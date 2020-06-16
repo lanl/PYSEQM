@@ -39,7 +39,7 @@ guoqingz@usc.edu
 
 ./params/MOPAC : MNDO/AM1/PM3 parameters from MOPAC7.1
 
-./seqm : seqm module  
+./pyseqm : pyseqm module  
 ├── basics.py                                  : collections of classes for perform basic operations  
 ├── MolecularDynamics.py                       : geometry optimization and NVE and Langevin Molecular Dyanmics  
 ├── XLBOMD.py                                  : XL-BOMD  
@@ -60,9 +60,9 @@ guoqingz@usc.edu
     └── two_elec_two_center_int.py             : rotate and get two electron two center integrals in global frame  
 
 basics.py  
-  class Parser : prepare data in the form for other parts, similar to ./seqm/seqm_functions/data_loader  
-  class Pack_Parameters : combine parameters provided (like from ML) with other required ones loaded using ./seqm/seqm_functions/parameters.py from ./params/MOPAC  
-  class Hamiltonian : assemble functions in seqm/seqm_functions, perform SCF and construct Fockian  
+  class Parser : prepare data in the form for other parts, similar to ./pyseqm/seqm_functions/data_loader  
+  class Pack_Parameters : combine parameters provided (like from ML) with other required ones loaded using ./pyseqm/seqm_functions/parameters.py from ./params/MOPAC  
+  class Hamiltonian : assemble functions in pyseqm/seqm_functions, perform SCF and construct Fockian  
   class Energy : get energies based on Hamiltonian (total energy, heat of formation, nuclear energies, etc)  
   class Force : use torch.autograd.grad to get gradient of total energy on coordinates to get force  
 
