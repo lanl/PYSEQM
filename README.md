@@ -93,20 +93,11 @@ XLBOMD.py
    [[7,1,1,1],[[7,1,1,0],[7,1,1,1]]  ==> index [0,1,2,3,4,5,6,7,8,9,10]
 ```
 
-## TODO
-
-1. replace torch.symeig with cusolver batch symeig: pycuda cusolver only support matrix size <=32, the newest cuda cusolver uses different mechanism for matrix size <=32 and >32 in symeig.
-plan: use libtorch, pybind11 to build a function with cuda cusolver in C++ for pytorch
-2. optimize class Pack_Parameters, don't need to do self.p[i,Z] every MD step, not important at this moment
-3. split the parser for dynamic part and static part for MD, the static part is in Pack_Parameters, see above, not important at this moment
-
-
-## Problems
-
-1. symeig backward doesn't work when energy degenerated
-2. Pytorch forward and backward can't handle limit and too large values, e.g \lim_{x->0} x^2/x = 0, \lim_{x->1^-} (1-x)/sqrt(1-x^2) = 0, torch.exp(torch.tensor(85)) = inf
-
 ## Suggestions:
 1. Benchmark convergence criteria eps for SCF and SP2, eps_sp2 will affect number of iterations for SCF
 2. in general set converger=[2], combining adaptive mixing and pulay seems takes fewest iterations
 3. when on GPU, use SP2, on CPU don't use SP2, but benchmark to check
+
+
+## Citation
+Zhou, G., Nebgen B., Lubbers, N., Malone, W., Niklasson, A. & Tretiak S. GPU-Accelerated Semi-Empirical Born Oppenheimer Molecular Dynamics using PyTorch, submitted
