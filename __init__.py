@@ -1,1 +1,1 @@
-from . import pyseqm
+from . import seqm
