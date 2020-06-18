@@ -1,7 +1,7 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.MolecularDynamics import Geometry_Optimization_SD
+from seqm.seqm_functions.constants import Constants
+from seqm.MolecularDynamics import Geometry_Optimization_SD
 
 #check sd geometry optimization
 

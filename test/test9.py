@@ -1,7 +1,7 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.MolecularDynamics import Molecular_Dynamics_Basic
+from seqm.seqm_functions.constants import Constants
+from seqm.MolecularDynamics import Molecular_Dynamics_Basic
 
 #check MD
 #velocity verlet algorithm

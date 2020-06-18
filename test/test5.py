@@ -1,7 +1,7 @@
 import torch
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.seqm_functions.parameters import params
-from pyseqm.basics import  Parser, Hamiltonian, Pack_Parameters, Energy,Force
+from seqm.seqm_functions.constants import Constants
+from seqm.seqm_functions.parameters import params
+from seqm.basics import  Parser, Hamiltonian, Pack_Parameters, Energy,Force
 
 #check computing force
 

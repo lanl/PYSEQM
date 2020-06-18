@@ -1,6 +1,6 @@
 import torch
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.basics import Force
+from seqm.seqm_functions.constants import Constants
+from seqm.basics import Force
 
 
 #check computing force

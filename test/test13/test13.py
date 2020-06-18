@@ -1,11 +1,11 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.seqm_functions.parameters import params
-from pyseqm.basics import Parser, Pack_Parameters, Energy
-import pyseqm
-pyseqm.seqm_functions.scf_loop.debug = True
-pyseqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 15
+from seqm.seqm_functions.constants import Constants
+from seqm.seqm_functions.parameters import params
+from seqm.basics import Parser, Pack_Parameters, Energy
+import seqm
+seqm.seqm_functions.scf_loop.debug = True
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 15
 
 torch.set_default_dtype(torch.float64)
 if torch.cuda.is_available():

@@ -1,8 +1,8 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.seqm_functions.parameters import params
-from pyseqm.basics import Parser, Pack_Parameters, Energy
+from seqm.seqm_functions.constants import Constants
+from seqm.seqm_functions.parameters import params
+from seqm.basics import Parser, Pack_Parameters, Energy
 
 
 

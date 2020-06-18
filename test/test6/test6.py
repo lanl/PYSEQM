@@ -1,7 +1,7 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.basics import Energy
+from seqm.seqm_functions.constants import Constants
+from seqm.basics import Energy
 
 
 #check code to produce energy terms for each molecule

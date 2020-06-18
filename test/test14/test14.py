@@ -1,10 +1,10 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.basics import Energy
-import pyseqm
-pyseqm.seqm_functions.scf_loop.debug = True
-pyseqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 20
+from seqm.seqm_functions.constants import Constants
+from seqm.basics import Energy
+import seqm
+seqm.seqm_functions.scf_loop.debug = True
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 20
 
 #check code to produce energy terms for each molecule
 # with a 'learned' given parameters

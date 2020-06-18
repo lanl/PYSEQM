@@ -1,7 +1,7 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.XLBOMD import XL_BOMD
+from seqm.seqm_functions.constants import Constants
+from seqm.XLBOMD import XL_BOMD
 
 #check MD
 #velocity verlet algorithm

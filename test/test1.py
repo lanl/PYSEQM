@@ -1,8 +1,8 @@
 import torch
 
-from pyseqm.seqm_functions.constants import Constants, ev_kcalpmol
-from pyseqm.basics import  Parser, Hamiltonian, Pack_Parameters, Energy
-from pyseqm.seqm_functions.parameters import params
+from seqm.seqm_functions.constants import Constants, ev_kcalpmol
+from seqm.basics import  Parser, Hamiltonian, Pack_Parameters, Energy
+from seqm.seqm_functions.parameters import params
 
 #check code to produce energy terms for each molecule
 # with a 'learned' given parameters

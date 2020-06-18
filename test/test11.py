@@ -1,8 +1,8 @@
 import torch
-from pyseqm.seqm_functions.constants import Constants
-from pyseqm.basics import Force
-import pyseqm
-pyseqm.seqm_functions.scf_loop.debug = True
+from seqm.seqm_functions.constants import Constants
+from seqm.basics import Force
+import seqm
+seqm.seqm_functions.scf_loop.debug = True
 
 #check computing force
 

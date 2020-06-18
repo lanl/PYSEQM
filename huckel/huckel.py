@@ -1,10 +1,10 @@
 import torch
-from pyseqm.seqm_functions import diat_overlap
-from pyseqm.seqm_functions.constants import overlap_cutoff
-from pyseqm.seqm_functions.parameters import params
-from pyseqm.basics import Parser
-from pyseqm.seqm_functions.pack import unpack, pack
-from pyseqm.seqm_functions.diag import sym_eig_trunc1
+from seqm.seqm_functions import diat_overlap
+from seqm.seqm_functions.constants import overlap_cutoff
+from seqm.seqm_functions.parameters import params
+from seqm.basics import Parser
+from seqm.seqm_functions.pack import unpack, pack
+from seqm.seqm_functions.diag import sym_eig_trunc1
 
 def huckel(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas, zetap, beta, Kstar=None):
     dtype = xij.dtype
