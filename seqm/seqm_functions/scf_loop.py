@@ -104,7 +104,7 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
 def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, sp2=[False]):
+                maskd, mask, idxi, idxj, P, eps, sp2=[False], backward=False):
     """
     adaptive mixing algorithm, see cnvg.f
     """
@@ -124,7 +124,12 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
 
     for i in range(nDirect1):
         if notconverged.any():
-            if sp2[0]:
+            if backward:
+                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
+                                                   nHeavy[notconverged],
+                                                   nHydro[notconverged],
+                                                   nOccMO[notconverged])[1]
+            elif sp2[0]:
                 #Pnew[notconverged] = SP2(F[notconverged], nOccMO[notconverged], sp2[1])
                 Pnew[notconverged] = unpack(
                                             SP2(
@@ -141,8 +146,12 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                                                    nHeavy[notconverged],
                                                    nHydro[notconverged],
                                                    nOccMO[notconverged])[1]
-            Pold[notconverged] = P[notconverged]
-            P[notconverged] = Pnew[notconverged]
+            if backward:
+                Pold = P+0.0
+                P = Pnew+0.0
+            else:
+                Pold[notconverged] = P[notconverged]
+                P[notconverged] = Pnew[notconverged]
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
@@ -159,10 +168,16 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
             k+=1
         else:
             return P, notconverged
-
+    if backward:
+        fac_register = []
     while(1):
         if notconverged.any():
-            if sp2[0]:
+            if backward:
+                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
+                                                   nHeavy[notconverged],
+                                                   nHydro[notconverged],
+                                                   nOccMO[notconverged])[1]
+            elif sp2[0]:
                 #Pnew[notconverged] = SP2(F[notconverged], nOccMO[notconverged], sp2[1])
                 Pnew[notconverged] = unpack(
                                             SP2(
@@ -180,16 +195,32 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                                                    nHydro[notconverged],
                                                    nOccMO[notconverged])[1]
             #fac = sqrt( \sum_i (P_ii^(k) - P_ii^(k-1))**2 / \sum_i (P_ii^(k) - 2*P_ii^(k-1) + P_ii^(k-2))**2 )
-            fac = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
+            if backward:
+                with torch.no_grad():
+                    f = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
+                    f[notconverged] = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
+                                               - P[notconverged].diagonal(dim1=1,dim2=2) \
+                                             )**2, dim=1 ) / \
+                                  torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
+                                              - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
+                                              + Pold[notconverged].diagonal(dim1=1,dim2=2)
+                                          )**2, dim=1 ) ).reshape(-1,1,1)
+                    fac_register.append(f)
+            else:
+                fac = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
                                            - P[notconverged].diagonal(dim1=1,dim2=2) \
                                          )**2, dim=1 ) / \
-                             torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
+                                  torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
                                           - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
                                           + Pold[notconverged].diagonal(dim1=1,dim2=2)
                                       )**2, dim=1 ) ).reshape(-1,1,1)
             #
-            Pold[notconverged] = P[notconverged]
-            P[notconverged] = (1.0+fac)*Pnew[notconverged] - fac*P[notconverged]
+            if backward:
+                Pold = P+0.0
+                P = (1.0+fac_register[-1])*Pnew - fac_register[-1]*P
+            else:
+                Pold[notconverged] = P[notconverged]
+                P[notconverged] = (1.0+fac)*Pnew[notconverged] - fac*P[notconverged]
 
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
@@ -688,14 +719,23 @@ def scf_loop(const, molsize, \
     #             can't reuse P, so put P=None and initial P above
     #"""
     if scf_backward==2:
-        if scf_converger[0] != 0:
-            raise ValueError("""For direct backpropagation through scf,
-                                must use constant mixing at this moment\n
-                                set scf_converger=[0, alpha]\n""")
-        Pconv, notconverged =  scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
+        if sp2[0]:
+            warnings.warn('SP2 is not used for direct backpropagation through scf loop')
+            sp2[0] = False
+        if scf_converger[0] == 0:
+            Pconv, notconverged =  scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
                          nHydro, nHeavy, nOccMO, \
                          nmol, molsize, \
                          maskd, mask, idxi, idxj, P, eps, sp2=sp2, alpha=scf_converger[1], backward=True)
+        elif scf_converger[0] == 1:
+            Pconv, notconverged =  scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
+                         nHydro, nHeavy, nOccMO, \
+                         nmol, molsize, \
+                         maskd, mask, idxi, idxj, P, eps, sp2=sp2, backward=True)
+        else:
+            raise ValueError("""For direct backpropagation through scf,
+                                must use constant mixing at this moment\n
+                                set scf_converger=[0, alpha] or [1]\n""")
     #"""
     #"""
     #scf_backward 1, use recursive formula, uncomment following line
