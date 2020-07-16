@@ -16,6 +16,7 @@ import time
 debug=False
 #debug=True
 
+MIN_ITER = 0
 MAX_ITER = 1000
 SCF_BACKWARD_MAX_ITER = 10
 MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE = 5
@@ -123,7 +124,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
     Eelec_new = torch.zeros_like(Eelec)
 
     for i in range(nDirect1):
-        if notconverged.any():
+        if notconverged.any() and k < MAX_ITER:
             if backward:
                 Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                                                    nHeavy[notconverged],
@@ -162,7 +163,8 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                                                     -F[notconverged].matmul(P[notconverged])) \
                                                     .reshape(torch.sum(notconverged),-1), dim=1)[0]
             #"""
-            notconverged =  err>eps
+            if k>= MIN_ITER:
+                notconverged =  err>eps
             if debug:
                 print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item())
             k+=1
@@ -171,7 +173,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
     if backward:
         fac_register = []
     while(1):
-        if notconverged.any():
+        if notconverged.any() and k < MAX_ITER:
             if backward:
                 Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                                                    nHeavy[notconverged],
@@ -234,7 +236,8 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                                                     .reshape(torch.sum(notconverged),-1), dim=1)[0]
             #err = torch.max(torch.abs((Pnew-P).reshape(Pnew.shape[0],-1)), dim=1)[0]
             #"""
-            notconverged =  err>eps
+            if k>= MIN_ITER:
+                notconverged =  err>eps
             if debug:
                 print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item())
             k+=1
@@ -694,8 +697,8 @@ def scf_loop(const, molsize, \
         t1 = time.time()
         const.timing["Hcore + STO Integrals"].append(t1-t0)
         t0 = time.time()
-    if scf_backward==2:
-        P=None
+    #if scf_backward==2:
+    #    P=None
     if not torch.is_tensor(P):
         P0 = torch.zeros_like(M)  # density matrix
         P0[maskd[Z>1],0,0] = tore[Z[Z>1]]/4.0
@@ -753,15 +756,15 @@ def scf_loop(const, molsize, \
             nHydro, nHeavy, nOccMO, \
             nmol, molsize, \
             maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps)
-    #"""
+    """
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
         warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, MAX_ITER))
         if RAISE_ERROR_IF_SCF_FORWARD_FAILS:
             raise ValueError("SCF for some the molecules in the batch doesn't converge")
-
-    if notconverged.all():
-        raise ValueError("SCF for all the molecules in the batch doesn't converge, try to increase MAX_ITER")
+    """
+    #if notconverged.all():
+    #    raise ValueError("SCF for all the molecules in the batch doesn't converge, try to increase MAX_ITER")
 
     if const.do_timing:
         if torch.cuda.is_available():
