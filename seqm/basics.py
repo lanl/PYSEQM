@@ -324,8 +324,8 @@ class Energy(torch.nn.Module):
                                          gsp=parameters['g_sp'],
                                          gp2=parameters['g_p2'],
                                          hsp=parameters['h_sp'])
-            Hf = heat_formation(const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
-            return Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged
+            Hf, Eiso_sum = heat_formation(const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
+            return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e, P, charge, notconverged
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough
             #index_add is used in total_energy and heat_formation function
