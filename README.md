@@ -9,7 +9,7 @@ Semi-Emperical Quantum Mechanics Code for closed shell molecules with pytorch
 
 ## Packages Required:
 ```
-pytorch 1.2
+pytorch (tested with 1.2 and 1.5)
 ```
 
 ## Author:
@@ -36,6 +36,7 @@ guoqingz@usc.edu
 12. ./test12.py : second order gradient
 13. ./test13 : check gradient of orbital energy on parameters
 14. ./test14 : check gradient of orbital energy on coordinates
+15. ./test15 : check the second order gradients, test with gradient of force on coordinates
 
 ./params/MOPAC : MNDO/AM1/PM3 parameters from MOPAC7.1
 
