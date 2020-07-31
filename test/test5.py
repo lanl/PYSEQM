@@ -39,7 +39,7 @@ seqm_parameters = {
                    'sp2' : [True, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
-                   'learned' : ['g_ss'], # learned parameters name list, e.g ['U_ss']
+                   'learned' : ['g_ss', 'U_ss'], # learned parameters name list, e.g ['U_ss']
                    'parameter_file_dir' : '../params/MOPAC/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    }
@@ -60,20 +60,19 @@ p=params(method=seqm_parameters['method'],
          elements=seqm_parameters['elements'],
          root_dir=seqm_parameters['parameter_file_dir'],
          parameters=seqm_parameters['learned']).to(device)
-p, =p[Z].transpose(0,1).contiguous()
+p, p1=p[Z].transpose(0,1).contiguous()
 p.requires_grad_(True)
-learnedpar = {'g_ss':p}
+learnedpar = {'g_ss':p, 'U_ss':p1}
 
 
 
-
-force =  Force(seqm_parameters).to(device)
+eng = Energy(seqm_parameters).to(device)
 #coordinates.requires_grad_(True)
 
 #######################################
 #require grad on p
-f, P, L = force(const, coordinates, species, learned_parameters=learnedpar, par_grad=True)[:3]
-#print(f)
+Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learnedpar, all_terms = True)
+Etot.sum().backward()
 print(p.grad)
 
 

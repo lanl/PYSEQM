@@ -273,8 +273,18 @@ class Energy(torch.nn.Module):
         nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
-
-        parameters = self.packpar(Z, learned_params = learned_parameters)
+        if callable(learned_parameters):
+            p = learned_parameters(species, coordinates)
+            if p.shape[0] == species.shape[0]*species.shape[1]: # remove parameter padding
+                p=p[species.reshape(-1)>0]
+            adict = dict()
+            k=0
+            for par in self.seqm_parameters['learned']:
+                adict[par] = p[:,k]
+                k += 1
+            parameters = self.packpar(Z, learned_params = adict)    
+        else:
+            parameters = self.packpar(Z, learned_params = learned_parameters)
         F, e, P, Hcore, w, charge, notconverged =  self.hamiltonian(const, molsize, \
                                                  nHeavy, nHydro, nocc, \
                                                  Z, maskd, \
@@ -346,15 +356,11 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
 
-    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, par_grad=False):
+    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None):
 
         coordinates.requires_grad_(True)
         #print(learned_parameters)
         #learned_parameters['U_ss'].register_hook(print)
-        if not par_grad:
-            for x in learned_parameters:
-                if learned_parameters[x].requires_grad:
-                    learned_parameters[x].requires_grad_(False)
         #"""
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = self.energy(const, coordinates, species, learned_parameters=learned_parameters, all_terms=True, P0=P0)
         L = Etot.sum()
@@ -368,18 +374,9 @@ class Force(torch.nn.Module):
         #L.backward()
         #"""
         gv = [coordinates]
-        if par_grad:
-            for x in learned_parameters:
-                if learned_parameters[x].requires_grad:
-                    gv.append(learned_parameters[x])
+
         gradients  = grad(L, gv,create_graph=self.create_graph)
         #coordinates.grad = gradients[0]
-        if par_grad:
-            i=1
-            for x in learned_parameters:
-                if learned_parameters[x].requires_grad:
-                    learned_parameters[x].grad = gradients[i]
-                    i += 1
         #"""
         if const.do_timing:
             if torch.cuda.is_available():

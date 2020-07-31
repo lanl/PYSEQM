@@ -74,8 +74,18 @@ class EnergyXL(torch.nn.Module):
         nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
-
-        parameters = self.packpar(Z, learned_params = learned_parameters)
+        if callable(learned_parameters):
+            p = learned_parameters(species, coordinates)
+            if p.shape[0] == species.shape[0]*species.shape[1]: # remove parameter padding
+                p=p[species.reshape(-1)>0]
+            adict = dict()
+            k=0
+            for par in self.seqm_parameters['learned']:
+                adict[par] = p[:,k]
+                k += 1
+            parameters = self.packpar(Z, learned_params = adict)    
+        else:
+            parameters = self.packpar(Z, learned_params = learned_parameters)
         beta = torch.cat((parameters['beta_s'].unsqueeze(1), parameters['beta_p'].unsqueeze(1)),dim=1)
         if "Kbeta" in parameters:
             Kbeta = parameters["Kbeta"]
@@ -189,15 +199,11 @@ class ForceXL(torch.nn.Module):
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, const, coordinates, species, P, learned_parameters=dict(), par_grad=False):
+    def forward(self, const, coordinates, species, P, learned_parameters=dict()):
 
         coordinates.requires_grad_(True)
         #print(learned_parameters)
         #learned_parameters['U_ss'].register_hook(print)
-        if not par_grad:
-            for x in learned_parameters:
-                if learned_parameters[x].requires_grad:
-                    learned_parameters[x].requires_grad_(False)
         #"""
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, D = \
             self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True)
@@ -214,18 +220,8 @@ class ForceXL(torch.nn.Module):
         if const.do_timing:
             t0 = time.time()
         gv = [coordinates]
-        if par_grad:
-            for x in learned_parameters:
-                if learned_parameters[x].requires_grad:
-                    gv.append(learned_parameters[x])
         gradients  = grad(L, gv)
         coordinates.grad = gradients[0]
-        if par_grad:
-            i=1
-            for x in learned_parameters:
-                if learned_parameters[x].requires_grad:
-                    learned_parameters[x].grad = gradients[i]
-                    i += 1
         #"""
         if const.do_timing:
             if torch.cuda.is_available():

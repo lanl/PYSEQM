@@ -8,6 +8,8 @@ from seqm.seqm_functions.constants import Constants
 from seqm.basics import Energy
 import seqm
 seqm.seqm_functions.scf_loop.debug = True
+seqm.seqm_functions.scf_loop.MIN_ITER=0
+seqm.seqm_functions.scf_loop.MAX_ITER=0
 seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 1000
 seqm.seqm_functions.scf_loop.RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 seqm.seqm_functions.MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE = 90
@@ -15,7 +17,7 @@ seqm.seqm_functions.MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE = 90
 #check code to produce energy terms for each molecule
 # with a 'learned' given parameters
 
-#torch.manual_seed(0)
+torch.manual_seed(0)
 torch.set_default_dtype(torch.float64)
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -78,7 +80,7 @@ seqm_parameters = {
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
-                   'sp2' : [True, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
+                   'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
@@ -93,7 +95,12 @@ seqm_parameters = {
 
 coordinates.requires_grad_(True)
 eng = Energy(seqm_parameters).to(device)
-Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learned_parameters=dict(), all_terms=True)
+#P0=None
+P0=torch.load('P0.pkl')
+Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learned_parameters=dict(), all_terms=True, P0=P0)
+
+#torch.save(P.detach(),'P0.pkl')
+
 #fy =  dE/dy
 force, = torch.autograd.grad(Etot.sum(),coordinates, create_graph=True)
 
