@@ -113,6 +113,6 @@ def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
         eheat_sum = torch.zeros_like(Etot)
         eheat_sum.index_add_(0,atom_molid,const.eheat[Z])
         #Hf = Etot - Eiso_sum + eheat_sum
-        return Etot - Eiso_sum + eheat_sum
+        return Etot - Eiso_sum + eheat_sum, Eiso_sum
     else:
-        return Etot - Eiso_sum
+        return Etot - Eiso_sum, Eiso_sum
