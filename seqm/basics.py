@@ -274,14 +274,7 @@ class Energy(torch.nn.Module):
         Z, maskd, atom_molid, \
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
         if callable(learned_parameters):
-            p = learned_parameters(species, coordinates)
-            if p.shape[0] == species.shape[0]*species.shape[1]: # remove parameter padding
-                p=p[species.reshape(-1)>0]
-            adict = dict()
-            k=0
-            for par in self.seqm_parameters['learned']:
-                adict[par] = p[:,k]
-                k += 1
+            adict = learned_parameters(species, coordinates)
             parameters = self.packpar(Z, learned_params = adict)    
         else:
             parameters = self.packpar(Z, learned_params = learned_parameters)
