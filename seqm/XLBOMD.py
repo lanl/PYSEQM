@@ -278,7 +278,6 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         #t=0, just use normal way
         f, D, _ = self.force0(const, coordinates, species, learned_parameters=learned_parameters)[:3]
         acc = f/mass*self.acc_scale
-        del self.force0
         return acc, D.detach()
 
     def get_force(self):
