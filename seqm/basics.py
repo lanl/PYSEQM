@@ -265,7 +265,7 @@ class Energy(torch.nn.Module):
         # Hf_flag: true return Hf, false return Etot-Eiso
 
 
-    def forward(self, const, coordinates, species, learned_parameters=dict(), all_terms=False, P0=None):
+    def forward(self, const, coordinates, species, learned_parameters=dict(), all_terms=False, P0=None, step=0):
         """
         get the energy terms
         """
@@ -275,6 +275,7 @@ class Energy(torch.nn.Module):
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
+            #torch.save(adict, "par_%d.pkl" % step)
             parameters = self.packpar(Z, learned_params = adict)    
         else:
             parameters = self.packpar(Z, learned_params = learned_parameters)
@@ -349,14 +350,15 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
 
-    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None):
+    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0):
 
         coordinates.requires_grad_(True)
         #print(learned_parameters)
         #learned_parameters['U_ss'].register_hook(print)
         #"""
-        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = self.energy(const, coordinates, species, learned_parameters=learned_parameters, all_terms=True, P0=P0)
-        L = Etot.sum()
+        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = self.energy(const, coordinates, species, learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step)
+        #L = Etot.sum()
+        L = Hf.sum()
         if const.do_timing:
             t0 = time.time()
         #"""

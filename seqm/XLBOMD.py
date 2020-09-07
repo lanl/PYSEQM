@@ -63,8 +63,11 @@ class EnergyXL(torch.nn.Module):
 
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
+        self.Hf_flag = True
+        if "Hf_flag" in seqm_parameters:
+            self.Hf_flag = seqm_parameters["Hf_flag"] # True: Heat of formation, False: Etot-Eiso
 
-    def forward(self, const, coordinates, species, P, learned_parameters=dict(), all_terms=False):
+    def forward(self, const, coordinates, species, P, learned_parameters=dict(), all_terms=False, step=0):
         """
         get the energy terms
         D: Density Matrix, F=>D  (SP2)
@@ -76,6 +79,7 @@ class EnergyXL(torch.nn.Module):
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
+            torch.save(adict, "par_%d.pkl" % step)
             parameters = self.packpar(Z, learned_params = adict)    
         else:
             parameters = self.packpar(Z, learned_params = learned_parameters)
@@ -174,7 +178,7 @@ class EnergyXL(torch.nn.Module):
                                          gsp=parameters['g_sp'],
                                          gp2=parameters['g_p2'],
                                          hsp=parameters['h_sp'])
-            Hf, Eiso_sum = heat_formation(const, nmol,atom_molid, Z, Etot, Eiso)
+            Hf, Eiso_sum = heat_formation(const, nmol,atom_molid, Z, Etot, Eiso, flag=self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, D
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough
@@ -192,15 +196,16 @@ class ForceXL(torch.nn.Module):
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, const, coordinates, species, P, learned_parameters=dict()):
+    def forward(self, const, coordinates, species, P, learned_parameters=dict(), step=0):
 
         coordinates.requires_grad_(True)
         #print(learned_parameters)
         #learned_parameters['U_ss'].register_hook(print)
         #"""
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, D = \
-            self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True)
-        L = Etot.sum()
+            self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True, step=step)
+        #L = Etot.sum()
+        L = Hf.sum()
         #"""
         """
         Eelec, EnucAB, D = self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=False)
@@ -224,7 +229,8 @@ class ForceXL(torch.nn.Module):
         with torch.no_grad():
             force = -coordinates.grad.clone()
             coordinates.grad.zero_()
-        return force, Etot, D.detach()
+        #return force, Etot, D.detach()
+        return force, Hf, D.detach()
 
 
 
@@ -306,7 +312,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         P = self.coeff_D*D + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
         Pt[(self.m-1-cindx)] = P
 
-        force, Etot, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters)
+        force, Etot, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters, step=step)
         D = D.detach()
         acc = force/mass*self.acc_scale
         with torch.no_grad():

@@ -760,8 +760,8 @@ def scf_loop(const, molsize, \
         if RAISE_ERROR_IF_SCF_FORWARD_FAILS:
             raise ValueError("SCF for some the molecules in the batch doesn't converge")
 
-    if notconverged.all():
-        raise ValueError("SCF for all the molecules in the batch doesn't converge, try to increase MAX_ITER")
+    #if notconverged.all():
+    #    raise ValueError("SCF for all the molecules in the batch doesn't converge, try to increase MAX_ITER")
 
     if const.do_timing:
         if torch.cuda.is_available():

@@ -201,16 +201,17 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         Temp = Ek*1.160451812e4/(1.5*torch.sum(species>0,dim=1).type(Ek.dtype))
         return Ek, Temp
 
-    def get_force(self, const, mass, coordinates, velocities, species, learned_parameters=dict(), P0=None):
+    def get_force(self, const, mass, coordinates, velocities, species, learned_parameters=dict(), P0=None, step=0):
         """
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch
         """
-        F, P, L = self.conservative_force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0)[:3]
+        F, P, Etot, Hf = self.conservative_force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0, step=step)[:4]
+        L = Hf
         P = P.detach()
         return F, P, L
 
-    def one_step(self, const, mass, coordinates, velocities, species, acc=None, learned_parameters=dict(), P=None):
+    def one_step(self, const, mass, coordinates, velocities, species, acc=None, learned_parameters=dict(), P=None, step=0):
         dt = self.timestep
         """
         MASS = torch.as_tensor(const.mass)
@@ -220,7 +221,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """
 
         if not torch.is_tensor(acc):
-            force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P)
+            force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
             acc = force/mass*self.acc_scale
         if const.do_timing:
             t0 = time.time()
@@ -228,7 +229,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             velocities.add_(0.5*acc*dt)
             coordinates.add_(velocities*dt)
 
-        force, P, L = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P)
+        force, P, L = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
         acc = force/mass*self.acc_scale
         with torch.no_grad():
             velocities.add_(0.5*acc*dt)
@@ -259,7 +260,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         for i in range(steps):
             coordinates, velocities, acc, P, L = self.one_step(const, mass, coordinates, velocities, species, \
-                                                         acc=acc, learned_parameters=learned_parameters, P=P)
+                                                         acc=acc, learned_parameters=learned_parameters, P=P, step=i)
             #
             if not reuse_P:
                 P = None
