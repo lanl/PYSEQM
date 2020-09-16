@@ -239,7 +239,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             t1 = time.time()
             const.timing["MD"].append(t1-t0)
 
-        return coordinates, velocities, acc, P, L
+        return coordinates, velocities, acc, P, L, force
 
     def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True):
 
@@ -259,7 +259,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """
 
         for i in range(steps):
-            coordinates, velocities, acc, P, L = self.one_step(const, mass, coordinates, velocities, species, \
+            coordinates, velocities, acc, P, L, force = self.one_step(const, mass, coordinates, velocities, species, \
                                                          acc=acc, learned_parameters=learned_parameters, P=P, step=i)
             #
             if not reuse_P:
@@ -268,7 +268,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if (i+1)%self.output['thermo']==0:
                 print("md  %6d" % (i+1), end="")
                 for mol in self.output['molid']:
-                    print(" %f %f " % (T[mol], L[mol]+Ek[mol]), end="")
+                    print(" %f %f %f %f" % (T[mol], Ek[mol], L[mol], L[mol]+Ek[mol]), end="")
                 print()
 
             if (i+1)%self.output['dump']==0:
@@ -278,10 +278,14 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     f.write("%d\nstep: %d\n" % (torch.sum(species[mol]>0), i+1))
                     for atom in range(coordinates.shape[1]):
                         if species[mol,atom]>0:
-                            f.write("%s %f %f %f\n" % (const.label[species[mol,atom].item()],
+                            f.write("%s %f %f %f %f %f %f %f %f %f\n" % (const.label[species[mol,atom].item()],
                                                        coordinates[mol,atom,0],
                                                        coordinates[mol,atom,1],
-                                                       coordinates[mol,atom,2]))
+                                                       coordinates[mol,atom,2], 
+                                                       velocities[mol,atom,0],
+                                                       velocities[mol,atom,1],
+                                                       velocities[mol,atom,2],
+                                      force[mol,atom,0], force[mol,atom,1],force[mol,atom,2]))
 
                     f.close()
         return coordinates, velocities, acc
