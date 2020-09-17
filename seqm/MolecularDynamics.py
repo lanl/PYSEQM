@@ -315,7 +315,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         # self.vel_scale change sqrt(kb T/m) into Angstrom/fs
         self.Fr_scale = 0.09450522179973914
 
-    def get_force(self, const, masses, coordinates, velocities, species, learned_parameters=dict(), P0=None):
+    def get_force(self, const, masses, coordinates, velocities, species, learned_parameters=dict(), P0=None, step=0):
         """
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch (from conservative force)
