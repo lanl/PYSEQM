@@ -74,7 +74,7 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../../params/MOPAC/', # file directory for other required parameters
+                   #'parameter_file_dir' : '../../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    }
 

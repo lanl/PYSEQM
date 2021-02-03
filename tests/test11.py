@@ -44,7 +44,7 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../params/MOPAC/', # file directory for other required parameters
+                   #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
                    'scf_backward': 1, #scf_backward==0: ignore the gradient on density matrix
@@ -62,21 +62,6 @@ with torch.autograd.set_detect_anomaly(True):
 #print(P)
 #print(L)
 
-"""
-with torch.no_grad():
-    coordinates += 0.01*f
-
-f, P, L = force(const, coordinates, species, learned_parameters=dict(), P0=P)
-print(f)
-
-"""
 if const.do_timing:
     print(const.timing)
 
-
-
-
-
-
-
-#

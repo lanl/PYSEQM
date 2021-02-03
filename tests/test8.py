@@ -48,7 +48,7 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../params/MOPAC/', # file directory for other required parameters
+                   #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    }
 #
@@ -66,10 +66,3 @@ with torch.autograd.set_detect_anomaly(True):
 
 if const.do_timing:
     print(const.timing)
-
-# one strange thing
-#heat of formation = Eelec + Enuc - \sum Eiso + \sum Eheat_atom
-#Eelec Enuc and Eiso depend on the parameters for each atom in each molecule
-#while Eiso is the energy of isolated atom, there is no environment for this atom
-
-#

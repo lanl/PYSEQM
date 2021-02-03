@@ -124,7 +124,7 @@ class Pack_Parameters(torch.nn.Module):
         self.method = seqm_parameters['method']
         self.filedir = seqm_parameters['parameter_file_dir'] \
             if 'parameter_file_dir' in seqm_parameters \
-            else os.path.abspath(os.path.dirname(__file__))+'/../params/MOPAC/'
+            else os.path.abspath(os.path.dirname(__file__))+'/params/'
         self.parameters = parameterlist[self.method]
         self.required_list = []
         for i in self.parameters:

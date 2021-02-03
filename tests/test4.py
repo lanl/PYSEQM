@@ -49,7 +49,7 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '/../params/MOPAC/', # file directory for other required parameters
+                   #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    }
 #
@@ -62,7 +62,7 @@ md2 = XL_BOMD(seqm_parameters, timestep=1.0, k=9).to(device)
 velocities = md0.initialize_velocity(const, coordinates, species, Temp=300.0)
 #remove center of mass velocity
 
-coordinates, velocities, accelaration =  md0.run(const, 100, coordinates, velocities, species)
+coordinates, velocities, accelaration =  md0.run(const, 20, coordinates, velocities, species)
 #coordinates, velocities, accelaration =  md1.run(const, 20, coordinates, velocities, species)
 #coordinates, velocities, accelaration, P, Pt =  md2.run(const, 100, coordinates, velocities, species)
 

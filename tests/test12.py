@@ -43,7 +43,7 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../params/MOPAC/', # file directory for other required parameters
+                   #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    '2nd_grad' : True,
                    }
@@ -62,27 +62,6 @@ print(f.requires_grad)
 g2 = torch.autograd.grad(f**2,coordinates,torch.ones_like(f),create_graph=True)
 print(f)
 print(g2)
-"""
-print(coordinates.shape)
-print(f.shape)
-print(g2.shape)
-"""
 
-"""
-with torch.no_grad():
-    coordinates += 0.01*f
-
-f, P, L = force(const, coordinates, species, learned_parameters=dict(), P0=P)
-print(f)
-
-"""
 if const.do_timing:
     print(const.timing)
-
-
-
-
-
-
-
-#
