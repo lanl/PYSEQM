@@ -1,4 +1,4 @@
-# PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics 
+# [PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics](https://github.com/lanl/PYSEQM)
 
 PYSEQM is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics, geometric optimization and  several thermostats. 
 
@@ -39,7 +39,7 @@ see [```./doc/documentation.md```](./doc/documentation.md)
 
 ## Authors:
 
-[Guoqing Zhou](guoqingz@usc.edu), Benjamin Nebgen, Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
+[Guoqing Zhou](mailto:guoqingz@usc.edu), Benjamin Nebgen, Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
 ## Acknowledgments
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T1
