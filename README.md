@@ -3,13 +3,6 @@
 PYSEQM is a module for  Born Oppenheimer Molecular Dynamics (BOMD) and Extended Lagrangian  BOMD based on Semi-Empirical Quantum Mechanics. It has efficient molecular dynamic engines with GPU supported and it is implemented in Python 3 with machine learning framework [PyTorch](http://pytorch.org). Several geometric optimization and thermostat algoritms are included for facilitating simulations.
 
 <hr/>
-
-## Authors:
-
-[Guoqing Zhou](guoqingz@usc.edu), Benjamin Nebgen, Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
-
-<hr/>
-
 ## Installation:
 
 ```bash
@@ -25,13 +18,19 @@ pip install git+https://github.com/lanl/PYSEQM.git
 ## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)
 
-### Semi-Empirical Methods Implemented:
+## Semi-Empirical Methods Implemented:
 1. MNDO
 2. AM1
 3. PM3
 
-### Prerequisites
+## Prerequisites:
 * PyTorch>=1.2
+
+<hr/>
+
+## Authors:
+
+[Guoqing Zhou](guoqingz@usc.edu), Benjamin Nebgen, Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
 ## Acknowledgments
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T1
