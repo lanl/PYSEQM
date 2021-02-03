@@ -1,6 +1,6 @@
 # [PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics](https://github.com/lanl/PYSEQM)
 
-PYSEQM is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics, geometric optimization and  several thermostats. 
+[PYSEQM](https://github.com/lanl/PYSEQM) is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics, geometric optimization and  several thermostats. 
 
 <hr/>
 
@@ -27,7 +27,7 @@ pip install git+https://github.com/lanl/PYSEQM.git
 ## Prerequisites:
 * PyTorch>=1.2
 
-## Usage:
+## U[sage:
 see [```./doc/documentation.md```](./doc/documentation.md)
 
 ## Semi-Empirical Methods Implemented:
@@ -39,7 +39,10 @@ see [```./doc/documentation.md```](./doc/documentation.md)
 
 ## Authors:
 
-[Guoqing Zhou](mailto:guoqingz@usc.edu), Benjamin Nebgen, Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
+[Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
+
+## Citation:
+[Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
 
 ## Acknowledgments
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T1
