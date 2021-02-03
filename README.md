@@ -15,7 +15,7 @@ PYSEQM is a module for  Born Oppenheimer Molecular Dynamics (BOMD) and Extended 
 ```bash
 git clone https://github.com/lanl/PYSEQM.git
 cd PYSEQM
-python setup install
+python setup.py install
 ```
 or
 ```bash
