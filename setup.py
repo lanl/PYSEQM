@@ -58,6 +58,6 @@ setup(
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=['numpy', 'torch>=1.2'],
     include_package_data=True,
-    package_data={'seqm/params': ['*.csv']},
+    package_data={'seqm': ['params/*.csv']},
 
 )
