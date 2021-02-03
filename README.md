@@ -33,6 +33,9 @@ see [```./doc/documentation.md```](./doc/documentation.md)
 ### Prerequisites
 * PyTorch>=1.2
 
+## Acknowledgments
+Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T1
+
 ## Copyright Notice
 
 © (or copyright) 2020. Triad National Security, LLC. All rights reserved.
