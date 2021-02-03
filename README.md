@@ -22,8 +22,8 @@ or
 pip install git+https://github.com/lanl/PYSEQM.git
 ```
 
-## Usage
-see ```./doc/documentation.pdf```
+## Usage:
+see [```./doc/documentation.pdf```](./doc/documentation.pdf)
 
 ### Semi-Empirical Methods Implemented:
 1. MNDO
@@ -31,7 +31,7 @@ see ```./doc/documentation.pdf```
 3. PM3
 
 ### Prerequisites
-* PyTorch: Refer to [PyTorch website](http://pytorch.org/) to install the version w.r.t. your environment. (tested with 1.2 and 1.5)
+* PyTorch>=1.2
 
 
 
