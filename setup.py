@@ -50,7 +50,7 @@ setup(
     # What does your project relate to?
     keywords='Semi-Empirical Quantum Mechanics',
 
-    packages=find_packages(exclude=['huckel', 'params', 'tests']),
+    packages=find_packages(exclude=['params', 'tests']),
 
     # List run-time dependencies here.  These will be installed by pip when
     # your project is installed. For an analysis of "install_requires" vs pip's
