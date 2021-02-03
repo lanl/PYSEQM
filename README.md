@@ -1,8 +1,16 @@
-# PYSEQM: Semi-Empirical Quantum Mechanics with PYtorch
+# PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics 
 
-PYSEQM is a module for  Born Oppenheimer Molecular Dynamics (BOMD) and Extended Lagrangian  BOMD based on Semi-Empirical Quantum Mechanics. It has efficient molecular dynamic engines with GPU supported and it is implemented in Python 3 with machine learning framework [PyTorch](http://pytorch.org). Several geometric optimization and thermostat algoritms are included for facilitating simulations.
+PYSEQM is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics (BOMD, XL-BOMD), geometric optimization and  several thermostats. 
 
 <hr/>
+
+## Features:
+
+* Interface with machine learning (ML) framework like [HIPNN](https://aip.scitation.org/doi/abs/10.1063/1.5011181) for future ML applications and development.
+* GPU-supported Molecular Dynamics Engine
+* Stable and Efficient Extended Lagrangian Born Oppenheimer Molecular Dynamics
+* Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for generating density matrix
+
 
 ## Installation:
 
@@ -15,6 +23,8 @@ or
 ```bash
 pip install git+https://github.com/lanl/PYSEQM.git
 ```
+## Prerequisites:
+* PyTorch>=1.2
 
 ## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)
@@ -23,9 +33,6 @@ see [```./doc/documentation.md```](./doc/documentation.md)
 1. MNDO
 2. AM1
 3. PM3
-
-## Prerequisites:
-* PyTorch>=1.2
 
 <hr/>
 
