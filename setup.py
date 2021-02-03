@@ -57,6 +57,7 @@ setup(
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=['numpy', 'torch>=1.2'],
+    include_package_data=True,
     package_data={'seqm/params': ['params/parameters_AM1_MOPAC.csv', 
                                  'params/parameters_MNDO_MOPAC.csv', 
                                  'params/parameters_PM3_MOPAC.csv']},
