@@ -3,16 +3,13 @@ from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
 from .seqm_functions.parameters import params
 from torch.autograd import grad
+import os
 import time
-#chemnn.indexers.OpenPairIndexer,
-#     cutoff should be large enough to include all atoms at this moment
+
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3
 """
 
-
-
-#
 parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
                       'alpha',
@@ -29,8 +26,6 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'Gaussian1_L', 'Gaussian2_L',
                        'Gaussian1_M', 'Gaussian2_M'
                       ]}
-#
-
 
 class Parser(torch.nn.Module):
     """
@@ -54,19 +49,15 @@ class Parser(torch.nn.Module):
         device = coordinates.device
         dtype = coordinates.dtype
 
-
         nmol, molsize = species.shape
         nonblank = species>0
         n_real_atoms = torch.sum(nonblank)
-
-
 
         atom_index = torch.arange(nmol*molsize, device=device,dtype=torch.int64)
         real_atoms = atom_index[nonblank.reshape(-1)>0]
 
         inv_real_atoms = torch.zeros((nmol*molsize,), device=device,dtype=torch.int64)
         inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device,dtype=torch.int64)
-
 
         Z = species.reshape(-1)[real_atoms]
         nHeavy = torch.sum(species>1,dim=1)
@@ -126,13 +117,14 @@ class Pack_Parameters(torch.nn.Module):
         method : seqm method
         learned : list for parameters will be provided and require grad, e.g. learned = ['U_ss']
         filedir : mopac parameter files directory
-
         """
         super().__init__()
         self.elements = seqm_parameters['elements']
         self.learned_list = seqm_parameters['learned']
         self.method = seqm_parameters['method']
-        self.filedir = seqm_parameters['parameter_file_dir']
+        self.filedir = seqm_parameters['parameter_file_dir'] \
+            if 'parameter_file_dir' in seqm_parameters \
+            else os.path.abspath(os.path.dirname(__file__))+'/../params/MOPAC/'
         self.parameters = parameterlist[self.method]
         self.required_list = []
         for i in self.parameters:
@@ -353,40 +345,19 @@ class Force(torch.nn.Module):
     def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0):
 
         coordinates.requires_grad_(True)
-        #print(learned_parameters)
-        #learned_parameters['U_ss'].register_hook(print)
-        #"""
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = self.energy(const, coordinates, species, learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step)
         #L = Etot.sum()
         L = Hf.sum()
         if const.do_timing:
             t0 = time.time()
-        #"""
-        """
-        Eelec, EnucAB, P = self.energy(const, coordinates, species, learned_parameters=learned_parameters, all_terms=False, P0=P0)
-        L = Eelec.sum() + EnucAB.sum()
-        #"""
-        #L.backward()
-        #"""
         gv = [coordinates]
 
         gradients  = grad(L, gv,create_graph=self.create_graph)
-        #coordinates.grad = gradients[0]
-        #"""
         if const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t1 = time.time()
             const.timing["Force"].append(t1-t0)
-
-
-        #L.backward(retain_graph=True)
-        #print(learned_parameters['U_ss'].grad)
         force = -gradients[0]
-        """
-        with torch.no_grad():
-            force = -coordinates.grad.clone()
-            coordinates.grad.zero_()
-        #"""
 
         return force, P, Etot, Hf, Eelec, Enuc, Eiso, EnucAB, e, charge, notconverged

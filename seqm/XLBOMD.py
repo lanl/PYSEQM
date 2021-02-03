@@ -18,7 +18,7 @@ here Tr(D) = 2*Nocc
 #the formula without XL is E(D) = 0.5 * tr(D(Hcore+F)), (Tr(D)==2*Nocc)
 #agree if P==D
 
-# in A.M.N. Niklasson example matlab code, SP2.m return D, tr(D)=Nocc
+# in A.M.N. Niklasson code, SP2.m return D, tr(D)=Nocc
 # and E(D,P) = 2*tr(Hcore*D) + tr((2D-P)*G(P))
 
 #in the seqm_functions/scf_loop.py, P means Density matrix
@@ -199,22 +199,9 @@ class ForceXL(torch.nn.Module):
     def forward(self, const, coordinates, species, P, learned_parameters=dict(), step=0):
 
         coordinates.requires_grad_(True)
-        #print(learned_parameters)
-        #learned_parameters['U_ss'].register_hook(print)
-        #"""
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, D = \
             self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True, step=step)
-        #L = Etot.sum()
         L = Hf.sum()
-        #"""
-        """
-        Eelec, EnucAB, D = self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=False)
-        L = Eelec.sum() + EnucAB.sum()
-        """
-        """
-        L.backward()
-        #"""
-        #"""
         if const.do_timing:
             t0 = time.time()
         gv = [coordinates]

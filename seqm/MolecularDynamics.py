@@ -184,7 +184,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         return velocities
 
     def zero_com(self, const, species, velocities):
-
         """
         remove center of mass velocity
         mass shape (nmol, molsize, 1)
