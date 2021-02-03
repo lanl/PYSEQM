@@ -23,7 +23,7 @@ pip install git+https://github.com/lanl/PYSEQM.git
 ```
 
 ## Usage:
-see [```./doc/documentation.pdf```](./doc/documentation.pdf)
+see [```./doc/documentation.md```](./doc/documentation.md)
 
 ### Semi-Empirical Methods Implemented:
 1. MNDO
