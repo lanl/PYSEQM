@@ -8,11 +8,10 @@ PYSEQM is a module for  Born Oppenheimer Molecular Dynamics (BOMD) and Extended 
 
 [Guoqing Zhou](guoqingz@usc.edu), Benjamin Nebgen, Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
-
-
-
 <hr/>
+
 ## Installation:
+
 ```bash
 git clone https://github.com/lanl/PYSEQM.git
 cd PYSEQM
