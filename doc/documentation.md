@@ -24,7 +24,7 @@ import torch
 from seqm.seqm_functions.constants import Constants
 from seqm.XLBOMD import XL_BOMD
 
-#torch setting
+# torch setting
 torch.set_default_dtype(torch.float64)
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -50,7 +50,7 @@ seqm_parameters = {
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    }
 
-# prepare configurations
+# Prepare configurations
 # Note configurations are prepared in batch mode, i.e. first dimension: molecules
 #example with two molecule systems
 species = torch.as_tensor([[8,6,1,1],[8,6,1,1]],dtype=torch.int64, device=device)
@@ -73,12 +73,12 @@ coordinates = torch.tensor([
 const = Constants().to(device)
 
 
-# Setup Molecular Dynamics Enginee
+# Setup Molecular Dynamics Engine
 #md =  Molecular_Dynamics_Basic(seqm_parameters, timestep=1.0).to(device)
 #md =  Molecular_Dynamics_Langevin(seqm_parameters, timestep=1.0, damp=100.0, T=300.0, output={'molid':[0, 1], 'thermo':1, 'dump':10, 'prefix':'md'}).to(device)
 md = XL_BOMD(seqm_parameters, timestep=1.0, k=9).to(device)
 
-# Initialize velocities, (can also be provided)
+# Initialize velocities (can also be provided)
 velocities = md.initialize_velocity(const, coordinates, species, Temp=300.0)
 
 # NVE or NVT
@@ -149,7 +149,7 @@ XLBOMD.py
 
 ## Caution:
 
-1. atoms in molecules are sorted in descending order based on atomic number
+1. Atoms in molecules are sorted in descending order based on atomic number
 2. 0 padding is used for atoms in molecules
 ```
    NH3 ==> [7,1,1,1], H2O ==> [8,1,1,0]
