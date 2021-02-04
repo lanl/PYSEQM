@@ -29,7 +29,7 @@ To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch webs
 ## Prerequisites:
 * PyTorch>=1.2
 
-## U[sage:
+## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)
 
 ## Semi-Empirical Methods Implemented:
