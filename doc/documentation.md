@@ -1,4 +1,4 @@
-# PYSEQM
+# [PYSEQM](https://github.com/lanl/PYSEQM)
 
 ## Semi-Empirical Methods Implemented:
 1. MNDO
@@ -9,13 +9,12 @@
 
 ### Units:
 
-**Length**: Å  
-**Energy**: eV  
-**Temperature**: Kelvin  
-**Time**: femtosecond  
-**Force**: eV/Å  
-**Velocity**: Å/femtosecond  
-
+* **Length**: Å  
+* **Energy**: eV  
+* **Temperature**: Kelvin  
+* **Time**: femtosecond  
+* **Force**: eV/Å  
+* **Velocity**: Å/femtosecond  
 
 ### Runing script:
 ```python
@@ -168,4 +167,4 @@ XLBOMD.py
 
 
 ## Citation:
-Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.
+[Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
