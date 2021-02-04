@@ -9,10 +9,10 @@
 
 ### Units:
 
-**Length**: Å
-**Energy**: eV
-**Temperature**: Kelvin
-**Time**: femtosecond
+**Length**: Å  
+**Energy**: eV  
+**Temperature**: Kelvin  
+**Time**: femtosecond  
 
 
 ### Runing script:
@@ -84,7 +84,7 @@ velocities = md.initialize_velocity(const, coordinates, species, Temp=300.0)
 #coordinates, velocities, accelaration =  md.run(const, 20, coordinates, velocities, species)
 
 # XL-BOMD
-coordinates, velocities, accelaration, P, Pt =  md.run(const, 100, coordinates, velocities, species)
+coordinates, velocities, accelaration, P, Pt =  md.run(const, 20, coordinates, velocities, species)
 ```
 
 ## Testing Example: /tests/test*.py
