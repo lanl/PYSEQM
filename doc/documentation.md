@@ -13,6 +13,8 @@
 **Energy**: eV  
 **Temperature**: Kelvin  
 **Time**: femtosecond  
+**Force**: eV/Å  
+**Velocity**: Å/femtosecond  
 
 
 ### Runing script:
