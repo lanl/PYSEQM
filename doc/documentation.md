@@ -47,7 +47,7 @@ seqm : seqm module
 
 basics.py  
   class Parser : prepare data in the form for other parts, similar to ./seqm/seqm_functions/data_loader  
-  class Pack_Parameters : combine parameters provided (like from ML) with other required ones loaded using ./seqm/seqm_functions/parameters.py from ./params/MOPAC  
+  class Pack_Parameters : combine parameters provided (like from ML) with other required ones loaded from ./params/  
   class Hamiltonian : assemble functions in seqm/seqm_functions, perform SCF and construct Fockian  
   class Energy : get energies based on Hamiltonian (total energy, heat of formation, nuclear energies, etc)  
   class Force : use torch.autograd.grad to get gradient of total energy on coordinates to get force  
@@ -63,8 +63,6 @@ XLBOMD.py
   class EnergyXL : get energies based on XL-BOMD  
   class ForceXL : get force with XL-BOMD  
   class XL_BOMD : module to perform XL-BOMD  
-
-./huckel : extended Huckel theory, still need parameters for computing overlap and construct Fockian
 
 ## Caution:
 
