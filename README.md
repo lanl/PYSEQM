@@ -47,7 +47,7 @@ see [```./doc/documentation.md```](./doc/documentation.md)
 [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
 
 ## Acknowledgments:
-Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T1
+Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T-1
 
 ## Copyright Notice:
 
