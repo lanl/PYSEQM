@@ -1,18 +1,17 @@
-### Semi-Empirical Methods Implemented:
+# PYSEQM
+
+## Semi-Empirical Methods Implemented:
 1. MNDO
 2. AM1
 3. PM3
 
-# Structure:
-
-# ./test/test*.py : testing example
+## Testing Example: /tests/test*.py
 1. ./test1.py : example to get Fock matrix, energy etc, and backward
 2. ./test2.py : example to get force
 3. ./test3.py : example for geometry optimization
 4. ./test4.py : example for molecular dynamcies (NVE, NVT)
 5. ./test5.py : example for how to add trained parameters for the calculation
 6. ./test6/test6.py : example to verify the force computed from the code
-==> autograd.grad and backward are working now
 7. ./test7/test7.py : example to verify the gradient on parameters
 8. ./test8.py : XL-BOMD
 9. ./test9.py : NVE, compared with test8.py
@@ -23,27 +22,28 @@
 14. ./test14 : check gradient of orbital energy on coordinates
 15. ./test15 : check the second order gradients, test with gradient of force on coordinates
 
-./params/MOPAC : MNDO/AM1/PM3 parameters from MOPAC7.1
+## Structure:
 
-./seqm : seqm module  
-├── basics.py                                  : collections of classes for perform basic operations  
-├── MolecularDynamics.py                       : geometry optimization and NVE and Langevin Molecular Dyanmics  
-├── XLBOMD.py                                  : XL-BOMD  
-└── seqm_functions                             :  
-    ├── cal_par.py                             : compute dipole/qutrupole charge separation and additive terms rho1 and rho2  
-    ├── constants.py                           : store some constant parameters  
-    ├── data_loader.py                         : load and prepare dataset from numpy array, not updated  
-    ├── diag.py                                : diagonalization functions, where pseudo_diag is not used  
-    ├── diat_overlap.py                        : get overlap integrals  
-    ├── energy.py                              : compute various energies  
-    ├── fock.py                                : construct Fockian  
-    ├── hcore.py                               : construct Hcore  
-    ├── pack.py                                : functions to deal with the padding in batch of matrix  
-    ├── parameters.py                          : load parameters from structured csv files as in ./params/MOPAC  
-    ├── scf_loop.py                            : perform SCF procedure  
-    ├── SP2.py                                 : single particle density matrix expansion algorithm SP2  
+seqm : seqm module  
+├── basics.py : collections of classes for perform basic operations  
+├── MolecularDynamics.py : geometry optimization and NVE and Langevin Molecular Dyanmics  
+├── XLBOMD.py : XL-BOMD  
+├── params : MNDO/AM1/PM3 parameters
+└── seqm_functions
+    ├── cal_par.py : compute dipole/qutrupole charge separation and additive terms rho1 and rho2  
+    ├── constants.py : store some constant parameters  
+    ├── data_loader.py : load and prepare dataset from numpy array, not updated  
+    ├── diag.py : diagonalization functions, where pseudo_diag is not used  
+    ├── diat_overlap.py : get overlap integrals  
+    ├── energy.py : compute various energy terms 
+    ├── fock.py : construct Fockian matrix
+    ├── hcore.py : construct Hcore  
+    ├── pack.py : functions to deal with the padding in batch of matrix  
+    ├── parameters.py : load parameters from structured csv files as in ./params  
+    ├── scf_loop.py : perform SCF procedure  
+    ├── SP2.py : single particle density matrix expansion algorithm SP2  
     ├── two_elec_two_center_int_local_frame.py : compute two electron two center integrals in local frame for each pair of atoms  
-    └── two_elec_two_center_int.py             : rotate and get two electron two center integrals in global frame  
+    └── two_elec_two_center_int.py : rotate and get two electron two center integrals in global frame  
 
 basics.py  
   class Parser : prepare data in the form for other parts, similar to ./seqm/seqm_functions/data_loader  
