@@ -26,17 +26,17 @@
 
 seqm : seqm module  
 ├── basics.py : collections of classes for perform basic operations  
-├── MolecularDynamics.py : geometry optimization and NVE and Langevin Molecular Dyanmics  
-├── XLBOMD.py : XL-BOMD  
-├── params : MNDO/AM1/PM3 parameters
-└── seqm_functions
+├── MolecularDynamics.py : geometry optimization and NVE and Langevin Molecular Dyanmics   
+├── XLBOMD.py : XL-BOMD 
+├── params : MNDO/AM1/PM3 parameters 
+└── seqm_functions 
     ├── cal_par.py : compute dipole/qutrupole charge separation and additive terms rho1 and rho2  
     ├── constants.py : store some constant parameters  
     ├── data_loader.py : load and prepare dataset from numpy array, not updated  
     ├── diag.py : diagonalization functions, where pseudo_diag is not used  
-    ├── diat_overlap.py : get overlap integrals  
+    ├── diat_overlap.py : get overlap integrals   
     ├── energy.py : compute various energy terms 
-    ├── fock.py : construct Fockian matrix
+    ├── fock.py : construct Fockian matrix 
     ├── hcore.py : construct Hcore  
     ├── pack.py : functions to deal with the padding in batch of matrix  
     ├── parameters.py : load parameters from structured csv files as in ./params  
