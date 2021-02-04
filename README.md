@@ -24,6 +24,8 @@ or
 pip install git+https://github.com/lanl/PYSEQM.git
 ```
 
+To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch website](https://pytorch.org/)
+
 ## Prerequisites:
 * PyTorch>=1.2
 
