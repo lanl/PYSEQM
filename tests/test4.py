@@ -56,7 +56,7 @@ seqm_parameters = {
 
 
 
-md0 =  Molecular_Dynamics_Basic(seqm_parameters, timestep=1.0)
+md0 =  Molecular_Dynamics_Basic(seqm_parameters, timestep=1.0).to(device)
 md1 =  Molecular_Dynamics_Langevin(seqm_parameters, timestep=1.0, damp=100.0, T=300.0, output={'molid':[0, 1], 'thermo':1, 'dump':10, 'prefix':'md'}).to(device)
 md2 = XL_BOMD(seqm_parameters, timestep=1.0, k=9).to(device)
 velocities = md0.initialize_velocity(const, coordinates, species, Temp=300.0)
