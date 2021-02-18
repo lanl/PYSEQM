@@ -329,11 +329,13 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             print("T(%d)  Etot(%d)  " % (mol, mol), end="")
         print()
         """
+        q0 = const.tore[species]
 
         for i in range(steps):
             coordinates, velocities, acc, D, P, Pt, Etot = self.one_step(const, i, mass, coordinates, velocities, species, \
                                                          acc, D, P, Pt, learned_parameters=learned_parameters)
             Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
             if (i+1)%self.output['thermo']==0:
                 print("md  %6d" % (i+1), end="")
                 for mol in self.output['molid']:
@@ -346,10 +348,18 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                     f.write("%d\nstep: %d\n" % (torch.sum(species[mol]>0), i+1))
                     for atom in range(coordinates.shape[1]):
                         if species[mol,atom]>0:
-                            f.write("%s %f %f %f\n" % (const.label[species[mol,atom].item()],
-                                                       coordinates[mol,atom,0],
-                                                       coordinates[mol,atom,1],
-                                                       coordinates[mol,atom,2]))
+                            f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
+                                                    (const.label[species[mol,atom].item()],
+                                                        coordinates[mol,atom,0],
+                                                        coordinates[mol,atom,1],
+                                                        coordinates[mol,atom,2], 
+                                                        velocities[mol,atom,0],
+                                                        velocities[mol,atom,1],
+                                                        velocities[mol,atom,2],
+                                                        force[mol,atom,0], 
+                                                        force[mol,atom,1],
+                                                        force[mol,atom,2], 
+                                                        q[mol,atom]))
 
                     f.close()
         return coordinates, velocities, acc, P, Pt
