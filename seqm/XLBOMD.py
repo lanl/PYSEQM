@@ -347,7 +347,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                     f.write("%d\nstep: %d\n" % (torch.sum(species[mol]>0), i+1))
                     for atom in range(coordinates.shape[1]):
                         if species[mol,atom]>0:
-                            f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
+                            f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
                                                     (const.label[species[mol,atom].item()],
                                                         coordinates[mol,atom,0],
                                                         coordinates[mol,atom,1],
