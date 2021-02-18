@@ -26,11 +26,11 @@ N = 100
 
 #"""
 #pertubation direction
-dir1 = torch.randn(3)
+dir1 = torch.randn(3).to(device)
 dir1 /= torch.norm(dir1)
 
 #force direction
-dir2 = torch.randn(3)
+dir2 = torch.randn(3).to(device)
 dir2 /= torch.norm(dir2)
 
 #dir2 = dir2 - (dir2*dir1).sum()*dir1

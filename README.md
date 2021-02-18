@@ -24,10 +24,12 @@ or
 pip install git+https://github.com/lanl/PYSEQM.git
 ```
 
+To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch website](https://pytorch.org/)
+
 ## Prerequisites:
 * PyTorch>=1.2
 
-## U[sage:
+## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)
 
 ## Semi-Empirical Methods Implemented:
@@ -44,10 +46,10 @@ see [```./doc/documentation.md```](./doc/documentation.md)
 ## Citation:
 [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
 
-## Acknowledgments
-Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T1
+## Acknowledgments:
+Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T-1
 
-## Copyright Notice
+## Copyright Notice:
 
 © (or copyright) 2020. Triad National Security, LLC. All rights reserved.
 This program was produced under U.S. Government contract 89233218CNA000001 for Los Alamos
@@ -59,7 +61,7 @@ nonexclusive, paid-up, irrevocable worldwide license in this material to reprodu
 derivative works, distribute copies to the public, perform publicly and display publicly, and to permit
 others to do so.
 
-## License
+## License:
 
 This program is open source under the BSD-3 License.
 Redistribution and use in source and binary forms, with or without

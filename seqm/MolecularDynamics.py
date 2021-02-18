@@ -239,6 +239,17 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             const.timing["MD"].append(t1-t0)
 
         return coordinates, velocities, acc, P, L, force
+    
+    @staticmethod
+    def atomic_charges(P, n_orbital=4):
+        """
+        get atomic charge based on single-particle density matrix P
+        n_orbital : number of orbitals for each atom, default is 4
+        """
+        n_molecule = P.shape[0]
+        n_atom = P.shape[1]//n_orbital
+        q = P.diagonal(dim1=1,dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(axis=2)
+        return q
 
     def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True):
 
@@ -256,11 +267,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             print("T(%d)  Etot(%d)  " % (mol, mol), end="")
         print()
         """
+        q0 = const.tore[species]
 
         for i in range(steps):
             coordinates, velocities, acc, P, L, force = self.one_step(const, mass, coordinates, velocities, species, \
                                                          acc=acc, learned_parameters=learned_parameters, P=P, step=i)
             #
+            q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
             if not reuse_P:
                 P = None
             Ek, T = self.kinetic_energy(const, mass, species, velocities)
@@ -277,14 +290,18 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     f.write("%d\nstep: %d\n" % (torch.sum(species[mol]>0), i+1))
                     for atom in range(coordinates.shape[1]):
                         if species[mol,atom]>0:
-                            f.write("%s %f %f %f %f %f %f %f %f %f\n" % (const.label[species[mol,atom].item()],
-                                                       coordinates[mol,atom,0],
-                                                       coordinates[mol,atom,1],
-                                                       coordinates[mol,atom,2], 
-                                                       velocities[mol,atom,0],
-                                                       velocities[mol,atom,1],
-                                                       velocities[mol,atom,2],
-                                      force[mol,atom,0], force[mol,atom,1],force[mol,atom,2]))
+                            f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
+                                                    (const.label[species[mol,atom].item()],
+                                                        coordinates[mol,atom,0],
+                                                        coordinates[mol,atom,1],
+                                                        coordinates[mol,atom,2], 
+                                                        velocities[mol,atom,0],
+                                                        velocities[mol,atom,1],
+                                                        velocities[mol,atom,2],
+                                                        force[mol,atom,0], 
+                                                        force[mol,atom,1],
+                                                        force[mol,atom,2], 
+                                                        q[mol,atom]))
 
                     f.close()
         return coordinates, velocities, acc

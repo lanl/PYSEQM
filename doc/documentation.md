@@ -33,7 +33,7 @@ else:
 
 # Specify SEQM parameters
 seqm_parameters = {
-                   'method' : 'AM1',  # AM1, MNDO, PM
+                   'method' : 'AM1',  # AM1, MNDO, PM3
                    'scf_eps' : 1.0e-6,  # unit eV, SCF converging threshold
                    'scf_converger' : [2,0.0], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
@@ -45,14 +45,16 @@ seqm_parameters = {
                    'learned' : [], # learned parameters name list, e.g ['U_ss'], 
                         # name lists in seqm.basics.parameterlist  
                         # if empty, loaded from ./seqm/params, 
-                        # otherwise provide dictionary for modules, see test5.py
-                        # or callable for modules, f(species, coordinates), which return a dictionary 
+                        # otherwise provide dictionary for modules Energy, Force or MD, see test5.py
+                        # or provide callable function for modules, f(species, coordinates), which return a same type dictionary as in test5.py
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    }
 
 # Prepare configurations
 # Note configurations are prepared in batch mode, i.e. first dimension: molecules
 #example with two molecule systems
+# [O, C, H, H]
+# species in descending order
 species = torch.as_tensor([[8,6,1,1],[8,6,1,1]],dtype=torch.int64, device=device)
 coordinates = torch.tensor([
                   [
