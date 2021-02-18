@@ -79,7 +79,6 @@ class EnergyXL(torch.nn.Module):
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
-            torch.save(adict, "par_%d.pkl" % step)
             parameters = self.packpar(Z, learned_params = adict)    
         else:
             parameters = self.packpar(Z, learned_params = learned_parameters)
@@ -356,9 +355,6 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                                                         velocities[mol,atom,0],
                                                         velocities[mol,atom,1],
                                                         velocities[mol,atom,2],
-                                                        force[mol,atom,0], 
-                                                        force[mol,atom,1],
-                                                        force[mol,atom,2], 
                                                         q[mol,atom]))
 
                     f.close()
