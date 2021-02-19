@@ -302,7 +302,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                 torch.cuda.synchronize()
             t1 = time.time()
             const.timing["MD"].append(t1-t0)
-        return coordinates, velocities, acc, D, P, Pt, Hf
+        return coordinates, velocities, acc, D, P, Pt, Hf, force
 
     def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), Pt=None, **kwargs):
         MASS = torch.as_tensor(const.mass)
@@ -326,7 +326,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         E0 = None
 
         for i in range(steps):
-            coordinates, velocities, acc, D, P, Pt, L = self.one_step(const, i, mass, coordinates, velocities, species, \
+            coordinates, velocities, acc, D, P, Pt, L, forces = self.one_step(const, i, mass, coordinates, velocities, species, \
                                                          acc, D, P, Pt, learned_parameters=learned_parameters)
             #
             q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
@@ -354,6 +354,6 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             
             
             self.screen_output(i, T, Ek, L, d)
-            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L)
+            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L, forces)
 
         return coordinates, velocities, acc, P, Pt

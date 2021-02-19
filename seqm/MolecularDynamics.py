@@ -265,7 +265,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     print(" %8.2f %e %e %e %e %e %e" % (T[mol], Ek[mol], L[mol], L[mol]+Ek[mol], d[mol,0], d[mol,1], d[mol,2]), end="")
                 print()
     
-    def dump(self, i, const, species, coordinates, velocities, q, T, Ek, L):
+    def dump(self, i, const, species, coordinates, velocities, q, T, Ek, L, forces):
         if (i+1)%self.output['dump']==0:
             for mol in self.output['molid']:
                 fn = self.output['prefix'] + "." + str(mol) + ".xyz"
@@ -273,7 +273,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 f.write("%d\nstep: %d, T=%6.3fK, Ek=%23.16e, Ep=%23.16e\n" % (torch.sum(species[mol]>0), i+1, T[mol], Ek[mol], L[mol]))
                 for atom in range(coordinates.shape[1]):
                     if species[mol,atom]>0:
-                        f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
+                        f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
                                                 (const.label[species[mol,atom].item()],
                                                     coordinates[mol,atom,0],
                                                     coordinates[mol,atom,1],
@@ -281,6 +281,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                                                     velocities[mol,atom,0],
                                                     velocities[mol,atom,1],
                                                     velocities[mol,atom,2],
+                                                    forces[mol,atom,0],
+                                                    forces[mol,atom,1],
+                                                    forces[mol,atom,2],
                                                     q[mol,atom]))
                 f.close()
 
@@ -309,7 +312,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         E0 = None
 
         for i in range(steps):
-            coordinates, velocities, acc, P, L, force = self.one_step(const, mass, coordinates, velocities, species, \
+            coordinates, velocities, acc, P, L, forces = self.one_step(const, mass, coordinates, velocities, species, \
                                                          acc=acc, learned_parameters=learned_parameters, P=P, step=i)
             #
             q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
@@ -339,7 +342,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             
             
             self.screen_output(i, T, Ek, L, d)
-            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L)
+            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L, forces)
 
             
             
