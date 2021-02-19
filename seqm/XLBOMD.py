@@ -225,21 +225,15 @@ class XL_BOMD(Molecular_Dynamics_Basic):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self,seqm_parameters, timestep=1.0, k=5, output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}):
+    def __init__(self,seqm_parameters, timestep=1.0, k=5, output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}, *args, **kwargs):
         """
         unit for timestep is femtosecond
         """
-        super().__init__(seqm_parameters, timestep=1.0, output=output)
-        self.seqm_parameters = seqm_parameters
-        self.timestep = timestep
+        super().__init__(seqm_parameters, timestep=1.0, output=output, *args, **kwargs)
         self.conservative_force = ForceXL(seqm_parameters)
         self.force0 = Force(seqm_parameters)
-        self.acc_scale = 0.009648532800137615
-        self.vel_scale = 0.9118367323190634e-3
-        self.kinetic_energy_scale = 1.0364270099032438e2
         #check Niklasson et al JCP 130, 214109 (2009)
         #coeff: kappa, alpha, c0, c1, ..., c9
-        self.output = output
         self.coeffs = {3: [1.69,  150e-3,   -2.0,   3.0,    0.0,  -1.0],
                        4: [1.75,   57e-3,   -3.0,   6.0,   -2.0,  -2.0,   1.0],
                        5: [1.82,   18e-3,   -6.0,  14.0,   -8.0,  -3.0,   4.0,   -1.0],
@@ -298,7 +292,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         P = self.coeff_D*D + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
         Pt[(self.m-1-cindx)] = P
 
-        force, Etot, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters, step=step)
+        force, Hf, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters, step=step)
         D = D.detach()
         acc = force/mass*self.acc_scale
         with torch.no_grad():
@@ -308,9 +302,9 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                 torch.cuda.synchronize()
             t1 = time.time()
             const.timing["MD"].append(t1-t0)
-        return coordinates, velocities, acc, D, P, Pt, Etot
+        return coordinates, velocities, acc, D, P, Pt, Hf
 
-    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), Pt=None):
+    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), Pt=None, **kwargs):
         MASS = torch.as_tensor(const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
         MASS[0] = 1.0
@@ -329,33 +323,37 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         print()
         """
         q0 = const.tore[species]
+        E0 = None
 
         for i in range(steps):
-            coordinates, velocities, acc, D, P, Pt, Etot = self.one_step(const, i, mass, coordinates, velocities, species, \
+            coordinates, velocities, acc, D, P, Pt, L = self.one_step(const, i, mass, coordinates, velocities, species, \
                                                          acc, D, P, Pt, learned_parameters=learned_parameters)
-            Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            #
             q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-            if (i+1)%self.output['thermo']==0:
-                print("md  %6d" % (i+1), end="")
-                for mol in self.output['molid']:
-                    print(" %f %f " % (T[mol], Etot[mol]+Ek[mol]), end="")
-                print()
-            if (i+1)%self.output['dump']==0:
-                for mol in self.output['molid']:
-                    fn = self.output['prefix'] + "." + str(mol) + ".xyz"
-                    f = open(fn,'a+')
-                    f.write("%d\nstep: %d\n" % (torch.sum(species[mol]>0), i+1))
-                    for atom in range(coordinates.shape[1]):
-                        if species[mol,atom]>0:
-                            f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
-                                                    (const.label[species[mol,atom].item()],
-                                                        coordinates[mol,atom,0],
-                                                        coordinates[mol,atom,1],
-                                                        coordinates[mol,atom,2], 
-                                                        velocities[mol,atom,0],
-                                                        velocities[mol,atom,1],
-                                                        velocities[mol,atom,2],
-                                                        q[mol,atom]))
+            d = self.dipole(q, coordinates)
+            Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            if not torch.is_tensor(E0):
+                E0 = L+Ek
+            
+            if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
+            
+            #scale velocities to control temperature
+            if 'scale_vel' in kwargs:
+                # kwargs["scale_vel"] = [freq, T(target)]
+                flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
+                if flag:
+                    Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            
+            #control energy shift
+            if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                #scale velocities to adjust kinetic energy and compenstate the energy shift
+                Eshift = Ek + L - E0
+                self.control_shift(velocities, Ek, Eshift)
+                Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            
+            
+            self.screen_output(i, T, Ek, L, d)
+            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L)
 
-                    f.close()
         return coordinates, velocities, acc, P, Pt

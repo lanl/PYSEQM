@@ -54,17 +54,19 @@ seqm_parameters = {
                    }
 #
 
+output={'molid':[0], 'thermo':1, 'dump':1, 'prefix':'md'}
 
-
-md0 =  Molecular_Dynamics_Basic(seqm_parameters, timestep=1.0).to(device)
-md1 =  Molecular_Dynamics_Langevin(seqm_parameters, timestep=1.0, damp=100.0, T=300.0, output={'molid':[0, 1], 'thermo':1, 'dump':10, 'prefix':'md'}).to(device)
-md2 = XL_BOMD(seqm_parameters, timestep=1.0, k=9).to(device)
+md0 =  Molecular_Dynamics_Basic(seqm_parameters, timestep=1.0,output=output).to(device)
+md1 =  Molecular_Dynamics_Langevin(seqm_parameters, timestep=1.0, damp=100.0, Temp=300.0, output=output).to(device)
+md2 = XL_BOMD(seqm_parameters, timestep=1.0, k=9,output=output).to(device)
 velocities = md0.initialize_velocity(const, coordinates, species, Temp=300.0)
 #remove center of mass velocity
-
-coordinates, velocities, accelaration =  md0.run(const, 20, coordinates, velocities, species)
+md=md2
+#coordinates, velocities, accelaration =  md1.run(const, 10, coordinates, velocities, species, control_energy_shift=True)
 #coordinates, velocities, accelaration =  md1.run(const, 20, coordinates, velocities, species)
 #coordinates, velocities, accelaration, P, Pt =  md2.run(const, 100, coordinates, velocities, species)
+_ = md.run(const, 10, coordinates, velocities, species, control_energy_shift=True)
+_ = md.run(const, 10, coordinates, velocities, species, scale_vel=[1,300])
 
 
 if const.do_timing:

@@ -151,7 +151,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self,seqm_parameters, timestep=1.0, output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}):
+    def __init__(self,seqm_parameters, timestep=1.0, output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}, *args, **kwargs):
         """
         unit for timestep is femtosecond
         output: [molecule id list, frequency N, prefix]
@@ -159,7 +159,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             geometry is writted every dump step to the file with name prefix + molid + .xyz
             step, temp, and total energy is print to screens for select molecules every thermo
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.seqm_parameters = seqm_parameters
         self.timestep = timestep
         self.conservative_force = Force(seqm_parameters)
@@ -250,8 +250,53 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         n_atom = P.shape[1]//n_orbital
         q = P.diagonal(dim1=1,dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(axis=2)
         return q
+    
+    @staticmethod
+    def dipole(q, coordinates):
+        return torch.sum(q.unsqueeze(2)*coordinates, axis=1)
 
-    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True):
+    
+    def screen_output(self, i, T, Ek, L, d):
+        if i==0:
+            print("Step, Temp, E(kinetic), E(potential), E(total), dipole(x,y,z)")
+        if (i+1)%self.output['thermo']==0:
+                print("%6d" % (i+1), end="")
+                for mol in self.output['molid']:
+                    print(" %8.2f %e %e %e %e %e %e" % (T[mol], Ek[mol], L[mol], L[mol]+Ek[mol], d[mol,0], d[mol,1], d[mol,2]), end="")
+                print()
+    
+    def dump(self, i, const, species, coordinates, velocities, q, T, Ek, L):
+        if (i+1)%self.output['dump']==0:
+            for mol in self.output['molid']:
+                fn = self.output['prefix'] + "." + str(mol) + ".xyz"
+                f = open(fn,'a+')
+                f.write("%d\nstep: %d, T=%6.3fK, Ek=%23.16e, Ep=%23.16e\n" % (torch.sum(species[mol]>0), i+1, T[mol], Ek[mol], L[mol]))
+                for atom in range(coordinates.shape[1]):
+                    if species[mol,atom]>0:
+                        f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
+                                                (const.label[species[mol,atom].item()],
+                                                    coordinates[mol,atom,0],
+                                                    coordinates[mol,atom,1],
+                                                    coordinates[mol,atom,2], 
+                                                    velocities[mol,atom,0],
+                                                    velocities[mol,atom,1],
+                                                    velocities[mol,atom,2],
+                                                    q[mol,atom]))
+                f.close()
+
+    def scale_velocities(self, i, velocities, T, scale_vel):
+        #freq, T0 = scale_vel
+        if (i+1)%scale_vel[0]==0:
+            alpha = torch.sqrt(scale_vel[1]/T)
+            velocities.mul_(alpha.reshape(-1,1,1))
+            return True
+        return False
+
+    def control_shift(self, velocities, Ek, Eshift):
+        alpha = torch.sqrt((Ek-Eshift)/Ek)
+        velocities.mul_(alpha.reshape(-1,1,1))
+
+    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, **kwargs):
 
         MASS = torch.as_tensor(const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
@@ -260,50 +305,44 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         acc = None
         P = None
-        #output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}
-        """
-        print("#step(dt=%.2f) " % self.timestep, end='')
-        for mol in self.output['molid']:
-            print("T(%d)  Etot(%d)  " % (mol, mol), end="")
-        print()
-        """
         q0 = const.tore[species]
+        E0 = None
 
         for i in range(steps):
             coordinates, velocities, acc, P, L, force = self.one_step(const, mass, coordinates, velocities, species, \
                                                          acc=acc, learned_parameters=learned_parameters, P=P, step=i)
             #
             q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
+            d = self.dipole(q, coordinates)
             if not reuse_P:
                 P = None
             Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            if (i+1)%self.output['thermo']==0:
-                print("md  %6d" % (i+1), end="")
-                for mol in self.output['molid']:
-                    print(" %f %f %f %f" % (T[mol], Ek[mol], L[mol], L[mol]+Ek[mol]), end="")
-                print()
+            if not torch.is_tensor(E0):
+                E0 = L+Ek
+            
+            if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
+            
+            #scale velocities to control temperature
+            if 'scale_vel' in kwargs:
+                # kwargs["scale_vel"] = [freq, T(target)]
+                flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
+                if flag:
+                    Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            
+            #control energy shift
+            if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                #scale velocities to adjust kinetic energy and compenstate the energy shift
+                Eshift = Ek + L - E0
+                self.control_shift(velocities, Ek, Eshift)
+                Ek, T = self.kinetic_energy(const, mass, species, velocities)
+            
+            
+            self.screen_output(i, T, Ek, L, d)
+            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L)
 
-            if (i+1)%self.output['dump']==0:
-                for mol in self.output['molid']:
-                    fn = self.output['prefix'] + "." + str(mol) + ".xyz"
-                    f = open(fn,'a+')
-                    f.write("%d\nstep: %d\n" % (torch.sum(species[mol]>0), i+1))
-                    for atom in range(coordinates.shape[1]):
-                        if species[mol,atom]>0:
-                            f.write("%2s %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e %23.16e\n" % 
-                                                    (const.label[species[mol,atom].item()],
-                                                        coordinates[mol,atom,0],
-                                                        coordinates[mol,atom,1],
-                                                        coordinates[mol,atom,2], 
-                                                        velocities[mol,atom,0],
-                                                        velocities[mol,atom,1],
-                                                        velocities[mol,atom,2],
-                                                        force[mol,atom,0], 
-                                                        force[mol,atom,1],
-                                                        force[mol,atom,2], 
-                                                        q[mol,atom]))
-
-                    f.close()
+            
+            
         return coordinates, velocities, acc
 
 class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
@@ -312,10 +351,10 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     #same formula as in lammps
     """
 
-    def __init__(self, seqm_parameters, timestep=1.0, damp=1.0, T=300.0, output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}):
+    def __init__(self, seqm_parameters, timestep=1.0, damp=1.0, Temp=300.0, output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}, *args, **kwargs):
         """
         damp is damping factor in unit of time (fs)
-        T : temperature in unit of Kelvin
+        Temp : temperature in unit of Kelvin
         F = Fc + Ff + Fr
         Ff = - (m / damp) v
         Fr = sqrt(2 Kb T m / (dt damp))*R(t)
@@ -323,9 +362,9 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         <R_ij(t)>=0
         <R_ij(t) * R_ik(t) > = delta_jk
         """
-        super().__init__(seqm_parameters, timestep=1.0, output=output)
+        super().__init__(seqm_parameters, timestep=1.0, output=output, *args, **kwargs)
         self.damp = damp
-        self.T = T
+        self.T = Temp
         # Fr = sqrt(2 Kb T m / (dt damp))*R(t)
         #    = sqrt(2.0) * sqrt(kb T/m) * m/sqrt(dt damp) * R(t)
         # self.vel_scale change sqrt(kb T/m) into Angstrom/fs
