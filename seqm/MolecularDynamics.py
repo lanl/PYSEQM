@@ -297,6 +297,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
     def control_shift(self, velocities, Ek, Eshift):
         alpha = torch.sqrt((Ek-Eshift)/Ek)
+        alpha[~torch.isfinite(alpha)]=0.0
         velocities.mul_(alpha.reshape(-1,1,1))
 
     def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, **kwargs):
