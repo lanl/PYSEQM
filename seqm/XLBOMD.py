@@ -216,6 +216,7 @@ class ForceXL(torch.nn.Module):
             force = -coordinates.grad.clone()
             coordinates.grad.zero_()
         #return force, Etot, D.detach()
+        del Etot, Eelec, Enuc, Eiso, EnucAB, L
         return force, Hf, D.detach()
 
 
@@ -263,7 +264,8 @@ class XL_BOMD(Molecular_Dynamics_Basic):
     def initialize(self, const, mass, coordinates, species, learned_parameters=dict()):
         #t=0, just use normal way
         f, D, _ = self.force0(const, coordinates, species, learned_parameters=learned_parameters)[:3]
-        acc = f/mass*self.acc_scale
+        with torch.no_grad():
+            acc = f/mass*self.acc_scale
         return acc, D.detach()
 
     def get_force(self):
@@ -282,20 +284,20 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             velocities.add_(0.5*acc*dt)
             coordinates.add_(velocities*dt)
 
-        #cindx = step%self.m
-        #e.g k=5, m=6
-        #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
-        #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
-        #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
-        #Pt (2,3,4,5,0,1), step=6n+2
-        cindx = step%self.m
-        P = self.coeff_D*D + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-        Pt[(self.m-1-cindx)] = P
+            #cindx = step%self.m
+            #e.g k=5, m=6
+            #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
+            #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
+            #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
+            #Pt (2,3,4,5,0,1), step=6n+2
+            cindx = step%self.m
+            P = self.coeff_D*D + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            Pt[(self.m-1-cindx)] = P
 
         force, Hf, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters, step=step)
-        D = D.detach()
-        acc = force/mass*self.acc_scale
         with torch.no_grad():
+            D = D.detach()
+            acc = force/mass*self.acc_scale
             velocities.add_(0.5*acc*dt)
         if const.do_timing:
             if torch.cuda.is_available():
@@ -309,11 +311,11 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
         MASS[0] = 1.0
         mass = MASS[species].unsqueeze(2)
-
         acc, D = self.initialize(const, mass, coordinates, species, learned_parameters=learned_parameters)
-        if not torch.is_tensor(Pt):
-            Pt = D.unsqueeze(0).expand((self.m,)+D.shape).clone()
-        P = D.clone()
+        with torch.no_grad():
+            if not torch.is_tensor(Pt):
+                Pt = D.unsqueeze(0).expand((self.m,)+D.shape).clone()
+            P = D.clone()
 
         #output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}
         """
@@ -326,34 +328,39 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         E0 = None
 
         for i in range(steps):
+            
             coordinates, velocities, acc, D, P, Pt, L, forces = self.one_step(const, i, mass, coordinates, velocities, species, \
-                                                         acc, D, P, Pt, learned_parameters=learned_parameters)
-            #
-            q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-            d = self.dipole(q, coordinates)
-            Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            if not torch.is_tensor(E0):
-                E0 = L+Ek
-            
-            if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
-                raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
-            
-            #scale velocities to control temperature
-            if 'scale_vel' in kwargs:
-                # kwargs["scale_vel"] = [freq, T(target)]
-                flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
-                if flag:
-                    Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            
-            #control energy shift
-            if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                #scale velocities to adjust kinetic energy and compenstate the energy shift
-                Eshift = Ek + L - E0
-                self.control_shift(velocities, Ek, Eshift)
+                                                            acc, D, P, Pt, learned_parameters=learned_parameters)
+                #
+            with torch.no_grad():
+                q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
+                d = self.dipole(q, coordinates)
                 Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            
-            
-            self.screen_output(i, T, Ek, L, d)
-            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L, forces)
+                if not torch.is_tensor(E0):
+                    E0 = L+Ek
+                
+                if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                    raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
+                
+                #scale velocities to control temperature
+                if 'scale_vel' in kwargs:
+                    # kwargs["scale_vel"] = [freq, T(target)]
+                    flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
+                    if flag:
+                        Ek, T = self.kinetic_energy(const, mass, species, velocities)
+                
+                #control energy shift
+                if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                    #scale velocities to adjust kinetic energy and compenstate the energy shift
+                    Eshift = Ek + L - E0
+                    self.control_shift(velocities, Ek, Eshift)
+                    Ek, T = self.kinetic_energy(const, mass, species, velocities)
+                
+                
+                self.screen_output(i, T, Ek, L, d)
+                self.dump(i, const, species, coordinates, velocities, q, T, Ek, L, forces)
+            del q, d, T, Ek, L, forces
+            if i%1000==0:
+                torch.cuda.empty_cache()
 
         return coordinates, velocities, acc, P, Pt

@@ -218,19 +218,19 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         MASS[0] = 1.0
         mass = MASS[species].unsqueeze(2)
         """
-
-        if not torch.is_tensor(acc):
-            force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
-            acc = force/mass*self.acc_scale
+ 
         if const.do_timing:
             t0 = time.time()
+        if not torch.is_tensor(acc):
+            force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
+            with torch.no_grad():
+                acc = force/mass*self.acc_scale
         with torch.no_grad():
             velocities.add_(0.5*acc*dt)
             coordinates.add_(velocities*dt)
-
         force, P, L = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
-        acc = force/mass*self.acc_scale
         with torch.no_grad():
+            acc = force/mass*self.acc_scale
             velocities.add_(0.5*acc*dt)
         if const.do_timing:
             if torch.cuda.is_available():
@@ -314,36 +314,40 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         for i in range(steps):
             coordinates, velocities, acc, P, L, forces = self.one_step(const, mass, coordinates, velocities, species, \
-                                                         acc=acc, learned_parameters=learned_parameters, P=P, step=i)
-            #
-            q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-            d = self.dipole(q, coordinates)
-            if not reuse_P:
-                P = None
-            Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            if not torch.is_tensor(E0):
-                E0 = L+Ek
-            
-            if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
-                raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
-            
-            #scale velocities to control temperature
-            if 'scale_vel' in kwargs:
-                # kwargs["scale_vel"] = [freq, T(target)]
-                flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
-                if flag:
-                    Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            
-            #control energy shift
-            if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                #scale velocities to adjust kinetic energy and compenstate the energy shift
-                Eshift = Ek + L - E0
-                self.control_shift(velocities, Ek, Eshift)
+                                                            acc=acc, learned_parameters=learned_parameters, P=P, step=i)
+            with torch.no_grad():
+                q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
+                d = self.dipole(q, coordinates)
+                if not reuse_P:
+                    P = None
                 Ek, T = self.kinetic_energy(const, mass, species, velocities)
-            
-            
-            self.screen_output(i, T, Ek, L, d)
-            self.dump(i, const, species, coordinates, velocities, q, T, Ek, L, forces)
+                if not torch.is_tensor(E0):
+                    E0 = L+Ek
+                
+                if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                    raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
+                
+                #scale velocities to control temperature
+                if 'scale_vel' in kwargs:
+                    # kwargs["scale_vel"] = [freq, T(target)]
+                    flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
+                    if flag:
+                        Ek, T = self.kinetic_energy(const, mass, species, velocities)
+                
+                #control energy shift
+                if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                    #scale velocities to adjust kinetic energy and compenstate the energy shift
+                    Eshift = Ek + L - E0
+                    self.control_shift(velocities, Ek, Eshift)
+                    Ek, T = self.kinetic_energy(const, mass, species, velocities)
+                    del Eshift
+                
+                
+                self.screen_output(i, T, Ek, L, d)
+                self.dump(i, const, species, coordinates, velocities, q, T, Ek, L, forces)
+            del forces, q, d, Ek, T
+            if i%1000==0:
+                torch.cuda.empty_cache()
 
             
             
