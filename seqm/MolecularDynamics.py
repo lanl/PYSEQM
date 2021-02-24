@@ -49,7 +49,7 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
 
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
-            coordinates, force, P, Lnew, alpha = self.onestep(const, coordinates, species, alpha, learned_parameters=dict(), P0=P)
+            coordinates, force, P, Lnew, alpha = self.onestep(const, coordinates, species, alpha, learned_parameters=learned_parameters, P0=P)
             force_err = torch.max(torch.abs(force))
             energy_err = (Lnew-Lold).sum()/nmol
             if log:
@@ -113,10 +113,10 @@ class Geometry_Optimization_SD(torch.nn.Module):
         dtype = coordinates.dtype
         device = coordinates.device
         nmol=coordinates.shape[0]
-        coordinates.requires_grad_(True)
+        #coordinates.requires_grad_(True)
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
-            coordinates, force, P, Lnew = self.onestep(const, coordinates, species, learned_parameters=dict(), P0=P)
+            coordinates, force, P, Lnew = self.onestep(const, coordinates, species, learned_parameters=learned_parameters, P0=P)
             force_err = torch.max(torch.abs(force))
             energy_err = (Lnew-Lold).sum()/nmol
             if log:
