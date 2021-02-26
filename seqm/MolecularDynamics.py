@@ -50,6 +50,7 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
             coordinates, force, P, Lnew, alpha = self.onestep(const, coordinates, species, alpha, learned_parameters=learned_parameters, P0=P)
+            coordinates.grad.zero_()
             force_err = torch.max(torch.abs(force))
             energy_err = (Lnew-Lold).sum()/nmol
             if log:
