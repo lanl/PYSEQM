@@ -53,8 +53,11 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
             if torch.is_tensor(coordinates.grad):
                 with torch.no_grad():
                     coordinates.grad.zero_()
-            force_err = torch.max(torch.abs(force))
-            energy_err = (Lnew-Lold).sum()/nmol
+            with torch.no_grad():
+                alpha[alpha<1.0e-3]=1.0e-3
+                force_err = torch.max(torch.abs(force))
+                energy_err = (Lnew-Lold).sum()/nmol
+                force.zero_()
             if log:
 
                 print("%d " % (i+1), end="")

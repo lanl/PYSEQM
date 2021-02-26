@@ -31,6 +31,12 @@ var/
 *.egg
 .vscode
 *.docx
+*.xyz
+*.dat
+*.npy
+*.jpg
+*.pdf
+*.png
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
