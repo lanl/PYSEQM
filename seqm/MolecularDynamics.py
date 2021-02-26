@@ -71,7 +71,7 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
 
             #if (force_err>self.force_tol and torch.abs(energy_err)>self.energy_tol):
             if (force_err>self.force_tol):
-                Lold = Lnew
+                Lold = Lnew.detach().clone()
                 continue
             else:
                 break
