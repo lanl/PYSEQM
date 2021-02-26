@@ -333,6 +333,8 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                                                             acc, D, P, Pt, learned_parameters=learned_parameters)
                 #
             with torch.no_grad():
+                if torch.is_tensor(coordinates.grad):
+                    coordinates.grad.zero_()
                 q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
                 d = self.dipole(q, coordinates)
                 Ek, T = self.kinetic_energy(const, mass, species, velocities)

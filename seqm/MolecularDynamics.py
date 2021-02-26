@@ -50,7 +50,9 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
             coordinates, force, P, Lnew, alpha = self.onestep(const, coordinates, species, alpha, learned_parameters=learned_parameters, P0=P)
-            coordinates.grad.zero_()
+            if torch.is_tensor(coordinates.grad):
+                with torch.no_grad():
+                    coordinates.grad.zero_()
             force_err = torch.max(torch.abs(force))
             energy_err = (Lnew-Lold).sum()/nmol
             if log:
@@ -118,6 +120,9 @@ class Geometry_Optimization_SD(torch.nn.Module):
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
             coordinates, force, P, Lnew = self.onestep(const, coordinates, species, learned_parameters=learned_parameters, P0=P)
+            if torch.is_tensor(coordinates.grad):
+                with torch.no_grad():
+                    coordinates.grad.zero_()
             force_err = torch.max(torch.abs(force))
             energy_err = (Lnew-Lold).sum()/nmol
             if log:
@@ -317,6 +322,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             coordinates, velocities, acc, P, L, forces = self.one_step(const, mass, coordinates, velocities, species, \
                                                             acc=acc, learned_parameters=learned_parameters, P=P, step=i)
             with torch.no_grad():
+                if torch.is_tensor(coordinates.grad):
+                    coordinates.grad.zero_()
                 q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
                 d = self.dipole(q, coordinates)
                 if not reuse_P:
