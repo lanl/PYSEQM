@@ -61,13 +61,13 @@ md1 =  Molecular_Dynamics_Langevin(seqm_parameters, timestep=1.0, damp=100.0, Te
 md2 = XL_BOMD(seqm_parameters, timestep=1.0, k=9,output=output).to(device)
 velocities = md0.initialize_velocity(const, coordinates, species, Temp=300.0)
 #remove center of mass velocity
-md=md2
+md=md0
 #coordinates, velocities, accelaration =  md1.run(const, 10, coordinates, velocities, species)
 #coordinates, velocities, accelaration =  md1.run(const, 20, coordinates, velocities, species)
 #coordinates, velocities, accelaration, P, Pt =  md2.run(const, 100, coordinates, velocities, species)
-_ = md.run(const, 10, coordinates, velocities, species)
-_ = md.run(const, 10, coordinates, velocities, species, control_energy_shift=True)
-_ = md.run(const, 10, coordinates, velocities, species, scale_vel=[1,300])
+_ = md.run(const, 10, coordinates, velocities, species, remove_com=[True, 1])
+_ = md.run(const, 10, coordinates, velocities, species, control_energy_shift=True, remove_com=[True, 1])
+_ = md.run(const, 10, coordinates, velocities, species, scale_vel=[1,300], remove_com=[True, 1])
 
 
 if const.do_timing:

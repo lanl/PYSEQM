@@ -119,7 +119,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
         dtype = coordinates.dtype
         device = coordinates.device
         nmol=coordinates.shape[0]
-        #coordinates.requires_grad_(True)
+        coordinates.requires_grad_(True)
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
             coordinates, force, P, Lnew = self.onestep(const, coordinates, species, learned_parameters=learned_parameters, P0=P)
@@ -189,19 +189,41 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         velocities[species==0,:] = 0.0
         if vel_com:
             #remove center of mass velocity
-            self.zero_com(const, species, velocities)
+            self.zero_com(const, species, coordinates, velocities)
         return velocities
 
-    def zero_com(self, const, species, velocities):
+    def zero_com(self, const, species, coordinates, velocities):
         """
+        remove center of mass
         remove center of mass velocity
+        remove angular momentum
+        scale temperature back
         mass shape (nmol, molsize, 1)
         velocities shape (nmol, molsize, 3)
         """
         #mass for padding atom is 0.0
         mass = const.mass[species].unsqueeze(2)
-        com = torch.sum(mass*velocities,dim=1,keepdim=True)/torch.sum(mass,dim=1,keepdim=True)
-        velocities.sub_(com)
+        M = torch.sum(mass,dim=1,keepdim=True)
+        _, T0 = self.kinetic_energy(const, mass, species, velocities)
+        with torch.no_grad():
+            r_com = torch.sum(mass*coordinates,dim=1,keepdim=True)/M
+            coordinates.sub_(r_com)
+            v_com = torch.sum(mass*velocities,dim=1,keepdim=True)/M
+            velocities.sub_(v_com)
+            L = torch.sum(mass * torch.cross(coordinates, velocities, dim=2), dim=1)
+            I = torch.sum(mass * torch.norm(coordinates, dim=2, keepdim=True)**2, dim=1, keepdim=True) \
+                * torch.eye(3, dtype=coordinates.dtype, device=coordinates.device).reshape(1,3,3) \
+                - torch.sum( mass.unsqueeze(3) * coordinates.unsqueeze(3) * coordinates.unsqueeze(2), dim=1)
+            omega, _ = torch.solve(L.unsqueeze(2), I)
+            velocities.add_( torch.cross(coordinates, omega.reshape(-1,1,3).repeat(1,coordinates.shape[1],1)) )
+            _, T1 = self.kinetic_energy(const, mass, species, velocities)
+            alpha = torch.sqrt(T0/T1)
+            velocities.mul_(alpha.reshape(-1,1,1))
+            #Lnew = torch.sum(mass * torch.cross(coordinates, velocities), dim=1)
+            #_, Tnew = self.kinetic_energy(const, mass, species, velocities)
+            #print("After remove angular momentum: ", Lnew, T0-Tnew)
+            del r_com, v_com, L, I, omega, T0, T1, alpha #, Lnew, Tnew
+
 
     def kinetic_energy(self, const, mass, species, velocities):
         Ek = torch.sum(0.5*mass*velocities**2,dim=(1,2))*self.kinetic_energy_scale
@@ -309,7 +331,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         alpha[~torch.isfinite(alpha)]=0.0
         velocities.mul_(alpha.reshape(-1,1,1))
 
-    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, **kwargs):
+    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], **kwargs):
 
         MASS = torch.as_tensor(const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
@@ -331,6 +353,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 d = self.dipole(q, coordinates)
                 if not reuse_P:
                     P = None
+                if remove_com[0]:
+                    if i%remove_com[1]==0:
+                        self.zero_com(const, species, coordinates, velocities)
+
                 Ek, T = self.kinetic_energy(const, mass, species, velocities)
                 if not torch.is_tensor(E0):
                     E0 = L+Ek
