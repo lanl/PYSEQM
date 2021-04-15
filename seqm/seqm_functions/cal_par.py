@@ -56,7 +56,7 @@ class additive_term_rho1(torch.autograd.Function):
         d1[c]*=-1.0
 
         d2 = d1+0.04
-        for i in range(1,6):
+        for i in range(1,20):
             hsp1 = 0.5*d1 - 0.5/torch.sqrt(4.0*D1**2+1.0/d1**2)
             hsp2 = 0.5*d2 - 0.5/torch.sqrt(4.0*D1**2+1.0/d2**2)
 
@@ -64,6 +64,9 @@ class additive_term_rho1(torch.autograd.Function):
             #d3 = d1 + (d2-d1)*(hsp-hsp1)/(hsp2-hsp1)
             d1 = d2
             d2 = d3
+            err = torch.abs(0.5*d2 - 0.5/torch.sqrt(4.0*D1**2+1.0/d2**2)-hsp).max()
+            if err<eps:
+                break
             #print(d1, d2)
         #ad = d2
         #rho1 = 0.5/d
@@ -140,15 +143,19 @@ class additive_term_rho2(torch.autograd.Function):
         q1[c]*=-1.0
 
         q2 = q1 + 0.04
-        for i in range(1,6):
+        for i in range(1,20):
             hpp1 = 0.25*q1 - 0.5/torch.sqrt(4.0*D2**2+1.0/q1**2) + 0.25/torch.sqrt(8.0*D2**2+1.0/q1**2)
             hpp2 = 0.25*q2 - 0.5/torch.sqrt(4.0*D2**2+1.0/q2**2) + 0.25/torch.sqrt(8.0*D2**2+1.0/q2**2)
             #q3 =  q1 + (q2-q1)*(hpp-hpp1)/(hpp2-hpp1)
             q3 = torch.where(torch.abs(hpp2-hpp1)>eps,q1 + (q2-q1)*(hpp-hpp1)/(hpp2-hpp1),q2)
             q1 = q2
             q2 = q3
+            err = torch.abs(0.25*q2 - 0.5/torch.sqrt(4.0*D2**2+1.0/q2**2) + 0.25/torch.sqrt(8.0*D2**2+1.0/q2**2)-hpp).max()
+            if err<eps:
+                break
         # aq = q3
         # rho2 = 0.5/q
+        #print(hpp, 0.25*q2 - 0.5/torch.sqrt(4.0*D2**2+1.0/q2**2) + 0.25/torch.sqrt(8.0*D2**2+1.0/q2**2)-hpp)
         rho2 = 0.5/q2
         """
         if torch.isnan(rho2).any():
