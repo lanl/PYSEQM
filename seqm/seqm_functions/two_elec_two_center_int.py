@@ -38,8 +38,9 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     dd[isX], qq[isX] = dd_qq(qn0[isX],zetas[isX], zetap[isX])
     rho_0[isH] = 0.5*ev/gss[isH]
     rho_0[isX] = 0.5*ev/gss[isX]
-    rho_1[isX] = rho1(hsp[isX],dd[isX])
-    rho_2[isX] = rho2(hpp[isX],qq[isX])
+    if torch.sum(isX)>0:
+        rho_1[isX] = rho1(hsp[isX],dd[isX])
+        rho_2[isX] = rho2(hpp[isX],qq[isX])
 
     w, e1b, e2a = \
         rotate(ni, nj, xij, rij, tore, dd[idxi],dd[idxj], \
