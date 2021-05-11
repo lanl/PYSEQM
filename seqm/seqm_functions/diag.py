@@ -3,6 +3,12 @@ from .pack import *
 #this pseudo_diag is not efficient to be implemented in python
 #as it applies a series Jacobi transformation on eigenvectors (in place operations)
 #have to use python for loop
+
+CHECK_DEGENERACY = False
+# flag to control whether consider degeneracy when constructing the density matrix
+# if no, then occupied orbitals are from 0, 1, ..., nocc-1
+# if yes, then equal contributions are used for degenarated orbitals near fermi level
+
 def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
     #x single Fock matrix
     #here x has padding 0, but is symmetric, i.e. lower and upper trianlge parts are filled
@@ -69,6 +75,30 @@ def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
     else:
         return P
 
+
+def construct_P(e, v, nocc):
+    # e: eigenvalue, sorted, ascending
+    # v: eigenvector
+    # nocc: int 
+    if e.dtype==torch.float32:
+            atol = 1.0e-7
+    elif e.dtype==torch.float64:
+            atol = 1.0e-14
+    cond = (e-e[nocc-1]).abs()<=atol
+    if cond[nocc:].any():
+        c = torch.nonzero(cond)
+        indx1 = c[0].item()
+        indx2 = c[-1].item()+1
+        nd = indx2-indx1
+        coeff = torch.ones(1, indx2, device=e.device,dtype=e.dtype)
+        coeff[0,indx1:] = (nocc.type(torch.double)-indx1)/nd
+        t = 2.0*torch.matmul(coeff*v[:,:indx2], v[:,:indx2].transpose(0,1))
+    else:
+        t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
+    return t
+
+
+
 def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
 
     dtype =  x.dtype
@@ -116,7 +146,10 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
     if x.dim()==2:
-        t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
+        if CHECK_DEGENERACY:
+            t = construct_P(e, v, nocc)
+        else:
+            t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
     else:
         """
         t = torch.zeros_like(v)
@@ -125,7 +158,12 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
 
         t*=2.0
         """
-        t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
+        if CHECK_DEGENERACY:
+            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
+        else:
+            #list(map(lambda a,n : print('norm', torch.norm(v, dim=0), n), v, nocc))
+            #print(torch.norm())
+            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
     P = unpack(t, nheavyatom, nH, x.shape[-1])
 
     return e,P, v
@@ -145,7 +183,12 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
         e0, v0 = list(zip(*list(map(
                         lambda a,b,c: torch.symeig(pack(a,b,c),eigenvectors=True,upper=True),
                         x,nheavyatom, nH))))
-        P0 = list(map(
+        if CHECK_DEGENERACY:
+            P0 = list(map(
+                     lambda e, v, nc : construct_P(e,v,nc),
+                     e0, v0,nocc))
+        else:
+            P0 = list(map(
                      lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
                      v0,nocc))
         #

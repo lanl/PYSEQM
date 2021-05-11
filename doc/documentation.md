@@ -166,7 +166,7 @@ XLBOMD.py
 1. Benchmark convergence criteria eps for SCF and SP2, eps_sp2 will affect number of iterations for SCF
 2. in general set converger=[2], combining adaptive mixing and pulay seems takes fewest iterations
 3. when on GPU, use SP2, on CPU don't use SP2, but benchmark to check
-
+4. For molecules with degeneracy, use convergers=0 or 2, and turn on ```seqm.seqm_functions.diag.CHECK_DEGENERACY = True```
 
 ## Citation:
 [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
