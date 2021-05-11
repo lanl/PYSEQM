@@ -39,12 +39,13 @@ class Parser(torch.nn.Module):
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
 
-    def forward(self, constansts, species, coordinates):
+    def forward(self, constansts, species, coordinates, *args, **kwargs):
         """
         constants : instance of Class Constants
         species : atom types for atom in each molecules,
                   shape (nmol, molsize),  dtype: torch.int64
         coordinates : atom position, shape (nmol, molsize, 3)
+        charges: total charge for each molecule, shape (nmol,), 0 if None
         """
         device = coordinates.device
         dtype = coordinates.dtype
@@ -63,7 +64,13 @@ class Parser(torch.nn.Module):
         nHeavy = torch.sum(species>1,dim=1)
         nHydro = torch.sum(species==1,dim=1)
         tore=constansts.tore
-        nocc = (torch.sum(tore[species],dim=1)/2.0).reshape(-1).type(torch.int64)
+        n_charge = torch.sum(tore[species],dim=1).reshape(-1).type(torch.int64)
+        if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
+            n_charge += kwargs['charges'].reshape(-1).type(torch.int64)
+        nocc = n_charge//2
+
+        if ((n_charge%2)==1).any():
+            raise ValueError("Only closed shell system (with even number of electrons) are supported")
         t1 = (torch.arange(molsize,dtype=torch.int64,device=device)*(molsize+1)).reshape((1,-1))
         t2 = (torch.arange(nmol,dtype=torch.int64,device=device)*molsize**2).reshape((-1,1))
         maskd = (t1+t2).reshape(-1)[real_atoms]
@@ -257,14 +264,14 @@ class Energy(torch.nn.Module):
         # Hf_flag: true return Hf, false return Etot-Eiso
 
 
-    def forward(self, const, coordinates, species, learned_parameters=dict(), all_terms=False, P0=None, step=0):
+    def forward(self, const, coordinates, species, learned_parameters=dict(), all_terms=False, P0=None, step=0, *args, **kwargs):
         """
         get the energy terms
         """
         nmol, molsize, \
         nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \
-        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
+        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates, *args, **kwargs)
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
             if torch.is_tensor(coordinates.grad):
@@ -345,10 +352,12 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
 
-    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0):
+    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0, *args, **kwargs):
 
         coordinates.requires_grad_(True)
-        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = self.energy(const, coordinates, species, learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step)
+        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = \
+            self.energy(const, coordinates, species, \
+                learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step, *args, **kwargs)
         #L = Etot.sum()
         L = Hf.sum()
         if const.do_timing:

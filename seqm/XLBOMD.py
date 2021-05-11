@@ -67,7 +67,7 @@ class EnergyXL(torch.nn.Module):
         if "Hf_flag" in seqm_parameters:
             self.Hf_flag = seqm_parameters["Hf_flag"] # True: Heat of formation, False: Etot-Eiso
 
-    def forward(self, const, coordinates, species, P, learned_parameters=dict(), all_terms=False, step=0):
+    def forward(self, const, coordinates, species, P, learned_parameters=dict(), all_terms=False, step=0, *args, **kwargs):
         """
         get the energy terms
         D: Density Matrix, F=>D  (SP2)
@@ -76,7 +76,7 @@ class EnergyXL(torch.nn.Module):
         nmol, molsize, \
         nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \
-        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
+        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates, *args, **kwargs)
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
             parameters = self.packpar(Z, learned_params = adict)    
@@ -195,11 +195,11 @@ class ForceXL(torch.nn.Module):
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, const, coordinates, species, P, learned_parameters=dict(), step=0):
+    def forward(self, const, coordinates, species, P, learned_parameters=dict(), step=0, *args, **kwargs):
 
         coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, D = \
-            self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True, step=step)
+            self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True, step=step, *args, **kwargs)
         L = Hf.sum()
         if const.do_timing:
             t0 = time.time()
@@ -261,9 +261,9 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         tmp[1] -= 1.0
         self.coeff = torch.nn.Parameter(tmp.repeat(2), requires_grad=False)
 
-    def initialize(self, const, mass, coordinates, species, learned_parameters=dict()):
+    def initialize(self, const, mass, coordinates, species, learned_parameters=dict(), *args, **kwargs):
         #t=0, just use normal way
-        f, D, _ = self.force0(const, coordinates, species, learned_parameters=learned_parameters)[:3]
+        f, D, _ = self.force0(const, coordinates, species, learned_parameters=learned_parameters, *args, **kwargs)[:3]
         with torch.no_grad():
             acc = f/mass*self.acc_scale
         return acc, D.detach()
@@ -274,7 +274,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         """
         pass
 
-    def one_step(self, const, step, mass, coordinates, velocities, species, acc, D, P, Pt, learned_parameters=dict()):
+    def one_step(self, const, step, mass, coordinates, velocities, species, acc, D, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P
         dt = self.timestep
         if const.do_timing:
@@ -294,7 +294,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             P = self.coeff_D*D + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
             Pt[(self.m-1-cindx)] = P
 
-        force, Hf, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters, step=step)
+        force, Hf, D = self.conservative_force(const, coordinates, species, P, learned_parameters=learned_parameters, step=step, *args, **kwargs)
         with torch.no_grad():
             D = D.detach()
             acc = force/mass*self.acc_scale
@@ -306,12 +306,12 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             const.timing["MD"].append(t1-t0)
         return coordinates, velocities, acc, D, P, Pt, Hf, force
 
-    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), Pt=None, **kwargs):
+    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), Pt=None, *args, **kwargs):
         MASS = torch.as_tensor(const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
         MASS[0] = 1.0
         mass = MASS[species].unsqueeze(2)
-        acc, D = self.initialize(const, mass, coordinates, species, learned_parameters=learned_parameters)
+        acc, D = self.initialize(const, mass, coordinates, species, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
                 Pt = D.unsqueeze(0).expand((self.m,)+D.shape).clone()
@@ -330,7 +330,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         for i in range(steps):
             
             coordinates, velocities, acc, D, P, Pt, L, forces = self.one_step(const, i, mass, coordinates, velocities, species, \
-                                                            acc, D, P, Pt, learned_parameters=learned_parameters)
+                                                            acc, D, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
                 #
             with torch.no_grad():
                 if torch.is_tensor(coordinates.grad):

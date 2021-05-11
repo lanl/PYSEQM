@@ -25,14 +25,14 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
         self.max_evl = max_evl
         self.force = Force(seqm_parameters)
 
-    def onestep(self, const, coordinates, species, alpha, learned_parameters=dict(), P0=None):
-        force, P, L = self.force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0)[:3]
+    def onestep(self, const, coordinates, species, alpha, learned_parameters=dict(), P0=None, *args, **kwargs):
+        force, P, L = self.force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0, *args, **kwargs)[:3]
         P = P.detach()
         alphas = alpha.unsqueeze(1) * torch.tensor([0.5, 0.75, 1.0, 1.25, 1.5], dtype=coordinates.dtype, device=coordinates.device).reshape((1,-1))
         with torch.no_grad():
             eng = torch.zeros_like(alphas)
             for k in range(alphas.shape[1]):
-                eng[...,k] = self.force.energy(const, coordinates+force*alphas[...,k].reshape(-1,1,1), species, learned_parameters=learned_parameters, all_terms=True, P0=P0)[1]
+                eng[...,k] = self.force.energy(const, coordinates+force*alphas[...,k].reshape(-1,1,1), species, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)[1]
             #print(eng)
             index1 = torch.arange(alphas.shape[0], dtype=torch.int64, device=coordinates.device)
             index2 = torch.argmin(eng,dim=1)
@@ -40,7 +40,7 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
             coordinates.add_(alpha.reshape(-1,1,1)*force)
         return coordinates, force, P, L, alpha
 
-    def run(self, const, coordinates, species, learned_parameters=dict(), P=None, log=True):
+    def run(self, const, coordinates, species, learned_parameters=dict(), P=None, log=True, *args, **kwargs):
         dtype = coordinates.dtype
         device = coordinates.device
         nmol=coordinates.shape[0]
@@ -49,7 +49,7 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
 
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
-            coordinates, force, P, Lnew, alpha = self.onestep(const, coordinates, species, alpha, learned_parameters=learned_parameters, P0=P)
+            coordinates, force, P, Lnew, alpha = self.onestep(const, coordinates, species, alpha, learned_parameters=learned_parameters, P0=P, *args, **kwargs)
             if torch.is_tensor(coordinates.grad):
                 with torch.no_grad():
                     coordinates.grad.zero_()
@@ -108,21 +108,21 @@ class Geometry_Optimization_SD(torch.nn.Module):
         self.max_evl = max_evl
         self.force = Force(seqm_parameters)
 
-    def onestep(self, const, coordinates, species, learned_parameters=dict(), P0=None):
-        force, P, L = self.force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0)[:3]
+    def onestep(self, const, coordinates, species, learned_parameters=dict(), P0=None, *args, **kwargs):
+        force, P, L = self.force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0, *args, **kwargs)[:3]
         P = P.detach()
         with torch.no_grad():
             coordinates.add_(self.alpha*force)
         return coordinates, force, P, L
 
-    def run(self, const, coordinates, species, learned_parameters=dict(), P=None, log=True):
+    def run(self, const, coordinates, species, learned_parameters=dict(), P=None, log=True, *args, **kwargs):
         dtype = coordinates.dtype
         device = coordinates.device
         nmol=coordinates.shape[0]
         coordinates.requires_grad_(True)
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         for i in range(self.max_evl):
-            coordinates, force, P, Lnew = self.onestep(const, coordinates, species, learned_parameters=learned_parameters, P0=P)
+            coordinates, force, P, Lnew = self.onestep(const, coordinates, species, learned_parameters=learned_parameters, P0=P, *args, **kwargs)
             if torch.is_tensor(coordinates.grad):
                 with torch.no_grad():
                     coordinates.grad.zero_()
@@ -231,17 +231,17 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         Temp = Ek*1.160451812e4/(1.5*torch.sum(species>0,dim=1).type(Ek.dtype))
         return Ek, Temp
 
-    def get_force(self, const, mass, coordinates, velocities, species, learned_parameters=dict(), P0=None, step=0):
+    def get_force(self, const, mass, coordinates, velocities, species, learned_parameters=dict(), P0=None, step=0, *args, **kwargs):
         """
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch
         """
-        F, P, Etot, Hf = self.conservative_force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0, step=step)[:4]
+        F, P, Etot, Hf = self.conservative_force(const, coordinates, species, learned_parameters=learned_parameters, P0=P0, step=step, *args, **kwargs)[:4]
         L = Hf
         P = P.detach()
         return F, P, L
 
-    def one_step(self, const, mass, coordinates, velocities, species, acc=None, learned_parameters=dict(), P=None, step=0):
+    def one_step(self, const, mass, coordinates, velocities, species, acc=None, learned_parameters=dict(), P=None, step=0, *args, **kwargs):
         dt = self.timestep
         """
         MASS = torch.as_tensor(const.mass)
@@ -253,13 +253,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if const.do_timing:
             t0 = time.time()
         if not torch.is_tensor(acc):
-            force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
+            force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step, *args, **kwargs)
             with torch.no_grad():
                 acc = force/mass*self.acc_scale
         with torch.no_grad():
             velocities.add_(0.5*acc*dt)
             coordinates.add_(velocities*dt)
-        force, P, L = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step)
+        force, P, L = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step, *args, **kwargs)
         with torch.no_grad():
             acc = force/mass*self.acc_scale
             velocities.add_(0.5*acc*dt)
@@ -331,7 +331,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         alpha[~torch.isfinite(alpha)]=0.0
         velocities.mul_(alpha.reshape(-1,1,1))
 
-    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], **kwargs):
+    def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], *args, **kwargs):
 
         MASS = torch.as_tensor(const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
@@ -344,8 +344,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         E0 = None
 
         for i in range(steps):
-            coordinates, velocities, acc, P, L, forces = self.one_step(const, mass, coordinates, velocities, species, \
-                                                            acc=acc, learned_parameters=learned_parameters, P=P, step=i)
+            coordinates, velocities, acc, P, L, forces = \
+                self.one_step(const, mass, coordinates, velocities, species, \
+                acc=acc, learned_parameters=learned_parameters, P=P, step=i, *args, **kwargs)
             with torch.no_grad():
                 if torch.is_tensor(coordinates.grad):
                     coordinates.grad.zero_()
@@ -415,7 +416,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         # self.vel_scale change sqrt(kb T/m) into Angstrom/fs
         self.Fr_scale = 0.09450522179973914
 
-    def get_force(self, const, masses, coordinates, velocities, species, learned_parameters=dict(), P0=None, step=0):
+    def get_force(self, const, masses, coordinates, velocities, species, learned_parameters=dict(), P0=None, step=0, *args, **kwargs):
         """
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch (from conservative force)
