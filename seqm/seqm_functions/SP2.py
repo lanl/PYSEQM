@@ -63,7 +63,7 @@ def SP2(a, nocc, eps=1.0e-4, factor=2.0):
         #"""
         if flag:
             #float32, harder to converge to a smaller eps, for this one set eps=1.0e-2, and break when no more improvement
-            notconverged[notconverged] = ~((errm0[notconverged] < eps) * (errm0[notconverged] >= errm2[notconverged]))
+            notconverged[notconverged.clone()] = ~((errm0[notconverged] < eps) * (errm0[notconverged] >= errm2[notconverged]))
         else:
             #float64, if use above critiria, the error will keep going down and take lots of iteration to reach no more improvement
             #so put eps as a small one like 1.0e-4, to recude the number of iterations
