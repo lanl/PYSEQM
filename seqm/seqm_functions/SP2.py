@@ -67,6 +67,6 @@ def SP2(a, nocc, eps=1.0e-4, factor=2.0):
         else:
             #float64, if use above critiria, the error will keep going down and take lots of iteration to reach no more improvement
             #so put eps as a small one like 1.0e-4, to recude the number of iterations
-            notconverged[notconverged] = ~((errm0[notconverged] < eps) * (errm1[notconverged] < eps))
+            notconverged[notconverged.clone()] = ~((errm0[notconverged] < eps) * (errm1[notconverged] < eps))
 
     return factor*a0
