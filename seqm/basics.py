@@ -267,10 +267,6 @@ class Energy(torch.nn.Module):
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(const, species, coordinates)
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
-            if torch.is_tensor(coordinates.grad):
-                with torch.no_grad():
-                    coordinates.grad.zero_()
-            #torch.save(adict, "par_%d.pkl" % step)
             parameters = self.packpar(Z, learned_params = adict)    
         else:
             parameters = self.packpar(Z, learned_params = learned_parameters)
