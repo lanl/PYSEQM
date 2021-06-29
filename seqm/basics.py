@@ -3,6 +3,7 @@ from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
 from .seqm_functions.parameters import params
 from torch.autograd import grad
+from .seqm_functions.constants import ev
 import os
 import time
 
@@ -314,7 +315,14 @@ class Energy(torch.nn.Module):
                              parameters['Gaussian2_M']),dim=1)
             #
             parnuc = (alpha, K, L, M)
-        EnucAB = pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam=w[...,0,0], method=self.method, parameters=parnuc)
+        if 'g_ss_nuc' in parameters:
+            g = parameters['g_ss_nuc']
+            rho0a = 0.5*ev/g[idxi]
+            rho0b = 0.5*ev/g[idxj]
+            gam = ev/torch.sqrt(rij**2 + (rho0a+rho0b)**2)
+        else:
+            gam = w[...,0,0]
+        EnucAB = pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
         if all_terms:
             Etot, Enuc = total_energy(nmol, pair_molid,EnucAB, Eelec)
