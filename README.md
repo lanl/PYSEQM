@@ -32,6 +32,9 @@ To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch webs
 ## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)
 
+## trained model file
+model.pt
+
 ## Semi-Empirical Methods Implemented:
 1. MNDO
 2. AM1
