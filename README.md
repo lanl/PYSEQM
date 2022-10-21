@@ -32,8 +32,8 @@ To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch webs
 ## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)
 
-## trained model file
-model.pt
+## Trained model from "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics"
+examples/model/model.pt
 
 ## Semi-Empirical Methods Implemented:
 1. MNDO
@@ -48,6 +48,7 @@ model.pt
 
 ## Citation:
 [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
+[Zhou, Guoqing, et al. "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics." *Proceedings of the National Academy of Sciences* 119.27 (2022): e2120333119.](https://www.pnas.org/doi/10.1073/pnas.2120333119)
 
 ## Acknowledgments:
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T-1
