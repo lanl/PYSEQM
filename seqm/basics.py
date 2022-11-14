@@ -67,7 +67,7 @@ class Parser(torch.nn.Module):
         tore=constansts.tore
         n_charge = torch.sum(tore[species],dim=1).reshape(-1).type(torch.int64)
         if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
-            n_charge += kwargs['charges'].reshape(-1).type(torch.int64)
+            n_charge -= kwargs['charges'].reshape(-1).type(torch.int64)
         nocc = n_charge//2
 
         if ((n_charge%2)==1).any():
