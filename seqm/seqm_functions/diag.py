@@ -104,7 +104,8 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
+        # e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
+        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH)] = e0
     else:#need to add large diagonal values to replace 0 padding
@@ -128,12 +129,14 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
             if cond[i]:
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
         try:
-            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            # e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            e0, v = torch.linalg.eigh(x0, UPLO='U')
         except:
             if torch.isnan(x0).any():
                 print(x0)
             #print(x0.detach().data.numpy())
-            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            # e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            e0, v = torch.linalg.eigh(x0, UPLO='U')
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
@@ -174,14 +177,18 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
+        # e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
+        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH)] = e0
     else:#need to add large diagonal values to replace 0 padding
         #Gershgorin circle theorem estimate upper bounds of eigenvalues
 
+        # e0, v0 = list(zip(*list(map(
+        #                 lambda a,b,c: torch.symeig(pack(a,b,c),eigenvectors=True,upper=True),
+        #                 x,nheavyatom, nH))))
         e0, v0 = list(zip(*list(map(
-                        lambda a,b,c: torch.symeig(pack(a,b,c),eigenvectors=True,upper=True),
+                        lambda a,b,c: torch.linalg.eigh(pack(a,b,c), UPLO='U'),
                         x,nheavyatom, nH))))
         if CHECK_DEGENERACY:
             P0 = list(map(
