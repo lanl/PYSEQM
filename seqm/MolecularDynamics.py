@@ -214,7 +214,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             I = torch.sum(mass * torch.norm(coordinates, dim=2, keepdim=True)**2, dim=1, keepdim=True) \
                 * torch.eye(3, dtype=coordinates.dtype, device=coordinates.device).reshape(1,3,3) \
                 - torch.sum( mass.unsqueeze(3) * coordinates.unsqueeze(3) * coordinates.unsqueeze(2), dim=1)
-            omega, _ = torch.solve(L.unsqueeze(2), I)
+            # omega, _ = torch.solve(L.unsqueeze(2), I)
+            omega = torch.linalg.solve(I, L.unsqueeze(2))
             velocities.add_( torch.cross(coordinates, omega.reshape(-1,1,3).repeat(1,coordinates.shape[1],1)) )
             _, T1 = self.kinetic_energy(const, mass, species, velocities)
             alpha = torch.sqrt(T0/T1)
