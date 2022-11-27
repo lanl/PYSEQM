@@ -23,6 +23,21 @@ class Electronic_Structure(torch.nn.Module):
 
         #self.acc_scale = 0.009648532800137615
         #self.output = output
+    
+    @staticmethod
+    def atomic_charges(P, n_orbital=4):
+        """
+        get atomic charge based on single-particle density matrix P
+        n_orbital : number of orbitals for each atom, default is 4
+        """
+        n_molecule = P.shape[0]
+        n_atom = P.shape[1]//n_orbital
+        q = P.diagonal(dim1=1,dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(axis=2)
+        return q
+    
+    @staticmethod
+    def dipole(q, coordinates):
+        return torch.sum(q.unsqueeze(2)*coordinates, axis=1)
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, err_threshold = None, rank = None, T_el = None, dm_prop='SCF', *args, **kwargs):
         """
@@ -33,25 +48,23 @@ class Electronic_Structure(torch.nn.Module):
             molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, self.charge, self.notconverged = \
                         self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
             molecule.dm = P.detach()
-            
-            # self.force, P, self.Etot, self.Hf, self.Eelec, self.Enuc, self.Eiso, self.EnucAB, self.e_gap, self.e_mo, self.charge, self.notconverged = \
-            #             self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
-            # self.P = P.detach()
+            with torch.no_grad():
+                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
+                molecule.d = self.dipole(molecule.q, molecule.coordinates)
+
             
         elif dm_prop=='XL-BOMD':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap =\
                         self.conservative_force_xl(molecule, P=P0, learned_parameters=learned_parameters, *args, **kwargs)
             
-            # self.force, self.Hf, P, self.e_gap, self.e_mo = self.conservative_force_xl(molecule, P=P0, learned_parameters=learned_parameters, *args, **kwargs)
-            # self.P = P.detach()
+
         
         elif dm_prop=='XL-BOMD-LR':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, \
             molecule.Electronic_entropy, molecule.dP2dt2, molecule.Krylov_Error,  molecule.Fermi_occ = \
                         self.conservative_force_xl_lr(molecule, P0, err_threshold, rank, T_el, learned_parameters, *args, **kwargs)
             
-            # self.force, self.Hf, self.El_Ent, P, self.dP2dt2, self.Error, self.e_gap, self.e_mo, self.Fermi_occ = self.conservative_force_xl_lr(molecule, P0, err_threshold, rank, T_el, learned_parameters, *args, **kwargs)
-            # self.P = P.detach()
+
 
 
         #return F, P, L

@@ -129,7 +129,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         #mass for padding atom is 0.0
         mass = molecule.const.mass[molecule.species].unsqueeze(2)
         M = torch.sum(mass,dim=1,keepdim=True)
-        _, T0 = self.kinetic_energy(molecule)
+        _, T0 = self.kinetic_energy(molecule, molecule.velocities)
         with torch.no_grad():
             r_com = torch.sum(mass*molecule.coordinates,dim=1,keepdim=True)/M
             molecule.coordinates.sub_(r_com)
@@ -141,7 +141,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 - torch.sum( mass.unsqueeze(3) * molecule.coordinates.unsqueeze(3) * molecule.coordinates.unsqueeze(2), dim=1)
             omega, _ = torch.solve(L.unsqueeze(2), I)
             molecule.velocities.add_( torch.cross(molecule.coordinates, omega.reshape(-1,1,3).repeat(1,molecule.coordinates.shape[1],1)) )
-            _, T1 = self.kinetic_energy(molecule)
+            _, T1 = self.kinetic_energy(molecule, molecule.velocities)
             alpha = torch.sqrt(T0/T1)
             molecule.velocities.mul_(alpha.reshape(-1,1,1))
             #Lnew = torch.sum(mass * torch.cross(coordinates, velocities), dim=1)
@@ -150,8 +150,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             del r_com, v_com, L, I, omega, T0, T1, alpha #, Lnew, Tnew
 
 
-    def kinetic_energy(self, molecule):
-        Ek = torch.sum(0.5*molecule.mass*molecule.velocities**2,dim=(1,2))*self.kinetic_energy_scale
+    def kinetic_energy(self, molecule, velocities):
+        Ek = torch.sum(0.5*molecule.mass*velocities**2,dim=(1,2))*self.kinetic_energy_scale
         #Ek = torch.sum(0.5*mass*velocities**2)*self.kinetic_energy_scale
         Temp = Ek*1.160451812e4/(1.5*torch.sum(molecule.species>0,dim=1).type(Ek.dtype))
         return Ek, Temp
@@ -231,7 +231,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         alpha[~torch.isfinite(alpha)]=0.0
         velocities.mul_(alpha.reshape(-1,1,1))
 
-    def one_step(self, molecule, learned_parameters=dict(), *args, **kwargs):
+    def one_step(self, molecule, velocities, acc=None, learned_parameters=dict(), P=None, *args, **kwargs):
         dt = self.timestep
         """
         MASS = torch.as_tensor(const.mass)
@@ -241,47 +241,59 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """ 
         if molecule.const.do_timing:
             t0 = time.time()
-        if not torch.is_tensor(molecule.acc):
-            self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
+        if not torch.is_tensor(acc):
+            self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='SCF', *args, **kwargs)
+            force = molecule.force
+            P = molecule.dm
             with torch.no_grad():
-                molecule.acc = molecule.force/molecule.mass*self.acc_scale
+                acc = force/molecule.mass*self.acc_scale
         with torch.no_grad():
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            molecule.coordinates.add_(molecule.velocities*dt)
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
+            velocities.add_(0.5*acc*dt)
+            molecule.coordinates.add_(velocities*dt)
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='SCF', *args, **kwargs)
+        force = molecule.force
+        P = molecule.dm
+        L = molecule.Hf
+        e_gap = molecule.e_gap
 
         with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
+            acc = force/molecule.mass*self.acc_scale
+            velocities.add_(0.5*acc*dt)
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
 
-    def run(self, molecule, steps, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], *args, **kwargs):
+        return molecule.coordinates, velocities, acc, P, L, force, e_gap
 
-        #q0 = molecule.const.tore[molecule.species]
+
+    def run(self, molecule, steps, velocities, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], *args, **kwargs):
+
+        acc = None
+        P = None
+        q0 = molecule.const.tore[molecule.species]
         E0 = None
 
         for i in range(steps):
-            self.one_step(molecule, learned_parameters=learned_parameters, P=molecule.dm, *args, **kwargs)
+            molecule.coordinates, velocities, acc, P, L, forces, e_gap = \
+                self.one_step(molecule, velocities, acc=acc, learned_parameters=learned_parameters, P=P, *args, **kwargs)
 
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
                     molecule.coordinates.grad.zero_()
-                # molecule.q = q0 - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
-                # molecule.d = self.dipole(molecule.q, molecule.coordinates)
+                q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
+                d = self.dipole(q, molecule.coordinates)
 
                 if not reuse_P:
-                    molecule.dm = None
+                    P = None
                 if remove_com[0]:
                     if i%remove_com[1]==0:
-                        self.zero_com(molecule)
+                        self.zero_com(molecule, velocities)
 
-                Ek, T = self.kinetic_energy(molecule)
+                Ek, T = self.kinetic_energy(molecule, velocities)
                 if not torch.is_tensor(E0):
-                    E0 = molecule.Hf+Ek
+                    E0 = L+Ek
                 
                 if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
                     raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
@@ -291,33 +303,32 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     # kwargs["scale_vel"] = [freq, T(target)]
                     flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
                     if flag:
-                        Ek, T = self.kinetic_energy(molecule)
+                        Ek, T = self.kinetic_energy(molecule, velocities)
                 
                 #control energy shift
                 if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
                     #scale velocities to adjust kinetic energy and compenstate the energy shift
-                    Eshift = Ek + molecule.Hf - E0
+                    Eshift = Ek + L - E0
                     self.control_shift(velocities, Ek, Eshift)
-                    Ek, T = self.kinetic_energy(molecule)
+                    Ek, T = self.kinetic_energy(molecule, velocities)
                     del Eshift
                 
                 
-                self.screen_output(i, T, Ek, molecule.Hf, molecule.d)
+                self.screen_output(i, T, Ek, L, d)
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
                     dump_kwargs['Info_log'] = [
-                        ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)]],
-                        
-                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
-
-                                              ]
+                        ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] 
+                                              ],                                              ]
                     
-                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
-            del molecule.force, molecule.q, molecule.d, Ek, T
+                self.dump(i, molecule, velocities, q, T, Ek, L, forces, e_gap, **dump_kwargs)
+            del forces, q, d, Ek, T
             if i%1000==0:
                 torch.cuda.empty_cache()
 
-        return molecule.coordinates, molecule.velocities, molecule.acc
+            
+            
+        return molecule.coordinates, velocities, acc
 
 
 class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
@@ -346,7 +357,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         # self.vel_scale change sqrt(kb T/m) into Angstrom/fs
         self.Fr_scale = 0.09450522179973914
 
-    def one_step(self, molecule, learned_parameters=dict(), *args, **kwargs):
+    def one_step(self, molecule, velocities, acc=None, learned_parameters=dict(), P=None, *args, **kwargs):
         dt = self.timestep
         """
         MASS = torch.as_tensor(const.mass)
@@ -356,37 +367,47 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         """ 
         if molecule.const.do_timing:
             t0 = time.time()
-        if not torch.is_tensor(molecule.acc):
-            self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
+        if not torch.is_tensor(acc):
+            self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='SCF', *args, **kwargs)
             Fc = molecule.force
-            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+            Ff = -molecule.mass * velocities / self.damp / self.acc_scale
             Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(Fc.shape, dtype=Fc.dtype, device=Fc.device)
-            molecule.force = Fc+Ff+Fr
-            molecule.force[molecule.species==0,:] = 0.0
+            force = Fc+Ff+Fr
+            force[molecule.species==0,:] = 0.0
 
+            P = molecule.dm
             with torch.no_grad():
-                molecule.acc = molecule.force/molecule.mass*self.acc_scale
+                acc = force/molecule.mass*self.acc_scale
         with torch.no_grad():
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            molecule.coordinates.add_(molecule.velocities*dt)
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
+            velocities.add_(0.5*acc*dt)
+            molecule.coordinates.add_(velocities*dt)
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='SCF', *args, **kwargs)
         Fc = molecule.force
-        Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+        Ff = -molecule.mass * velocities / self.damp / self.acc_scale
         Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(Fc.shape, dtype=Fc.dtype, device=Fc.device)
-        molecule.force = Fc+Ff+Fr
-        molecule.force[molecule.species==0,:] = 0.0
+        force = Fc+Ff+Fr
+        force[molecule.species==0,:] = 0.0
+
+        P = molecule.dm
+        L = molecule.Hf
+        e_gap = molecule.e_gap
+
 
         with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
+            acc = force/molecule.mass*self.acc_scale
+            velocities.add_(0.5*acc*dt)
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
 
+        return molecule.coordinates, velocities, acc, P, L, force, e_gap
 
-class XL_BOMD_MD(Molecular_Dynamics_Basic):
+
+
+
+class XL_BOMD_md(Molecular_Dynamics_Basic):
     """
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
@@ -428,13 +449,20 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
     def initialize(self, molecule, learned_parameters=dict(), *args, **kwargs):
         #t=0, just use normal way
 
-        self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)        
+        self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+        force = molecule.force
+        D = molecule.dm
+        
+        # force = self.esdriver.get_force()
+        # D = self.esdriver.get_dm()
+        
 
         with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
+            acc = force/molecule.mass*self.acc_scale
+        return acc, D
 
 
-    def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
+    def one_step(self, molecule, step, velocities, acc, D, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
         dt = self.timestep
         if molecule.const.do_timing:
@@ -442,8 +470,8 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
 
         with torch.no_grad():
             # leapfrog velocity Verlet
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            molecule.coordinates.add_(molecule.velocities*dt)                
+            velocities.add_(0.5*acc*dt)
+            molecule.coordinates.add_(velocities*dt)                
 
             #cindx = step%self.m
             #e.g k=5, m=6
@@ -453,28 +481,38 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
             #Pt (2,3,4,5,0,1), step=6n+2
             cindx = step%self.m
             # eq. 22 in https://doi.org/10.1063/1.3148075
-            P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            P = self.coeff_D*D + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
             Pt[(self.m-1-cindx)] = P
     
         self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='XL-BOMD', *args, **kwargs)
         
+        force = molecule.force
+        D = molecule.dm
+        Hf = molecule.Hf
+        e_gap = molecule.e_gap
+        
+        # force = self.esdriver.get_force()
+        # D = self.esdriver.get_dm()
+        # Hf = self.esdriver.get_Hf()
+        # e_gap = self.esdriver.get_e_gap()
+
         with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
+            acc = force/molecule.mass*self.acc_scale
+            velocities.add_(0.5*acc*dt)
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt
+        return molecule.coordinates, velocities, acc, D, P, Pt, Hf, force, e_gap
 
-    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, *args, **kwargs):
+    def run(self, molecule, steps, velocities, learned_parameters=dict(), Pt=None, *args, **kwargs):
 
-        self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+        acc, D = self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
-                Pt = molecule.dm.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
-            P = molecule.dm.clone()
+                Pt = D.unsqueeze(0).expand((self.m,)+D.shape).clone()
+            P = D.clone()
 
         #output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}
         """
@@ -488,17 +526,18 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
 
         for i in range(steps):
             
-            P, Pt = self.one_step(molecule, i, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
+            molecule.coordinates, velocities, acc, D, P, Pt, L, forces, e_gap = self.one_step(molecule, i, velocities, \
+                                                            acc, D, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
             
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
                     molecule.coordinates.grad.zero_()
-                molecule.q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
+                q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
+                d = self.dipole(q, molecule.coordinates)
                 
-                Ek, T = self.kinetic_energy(molecule)
+                Ek, T = self.kinetic_energy(molecule, velocities)
                 if not torch.is_tensor(E0):
-                    E0 = molecule.Hf + Ek
+                    E0 = L+Ek
                 
                 if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
                     raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
@@ -506,37 +545,35 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
                 #scale velocities to control temperature
                 if 'scale_vel' in kwargs:
                     # kwargs["scale_vel"] = [freq, T(target)]
-                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
+                    flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
                     if flag:
-                        Ek, T = self.kinetic_energy(molecule)
+                        Ek, T = self.kinetic_energy(molecule, velocities)
                 
                 #control energy shift
                 if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
                     #scale velocities to adjust kinetic energy and compenstate the energy shift
-                    Eshift = Ek + molecule.Hf - E0
-                    self.control_shift(molecule.velocities, Ek, Eshift)
-                    Ek, T = self.kinetic_energy(molecule)
+                    Eshift = Ek + L - E0
+                    self.control_shift(velocities, Ek, Eshift)
+                    Ek, T = self.kinetic_energy(molecule, velocities)
                 
                 
-                self.screen_output(i, T, Ek, molecule.Hf, molecule.d)
+                self.screen_output(i, T, Ek, L, d)
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
                     dump_kwargs['Info_log'] = [
                         ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                        
-                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
                                               ]
                     
-                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
-                del molecule.q, molecule.d, T, Ek, molecule.force
+                self.dump(i, molecule, velocities, q, T, Ek, L, forces, e_gap, **dump_kwargs)
+                del q, d, T, Ek, forces
             if i%1000==0:
                 torch.cuda.empty_cache()
 
-        return molecule.coordinates, molecule.velocities, molecule.acc
+        return molecule.coordinates, velocities, acc, P, Pt, L
 
 
 
-class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
+class XL_BOMD_md_low_rank(Molecular_Dynamics_Basic):
     """
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
@@ -594,10 +631,15 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
         
 
         self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)
-        with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
+        force = molecule.force
+        D = molecule.dm
 
-    def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
+        with torch.no_grad():
+            acc = force/molecule.mass*self.acc_scale
+        return acc, D
+
+
+    def one_step(self, molecule, step, velocities, acc, D, P, Pt, dP2dt2, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
 
         dt = self.timestep
@@ -606,60 +648,70 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
 
         with torch.no_grad():
             # leapfrog velocity Verlet
-            molecule.velocities.add_(0.5*molecule.acc*dt)
+            velocities.add_(0.5*acc*dt)
             cindx = step%self.m
             # eq. 22 in https://doi.org/10.1063/1.3148075
-            P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            P = self.coeff_D*dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
             Pt[(self.m-1-cindx)] = P
 
-            molecule.coordinates.add_(molecule.velocities*dt)
+            molecule.coordinates.add_(velocities*dt)
 
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, err_threshold = self.err_threshold,
-                      rank = self.rank, T_el = self.T_el, dm_prop='XL-BOMD-LR', *args, **kwargs)
+
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, err_threshold = self.err_threshold, rank = self.rank, T_el = self.T_el, dm_prop='XL-BOMD-LR', *args, **kwargs)
+        force = molecule.force
+        D = molecule.dm
+        Hf = molecule.Hf + molecule.Electronic_entropy
+        dP2dt2 = molecule.dP2dt2
+        Error = molecule.Krylov_Error
+        e_gap = molecule.e_gap
+        
         
         spherical_pot = False ########################################################################################==========
+        
         if spherical_pot:
             with torch.no_grad():
                 spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 5.9, k=1.1)
-                molecule.Hf = molecule.Hf + spherical_pot_E
-                molecule.force = molecule.force + spherical_pot_force
+                Hf = Hf + spherical_pot_E
+                force = force + spherical_pot_force
 
         with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
+            acc = force/molecule.mass*self.acc_scale
+            velocities.add_(0.5*acc*dt)
 
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt
+        return molecule.coordinates, velocities, acc, D, P, Pt, Hf, force, dP2dt2, e_gap, Error
 
-    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, *args, **kwargs):
+    def run(self, molecule, steps, velocities, learned_parameters=dict(), Pt=None, dP2dt2 = None, *args, **kwargs):
 
-        self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+        acc, D = self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
-                Pt = molecule.dm.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
-                molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
-            P = molecule.dm.clone()
+                Pt = D.unsqueeze(0).expand((self.m,)+D.shape).clone()
+                dP2dt2 = torch.zeros(D.shape, dtype=D.dtype, device=D.device)
+            P = D.clone()
+            #print(P) # in block form
 
         q0 = molecule.const.tore[molecule.species]
         E0 = None
 
         for i in range(steps):
 
-            P, Pt = self.one_step(molecule, i, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
-
+            molecule.coordinates, velocities, acc, D, P, Pt, L, forces, dP2dt2, e_gap, Error = self.one_step(molecule, i, velocities, \
+                                                            acc, D, P, Pt, dP2dt2, learned_parameters=learned_parameters, *args, **kwargs)
+                #
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
                     molecule.coordinates.grad.zero_()
-                molecule.q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
+                q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
+                d = self.dipole(q, molecule.coordinates)
                 
-                Ek, T = self.kinetic_energy(molecule)
+                Ek, T = self.kinetic_energy(molecule, velocities)
                 if not torch.is_tensor(E0):
-                    E0 = molecule.Hf + molecule.Electronic_entropy + Ek
+                    E0 = L+Ek
                 
                 if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
                     raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
@@ -667,45 +719,40 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
                 #scale velocities to control temperature
                 if 'scale_vel' in kwargs:
                     # kwargs["scale_vel"] = [freq, T(target)]
-                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
+                    flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
                     if flag:
-                        Ek, T = self.kinetic_energy(molecule)
+                        Ek, T = self.kinetic_energy(molecule, velocities)
                 
                 #control energy shift
                 if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
                     #scale velocities to adjust kinetic energy and compenstate the energy shift
-                    Eshift = Ek + molecule.Hf + molecule.Electronic_entropy - E0
-                    self.control_shift(molecule.velocities, Ek, Eshift)
-                    Ek, T = self.kinetic_energy(molecule)
+                    Eshift = Ek + L - E0
+                    self.control_shift(velocities, Ek, Eshift)
+                    Ek, T = self.kinetic_energy(molecule, velocities)
                 
-                self.screen_output(i, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.d)
+                
+                self.screen_output(i, T, Ek, L, d)
                 
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
                     dump_kwargs['Info_log'] = [
-                        ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                      '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                      zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
+                        ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
+                        
+                        ['dipole(x,y,z): ', molecule.Electronic_entropy],
                         
                         ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
                         
-                        ['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + \
-                                                  '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                  zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
+                        ['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
                         
-                        ['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error],
-                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]]
+                        ['Rank-m Krylov subspace approximation error: ', Error],
                                               ]
-                    #if 'Info_log_extended' in kwargs:
-                        #dump_kwargs['Info_log'].append(['dipole(x,y,z): ', molecule.d])
                     
-                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.force,
-                          molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
-            del molecule.q, molecule.d, T, Ek, molecule.force, dump_kwargs
+                self.dump(i, molecule, velocities, q, T, Ek, L, forces, e_gap, Error, **dump_kwargs)
+            del q, d, T, Ek, forces
             if i%1000==0:
                 torch.cuda.empty_cache()
 
-        return molecule.coordinates, molecule.velocities, molecule.acc
+        return molecule.coordinates, velocities, acc, P, Pt, L
 
 
 """
