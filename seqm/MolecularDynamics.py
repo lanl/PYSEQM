@@ -171,13 +171,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         return torch.sum(q.unsqueeze(2)*coordinates, axis=1)
 
     
-    def screen_output(self, i, T, Ek, L, d):
+    def screen_output(self, i, T, Ek, L):
         if i==0:
-            print("Step,    Temp,    E(kinetic),  E(potential),  E(total),      dipole(x,y,z)")
+            print("Step,    Temp,    E(kinetic),  E(potential),  E(total)")
         if (i+1)%self.output['thermo']==0:
                 print("%6d" % (i+1), end="")
                 for mol in self.output['molid']:
-                    print(" %8.2f   %e %e %e   %e %e %e" % (T[mol],   Ek[mol], L[mol], L[mol]+Ek[mol],   d[mol,0], d[mol,1], d[mol,2]), end="")
+                    print(" %8.2f   %e %e %e || " % (T[mol],   Ek[mol], L[mol], L[mol]+Ek[mol]), end="")
                 print()
     
     def dump(self, i, molecule, velocities, q, T, Ek, L, forces, e_gap, Err=None, **kwargs):
@@ -288,7 +288,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 #scale velocities to control temperature
                 if 'scale_vel' in kwargs:
                     # kwargs["scale_vel"] = [freq, T(target)]
-                    flag = self.scale_velocities(i, velocities, T, kwargs["scale_vel"])
+                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
                     if flag:
                         Ek, T = self.kinetic_energy(molecule)
                 
@@ -296,12 +296,12 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
                     #scale velocities to adjust kinetic energy and compenstate the energy shift
                     Eshift = Ek + molecule.Hf - E0
-                    self.control_shift(velocities, Ek, Eshift)
+                    self.control_shift(molecule.velocities, Ek, Eshift)
                     Ek, T = self.kinetic_energy(molecule)
                     del Eshift
                 
                 
-                self.screen_output(i, T, Ek, molecule.Hf, molecule.d)
+                self.screen_output(i, T, Ek, molecule.Hf)
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
                     dump_kwargs['Info_log'] = [
@@ -517,7 +517,7 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
                     Ek, T = self.kinetic_energy(molecule)
                 
                 
-                self.screen_output(i, T, Ek, molecule.Hf, molecule.d)
+                self.screen_output(i, T, Ek, molecule.Hf)
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
                     dump_kwargs['Info_log'] = [
@@ -677,7 +677,7 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
                     self.control_shift(molecule.velocities, Ek, Eshift)
                     Ek, T = self.kinetic_energy(molecule)
                 
-                self.screen_output(i, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.d)
+                self.screen_output(i, T, Ek, molecule.Hf + molecule.Electronic_entropy)
                 
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
@@ -685,6 +685,7 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
                         ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
                                                       '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
                                                       zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
+                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ],
                         
                         ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
                         
@@ -693,7 +694,6 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
                                                   zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
                         
                         ['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error],
-                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]]
                                               ]
                     #if 'Info_log_extended' in kwargs:
                         #dump_kwargs['Info_log'].append(['dipole(x,y,z): ', molecule.d])
