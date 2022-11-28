@@ -8,7 +8,6 @@ PYSEQM.egg-info/requires.txt
 PYSEQM.egg-info/top_level.txt
 seqm/ElectronicStructure.py
 seqm/MolecularDynamics.py
-seqm/MolecularDynamics_es-Copy1.py
 seqm/Molecule.py
 seqm/XLBOMD.py
 seqm/XLBOMD_LR.py

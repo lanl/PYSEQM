@@ -87,7 +87,7 @@ class EnergyXL(torch.nn.Module):
             seqm_parameters['scf_backward_eps'] = 1.0e-2
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_backward_eps']), requires_grad=False)
 
-    def forward(self, molecule, err_threshold, rank, T_el, P, learned_parameters=dict(), all_terms=False, *args, **kwargs):
+    def forward(self, molecule, err_threshold, max_rank, T_el, P, learned_parameters=dict(), all_terms=False, *args, **kwargs):
         """
         get the energy terms
         D: Density Matrix, F=>D  (SP2)
@@ -156,7 +156,7 @@ class EnergyXL(torch.nn.Module):
             ################
 
             #start_time = time.time()
-            Rank = rank
+            Rank = max_rank
             K0 = 1.0
             dDS = K0*(D - P) # tr2  #W0 = K0*(DS - X) from J. Chem. Theory Comput. 2020, 16, 6, 3628–3640, alg 3
             
@@ -165,10 +165,10 @@ class EnergyXL(torch.nn.Module):
             W = torch.zeros((D.shape[0], D.shape[1], D.shape[2], Rank), dtype=D.dtype, device=D.device)
             dW = dDS # tr2
             k = -1
-            Error = 10
+            Error = torch.tensor([10], dtype=D.dtype, device=D.device)
 
-            #while k < Rank-1 and Error > err_threshold:
-            while k < Rank-1:
+            while k < Rank-1 and torch.max(Error) > err_threshold:
+            #while k < Rank-1:
                 k = k + 1
                 V[:,:,:,k] = dW
 
@@ -190,7 +190,6 @@ class EnergyXL(torch.nn.Module):
                 # $$$ multiply by 2 ???
                 PO1 = Canon_DM_PRT(FO1,Temp,nHeavy,nHydro,QQ,e,mu0,8, kB, Occ_mask)
 
-
                 W[:,:,:,k] = K0*(PO1 - V[:,:,:,k])
                 dW = W[:,:,:,k]
                 Rank_m = k+1
@@ -199,7 +198,6 @@ class EnergyXL(torch.nn.Module):
                 #start_time_1 = time.time()
                 for I in range(0,Rank_m):
                     for J in range(I,Rank_m):
-                        ### if not symmetric, use this: O[:,I,J] = (W[:,:,:,I].transpose(1,2)@W[:,:,:,J]).diagonal(offset=0, dim1=-2, dim2=-1).sum(dim=-1)
                         O[:,I,J] = torch.sum(W[:,:,:,I].transpose(1,2)*W[:,:,:,J], dim=(1,2))
                         O[:,J,I] = O[:,I,J]
 
@@ -210,15 +208,13 @@ class EnergyXL(torch.nn.Module):
                 #start_time_1 = time.time()
                 
                 IdentRes = torch.zeros(D.shape, dtype=D.dtype, device=D.device)
-                # $$$ traces, symmetry
                 for I in range(0,Rank_m):
                     for J in range(0,Rank_m):
-                        ### if not symmetric, use this: IdentRes = IdentRes + MM[:,I,J].view(-1, 1, 1) * (W[:,:,:,J].transpose(1,2)@dDS).diagonal(offset=0, dim1=-2, dim2=-1).sum(dim=-1).view(-1, 1, 1) * W[:,:,:,I]
                         IdentRes = IdentRes + \
                             MM[:,I,J].view(-1, 1, 1) * torch.sum(W[:,:,:,J].transpose(1,2)*dDS, dim=(1,2)).view(-1, 1, 1) * W[:,:,:,I]            
                 Error = torch.linalg.norm(IdentRes - dDS, ord='fro', dim=(1,2))/torch.linalg.norm(dDS, ord='fro', dim=(1,2))
+                #print('Error: ', Error)
                 
-                #print(Error)
                 #print("    --- Error %s seconds ---" % (time.time() - start_time_1))
 
                 #Error = [0.0]
@@ -226,15 +222,12 @@ class EnergyXL(torch.nn.Module):
             #print("--- Rank cycle %s seconds ---" % (time.time() - start_time))
 
             #start_time = time.time()
+            #print(k)
             dP2dt2 = torch.zeros(D.shape, dtype=D.dtype, device=D.device)
 
             # $$$ room for optimization
             for I in range(0,Rank_m):
                 for J in range(0,Rank_m):
-                    ### if not symmetric, use this
-                    ### dP2dt2 = dP2dt2 - \
-                    ###     MM[:,I,J].view(-1, 1, 1) * (W[:,:,:,J].transpose(1,2)@dDS).diagonal(offset=0, dim1=-2, dim2=-1).sum(dim=-1).view(-1, 1, 1) * V[:,:,:,I]
-
                     dP2dt2 = dP2dt2 - \
                         MM[:,I,J].view(-1, 1, 1) * torch.sum(W[:,:,:,J].transpose(1,2)*dDS, dim=(1,2)).view(-1, 1, 1) * V[:,:,:,I]
         
@@ -242,7 +235,6 @@ class EnergyXL(torch.nn.Module):
         #print("--- dP2dt2 %s seconds ---" % (time.time() - start_time))
         ################
         ################
-
 
         #nuclear energy
         alpha = parameters['alpha']
@@ -308,11 +300,11 @@ class ForceXL(torch.nn.Module):
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, molecule, P, err_threshold, rank, T_el, learned_parameters=dict(), *args, **kwargs):
+    def forward(self, molecule, P, err_threshold, max_rank, T_el, learned_parameters=dict(), *args, **kwargs):
 
         molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, EEnt, Enuc, Eiso, EnucAB, D, dP2dt2, Error, e_gap, e, Fe_occ = \
-            self.energy(molecule, err_threshold, rank, T_el, P, learned_parameters, all_terms=True, *args, **kwargs)
+            self.energy(molecule, err_threshold, max_rank, T_el, P, learned_parameters, all_terms=True, *args, **kwargs)
         L = Hf.sum()
         if molecule.const.do_timing:
             t0 = time.time()

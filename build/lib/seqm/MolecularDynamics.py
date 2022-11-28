@@ -540,14 +540,14 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, err_threshold, rank, T_el, k=5, *args, **kwargs):
+    def __init__(self, err_threshold, max_rank, T_el, k=5, *args, **kwargs):
         """
         unit for timestep is femtosecond
         """
 
         self.k = k
         self.err_threshold = err_threshold
-        self.rank = rank
+        self.max_rank = max_rank
         self.T_el = T_el
 
         super().__init__(*args, **kwargs)
@@ -614,7 +614,7 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
             molecule.coordinates.add_(molecule.velocities*dt)
 
         self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, err_threshold = self.err_threshold,
-                      rank = self.rank, T_el = self.T_el, dm_prop='XL-BOMD-LR', *args, **kwargs)
+                      max_rank = self.max_rank, T_el = self.T_el, dm_prop='XL-BOMD-LR', *args, **kwargs)
         
         spherical_pot = False ########################################################################################==========
         if spherical_pot:

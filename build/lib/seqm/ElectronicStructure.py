@@ -39,7 +39,7 @@ class Electronic_Structure(torch.nn.Module):
     def dipole(q, coordinates):
         return torch.sum(q.unsqueeze(2)*coordinates, axis=1)
 
-    def forward(self, molecule, learned_parameters=dict(), P0=None, err_threshold = None, rank = None, T_el = None, dm_prop='SCF', *args, **kwargs):
+    def forward(self, molecule, learned_parameters=dict(), P0=None, err_threshold = None, max_rank = None, T_el = None, dm_prop='SCF', *args, **kwargs):
         """
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch
@@ -62,7 +62,7 @@ class Electronic_Structure(torch.nn.Module):
         elif dm_prop=='XL-BOMD-LR':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, \
             molecule.Electronic_entropy, molecule.dP2dt2, molecule.Krylov_Error,  molecule.Fermi_occ = \
-                        self.conservative_force_xl_lr(molecule, P0, err_threshold, rank, T_el, learned_parameters, *args, **kwargs)
+                        self.conservative_force_xl_lr(molecule, P0, err_threshold, max_rank, T_el, learned_parameters, *args, **kwargs)
             
 
 
