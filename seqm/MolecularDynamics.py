@@ -34,24 +34,23 @@ class Geometry_Optimization_SD(torch.nn.Module):
         self.max_evl = max_evl
         self.force = Force(seqm_parameters)
 
-    def onestep(self, molecule, learned_parameters=dict(), P0=None, *args, **kwargs):
+    def onestep(self, molecule, learned_parameters=dict(), *args, **kwargs):
 
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P0, dm_prop='SCF', *args, **kwargs)
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
         force = molecule.force
-        P = molecule.dm
-        L = molecule.Hf
         with torch.no_grad():
             molecule.coordinates.add_(self.alpha*force)
-        return molecule.coordinates, force, P, L
+        return force, molecule.Hf
 
-    def run(self, molecule, learned_parameters=dict(), P=None, log=True, *args, **kwargs):
+    def run(self, molecule, learned_parameters=dict(), log=True, *args, **kwargs):
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
         nmol = molecule.coordinates.shape[0]
         molecule.coordinates.requires_grad_(True)
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
+        print("Step,  Max_Force,      Etot(eV),     dE(eV)")
         for i in range(self.max_evl):
-            molecule.coordinates, force, P, Lnew = self.onestep(molecule, learned_parameters=learned_parameters, P0=P, *args, **kwargs)
+            force, Lnew = self.onestep(molecule, learned_parameters=learned_parameters, *args, **kwargs)
             if torch.is_tensor(molecule.coordinates.grad):
                 with torch.no_grad():
                     molecule.coordinates.grad.zero_()
@@ -59,7 +58,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
             energy_err = (Lnew-Lold).sum()/nmol
             if log:
 
-                print("%d " % (i+1), end="")
+                print("%d      " % (i+1), end="")
                 print("%e " % force_err.item(), end="")
 
                 """
@@ -68,7 +67,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
                     print("%e " % dis[k], end="")
                 #"""
                 for k in range(molecule.coordinates.shape[0]):
-                    print("%e %e %e " % (Lnew[k], Lold[k], Lnew[k]-Lold[k]), end="")
+                    print("||%e %e " % (Lnew[k], Lnew[k]-Lold[k]), end="")
                 print("")
 
             if (force_err>self.force_tol):
@@ -82,7 +81,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
             if log:
                 print("converged with %d step, Max Force = %e (eV/Ang), dE = %e (eV)" % (i+1, force_err.item(), energy_err.item()))
 
-        return molecule.coordinates, force_err, energy_err
+        return force_err, energy_err
 
 
 class Molecular_Dynamics_Basic(torch.nn.Module):

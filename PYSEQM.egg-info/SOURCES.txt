@@ -35,6 +35,7 @@ seqm/seqm_functions/hcore.py
 seqm/seqm_functions/pack.py
 seqm/seqm_functions/parameters.py
 seqm/seqm_functions/read_xyz.py
+seqm/seqm_functions/save_xyz.py
 seqm/seqm_functions/scf_loop.py
 seqm/seqm_functions/spherical_pot_force.py
 seqm/seqm_functions/two_elec_two_center_int.py
