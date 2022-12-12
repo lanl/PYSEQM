@@ -6,7 +6,8 @@ from .basics import Parser
 from .seqm_functions.G_XL_LR import G
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
 import numpy as np
-
+import sys
+np.set_printoptions(threshold=sys.maxsize)
 
 
 #not finished
@@ -113,6 +114,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         molecule.velocities[molecule.species==0,:] = 0.0
         if vel_com:
             #remove center of mass velocity
+            print('Initialize velocities: zero_com')
             self.zero_com(molecule)
         return molecule.velocities
 
@@ -269,9 +271,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
                     molecule.coordinates.grad.zero_()
-                molecule.q = q0 - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
-
+                
                 if not reuse_P:
                     molecule.dm = None
                 if remove_com[0]:
@@ -312,7 +312,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                                               ]
                     
                 self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
-            del molecule.force, molecule.q, molecule.d, Ek, T
+            del Ek, T
             if i%1000==0:
                 torch.cuda.empty_cache()
 
@@ -390,11 +390,13 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, k=5, *args, **kwargs):
+    def __init__(self, k=5, damp=False, *args, **kwargs):
         """
         unit for timestep is femtosecond
         """
         self.k = k
+        self.damp = damp
+        self.Fr_scale = 0.09450522179973914
         super().__init__(*args, **kwargs)
         self.esdriver = esdriver(self.seqm_parameters)
         #check Niklasson et al JCP 130, 214109 (2009)
@@ -426,8 +428,15 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
 
     def initialize(self, molecule, learned_parameters=dict(), *args, **kwargs):
         #t=0, just use normal way
-
-        self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)        
+        
+        
+        self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+        if self.damp:
+            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
+                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
+            molecule.force += Ff+Fr
+            molecule.force[molecule.species==0,:] = 0.0
 
         with torch.no_grad():
             molecule.acc = molecule.force/molecule.mass*self.acc_scale
@@ -456,6 +465,13 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
             Pt[(self.m-1-cindx)] = P
     
         self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='XL-BOMD', *args, **kwargs)
+        if self.damp:
+            #print('DAMPING')
+            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
+                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
+            molecule.force += Ff+Fr
+            molecule.force[molecule.species==0,:] = 0.0
         
         with torch.no_grad():
             molecule.acc = molecule.force/molecule.mass*self.acc_scale
@@ -482,7 +498,6 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
             print("T(%d)  Etot(%d)  " % (mol, mol), end="")
         print()
         """
-        q0 = molecule.const.tore[molecule.species]
         E0 = None
 
         for i in range(steps):
@@ -492,9 +507,7 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
                     molecule.coordinates.grad.zero_()
-                molecule.q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
-                
+
                 Ek, T = self.kinetic_energy(molecule)
                 if not torch.is_tensor(E0):
                     E0 = molecule.Hf + Ek
@@ -527,7 +540,7 @@ class XL_BOMD_MD(Molecular_Dynamics_Basic):
                                               ]
                     
                 self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
-                del molecule.q, molecule.d, T, Ek, molecule.force
+                del T, Ek
             if i%1000==0:
                 torch.cuda.empty_cache()
 
@@ -540,7 +553,7 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, err_threshold, max_rank, T_el, k=5, *args, **kwargs):
+    def __init__(self, err_threshold, max_rank, T_el, k=5, damp=False, *args, **kwargs):
         """
         unit for timestep is femtosecond
         """
@@ -549,6 +562,8 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
         self.err_threshold = err_threshold
         self.max_rank = max_rank
         self.T_el = T_el
+        self.damp = damp
+        self.Fr_scale = 0.09450522179973914
 
         super().__init__(*args, **kwargs)
         self.esdriver = esdriver(self.seqm_parameters)
@@ -591,10 +606,21 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
         # self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij \
         # = self.parser(molecule.const, molecule.species, molecule.coordinates, return_mask_l=True, *args, **kwargs)
         
+        if not torch.is_tensor(molecule.dm):
+            print('Doing initialization')
+            self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+            if self.damp:
+                Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+                Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
+                                                                                                                 dtype=molecule.force.dtype, device=molecule.force.device)
+                molecule.force += Ff+Fr
+                molecule.force[molecule.species==0,:] = 0.0
+        else:
+            print('Already initialized')
 
-        self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             molecule.acc = molecule.force/molecule.mass*self.acc_scale
+            #print('acc: ',molecule.acc)
 
     def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
@@ -606,6 +632,7 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
         with torch.no_grad():
             # leapfrog velocity Verlet
             molecule.velocities.add_(0.5*molecule.acc*dt)
+            
             cindx = step%self.m
             # eq. 22 in https://doi.org/10.1063/1.3148075
             P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
@@ -615,18 +642,24 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
 
         self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, err_threshold = self.err_threshold,
                       max_rank = self.max_rank, T_el = self.T_el, dm_prop='XL-BOMD-LR', *args, **kwargs)
+        if self.damp:
+            #print('DAMPING')
+            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
+                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
+            molecule.force += Ff+Fr
+            molecule.force[molecule.species==0,:] = 0.0
         
         spherical_pot = False ########################################################################################==========
         if spherical_pot:
             with torch.no_grad():
                 spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 5.9, k=1.1)
-                molecule.Hf = molecule.Hf + spherical_pot_E
+                molecule.Hf += spherical_pot_E
                 molecule.force = molecule.force + spherical_pot_force
 
         with torch.no_grad():
             molecule.acc = molecule.force/molecule.mass*self.acc_scale
             molecule.velocities.add_(0.5*molecule.acc*dt)
-
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -634,8 +667,8 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
             molecule.const.timing["MD"].append(t1-t0)
         return P, Pt
 
-    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, *args, **kwargs):
-
+    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, remove_com=[False,1000], *args, **kwargs):
+        
         self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
@@ -643,7 +676,6 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
                 molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
             P = molecule.dm.clone()
 
-        q0 = molecule.const.tore[molecule.species]
         E0 = None
 
         for i in range(steps):
@@ -653,8 +685,11 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
                     molecule.coordinates.grad.zero_()
-                molecule.q = q0 - self.atomic_charges(P) # unit +e, i.e. electron: -1.0
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
+                
+                if remove_com[0]:
+                    if i%remove_com[1]==0:
+                        #print(11111)
+                        self.zero_com(molecule)
                 
                 Ek, T = self.kinetic_energy(molecule)
                 if not torch.is_tensor(E0):
@@ -700,7 +735,7 @@ class XL_BOMD_LR_MD(Molecular_Dynamics_Basic):
                     
                 self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.force,
                           molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
-            del molecule.q, molecule.d, T, Ek, molecule.force, dump_kwargs
+            del T, Ek, dump_kwargs
             if i%1000==0:
                 torch.cuda.empty_cache()
 

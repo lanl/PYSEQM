@@ -4,7 +4,7 @@ import time
 from .basics import Parser
 
 class Molecule(torch.nn.Module):
-    def __init__(self, const, seqm_parameters, coordinates, species, *args, **kwargs):
+    def __init__(self, const, seqm_parameters, coordinates, species, charges=0, *args, **kwargs):
         """
         unit for timestep is femtosecond
         output: [molecule id list, frequency N, prefix]
@@ -17,6 +17,7 @@ class Molecule(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
         self.coordinates = coordinates
         self.species = species
+        self.tot_charge = charges
         
         self.parser = Parser(self.seqm_parameters)
         
@@ -24,7 +25,7 @@ class Molecule(torch.nn.Module):
         self.nHeavy, self.nHydro, self.nocc, \
         self.Z, self.maskd, self.atom_molid, \
         self.mask, self.mask_l, self.pair_molid, \
-        self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self.const, self.species, self.coordinates, return_mask_l=True, *args, **kwargs)
+        self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, return_mask_l=True, *args, **kwargs)
 
         MASS = torch.as_tensor(self.const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
@@ -44,8 +45,8 @@ class Molecule(torch.nn.Module):
         self.Eelec = None
         self.Enuc = None
         self.Eiso = None
-        self.e_mo = None
-        self.e_gap = None
+        self.e_mo = None #
+        self.e_gap = None #
         
         self.charge = None
         self.dipole = None

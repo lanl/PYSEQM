@@ -48,21 +48,19 @@ class Electronic_Structure(torch.nn.Module):
             molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, self.charge, self.notconverged = \
                         self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
             molecule.dm = P.detach()
-            with torch.no_grad():
-                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
-
             
         elif dm_prop=='XL-BOMD':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap =\
                         self.conservative_force_xl(molecule, P=P0, learned_parameters=learned_parameters, *args, **kwargs)
-            
 
-        
         elif dm_prop=='XL-BOMD-LR':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, \
             molecule.Electronic_entropy, molecule.dP2dt2, molecule.Krylov_Error,  molecule.Fermi_occ = \
                         self.conservative_force_xl_lr(molecule, P0, err_threshold, max_rank, T_el, learned_parameters, *args, **kwargs)
+            
+        with torch.no_grad():
+            molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
+            molecule.d = self.dipole(molecule.q, molecule.coordinates)
             
 
 

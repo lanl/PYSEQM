@@ -96,7 +96,7 @@ class EnergyXL(torch.nn.Module):
         nmol, molsize, \
         nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \
-        mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule.const, molecule.species, molecule.coordinates, return_mask_l=True, *args, **kwargs)
+        mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule, return_mask_l=True, *args, **kwargs)
         
 
         if callable(learned_parameters):

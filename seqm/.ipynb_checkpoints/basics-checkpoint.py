@@ -481,4 +481,4 @@ class Force(torch.nn.Module):
             force = -molecule.coordinates.grad.detach()
             molecule.coordinates.grad.zero_()
 
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
+        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e.detach(), e_gap.detach(), charge, notconverged

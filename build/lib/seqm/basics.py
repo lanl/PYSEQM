@@ -40,7 +40,7 @@ class Parser(torch.nn.Module):
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
 
-    def forward(self, constansts, species, coordinates, return_mask_l=False, *args, **kwargs):
+    def forward(self, molecule, return_mask_l=False, *args, **kwargs):
         """
         constants : instance of Class Constants
         species : atom types for atom in each molecules,
@@ -48,11 +48,11 @@ class Parser(torch.nn.Module):
         coordinates : atom position, shape (nmol, molsize, 3)
         charges: total charge for each molecule, shape (nmol,), 0 if None
         """
-        device = coordinates.device
-        dtype = coordinates.dtype
+        device = molecule.coordinates.device
+        dtype = molecule.coordinates.dtype
 
-        nmol, molsize = species.shape
-        nonblank = species>0
+        nmol, molsize = molecule.species.shape
+        nonblank = molecule.species>0
         n_real_atoms = torch.sum(nonblank)
 
         atom_index = torch.arange(nmol*molsize, device=device,dtype=torch.int64)
@@ -61,14 +61,16 @@ class Parser(torch.nn.Module):
         inv_real_atoms = torch.zeros((nmol*molsize,), device=device,dtype=torch.int64)
         inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device,dtype=torch.int64)
 
-        Z = species.reshape(-1)[real_atoms]
-        nHeavy = torch.sum(species>1,dim=1)
-        nHydro = torch.sum(species==1,dim=1)
-        tore=constansts.tore
-        n_charge = torch.sum(tore[species],dim=1).reshape(-1).type(torch.int64)
-        if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
-            n_charge += kwargs['charges'].reshape(-1).type(torch.int64)
+        Z = molecule.species.reshape(-1)[real_atoms]
+        nHeavy = torch.sum(molecule.species>1,dim=1)
+        nHydro = torch.sum(molecule.species==1,dim=1)
+        tore=molecule.const.tore
+        n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64)
+        if torch.is_tensor(molecule.tot_charge):
+            n_charge += molecule.tot_charge.reshape(-1).type(torch.int64)
         nocc = n_charge//2
+        
+        #print(nocc)
 
         if ((n_charge%2)==1).any():
             raise ValueError("Only closed shell system (with even number of electrons) are supported")
@@ -88,7 +90,7 @@ class Parser(torch.nn.Module):
                                 .expand(nmol,molsize,molsize) \
                                 .reshape(-1)
         #
-        paircoord_raw = (coordinates.unsqueeze(1)-coordinates.unsqueeze(2)).reshape(-1,3)
+        paircoord_raw = (molecule.coordinates.unsqueeze(1)-molecule.coordinates.unsqueeze(2)).reshape(-1,3)
         pairdist_raw = torch.norm(paircoord_raw,dim=1)
         close_pairs = pairdist_raw < self.outercutoff
 
@@ -96,7 +98,7 @@ class Parser(torch.nn.Module):
 
         paircoord = paircoord_raw[pairs]
         pairdist = pairdist_raw[pairs]
-        rij = pairdist*constansts.length_conversion_factor
+        rij = pairdist*molecule.const.length_conversion_factor
 
         idxi = inv_real_atoms[pair_first[pairs]]
         idxj = inv_real_atoms[pair_second[pairs]]
@@ -365,7 +367,7 @@ class Energy(torch.nn.Module):
         nmol, molsize, \
         nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \
-        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule.const, molecule.species, molecule.coordinates, *args, **kwargs)
+        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule, *args, **kwargs)
                 
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
@@ -481,4 +483,4 @@ class Force(torch.nn.Module):
             force = -molecule.coordinates.grad.detach()
             molecule.coordinates.grad.zero_()
 
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
+        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e.detach(), e_gap.detach(), charge, notconverged
