@@ -56,7 +56,7 @@ setup(
     # your project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    install_requires=['numpy', 'torch>=1.2'],
+    install_requires=['numpy', 'torch>=1.2,<=1.12.*'],
     include_package_data=True,
     package_data={'seqm': ['params/*.csv']},
 
