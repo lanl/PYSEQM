@@ -571,7 +571,7 @@ class SCF(torch.autograd.Function):
             if ctx.saved_tensors[i].requires_grad:
                 gv.append(ctx.saved_tensors[i])
                 gvind.append(i)
-                grads[i] = torch.zeros_like(ctx.saved_tensors[i])
+                # grads[i] = torch.zeros_like(ctx.saved_tensors[i])
             else:
                 grads[i] = None
         with torch.enable_grad():
@@ -615,10 +615,11 @@ class SCF(torch.autograd.Function):
         t=1
         ln = len(gradients)
         for i in gvind:
-            for l in range(1, ln):
-                grads[i].add_(gradients[l][t])
+            grads[i] =  torch.sum(torch.stack([gradients[l][t] for l in range(1, ln)]), dim=0)
+            # for l in range(1, ln):
+            #     grads[i].add_(gradients[l][t])
             t+=1
-
+        notconverged2 = notconverged.detach().clone()
         with torch.no_grad():
             #one way is to check grad0.abs().max if they are smaller than backward_eps
             #another way is to compare grad0.abs().max with previous grad0.abs().max, if
@@ -630,10 +631,10 @@ class SCF(torch.autograd.Function):
                 print("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(),nmol))
                 if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
                     raise ValueError("SCF backward doesn't converged for some molecules")
-            notconverged.add_(notconverged1)
-            if notconverged.any():
-                print("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(),nmol))
-                cond = notconverged.detach()
+            notconverged2 = notconverged2 + notconverged1
+            if notconverged2.any():
+                print("SCF for/back-ward : %d/%d not converged" % (notconverged2.sum().item(),nmol))
+                cond = notconverged2.detach()
                 #M, w, gss, gpp, gsp, gp2, hsp
                 #M shape(nmol*molsizes*molsize, 4, 4)
                 if torch.is_tensor(grads[1]):
