@@ -1,5 +1,5 @@
 # [PYSEQM](https://github.com/lanl/PYSEQM)
-
+awdwadwad
 ## Semi-Empirical Methods Implemented:
 1. MNDO
 2. AM1
