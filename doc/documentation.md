@@ -97,22 +97,13 @@ print('\n Dipole:\n', molecules.d)
 print('\n Forces (eV/A):\n', molecules.force)
 ```
 
-## Testing Example: /tests/test*.py
-1. ./test1.py : example to get Fock matrix, energy etc, and backward
-2. ./test2.py : example to get force
-3. ./test3.py : example for geometry optimization
-4. ./test4.py : example for molecular dynamcies (NVE, NVT)
-5. ./test5.py : example for how to add trained parameters for the calculation
-6. ./test6/test6.py : example to verify the force computed from the code
-7. ./test7/test7.py : example to verify the gradient on parameters
-8. ./test8.py : XL-BOMD
-9. ./test9.py : NVE, compared with test8.py
-10. ./test10  : Nanostar 884 atoms, XL-BOMD
-11. ./test11.py : test scf_backward recursive formula
-12. ./test12.py : second order gradient
-13. ./test13 : check gradient of orbital energy on parameters
-14. ./test14 : check gradient of orbital energy on coordinates
-15. ./test15 : check the second order gradients, test with gradient of force on coordinates
+## Testing Examples: /tests/test*.py
+1. ./test1.py : single point calculation
+2. ./test2.py : geometry optimization
+3. ./test3.py : BOMD (NVE, NVT, Langevin)
+4. ./test4.py : XL-BOMD
+5. ./test4.py : KSA-XL-BOMD
+
 
 ## Structure:
 
