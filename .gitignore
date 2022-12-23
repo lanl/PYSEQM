@@ -1,1 +1,5 @@
+build/
+dist/
+PYSEQM.egg-info/
 Tests/
+Tests_A100/
