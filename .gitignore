@@ -1,6 +1,8 @@
 build/
 dist/
 PYSEQM.egg-info/
-Tests/
+#Tests/
 Tests_A100/
 .ipynb_checkpoints/
+seqm/seqm_functions/__pycache__/
+PYSEQM.egg-info/
