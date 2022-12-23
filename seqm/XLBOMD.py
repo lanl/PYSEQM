@@ -132,7 +132,8 @@ class EnergyXL(torch.nn.Module):
         with torch.no_grad():
             if sp2[0]:
                 D = unpack(SP2(pack(F, nHeavy, nHydro), nocc, sp2[1]), nHeavy, nHydro, F.shape[-1])
-                e_gap = None
+                e_gap = torch.zeros(molecule.species.shape[0],1)
+                e = torch.zeros(molecule.species.shape[0], molecule.nocc)
             else:
                 e, D = sym_eig_trunc(F,nHeavy, nHydro, nocc)[0:2]
                 e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
