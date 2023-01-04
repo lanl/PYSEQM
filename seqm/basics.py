@@ -350,15 +350,12 @@ class Energy(torch.nn.Module):
         super().__init__()
         self.seqm_parameters =seqm_parameters
         self.method = seqm_parameters['method']
-
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
         self.hamiltonian = Hamiltonian(seqm_parameters)
         self.Hf_flag = True
         if "Hf_flag" in seqm_parameters:
-            self.Hf_flag = seqm_parameters["Hf_flag"]
-        # Hf_flag: true return Hf, false return Etot-Eiso
-
+            self.Hf_flag = seqm_parameters["Hf_flag"] # Hf_flag: true return Hf, false return Etot-Eiso
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """

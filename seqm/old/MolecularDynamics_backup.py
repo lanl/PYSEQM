@@ -388,7 +388,16 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
             
             
             
-class XL_BOMD(Molecular_Dynamics_Basic):
+            
+            
+            
+            
+            
+            
+            
+            
+            
+class XL_BOMD_MD(Molecular_Dynamics_Basic):
     """
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
@@ -492,14 +501,137 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             molecule.const.timing["MD"].append(t1-t0)
         return P, Pt
 
+    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, remove_com=[False,1000],  *args, **kwargs):
+
+        self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+        with torch.no_grad():
+            if not torch.is_tensor(Pt):
+                Pt = molecule.dm.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
+            P = molecule.dm.clone()
+
+        #output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}
+        """
+        print("#step(dt=%.2f) " % self.timestep, end='')
+        for mol in self.output['molid']:
+            print("T(%d)  Etot(%d)  " % (mol, mol), end="")
+        print()
+        """
+        E0 = None
+
+        for i in range(steps):
+            
+            P, Pt = self.one_step(molecule, i, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
+            
+            with torch.no_grad():
+                if torch.is_tensor(molecule.coordinates.grad):
+                    molecule.coordinates.grad.zero_()
+
+                if remove_com[0]:
+                    if i%remove_com[1]==0:
+                        self.zero_com(molecule)
+
+                Ek, T = self.kinetic_energy(molecule)
+                if not torch.is_tensor(E0):
+                    E0 = molecule.Hf + Ek
+                
+                if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                    raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
+                
+                #scale velocities to control temperature
+                if 'scale_vel' in kwargs:
+                    # kwargs["scale_vel"] = [freq, T(target)]
+                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
+                    if flag:
+                        Ek, T = self.kinetic_energy(molecule)
+                
+                #control energy shift
+                if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                    #scale velocities to adjust kinetic energy and compenstate the energy shift
+                    Eshift = Ek + molecule.Hf - E0
+                    self.control_shift(molecule.velocities, Ek, Eshift)
+                    Ek, T = self.kinetic_energy(molecule)
+                
+                
+                self.screen_output(i, T, Ek, molecule.Hf)
+                dump_kwargs = {}
+                if 'Info_log' in kwargs and kwargs['Info_log']:
+                    dump_kwargs['Info_log'] = [
+                        ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
+                        
+                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
+                                              ]
+                    
+                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
+                del T, Ek
+            if i%1000==0:
+                torch.cuda.empty_cache()
+
+        return molecule.coordinates, molecule.velocities, molecule.acc
+
+
+
+class KSA_XL_BOMD(XL_BOMD_MD):
+    """
+    perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
+    separate get force, run one step, and run n steps is to make it easier to implement thermostats
+    """
+    def __init__(self, *args, **kwargs):
+        """
+        unit for timestep is femtosecond
+        """
+        super().__init__(*args, **kwargs)
+
+
+    def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
+        #cindx: show in Pt, which is the latest P 
+        dt = self.timestep
+        if molecule.const.do_timing:
+            t0 = time.time()
+
+        with torch.no_grad():
+            # leapfrog velocity Verlet
+            molecule.velocities.add_(0.5*molecule.acc*dt)
+            
+            cindx = step%self.m
+            # eq. 22 in https://doi.org/10.1063/1.3148075
+            P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            Pt[(self.m-1-cindx)] = P
+
+            molecule.coordinates.add_(molecule.velocities*dt)
+
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop='XL-BOMD-LR', *args, **kwargs)
+        if self.damp:
+            #print('DAMPING')
+            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
+                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
+            molecule.force += Ff+Fr
+            molecule.force[molecule.species==0,:] = 0.0
+        
+        spherical_pot = False ########################################################################################==========
+        if spherical_pot:
+            with torch.no_grad():
+                spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 5.9, k=1.1)
+                molecule.Hf += spherical_pot_E
+                molecule.force = molecule.force + spherical_pot_force
+
+        with torch.no_grad():
+            molecule.acc = molecule.force/molecule.mass*self.acc_scale
+            molecule.velocities.add_(0.5*molecule.acc*dt)
+        if molecule.const.do_timing:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            t1 = time.time()
+            molecule.const.timing["MD"].append(t1-t0)
+        return P, Pt
+
     def run(self, molecule, steps, learned_parameters=dict(), Pt=None, remove_com=[False,1000], *args, **kwargs):
         
         self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
                 Pt = molecule.dm.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
-                if 'max_rank' in self.xl_bomd_params:
-                    molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
+                molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
             P = molecule.dm.clone()
 
         E0 = None
@@ -536,30 +668,28 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                     Eshift = Ek + molecule.Hf + molecule.Electronic_entropy - E0
                     self.control_shift(molecule.velocities, Ek, Eshift)
                     Ek, T = self.kinetic_energy(molecule)
+                
                 self.screen_output(i, T, Ek, molecule.Hf + molecule.Electronic_entropy)
+                
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
-                    if 'max_rank' in self.xl_bomd_params:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                          '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                          zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ],
-
-                            ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
-
-                            ['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + \
+                    dump_kwargs['Info_log'] = [
+                        ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
                                                       '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                      zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
-
-                            ['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error], ]
-                    else:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                          '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                          zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ], ]
-
+                                                      zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
+                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ],
+                        
+                        ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
+                        
+                        ['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + \
+                                                  '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
+                                                  zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
+                        
+                        ['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error],
+                                              ]
+                    #if 'Info_log_extended' in kwargs:
+                        #dump_kwargs['Info_log'].append(['dipole(x,y,z): ', molecule.d])
+                    
                 self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.force,
                           molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
             del T, Ek, dump_kwargs
@@ -567,63 +697,6 @@ class XL_BOMD(Molecular_Dynamics_Basic):
                 torch.cuda.empty_cache()
 
         return molecule.coordinates, molecule.velocities, molecule.acc
-
-
-
-class KSA_XL_BOMD(XL_BOMD):
-    """
-    perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
-    separate get force, run one step, and run n steps is to make it easier to implement thermostats
-    """
-    def __init__(self, *args, **kwargs):
-        """
-        unit for timestep is femtosecond
-        """
-        super().__init__(*args, **kwargs)
-
-
-    def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
-        #cindx: show in Pt, which is the latest P 
-        dt = self.timestep
-        if molecule.const.do_timing:
-            t0 = time.time()
-
-        with torch.no_grad():
-            # leapfrog velocity Verlet
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            
-            cindx = step%self.m
-            # eq. 22 in https://doi.org/10.1063/1.3148075
-            P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            Pt[(self.m-1-cindx)] = P
-
-            molecule.coordinates.add_(molecule.velocities*dt)
-
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop='XL-BOMD', *args, **kwargs)
-        if self.damp:
-            #print('DAMPING')
-            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
-            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
-                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
-            molecule.force += Ff+Fr
-            molecule.force[molecule.species==0,:] = 0.0
-        
-        spherical_pot = False ########################################################################################==========
-        if spherical_pot:
-            with torch.no_grad():
-                spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 5.9, k=1.1)
-                molecule.Hf += spherical_pot_E
-                molecule.force = molecule.force + spherical_pot_force
-
-        with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-        if molecule.const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt
 
 
 """

@@ -25,7 +25,7 @@ here Tr(D) = 2*Nocc
 """
 
 import torch
-from .seqm_functions.energy import total_energy, pair_nuclear_energy, elec_energy_isolated_atom, heat_formation
+from .seqm_functions.energy import total_energy, pair_nuclear_energy, elec_energy_isolated_atom, heat_formation, elec_energy_xl
 from .seqm_functions.SP2 import SP2
 from .basics import Parser, Parser_For_Ovr, Pack_Parameters
 from .seqm_functions.fock import fock
@@ -33,29 +33,12 @@ from .seqm_functions.G_XL_LR import G
 from .seqm_functions.fermi_q import Fermi_Q
 from .seqm_functions.canon_dm_prt import Canon_DM_PRT
 from .seqm_functions.hcore import hcore
-#from .seqm_functions.diat_overlap_full import overlap_full
 from .seqm_functions.diag import sym_eig_trunc
 from .seqm_functions.pack import *
 from .basics import Force
-
-#from .MolecularDynamics_es import Molecular_Dynamics_Basic
 from torch.autograd import grad
 import time
 
-def elec_energy_xl(D,P,F,Hcore):
-    """
-    XL_BOMD
-    electrionic energy is defined as:
-    E(D,P) = (2*tr(Hcore*D) + tr((2D-P)*G(P)))/2.0
-           = tr(D*F)-0.5*Tr((F-Hcore)*P)
-    """
-    #Hcore : only have upper triangle as constructed from hcore.py
-    h = Hcore.triu()+Hcore.triu(1).transpose(1,2)
-
-
-    Eelec = torch.sum(D*F-0.5*(F-h)*P,dim=(1,2))
-
-    return Eelec
 
 class EnergyXL(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -65,29 +48,14 @@ class EnergyXL(torch.nn.Module):
         super().__init__()
         self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
-
         self.parser = Parser(seqm_parameters)
-        #self.parser_di = Parser_For_Ovr(seqm_parameters)
-
         self.packpar = Pack_Parameters(seqm_parameters)
         self.Hf_flag = True
         if "Hf_flag" in seqm_parameters:
             self.Hf_flag = seqm_parameters["Hf_flag"] # True: Heat of formation, False: Etot-Eiso
 
-        
-        if 'eig' in seqm_parameters:
-            self.eig = seqm_parameters['eig']
-        else:
-            self.eig = False
-        if 'scf_backward' in seqm_parameters:
-            self.scf_backward = seqm_parameters['scf_backward']
-        else:
-            self.scf_backward = 0
-        if 'scf_backward_eps' not in seqm_parameters:
-            seqm_parameters['scf_backward_eps'] = 1.0e-2
-        self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_backward_eps']), requires_grad=False)
 
-    def forward(self, molecule, err_threshold, max_rank, T_el, P, learned_parameters=dict(), all_terms=False, *args, **kwargs):
+    def forward(self, molecule, P, learned_parameters=dict(), xl_bomd_params=dict(), all_terms=False, *args, **kwargs):
         """
         get the energy terms
         D: Density Matrix, F=>D  (SP2)
@@ -98,7 +66,6 @@ class EnergyXL(torch.nn.Module):
         Z, maskd, atom_molid, \
         mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule, return_mask_l=True, *args, **kwargs)
         
-
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
             parameters = self.packpar(Z, learned_params = adict)    
@@ -124,7 +91,6 @@ class EnergyXL(torch.nn.Module):
                      beta=beta,
                      Kbeta=Kbeta)
 
-
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -142,8 +108,15 @@ class EnergyXL(torch.nn.Module):
                  gp2=parameters['g_p2'],
                  hsp=parameters['h_sp'])
 
-        ### start_time = time.time()
-        Temp = T_el
+        
+        
+        
+        if 'scf_backward' in self.seqm_parameters:
+            self.scf_backward = self.seqm_parameters['scf_backward']
+        else:
+            self.scf_backward = 0
+        
+        Temp = xl_bomd_params['T_el']
         kB = 8.61739e-5 # eV/K, kB = 6.33366256e-6 Ry/K, kB = 3.166811429e-6 Ha/K, #kB = 3.166811429e-6 #Ha/K
         with torch.no_grad():
             D,S_Ent,QQ,e,Fe_occ,mu0, Occ_mask = Fermi_Q(F, Temp, nocc, nHeavy, nHydro, kB, scf_backward = self.scf_backward) # Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent
@@ -156,7 +129,7 @@ class EnergyXL(torch.nn.Module):
             ################
 
             #start_time = time.time()
-            Rank = max_rank
+            Rank = xl_bomd_params['max_rank']
             K0 = 1.0
             dDS = K0*(D - P) # tr2  #W0 = K0*(DS - X) from J. Chem. Theory Comput. 2020, 16, 6, 3628–3640, alg 3
             
@@ -167,7 +140,7 @@ class EnergyXL(torch.nn.Module):
             k = -1
             Error = torch.tensor([10], dtype=D.dtype, device=D.device)
 
-            while k < Rank-1 and torch.max(Error) > err_threshold:
+            while k < Rank-1 and torch.max(Error) > xl_bomd_params['err_threshold']:
             #while k < Rank-1:
                 k = k + 1
                 V[:,:,:,k] = dW
@@ -236,6 +209,9 @@ class EnergyXL(torch.nn.Module):
         ################
         ################
 
+        
+        
+
         #nuclear energy
         alpha = parameters['alpha']
         if self.method=='MNDO':
@@ -300,11 +276,11 @@ class ForceXL(torch.nn.Module):
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, molecule, P, err_threshold, max_rank, T_el, learned_parameters=dict(), *args, **kwargs):
+    def forward(self, molecule, P, learned_parameters=dict(), xl_bomd_params=dict(), *args, **kwargs):
 
         molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, EEnt, Enuc, Eiso, EnucAB, D, dP2dt2, Error, e_gap, e, Fe_occ = \
-            self.energy(molecule, err_threshold, max_rank, T_el, P, learned_parameters, all_terms=True, *args, **kwargs)
+            self.energy(molecule, P, learned_parameters, xl_bomd_params=xl_bomd_params, all_terms=True, *args, **kwargs)
         L = Hf.sum()
         if molecule.const.do_timing:
             t0 = time.time()

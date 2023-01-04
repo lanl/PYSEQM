@@ -7,10 +7,10 @@ PYSEQM.egg-info/dependency_links.txt
 PYSEQM.egg-info/requires.txt
 PYSEQM.egg-info/top_level.txt
 seqm/ElectronicStructure.py
+seqm/KSA_XL_BOMD.py
 seqm/MolecularDynamics.py
 seqm/Molecule.py
 seqm/XLBOMD.py
-seqm/XLBOMD_LR.py
 seqm/__init__.py
 seqm/basics.py
 seqm/params/parameters_AM1_MOPAC.csv

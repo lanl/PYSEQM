@@ -37,6 +37,21 @@ def elec_energy(P,F,Hcore):
 
     return Eelec
 
+def elec_energy_xl(D,P,F,Hcore):
+    """
+    XL_BOMD
+    electrionic energy is defined as:
+    E(D,P) = (2*tr(Hcore*D) + tr((2D-P)*G(P)))/2.0
+           = tr(D*F)-0.5*Tr((F-Hcore)*P)
+    """
+    #Hcore : only have upper triangle as constructed from hcore.py
+    h = Hcore.triu()+Hcore.triu(1).transpose(1,2)
+
+    Eelec = torch.sum(D*F-0.5*(F-h)*P,dim=(1,2))
+
+    return Eelec
+
+
 def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1', parameters=None):
     """
     Compute Nuclear Energy
