@@ -120,7 +120,7 @@ seqm : seqm module
     ├── diag.py : diagonalization functions, where pseudo_diag is not used  
     ├── diat_overlap.py : get overlap integrals  
     ├── energy.py : compute various energy terms  
-    ├── fermi_q.py : Fermi operator expansion (for KSA-XL-BOMD)  
+    ├── fermi_q.py : Fermi operator expansion (for KSA-XL-BOMD)  
     ├── fock.py : construct Fockian matrix  
     ├── G_XL_LR.py : generates two-electron part of Fockian (for KSA-XL-BOMD)  
     ├── hcore.py : construct Hcore  
