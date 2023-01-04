@@ -141,17 +141,22 @@ basics.py
   class Energy : get energies based on Hamiltonian (total energy, heat of formation, nuclear energies, etc)  
   class Force : use torch.autograd.grad to get gradient of total energy on coordinates to get force  
 
+ElectronicStructure.py  
+  class Electronic_Structure : calls SCF/XL-BOMD drivers and updates molecular properties  
+
+Molecule.py  
+  class Molecule : molecule objects for storing electronic/structural properties  
+
 MolecularDynamics.py  
   class Geometry_Optimization_SD : geometry optimization with steepest descend  
+  class KSA_XL_BOMD : NVE/NVT with Langevin thermostat  for KSA-XL-BOMD
   class Molecular_Dynamics_Basic : NVE MD  
   class Molecular_Dynamics_Langevin : NVT with Langevin thermostat  
-  class Geometry_Optimization_SD_LS : geometry optimization using linear search based on steepest descend, not finished  
-  class Molecular_Dynamics_Nose_Hoover : NVT with Nose Hoover, not finished  
+  class XL_BOMD : NVE/NVT with Langevin thermostat  for XL-BOMD
 
 XLBOMD.py  
   class EnergyXL : get energies based on XL-BOMD  
   class ForceXL : get force with XL-BOMD  
-  class XL_BOMD : module to perform XL-BOMD  
 
 ## Caution:
 
