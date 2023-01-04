@@ -114,17 +114,23 @@ seqm : seqm module
 ├── params : MNDO/AM1/PM3 parameters  
 └── seqm_functions  
     ├── cal_par.py : compute dipole/qutrupole charge separation and additive terms rho1 and rho2  
+    ├── canon_dm_prt.py : canonical density matrix perturbation algorithm for first-order response (for KSA-XL-BOMD)
     ├── constants.py : store some constant parameters  
     ├── data_loader.py : load and prepare dataset from numpy array, not updated  
     ├── diag.py : diagonalization functions, where pseudo_diag is not used  
     ├── diat_overlap.py : get overlap integrals  
     ├── energy.py : compute various energy terms  
+    ├── fermi_q.py : Fermi operator expansion (for KSA-XL-BOMD)
     ├── fock.py : construct Fockian matrix  
+    ├── G_XL_LR.py : generates two-electron part of Fockian (for KSA-XL-BOMD)  
     ├── hcore.py : construct Hcore  
     ├── pack.py : functions to deal with the padding in batch of matrix  
     ├── parameters.py : load parameters from structured csv files as in ./params  
+    ├── read_xyz.py  : read structures .xyz files  
+    ├── save_xyz.py  : save structures to .xyz files  
     ├── scf_loop.py : perform SCF procedure  
     ├── SP2.py : single particle density matrix expansion algorithm SP2  
+    ├── spherical_pot_force.py : apply spherical potential (plane bottom with parabolic walls)  
     ├── two_elec_two_center_int_local_frame.py : compute two electron two center integrals in local frame for each pair of atoms  
     └── two_elec_two_center_int.py : rotate and get two electron two center integrals in global frame  
 
