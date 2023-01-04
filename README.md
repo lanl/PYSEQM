@@ -14,13 +14,13 @@
 ## Installation:
 
 ```bash
-git clone https://github.com/lanl/PYSEQM.git
+git clone https://github.com/kulichenko-LANL/PYSEQM_dev.git
 cd PYSEQM
 python setup.py install
 ```
 or
 ```bash
-pip install git+https://github.com/lanl/PYSEQM.git
+pip install git+https://github.com/kulichenko-LANL/PYSEQM_dev.git
 ```
 
 To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch website](https://pytorch.org/)
@@ -43,7 +43,7 @@ model.pt
 
 ## Authors:
 
-[Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
+TBD
 
 ## Citation:
 [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
