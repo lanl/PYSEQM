@@ -97,12 +97,14 @@ print('\n Dipole:\n', molecules.d)
 print('\n Forces (eV/A):\n', molecules.force)
 ```
 
-## Testing Examples: /tests/test*.py
-1. ./test1.py : single point calculation
-2. ./test2.py : geometry optimization
-3. ./test3.py : BOMD (NVE, NVT, Langevin)
-4. ./test4.py : XL-BOMD
-5. ./test4.py : KSA-XL-BOMD
+## Testing Examples: /examples/Test*.py
+1. ./Test1_SinglePointProp.ipynb : single point calculation
+2. ./Test2_GeomOpt.ipynb : geometry optimization
+3. ./Test3_BOMD.ipynb : BOMD (NVE, NVT, Langevin)
+4. ./Test4_XL-BOMD.ipynb : XL-BOMD
+5. ./Test5_KSA-XL-BOMD.ipynb : KSA-XL-BOMD
+6. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S [GS + H<sub>2</sub>]<sup>2+</sup>
+
 
 
 ## Structure:
