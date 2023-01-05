@@ -107,6 +107,11 @@ print('\n Forces (eV/A):\n', molecules.force)
 6. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S ( [GS + H<sub>2</sub>]<sup>2+</sup> )
 
 
+## Output files
+1. *filename.id*.xyz : single point calculation
+2. ./Test2_GeomOpt.ipynb : geometry optimization
+
+
 
 ## Structure:
 
