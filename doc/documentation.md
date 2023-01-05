@@ -107,12 +107,12 @@ print('\n Forces (eV/A):\n', molecules.force)
 6. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S ( [GS + H<sub>2</sub>]<sup>2+</sup> )
 
 
-## Output files
+## Output files  
 1. *filename.id*.xyz : MD trajectory  
-  * Number of atoms
-  * Additional info line : Step number, Temperature (K), Kinetic energy (eV), Potential energy (eV), HOMO-LUMO gap (eV) KSA error, real time stamp (s)
-  * XYZ coordinates, velocities, forces: Element X Y Z Vx Vy Vz Fx Fy Fz
-2. *filename*.Info.*id*.txt : geometry optimization
+  * Number of atoms  
+  * Additional info line : Step number, Temperature (K), Kinetic energy (eV), Potential energy (eV), HOMO-LUMO gap (eV) KSA error, real time stamp (s)  
+  * XYZ coordinates, velocities, forces: Element X Y Z Vx Vy Vz Fx Fy Fz  
+2. *filename*.Info.*id*.txt : geometry optimization  
 
 
 ## Structure:
