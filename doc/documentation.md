@@ -111,8 +111,14 @@ print('\n Forces (eV/A):\n', molecules.force)
 1. *filename.id*.xyz : MD trajectory  
     * Number of atoms  
     * Additional info line : *Step number, Temperature (K), Kinetic energy (eV), Potential energy (eV), HOMO-LUMO gap (eV) KSA error, real time stamp (s)*  
-    * XYZ coordinates, velocities, forces: *Element X Y Z Vx Vy Vz Fx Fy Fz*  
+    * Block of XYZ coordinates, velocities, forces: *Element X Y Z Vx Vy Vz Fx Fy Fz*  
 2. *filename*.Info.*id*.txt : geometry optimization  
+    * Step number  
+	* Orbital energies  
+	* Dipole (x, y, z)
+	* Electronic entropy contribution (KSA-XL-BOMD only)  
+	* Fermi occupancies (KSA-XL-BOMD only)  
+	* Rank-m Krylov subspace approximation error  (KSA-XL-BOMD only)  
 
 
 ## Structure:
