@@ -100,7 +100,7 @@ step: 1
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.008671537660145763 
+  Rank-m Krylov subspace approximation error: 0.008671537660466766 
 
 step: 2
   Orbital energies (eV):
@@ -203,7 +203,7 @@ step: 2
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00732450042171564 
+  Rank-m Krylov subspace approximation error: 0.0073245004208790584 
 
 step: 3
   Orbital energies (eV):
@@ -291,7 +291,7 @@ step: 3
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.009147439433368957 
+  Rank-m Krylov subspace approximation error: 0.009147439433219563 
 
 step: 4
   Orbital energies (eV):
@@ -394,7 +394,7 @@ step: 4
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.006172307955008273 
+  Rank-m Krylov subspace approximation error: 0.006172307954702093 
 
 step: 5
   Orbital energies (eV):
@@ -497,7 +497,7 @@ step: 5
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.013358919410295014 
+  Rank-m Krylov subspace approximation error: 0.013358919409731244 
 
 step: 6
   Orbital energies (eV):
@@ -600,7 +600,7 @@ step: 6
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.007810991300576187 
+  Rank-m Krylov subspace approximation error: 0.007810991300799442 
 
 step: 7
   Orbital energies (eV):
@@ -703,7 +703,7 @@ step: 7
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.006239014548149075 
+  Rank-m Krylov subspace approximation error: 0.0062390145474555455 
 
 step: 8
   Orbital energies (eV):
@@ -806,7 +806,7 @@ step: 8
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.012099373052466366 
+  Rank-m Krylov subspace approximation error: 0.012099373053228007 
 
 step: 9
   Orbital energies (eV):
@@ -894,7 +894,7 @@ step: 9
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.006375841003671082 
+  Rank-m Krylov subspace approximation error: 0.0063758410036437565 
 
 step: 10
   Orbital energies (eV):
@@ -982,4 +982,4 @@ step: 10
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
       0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00821372229076415 
+  Rank-m Krylov subspace approximation error: 0.008213722290782873 

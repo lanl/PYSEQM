@@ -211,7 +211,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 
             if 'Info_log' in kwargs:
                 for mol in self.output['molid']:
-                    fn = self.output['prefix'] +"." + "Info" + "." + str(mol) + ".txt"
+                    fn = self.output['prefix'] + "." + str(mol) + ".Info.txt"
                     f = open(fn,'a+')
                     f.write("\nstep: {}\n".format(i+1))
                     for log in kwargs['Info_log']:
