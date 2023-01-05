@@ -67,7 +67,7 @@ class Parser(torch.nn.Module):
         tore=molecule.const.tore
         n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64)
         if torch.is_tensor(molecule.tot_charge):
-            n_charge += molecule.tot_charge.reshape(-1).type(torch.int64)
+            n_charge -= molecule.tot_charge.reshape(-1).type(torch.int64)
         nocc = n_charge//2
         
         #print(nocc)
