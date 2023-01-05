@@ -103,7 +103,8 @@ print('\n Forces (eV/A):\n', molecules.force)
 3. ./Test3_BOMD.ipynb : BOMD (NVE, NVT, Langevin)
 4. ./Test4_XL-BOMD.ipynb : XL-BOMD
 5. ./Test5_KSA-XL-BOMD.ipynb : KSA-XL-BOMD
-6. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S [GS + H<sub>2</sub>]<sup>2+</sup>
+6. ./Fullerenes : fullerenes test set
+6. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S ( [GS + H<sub>2</sub>]<sup>2+</sup> )
 
 
 
