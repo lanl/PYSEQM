@@ -108,10 +108,10 @@ print('\n Forces (eV/A):\n', molecules.force)
 
 
 ## Output files
-1. *filename.id*.xyz : MD trajectory
-* Number of atoms
-* Additional info line : Step number, Temperature (K), Kinetic energy (eV), Potential energy (eV), HOMO-LUMO gap (eV) KSA error, real time stamp (s)
-* XYZ coordinates, velocities, forces: Element X Y Z Vx Vy Vz Fx Fy Fz
+1. *filename.id*.xyz : MD trajectory  
+  * Number of atoms
+  * Additional info line : Step number, Temperature (K), Kinetic energy (eV), Potential energy (eV), HOMO-LUMO gap (eV) KSA error, real time stamp (s)
+  * XYZ coordinates, velocities, forces: Element X Y Z Vx Vy Vz Fx Fy Fz
 2. *filename*.Info.*id*.txt : geometry optimization
 
 
