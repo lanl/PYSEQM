@@ -2,6 +2,7 @@ import torch
 from .diag import sym_eig_trunc, sym_eig_trunc1
 from .pack import *
 
+#@torch.jit.script
 def Fermi_Q(H0,T, Nocc, nHeavy, nHydro, kB, scf_backward, OccErrThrs = 1e-9):
     '''
     Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent

@@ -39,6 +39,7 @@ from .basics import Force
 from torch.autograd import grad
 import time
 
+from .tools import attach_profile_range
 
 class EnergyXL(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -162,7 +163,6 @@ class EnergyXL(torch.nn.Module):
                     Rank_m = k+1
 
                     O = torch.zeros((D.shape[0], Rank_m, Rank_m), dtype=D.dtype, device=D.device)   
-                    #start_time_1 = time.time()
                     for I in range(0,Rank_m):
                         for J in range(I,Rank_m):
                             O[:,I,J] = torch.sum(W[:,:,:,I].transpose(1,2)*W[:,:,:,J], dim=(1,2))

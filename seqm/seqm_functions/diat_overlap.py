@@ -297,6 +297,7 @@ def aintgs(x0, jcall):
 
     return torch.cat((a1, a2, a3, a4, a5),dim=1)
 
+# @torch.jit.script ??
 def bintgs(x0, jcall):
     """
     B integrals for diatom_overlap_matrix
@@ -373,6 +374,13 @@ def bintgs(x0, jcall):
     # i=0        2  1/3   1/60  1/2520     2/(m!*(m+1))
     # i=2      2/3  1/5   1/84  1/3240     2/(m!*(m+3))
     # i=4      2/5  1/7  1/108  1/3960     2/(m!*(m+5))
+    # x_cond2 = x[cond2]
+    # x_cond2_2 = torch.square(x_cond2)
+    # x_cond2_3 = x_cond2*x_cond2_2
+    # x_cond2_4 = torch.square(x_cond2_sq)
+    # x_cond2_5 = x_cond2_4 * x_cond2
+    # x_cond2_6 = x_cond2_2*x_cond2_4
+    
     b1[cond2] = 2.0     + x[cond2]**2/3.0 + x[cond2]**4/60.0 + x[cond2]**6/2520.0
     b3[cond2] = 2.0/3.0 + x[cond2]**2/5.0 + x[cond2]**4/84.0 + x[cond2]**6/3240.0
     b5[cond2] = 2.0/5.0 + x[cond2]**2/7.0 + x[cond2]**4/108.0 + x[cond2]**6/3960.0

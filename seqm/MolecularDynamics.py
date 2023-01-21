@@ -9,7 +9,7 @@ import numpy as np
 import sys
 np.set_printoptions(threshold=sys.maxsize)
 
-
+from .tools import attach_profile_range
 #not finished
 
 class Geometry_Optimization_SD(torch.nn.Module):
@@ -581,7 +581,7 @@ class KSA_XL_BOMD(XL_BOMD):
         """
         super().__init__(*args, **kwargs)
 
-
+    #@attach_profile_range("KSA_XL_BOMD_ONESTEP")
     def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
         dt = self.timestep
