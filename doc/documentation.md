@@ -104,8 +104,9 @@ print('\n Forces (eV/A):\n', molecules.force)
 4. ./Test4_XL-BOMD.ipynb : XL-BOMD
 5. ./Test5_KSA-XL-BOMD.ipynb : KSA-XL-BOMD
 6. ./Test6_NormModes_Methanol.ipynb  : normal modes analysis of methanol via semi-numerical method
-7. ./Fullerenes : fullerenes test set
-8. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S ( [GS + H<sub>2</sub>]<sup>2+</sup> )
+7. ./Test7_Test7_low_rank_KSA_scf.ipynb  : low-rank KSA for density matrix SCF optimization
+8. ./Fullerenes : fullerenes test set
+9. ./GramicidinS/KSA-XL-BOMD_GS_dp.ipynb : Langevin MD of doubly protonated Gramicidin S ( [GS + H<sub>2</sub>]<sup>2+</sup> )
 
 
 ## Output files  
