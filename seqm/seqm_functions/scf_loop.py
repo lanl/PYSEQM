@@ -53,6 +53,7 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
     Eelec_new = torch.zeros_like(Eelec)
     k=0
     while(1):
+        start_time = time.time()
         if notconverged.any():
             if backward:
                 Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
@@ -99,7 +100,8 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
             #"""
             notconverged =  err>eps
             if debug:
-                print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item())
+                end_time = time.time()
+                print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item(),  end_time-start_time )
             k+=1
             if k >= MAX_ITER:
                 return P, notconverged
@@ -560,6 +562,7 @@ def scf_forward3(M, w, gss, gpp, gsp, gp2, hsp, \
         print("step, DM rmse, dE, number of not converged")
     
     while (1):
+        start_time = time.time()
         if notconverged.any():
             COUNTER +=1
             
@@ -623,7 +626,8 @@ def scf_forward3(M, w, gss, gpp, gsp, gp2, hsp, \
             
             SCF_err = torch.linalg.norm(dDS[notconverged], ord='fro', dim=(1,2))
             if debug:
-                print(COUNTER, SCF_err.cpu().numpy(), err.cpu().numpy(), torch.sum(notconverged).item())
+                end_time = time.time()
+                print(COUNTER, SCF_err.cpu().numpy(), err.cpu().numpy(), torch.sum(notconverged).item(), end_time - start_time)
             if COUNTER >= MAX_ITER:
                     return P, notconverged
         else:

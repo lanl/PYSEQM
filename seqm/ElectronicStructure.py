@@ -2,7 +2,7 @@ import torch
 from .basics import *
 import time
 from seqm.XLBOMD import ForceXL
-from seqm.XLBOMD_LR import ForceXL as ForceXL_lr
+#from seqm.XLBOMD_LR import ForceXL as ForceXL_lr
 
 class Electronic_Structure(torch.nn.Module):
     def __init__(self, seqm_parameters, *args, **kwargs):
@@ -18,7 +18,7 @@ class Electronic_Structure(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
         self.conservative_force = Force(self.seqm_parameters)
         self.conservative_force_xl = ForceXL(self.seqm_parameters)
-        self.conservative_force_xl_lr = ForceXL_lr(self.seqm_parameters)
+        #self.conservative_force_xl_lr = ForceXL_lr(self.seqm_parameters)
 
 
         #self.acc_scale = 0.009648532800137615
