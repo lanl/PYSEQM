@@ -12,6 +12,8 @@ np.set_printoptions(threshold=sys.maxsize)
 from .tools import attach_profile_range
 #not finished
 
+debug = False
+
 class Geometry_Optimization_SD(torch.nn.Module):
     """
     steepest descent algorithm for geometry optimization
@@ -266,6 +268,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         E0 = None
 
         for i in range(steps):
+            
+            start_time = time.time()
             self.one_step(molecule, learned_parameters=learned_parameters, P=molecule.dm, *args, **kwargs)
 
             with torch.no_grad():
@@ -315,6 +319,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             del Ek, T
             if i%1000==0:
                 torch.cuda.empty_cache()
+            
+            if debug:
+                print(time.time() - start_time)
 
         return molecule.coordinates, molecule.velocities, molecule.acc
 
@@ -505,6 +512,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         E0 = None
 
         for i in range(steps):
+            start_time = time.time()
 
             P, Pt = self.one_step(molecule, i, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
 
@@ -565,6 +573,9 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             del T, Ek, dump_kwargs
             if i%1000==0:
                 torch.cuda.empty_cache()
+            
+            if debug:
+                print(time.time() - start_time)
 
         return molecule.coordinates, molecule.velocities, molecule.acc
 
