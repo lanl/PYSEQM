@@ -6,7 +6,7 @@
 
 ## Features:
 
-* Interface with machine learning (ML) framework like [HIPNN](https://aip.scitation.org/doi/abs/10.1063/1.5011181) for ML applications and development.
+* Interface with machine learning (ML) framework like [HIPNN](https://github.com/lanl/hippynn) for ML applications and development.
 * GPU-supported Molecular Dynamics Engine
 * Stable and Efficient Extended Lagrangian Born Oppenheimer Molecular Dynamics ([XL-BOMD](https://aip.scitation.org/doi/full/10.1063/1.3148075))
 * Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for generating density matrix
