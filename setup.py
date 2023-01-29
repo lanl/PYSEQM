@@ -17,9 +17,10 @@ setup(
     # https://packaging.python.org/en/latest/single_source_version.html
     version='0.0.1',
 
-    description='A Semi-Empirical Born Oppenheimer Molecular Dynamics Engine implemented in PyTorch.',
+    description='A Semi-Empirical Born Oppenheimer Molecular Dynamics Engine\
+ implemented in PyTorch.',
     long_description=long_description,
-    
+
     # The project's main homepage.
     url='https://github.com/lanl/PYSEQM',
 
@@ -56,7 +57,7 @@ setup(
     # your project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    install_requires=['numpy', 'torch>=1.2'],
+    install_requires=['numpy', 'torch>=1.8'],
     include_package_data=True,
     package_data={'seqm': ['params/*.csv']},
 

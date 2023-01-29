@@ -118,7 +118,7 @@ seqm : seqm module
     ├── cal_par.py : compute dipole/qutrupole charge separation and additive terms rho1 and rho2  
     ├── constants.py : store some constant parameters  
     ├── data_loader.py : load and prepare dataset from numpy array, not updated  
-    ├── diag.py : diagonalization functions, where pseudo_diag is not used  
+    ├── diag.py : diagonalization functions  
     ├── diat_overlap.py : get overlap integrals  
     ├── energy.py : compute various energy terms  
     ├── fock.py : construct Fockian matrix  
