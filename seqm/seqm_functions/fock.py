@@ -30,7 +30,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     # to use here
     # while for diagonalization, may have to reshape
 
-    # for the diagonal block, the summation over ortitals on the same atom in Fock matrix
+    # for the diagonal block, the summation over orbitals on the same atom in Fock matrix
     F = M.clone()  # Hcore part
     Pptot = P[..., 1, 1] + P[..., 2, 2] + P[..., 3, 3]
     #  F_mu_mu = Hcore + \sum_nu^A P_nu_nu (g_mu_nu - 0.5 h_mu_nu) + \sum^B
@@ -65,7 +65,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
 
     F.add_(TMP)
 
-    # sumation over two electron two center integrals over the neighbor atoms
+    # summation over two electron two center integrals over the neighbor atoms
 
     # for the diagonal block, check JAB in fock2.f
     # F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
@@ -83,11 +83,11 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     # P[maskd[idxj]] : P^tot_{mu,nu \in B} shape (npairs, 4,4)
 
     # take out the upper triangle part in the same order as in W
-    # shape (nparis, 10)
+    # shape (npairs, 10)
 
     PA = (P[maskd[idxi]][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)] * weight).reshape((-1, 10, 1))
     PB = (P[maskd[idxj]][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)] * weight).reshape((-1, 1, 10))
-    # suma \sum_{mu,nu \in A} P_{mu, nu in A} (mu nu, lamda sigma) = suma_{lambda sigma \in B}
+    # suma \sum_{mu,nu \in A} P_{mu, nu in A} (mu nu, lambda sigma) = suma_{lambda sigma \in B}
     # suma shape (npairs, 10)
     suma = torch.sum(PA * w, dim=1)
     # sumb \sum_{l,s \in B} P_{l, s inB} (mu nu, l s) = sumb_{mu nu \in A}
@@ -106,7 +106,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     # \sum_A
     F.index_add_(0, maskd[idxj], sumA)
 
-    # off diagonal block part, check KAB in forck2.f
+    # off diagonal block part, check KAB in fock2.f
     # mu, nu in A
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)

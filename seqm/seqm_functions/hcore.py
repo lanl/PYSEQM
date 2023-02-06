@@ -22,11 +22,11 @@ def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z, ze
     # and return Hcore and structured two electron two center integrals
 
     # molsize : number of atoms in each molecule, including the padding zero
-    # mask: tell the postion of each pair, shape (npairs,)
+    # mask: tell the position of each pair, shape (npairs,)
 
-    # idxi, idxj, index for atom i and j in the current batch, shape (nparis,)
+    # idxi, idxj, index for atom i and j in the current batch, shape (npairs,)
     # in the data_loader.py, the index for for each atom is the index across whole dataset
-    # should take the remainder before passing into this funcition %(batch_size*molsize)
+    # should take the remainder before passing into this function %(batch_size*molsize)
 
     # ni, nj atomic number, shape (npairs,)
     # xij, unit vector from i to j (xj-xi)/|xj-xi|, shape (npairs,3)
@@ -40,7 +40,7 @@ def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z, ze
 
     # isbeta_pair : beta is for each pair in the molecule, shape (npairs, 4) or
     #              for each atom in the molecule, shape (ntotatoms, 2)
-    #              check diat.py for detail
+    #              check diat_overlap.py for detail
 
     # calpar will create dd, qq, rho0, rho1, rho2 used in rotate from zetas, zetap
     # and qn, gss, hsp, hpp (hpp = 0.5*(gpp-gp2))
@@ -66,7 +66,7 @@ def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z, ze
                                               qn_int)
     # di shape (npairs,4,4)
     w, e1b, e2a = TETCI(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, gss, gpp, gp2, hsp)
-    # w shape (napirs, 10,10)
+    # w shape (npairs, 10,10)
     # e1b, e2a shape (npairs, 10)
     # di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
 
@@ -95,7 +95,7 @@ def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z, ze
     # e1b, e2a order: (s s/), (px s/), (px px/), (py s/), (py px/), (py py/)
     #                (pz s/), (pz px/) (pz py/) (pz pz/)
 
-    # diagonal block, elecron nuclear interation
+    # diagonal block, electron nuclear interaction
     """
 
     #(s s)
@@ -135,7 +135,7 @@ def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z, ze
 
     # off diagonal block for Hcore
     # M[mask,:,:] = smat
-    # check the comment out part in diat.py h1elec
+    # check the comment out part in diat_overlap.py h1elec
     if torch.is_tensor(Kbeta):
         M[mask, 0, 0] = di[..., 0, 0] * (beta[idxi, 0] + beta[idxj, 0]) / 2.0 * Kbeta[:, 0]
         M[mask, 0, 1:] = di[..., 0, 1:] * (beta[idxi, 0:1] + beta[idxj, 1:2]) / 2.0 * Kbeta[:, 1, None]

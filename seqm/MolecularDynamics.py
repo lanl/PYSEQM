@@ -1,7 +1,5 @@
 import torch
 from .basics import Force
-import time
-# not finished
 
 
 class Geometry_Optimization_SD_LS(torch.nn.Module):
@@ -14,9 +12,9 @@ class Geometry_Optimization_SD_LS(torch.nn.Module):
     def __init__(self, seqm_parameters, alpha=0.01, force_tol=1.0e-4, energy_tol=1.0e-4, max_evl=1000):
         """
         Constructor
-        alpha : steepest descent mixing paramters, coordinates_new = coordinates_old + alpha*force
+        alpha : steepest descent mixing parameters, coordinates_new = coordinates_old + alpha*force
         force_tol : force tolerance, stop criteria when all force components are less then this
-        engery_tol : energy tolerance, stop criteria when delta sum_{molecules} Etot / nmol <= engery_tot
+        energy_tol : energy tolerance, stop criteria when delta sum_{molecules} Etot / nmol <= energy_tol
                      i.e. stop when the difference of the total energy for the whole batch of molecules is smaller than this
         mex_evl : maximal number of evaluations/iterations
         """
@@ -100,10 +98,8 @@ class Geometry_Optimization_SD(torch.nn.Module):
     def __init__(self, seqm_parameters, alpha=0.01, force_tol=1.0e-4, max_evl=1000):
         """
         Constructor
-        alpha : steepest descent mixing paramters, coordinates_new =  coordinates_old + alpha*force
+        alpha : steepest descent mixing parameters, coordinates_new =  coordinates_old + alpha*force
         force_tol : force tolerance, stop criteria when all force components are less then this
-        engery_tol : energy tolerance, stop criteria when delta sum_{molecules} Etot / nmol <= engery_tot
-                     i.e. stop when the difference of the total energy for the whole batch of molecules is smaller than this
         mex_evl : maximal number of evaluations/iterations
         """
         super().__init__()
@@ -163,7 +159,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
 
 class Molecular_Dynamics_Basic(torch.nn.Module):
     """
-    perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
+    perform basic molecular dynamics with velocity verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
 
@@ -172,7 +168,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         unit for timestep is femtosecond
         output: [molecule id list, frequency N, prefix]
             molecule id in the list are output, staring from 0 to nmol-1
-            geometry is writted every dump step to the file with name prefix + molid + .xyz
+            geometry is written every dump step to the file with name prefix + molid + .xyz
             step, temp, and total energy is print to screens for select molecules every thermo
         """
         super().__init__(*args, **kwargs)
@@ -253,13 +249,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         dt = self.timestep
         """
         MASS = torch.as_tensor(const.mass)
-        # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
+        # put the padding virtual atom mass finite as for acceleration, F/m evaluation.
         MASS[0] = 1.0
         mass = MASS[species].unsqueeze(2)
         """
 
-        if const.do_timing:
-            t0 = time.time()
         if not torch.is_tensor(acc):
             force, P, _ = self.get_force(const, mass, coordinates, velocities, species, learned_parameters=learned_parameters, P0=P, step=step, *args, **kwargs)
             with torch.no_grad():
@@ -271,11 +265,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         with torch.no_grad():
             acc = force / mass * self.acc_scale
             velocities.add_(0.5 * acc * dt)
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["MD"].append(t1 - t0)
 
         return coordinates, velocities, acc, P, L, force
 
@@ -341,7 +330,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), reuse_P=True, remove_com=[False, 1000], *args, **kwargs):
 
         MASS = torch.as_tensor(const.mass)
-        # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
+        # put the padding virtual atom mass finite as for acceleration, F/m evaluation.
         MASS[0] = 1.0
         mass = MASS[species].unsqueeze(2)
 
@@ -381,7 +370,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
                 # control energy shift
                 if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                    # scale velocities to adjust kinetic energy and compenstate the energy shift
+                    # scale velocities to adjust kinetic energy and compensate the energy shift
                     Eshift = Ek + L - E0
                     self.control_shift(velocities, Ek, Eshift)
                     Ek, T = self.kinetic_energy(const, mass, species, velocities)
@@ -398,7 +387,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
 class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     """
-    molecular dynamics with langevin thermostat
+    molecular dynamics with Langevin thermostat
     #same formula as in lammps
     """
 
@@ -434,64 +423,3 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         F[species == 0, :] = 0.0
 
         return F, P, L
-
-# not complete
-
-
-class Molecular_Dynamics_Nose_Hoover(Molecular_Dynamics_Basic):
-    pass
-
-# unit conversion note
-
-# energy unit: eV
-# length unit : Angstroms
-# force unit : eV/Angstroms
-# mass unit : grams/mol
-# velocity unit : Angstrom/fs
-# time unit: femtoseconds
-# temperature : Kelvin
-# accelaration : eV/Angstroms / (grams/mol)
-
-
-"""
-1 eV = 1.602176565e-19 J
-1 Angstrom = 1.0e-10 m
-1 eV/Angstrom = 1.602176565e-09 N
-1 AU = 1.66053906660e-27 kg
-1 femtosecond = 1.0e-15 second
-1 Angstrom/fs = 1.0e5 m/s
-
-# accelaration scale
-1 eV/Angstroms / (grams/mol) = 1.602176565e-09 N / 1.66053906660e-27 kg
- = 1.602176565e-09/1.66053906660e-27 m/s^2 = 1.602176565e-09/1.66053906660e-27 * 1.0e-20 Angstrom/fs^2
- = 1.602176565/1.66053906660*0.01 Angstrom/fs^2 = 0.009648532800137615 Angstrom/fs^2
-
-1 eV = 1.160451812e4 Kelvin
-
-# vel_scale = sqrt(kb*T/m)
-kb*T/m: 1 Kelvin/ AU = 1.0/1.160451812e4 * 1.602176565e-19 / 1.66053906660e-27 * m^2/s^2
-= 1.0/1.160451812e4 * 1.602176565e-19 / 1.66053906660e-27 * 1.0e-10 Angstrom^2/fs^2
-= 1.0/1.160451812 * 1.602176565 / 1.6605390666 * 1.0e-6 Angstrom^2/fs^2
-= 0.8314462264063073e-6 Angstrom^2/fs^2
-
-sqrt(Kelvin/ AU) = 0.9118367323190634e-3 Angstrom/fs
-
-# kinetic energy scale
-AU*(Angstrom/fs)^2 = 1.66053906660e-27 kg * 1.0e10 m^2/s^2 = 1.66053906660e-17 J
-= 1.66053906660e-17/1.602176565e-19 eV = 1.0364270099032438e2 eV
-
-# random force scale
-random force unit coversion
-Fr = sqrt(2 Kb T m / (dt damp))*R(t)
-Fr unit: sqrt(Kelvin*AU/(fs^2)) ==> eV/Angstrom
-1 sqrt(Kelvin*AU/(fs^2)) = sqrt(1.0/1.160451812e4 eV * 1.66053906660e-27 kg)/fs
-= sqrt(1.0/1.160451812e4 * 1.602176565e-19 J * 1.66053906660e-27 kg)/fs
-= sqrt(1.0/1.160451812e4 * 1.602176565e-19 * 1.66053906660e-27)/1.0e-15 kg*m/s^2
-= sqrt(1.0/1.160451812e4 * 1.602176565e-19 * 1.66053906660e-27)/1.0e-15 J/m
-= sqrt(1.0/1.160451812e4 * 1.602176565e-19 * 1.66053906660e-27)/1.0e-15 /1.602176565e-19 / 1.0e10  eV/Angstrom
-= sqrt(1.0/1.160451812e4 / 1.602176565e-19 * 1.66053906660e-27) * 1.0e5 eV/Angstrom
-= sqrt(1.0/1.160451812e4 / 1.602176565e-19 * 1.66053906660e-27) * 1.0e5 eV/Angstrom
-= sqrt(1.0/1.160451812 / 1.602176565 * 1.66053906660) * 0.1 eV/Angstrom
-= 0.09450522179973914 eV/Angstrom
-"""
-# acc ==> Angstrom/fs^2

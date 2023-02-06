@@ -17,7 +17,7 @@ def two_elec_two_center_int(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap
     # Z, zetas, zetap, gss, gpp, gp2, hsp for each atom
 
     # rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, cutoff=1.0e10):
-    # ni, nj, xij, rij, da, db, qa, qb, rho0a, rho0b ... rho2b, shape (napirs,)
+    # ni, nj, xij, rij, da, db, qa, qb, rho0a, rho0b ... rho2b, shape (npairs,)
     # tore: dictionary type tensor tore[1]=1,
     #       valence shell charge for H, tore[6]=4, valence shell charge for C
 
@@ -57,13 +57,13 @@ def two_elec_two_center_int(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap
 # rotate: rotate the two electron two center integrals from local frame to molecule frame
 def rotate(ni, nj, xij, rij, tore, da, db, qa, qb, rho0a, rho0b, rho1a, rho1b, rho2a, rho2b, cutoff=1.0e10):
     """
-    rotate the two elecron two center integrals from local frame to molecule frame
+    rotate the two electron two center integrals from local frame to molecule frame
     """
     dtype = xij.dtype
     device = xij.device
     # in mopac, xij = xi - xj for rotate, rather than the general one, xj-xi
     # thus put minus sign on xij
-    # ni, nj, xij, rij, da, db, qa, qb, rho0a, rho0b ... rho2b, shape (napirs,)
+    # ni, nj, xij, rij, da, db, qa, qb, rho0a, rho0b ... rho2b, shape (npairs,)
     # tore: dictionary type tensor tore[1]=1,
     #       valence shell charge for H, tore[6]=4, valence shell charge for C
 
@@ -110,7 +110,7 @@ def rotate(ni, nj, xij, rij, tore, da, db, qa, qb, rho0a, rho0b, rho1a, rho1b, r
     #
 
     # 33
-    # X-H hevay atom - Hydrogen
+    # X-H heavy atom - Hydrogen
     xXH = -xij[XH]
     yXH = torch.zeros(xXH.shape[0], 2, dtype=dtype, device=device)
     zXH = torch.zeros_like(xXH)
@@ -120,7 +120,7 @@ def rotate(ni, nj, xij, rij, tore, da, db, qa, qb, rho0a, rho0b, rho1a, rho1b, r
     # zXH[...,3-1] = torch,where(cond1, torch.tensor([0.0],dtype=dtype),
     #                           torch.sqrt(1.0-xXH[...,3-1]**2))
     """
-    pytorch new version doesn't support modify z and z depends on a , a depends on z
+    PyTorch new version doesn't support modify z and z depends on a , a depends on z
     zXH[...,3-1] =  torch.sqrt(1.0-xXH[...,3-1]**2)
     cond1XH = zXH[...,3-1]>1.0e-5
     #cond1 = torch.abs(xXH[...,3-1])>0.99999999, but z[3] is used in dominator, so change to

@@ -4,7 +4,7 @@ from .constants import a0
 
 def elec_energy_isolated_atom(const, Z, uss, upp, gss, gpp, gsp, gp2, hsp):
     """
-    electrionc energy for a single atom
+    electronic energy for a single atom
     #eisol in block.f or in calpar.f
     return Eiso, shape (natoms,)
     """
@@ -31,7 +31,7 @@ def elec_energy(P, F, Hcore):
     h = Hcore.triu() + Hcore.triu(1).transpose(1, 2)
 
     # Eelec = 0.5 * tr(P(Hcore+F))  # matmul
-    # Eelec = 0.5 * \sum P*(H+F)    # elementwise product
+    # Eelec = 0.5 * \sum P*(H+F)    # element wise product
 
     Eelec = 0.5 * torch.sum(P * (h + F), dim=(1, 2))
 
@@ -46,10 +46,10 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
     pair_molid : molecule id for each pair, shape (npairs,)
     ni, nj: atomic number, shape (npairs,)
     rij: pair distance in atomic units, shape (npairs,)
-    gam : (s^A s^A, s^B, s^B) = w[...,0,0], shape(npairs,): w ==> second return vaule of hcore
+    gam : (s^A s^A, s^B, s^B) = w[...,0,0], shape(npairs,): w ==> second return value of hcore
     parameters : tuple, (alpha,) or (alpha, K, L, M)
     alpha : shape (natoms,)
-    K,L,M : guassian terms in PM3 or AM1, shape (natoms, 2 or 4)
+    K,L,M : Gaussian terms in PM3 or AM1, shape (natoms, 2 or 4)
     return nuclear interaction energy for each molecule, (nmol, )
     """
     rija = rij * a0
@@ -68,7 +68,7 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
         # EnucAB = torch.abs(t1*(1.0+t2+t3))
         EnucAB = t1 * (1.0 + t2 + t3)
     elif method == 'PM3' or method == 'AM1':
-        # two gaussian terms for PM3
+        # two Gaussian terms for PM3
         # 3~4 terms for AM1
         _, K, L, M = parameters
         # K, L , M shape (natoms,2 or 4)
@@ -105,7 +105,7 @@ def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
     return Hf : shape (nmol,)
     #heat of formation : delta H_f^mol
     #electronic energies of isolated atom: E_el^A
-    #experimental heat of formation of isolatied atom : delta_H_f^A
+    #experimental heat of formation of isolated atom : delta_H_f^A
     # delta H_f^mol = E_tot^mol - sum_A E_el^A + sum_A delta_H_f^A
     #flag: True, return Hf = Etot - Eiso_sum + eheat_sum
            False, return Etot - Eiso_sum

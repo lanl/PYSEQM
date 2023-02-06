@@ -7,7 +7,7 @@ from .pack import pack, unpack
 CHECK_DEGENERACY = False
 # flag to control whether consider degeneracy when constructing the density matrix
 # if no, then occupied orbitals are from 0, 1, ..., nocc-1
-# if yes, then equal contributions are used for degenarated orbitals near fermi level
+# if yes, then equal contributions are used for degenerated orbitals near fermi level
 
 
 def construct_P(e, v, nocc):

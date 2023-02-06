@@ -6,15 +6,15 @@ from .constants import ev
 # ~40% pairs are X-X, and each take 22 in ri
 # ~40% are X-H, each take 4 in ri
 # <20% are H-H, each only take 1 in ri
-# spliting these will save memory, while make the sctructure complexated
-# and the overlapy matrix code diat.py is implemented as treating all the pairs
+# splitting these will save memory, while make the structure complicated
+# and the overlap matrix code diat_overlap.py is implemented as treating all the pairs
 # the same regarding the storage in memory
 
 # as the rotate.f treat these pairs differently
 # will generate ri for each type of pairs, and do the same thing on rotate.f
 # then combine them together to be in the same shape
 
-# chech repp.f
+# check repp.f
 
 
 def two_elec_two_center_int_local_frame(ni, nj, r0, tore, da0, db0, qa0, qb0, rho0a, rho0b, rho1a, rho1b, rho2a, rho2b):
@@ -23,7 +23,7 @@ def two_elec_two_center_int_local_frame(ni, nj, r0, tore, da0, db0, qa0, qb0, rh
     """
     dtype = r0.dtype
     device = r0.device
-    # ni, nj, r0, da0, db0, qa0, qb0, rho0a, rho0b ... rho2b, shape (napirs,)
+    # ni, nj, r0, da0, db0, qa0, qb0, rho0a, rho0b ... rho2b, shape (npairs,)
     # tore: dictionary type tensor tore[1]=1,
     #       valence shell charge for H, tore[6]=4, valence shell charge for C
     # rho0=0.5/am
@@ -47,10 +47,10 @@ def two_elec_two_center_int_local_frame(ni, nj, r0, tore, da0, db0, qa0, qb0, rh
     # C     (SS/)=1,   (SO/)=2,   (OO/)=3,   (PP/)=4
     # C     WHERE IJ=1 IF THE ORBITALS CENTRED ON ATOM I,  =2 IF ON ATOM J.
     # da, db, dipole charge separation
-    # qa, qb, qutrupole charge separation
+    # qa, qb, quadrupole charge separation
     # tore valence shell charge: H -> +1, O -> +6
     # rho0, rho1, rho2: additive terms
-    # ni, nj, r, shape: (nparis,)
+    # ni, nj, r, shape: (npairs,)
     # ri : (npairs, 22)
     # core : (npairs, 4, 2)
     #  tore: make it like a dict
@@ -153,7 +153,7 @@ def two_elec_two_center_int_local_frame(ni, nj, r0, tore, da0, db0, qa0, qb0, rh
     ev3dsqr44 = ev3 / sqrt((r + qb)**2 + aqq)
     ev3dsqr46 = ev3 / sqrt((r + qa)**2 + aqq)
     ev3dsqr48 = ev3 / sqrt((r - qa)**2 + aqq)
-    # all the index for ri is shfited by 1 to save space
+    # all the index for ri is shifted by 1 to save space
     # C     (SS/SS)=1,   (SO/SS)=2,   (OO/SS)=3,   (PP/SS)=4,   (SS/OS)=5,
     # C     (SO/SO)=6,   (SP/SP)=7,   (OO/SO)=8,   (PP/SO)=9,   (PO/SP)=10,
     # C     (SS/OO)=11,  (SS/PP)=12,  (SO/OO)=13,  (SO/PP)=14,  (SP/OP)=15,

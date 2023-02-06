@@ -5,7 +5,7 @@ from .constants import ev
 
 def dd_qq(qn, zs, zp):
     """
-    qn: pricipal quantum number for valence shell, shape (n_atoms,)
+    qn: principal quantum number for valence shell, shape (n_atoms,)
     zs : zeta_s, shape (n_atoms,)
     zp : zeta_p, shape (n_atoms,)
 
@@ -13,7 +13,7 @@ def dd_qq(qn, zs, zp):
     qq = lambda qn, zp : np.sqrt((4.0*qn**2+6.0*qn+2.0)/20.0)/zp
     return dd, qq
       dd: dipole charge separation
-      qq: qutrupole charge separation
+      qq: quadrupole charge separation
     """
     dd = (2.0 * qn + 1.0) * (4.0 * zs * zp)**(qn + 0.5) / (zs + zp)**(2.0 * qn + 2.0) / \
         torch.sqrt(torch.tensor(3.0, dtype=zs.dtype, device=zs.device))
@@ -94,7 +94,7 @@ class additive_term_rho1(torch.autograd.Function):
 
 class additive_term_rho2(torch.autograd.Function):
     """
-    additive term rho2, rho2 = 1.0/(2*aq) : aq or add(,3) or q in mopac calpar.f
+    additive term rho2, rho2
     """
     @staticmethod
     def forward(ctx, hpp_ev, D2):
@@ -152,7 +152,7 @@ class additive_term_rho2(torch.autograd.Function):
         dD2/drho2 = - (dhpp/drho2)/(dhpp/dD2)
         dhpp/dD2 = D2/4/(D2^2+rho2^2)^(3/2) - D2/4/(2*D2^2+rho2^2)^(3/2)
         """
-        # 1 hatree  = 27.21 eV
+        # 1 Hartree  = 27.21 eV
         rho2, D2 = ctx.saved_tensors
         tmp1 = 1.0 / (D2**2 + rho2**2)**1.5
         tmp2 = 1.0 / (2.0 * D2**2 + rho2**2)**1.5

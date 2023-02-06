@@ -4,10 +4,9 @@ from .seqm_functions.energy import elec_energy_isolated_atom, pair_nuclear_energ
 from .seqm_functions.parameters import params
 from .seqm_functions.constants import ev
 import os
-import time
 
 """
-Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3
+Semi-Empirical Quantum Mechanics: AM1/MNDO/PM3
 """
 
 parameterlist = {'AM1': ['U_ss', 'U_pp', 'zeta_s', 'zeta_p', 'beta_s', 'beta_p',
@@ -28,6 +27,31 @@ parameterlist = {'AM1': ['U_ss', 'U_pp', 'zeta_s', 'zeta_p', 'beta_s', 'beta_p',
                          ]}
 
 
+def update_seqm_parameters(seqm_parameters):
+    default_seqm_parameters = {
+        'method': 'AM1',  # choice of SEQM method: AM1, MNDO, PM3
+        'scf_eps': 1.0e-6,  # SCF loop convergence criteria for change of electric energy, unit eV
+        'scf_converger': [2, 0.0],  # converger used for scf loop
+                                    # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
+                                    # [1], adaptive mixing
+                                    # [2], adaptive mixing, then pulay
+        'sp2': [False, 1.0e-5],  # whether to use SP2 algorithm in scf loop,
+                                 # [True, eps] or [False], eps for SP2 convergence criteria
+        'elements': [0, 1, 6, 7, 8],  # element types (atomic number) in the calculation, 0 for padding
+        'parameter_file_dir': os.path.abspath(os.path.dirname(__file__)) + '/params/',  # path to the parameter file
+        'learned': [],  # learned parameters name list, e.g ['U_ss']
+        'pair_outer_cutoff': 1.0e10,  # cutoff used for pairs, unit Angstrom
+        'Hf_flag': True,  # If True, the return energy Hf is heat of formation; False: atomization energy Etot-Eiso
+        'eig': False,  # if compute eigenvalues (orbital energies) and eigenvectors
+        'scf_backward': 0,  # 0 : ignore the gradient on density matrix, Hellmann-Feymann theorem
+                            # 1 : use recursive formula
+                            # 2 : do backward through scf loop directly
+        'scf_backward_eps': 1.0e-3,  # scf_backward convergence criteria for using recursive formula, unit eV
+        '2nd_grad': False,  # if second order gradient will be computed, used for force training
+    }
+    return {**default_seqm_parameters, **seqm_parameters}
+
+
 class Parser(torch.nn.Module):
     """
     parsing inputs from coordinates and types
@@ -41,7 +65,7 @@ class Parser(torch.nn.Module):
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
 
-    def forward(self, constansts, species, coordinates, *args, **kwargs):
+    def forward(self, constants, species, coordinates, *args, **kwargs):
         """
         constants : instance of Class Constants
         species : atom types for atom in each molecules,
@@ -65,7 +89,7 @@ class Parser(torch.nn.Module):
         Z = species.reshape(-1)[real_atoms]
         nHeavy = torch.sum(species > 1, dim=1)
         nHydro = torch.sum(species == 1, dim=1)
-        tore = constansts.tore
+        tore = constants.tore
         n_charge = torch.sum(tore[species], dim=1).reshape(-1).type(torch.int64)
         if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
             n_charge -= kwargs['charges'].reshape(-1).type(torch.int64)
@@ -100,7 +124,7 @@ class Parser(torch.nn.Module):
 
         paircoord = paircoord_raw[pairs]
         pairdist = pairdist_raw[pairs]
-        rij = pairdist * constansts.length_conversion_factor
+        rij = pairdist * constants.length_conversion_factor
 
         idxi = inv_real_atoms[pair_first[pairs]]
         idxj = inv_real_atoms[pair_second[pairs]]
@@ -133,12 +157,11 @@ class Pack_Parameters(torch.nn.Module):
         filedir : mopac parameter files directory
         """
         super().__init__()
+        seqm_parameters = update_seqm_parameters(seqm_parameters)
         self.elements = seqm_parameters['elements']
         self.learned_list = seqm_parameters['learned']
         self.method = seqm_parameters['method']
-        self.filedir = seqm_parameters['parameter_file_dir'] \
-            if 'parameter_file_dir' in seqm_parameters \
-            else os.path.abspath(os.path.dirname(__file__)) + '/params/'
+        self.filedir = seqm_parameters['parameter_file_dir']
         self.parameters = parameterlist[self.method]
         self.required_list = []
         for i in self.parameters:
@@ -150,7 +173,7 @@ class Pack_Parameters(torch.nn.Module):
 
     def forward(self, Z, learned_params=dict()):
         """
-        combine the learned_parames with other required parameters
+        combine the learned_params with other required parameters
         """
         for i in range(self.nrp):
             learned_params[self.required_list[i]] = self.p[Z, i]  # .contiguous()
@@ -167,25 +190,16 @@ class Hamiltonian(torch.nn.Module):
         Constructor
         """
         super().__init__()
+        seqm_parameters = update_seqm_parameters(seqm_parameters)
         # put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         # be used to restart jobs
         self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
         self.sp2 = seqm_parameters['sp2']
         self.scf_converger = seqm_parameters['scf_converger']
         # whether return eigenvalues, eigenvectors, otherwise they are None
-        if 'eig' in seqm_parameters:
-            self.eig = seqm_parameters['eig']
-        else:
-            self.eig = False
-        if 'scf_backward' in seqm_parameters:
-            self.scf_backward = seqm_parameters['scf_backward']
-        else:
-            self.scf_backward = 0
-        if 'scf_backward_eps' not in seqm_parameters:
-            seqm_parameters['scf_backward_eps'] = 1.0e-2
+        self.eig = seqm_parameters['eig']
+        self.scf_backward = seqm_parameters['scf_backward']
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_backward_eps']), requires_grad=False)
-        # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
-        # 1: use recursive formula go back through scf loop
 
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, parameters, P0=None):
         """
@@ -195,7 +209,7 @@ class Hamiltonian(torch.nn.Module):
         nHeavy : number of heavy atoms in each molecule, shape (nmol,) nmol: number of molecules in this batch
         nHydro : number of hydrogen in each molecule, shape (nmol,)
         nocc : number of occupied molecular orbitals, shape (nmol,)
-        maskd : diagonal block postions, shape (n_atoms,)
+        maskd : diagonal block positions, shape (n_atoms,)
         mask: off diagonal block positions, shape (n_pairs,)
         idxi/idxj : atom indexes for first/second atom in each pair, shape (n_pairs,)
         ni/nj : atom number for first/second atom in each pair, shape (n_pairs,)
@@ -206,7 +220,7 @@ class Hamiltonian(torch.nn.Module):
         uss, upp, gss, gsp, gpp, gp2, hsp: parameters for AM1/PM3/MNDO, shape (n_atoms,)
         #
         return F, e, P, Hcore
-        F : fock matrix, i.e. the Hamiltonian for the system, shape (nmol, molsize*4, molsize*4)
+        F : Fock matrix, i.e. the Hamiltonian for the system, shape (nmol, molsize*4, molsize*4)
         e : orbital energies, shape (nmol, molsize*4), 0 padding is used
         P : Density matrix for closed shell system, shape (nmol, molsize*4, molsize*4)
         Hcore : Hcore matrix, same shape as F
@@ -257,21 +271,19 @@ class Hamiltonian(torch.nn.Module):
 
 
 class Energy(torch.nn.Module):
+
     def __init__(self, seqm_parameters):
         """
         Constructor
         """
         super().__init__()
+        seqm_parameters = update_seqm_parameters(seqm_parameters)
         self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
-
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
         self.hamiltonian = Hamiltonian(seqm_parameters)
-        self.Hf_flag = True
-        if "Hf_flag" in seqm_parameters:
-            self.Hf_flag = seqm_parameters["Hf_flag"]
-        # Hf_flag: true return Hf, false return Etot-Eiso
+        self.Hf_flag = seqm_parameters["Hf_flag"]
 
     def forward(self, const, coordinates, species, learned_parameters=dict(), all_terms=False, P0=None, step=0, *args, **kwargs):
         """
@@ -284,8 +296,10 @@ class Energy(torch.nn.Module):
         if callable(learned_parameters):
             adict = learned_parameters(species, coordinates)
             parameters = self.packpar(Z, learned_params=adict)
-        else:
+        elif isinstance(learned_parameters, dict):
             parameters = self.packpar(Z, learned_params=learned_parameters)
+        else:
+            raise ValueError("learned_parameters is not valid")
         F, e, P, Hcore, w, charge, notconverged = self.hamiltonian(const, molsize,
                                                                    nHeavy, nHydro, nocc,
                                                                    Z, maskd,
@@ -358,11 +372,9 @@ class Force(torch.nn.Module):
 
     def __init__(self, seqm_parameters):
         super().__init__()
+        seqm_parameters = update_seqm_parameters(seqm_parameters)
         self.energy = Energy(seqm_parameters)
-        if "2nd_grad" in seqm_parameters:
-            self.create_graph = seqm_parameters["2nd_grad"]
-        else:
-            self.create_graph = False
+        self.create_graph = seqm_parameters["2nd_grad"]
         self.seqm_parameters = seqm_parameters
 
     def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0, *args, **kwargs):
@@ -371,26 +383,9 @@ class Force(torch.nn.Module):
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = \
             self.energy(const, coordinates, species,
                         learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step, *args, **kwargs)
-        # L = Etot.sum()
-        L = Hf.sum()
-        if const.do_timing:
-            t0 = time.time()
 
-        # gv = [coordinates]
-        # gradients  = grad(L, gv,create_graph=self.create_graph)
-        L.backward(create_graph=self.create_graph)
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["Force"].append(t1 - t0)
-        # force = -gradients[0]
-        if self.create_graph:
-            force = -coordinates.grad.clone()
-            with torch.no_grad():
-                coordinates.grad.zero_()
-        else:
-            force = -coordinates.grad.detach()
-            coordinates.grad.zero_()
+        force = torch.autograd.grad(Hf.sum(), coordinates, create_graph=self.create_graph)[0]
+        if not self.create_graph:
+            force = force.detach()
 
         return force, P, Etot, Hf, Eelec, Enuc, Eiso, EnucAB, e, charge, notconverged

@@ -34,7 +34,7 @@ def diatom_overlap_matrix(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     ca = tmp.clone()
     ca[cond_xy] = xij[cond_xy, 0] / xy[cond_xy]
 
-    cb = torch.where(xy >= 1.0e-10, xij[..., 2], tmp)  # xij is a unti vector already
+    cb = torch.where(xy >= 1.0e-10, xij[..., 2], tmp)  # xij is a unit vector already
     # cb = torch.where(xy>=1.0e-10, xij[...,2]/rij, tmp)
     # del tmp
     # sa = torch.where(xy>=1.0e-10, xij[...,1]/xy, torch.tensor(0.0,dtype=dtype, device=device))
@@ -44,14 +44,14 @@ def diatom_overlap_matrix(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     # sb = torch.where(xy>=1.0e-10, xy/rij, torch.tensor(0.0,dtype=dtype))
     sb = torch.where(xy >= 1.0e-10, xy, torch.tensor(0.0, dtype=dtype, device=device))
     ################################
-    # ok to use torch.where here as postion doesn't require grad
-    # if update to do MD, ca, cb, sa, sb should be chaneged to the indexing version
+    # ok to use torch.where here as position doesn't require grad
+    # if update to do MD, ca, cb, sa, sb should be changed to the indexing version
     ################################
 
     # overlap matrix in the local frame
     # first row  - first row  : ii = 1, jcall = 2
     # first row  - second row : ii = 2, jcall = 3
-    # second row - secpmd row : ii = 4, jcall = 4
+    # second row - second row : ii = 4, jcall = 4
 
     # only first and second row are included here
     # one-element slice to keep dim
@@ -68,7 +68,7 @@ def diatom_overlap_matrix(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     jcall[(qni == 2) & (qnj == 1)] = 3
     jcall[(qni == 2) & (qnj == 2)] = 4
     if torch.any(jcall == 0):
-        raise ValueError("\nError from diat.py, overlap matrix\nSome elements are not supported yet")
+        raise ValueError("Some elements are not supported yet")
 
     # na>=nb
     # setc.isp=2
@@ -77,7 +77,7 @@ def diatom_overlap_matrix(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     # setc.sb = s1 = zeta_A
 
     # change to atomic units, a0 here is taken from mopac, different from the standard value
-    # r is already in unit of bohr radius, AU
+    # r is already in unit of Bohr radius, AU
 
     # parameter_set = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
     #                 'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'alpha']
@@ -221,8 +221,8 @@ def aintgs(x0, jcall):
     # c = exp(-alpha)
     # jcall >=2, and = 2,3,4 for first and second row elements
 
-    # in same case x will be zero, which causes an issue when backpropagating
-    # like zete_p from Hydrogen, H -  H Pair
+    # in same case x will be zero, which causes an issue when do back propagation
+    # like zeta_p from Hydrogen, H -  H Pair
     # or pairs for same atom, then rab = 0
     t = 1.0 / torch.tensor(0.0, dtype=dtype, device=device)
     x = torch.where(x0 != 0, x0, t).reshape(-1, 1)
@@ -282,7 +282,7 @@ def bintgs(x0, jcall):
 
     # do some test to choose which one is faster
 
-    # can't use this way torch.where to do backpropagating
+    # can't use this way torch.where to do back propagation
     b1 = torch.ones_like(x) * 2.0
     b2 = torch.zeros_like(x)
     b3 = torch.ones_like(x) * (2.0 / 3.0)

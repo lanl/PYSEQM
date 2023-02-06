@@ -7,10 +7,9 @@ from .SP2 import SP2
 from .pack import pack, unpack
 from .diag import sym_eig_trunc, sym_eig_trunc1
 import warnings
-import time
-# from .check import check
+
 # scf_backward==0: ignore the gradient on density matrix
-# scf_backward==1: use recursive formu
+# scf_backward==1: use recursive formula
 # scf_backward==2: go backward scf loop directly
 
 debug = False
@@ -25,7 +24,7 @@ RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 # truncate gradient(set the gradient on non-converged molecules as 0.0)
 
 RAISE_ERROR_IF_SCF_FORWARD_FAILS = False
-# if true, raise error rather than ignore those non-convered molecules
+# if true, raise error rather than ignore those non-converged molecules
 
 
 # use constant mixing
@@ -404,7 +403,7 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp,
 
     # start prepare for pulay algorithm
     counter = -1  # index of stored FPPF for current iteration: 0, 1, ..., cFock-1
-    cFock = 0  # in current iteraction, number of fock matrixes stored, cFock <= nFock
+    cFock = 0  # in current iteration, number of fock matrixes stored, cFock <= nFock
     # Pulay algorithm needs at least two previous stored density and Fock matrixes to start
     while (cFock < 2):
         if notconverged.any():
@@ -657,7 +656,7 @@ class SCF(torch.autograd.Function):
 class SCF0(SCF):
     @staticmethod
     def backward(ctx, grad0, grad1):
-        # igonre the gradient on density matrix
+        # ignore the gradient on density matrix
         return None, None, None, None, None, None, None, \
             None, None, None, \
             None, None, \
@@ -681,16 +680,10 @@ def scf_loop(const, molsize,
 
     nmol = nOccMO.shape[0]
     tore = const.tore
-    if const.do_timing:
-        t0 = time.time()
+
     M, w = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z,
                  zetas, zetap, uss, upp, gss, gpp, gp2, hsp, beta, Kbeta=Kbeta)
-    if const.do_timing:
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        t1 = time.time()
-        const.timing["Hcore + STO Integrals"].append(t1 - t0)
-        t0 = time.time()
+
     if scf_backward == 2:
         P = None
     if not torch.is_tensor(P):
@@ -717,7 +710,7 @@ def scf_loop(const, molsize,
     # """
     if scf_backward == 2:
         if sp2[0]:
-            warnings.warn('SP2 is not used for direct backpropagation through scf loop')
+            warnings.warn('SP2 is not used for direct back propagation through scf loop')
             sp2[0] = False
         if scf_converger[0] == 0:
             Pconv, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
@@ -730,7 +723,7 @@ def scf_loop(const, molsize,
                                                nmol, molsize,
                                                maskd, mask, idxi, idxj, P, eps, sp2=sp2, backward=True)
         else:
-            raise ValueError("""For direct backpropagation through scf,
+            raise ValueError("""For direct back propagation through scf,
                                 must use constant mixing at this moment\n
                                 set scf_converger=[0, alpha] or [1]\n""")
     # """
@@ -760,18 +753,11 @@ def scf_loop(const, molsize,
     # if notconverged.all():
     #    raise ValueError("SCF for all the molecules in the batch doesn't converge, try to increase MAX_ITER")
 
-    if const.do_timing:
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        t1 = time.time()
-        const.timing["SCF"].append(t1 - t0)
-
     F = fock(nmol, molsize, Pconv, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4) \
              .transpose(2, 3) \
              .reshape(nmol, 4 * molsize, 4 * molsize)
-    #
-    # return Fock matrix, eigenvalues, density matrix, Hcore,  2 electron 2 center integrals, eigenvectors
+
     if eig:
         """
         e, v = list(zip(*list(map(

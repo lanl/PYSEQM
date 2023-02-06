@@ -10,7 +10,7 @@ P: Dynamic Density Matrix (field tensor)
 
 P = P(t)
 F(P) = Hcore + G(P) (Directly construct)
-D <= F (diagonization or just use SP2)
+D <= F (diagonalization or just use SP2)
 
 #electronic energy
 E(D,P) = (2*tr(Hcore*D) + tr((2D-P)*G(P)))/2.0
@@ -27,21 +27,19 @@ here Tr(D) = 2*Nocc
 import torch
 from .seqm_functions.energy import total_energy, pair_nuclear_energy, elec_energy_isolated_atom, heat_formation
 from .seqm_functions.SP2 import SP2
-from .basics import Parser, Pack_Parameters
+from .basics import Parser, Pack_Parameters, update_seqm_parameters
 from .seqm_functions.fock import fock
 from .seqm_functions.hcore import hcore
 from .seqm_functions.diag import sym_eig_trunc
 from .seqm_functions.pack import pack, unpack
 from .basics import Force
 from .MolecularDynamics import Molecular_Dynamics_Basic
-from torch.autograd import grad
-import time
 
 
 def elec_energy_xl(D, P, F, Hcore):
     """
     XL_BOMD
-    electrionic energy is defined as:
+    electronic energy is defined as:
     E(D,P) = (2*tr(Hcore*D) + tr((2D-P)*G(P)))/2.0
            = tr(D*F)-0.5*Tr((F-Hcore)*P)
     """
@@ -59,15 +57,13 @@ class EnergyXL(torch.nn.Module):
         Constructor
         """
         super().__init__()
-
+        seqm_parameters = update_seqm_parameters(seqm_parameters)
         self.method = seqm_parameters['method']
         self.seqm_parameters = seqm_parameters
 
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
-        self.Hf_flag = True
-        if "Hf_flag" in seqm_parameters:
-            self.Hf_flag = seqm_parameters["Hf_flag"]  # True: Heat of formation, False: Etot-Eiso
+        self.Hf_flag = seqm_parameters["Hf_flag"]  # True: Heat of formation, False: Etot-Eiso
 
     def forward(self, const, coordinates, species, P, learned_parameters=dict(), all_terms=False, step=0, *args, **kwargs):
         """
@@ -89,8 +85,6 @@ class EnergyXL(torch.nn.Module):
             Kbeta = parameters["Kbeta"]
         else:
             Kbeta = None
-        if const.do_timing:
-            t0 = time.time()
         M, w = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij, Z,
                      zetas=parameters['zeta_s'],
                      zetap=parameters['zeta_p'],
@@ -103,11 +97,6 @@ class EnergyXL(torch.nn.Module):
                      beta=beta,
                      Kbeta=Kbeta)
         #
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["Hcore + STO Integrals"].append(t1 - t0)
 
         Hcore = M.reshape(nmol, molsize, molsize, 4, 4) \
                  .transpose(2, 3) \
@@ -121,18 +110,11 @@ class EnergyXL(torch.nn.Module):
                  hsp=parameters['h_sp'])
         #
         sp2 = self.seqm_parameters['sp2']
-        if const.do_timing:
-            t0 = time.time()
         with torch.no_grad():
             if sp2[0]:
                 D = unpack(SP2(pack(F, nHeavy, nHydro), nocc, sp2[1]), nHeavy, nHydro, F.shape[-1])
             else:
                 D = sym_eig_trunc(F, nHeavy, nHydro, nocc)[1]
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["D*"].append(t1 - t0)
         # nuclear energy
         alpha = parameters['alpha']
         if self.method == 'MNDO':
@@ -196,36 +178,23 @@ class ForceXL(torch.nn.Module):
     def __init__(self, seqm_parameters):
         super().__init__()
         self.energy = EnergyXL(seqm_parameters)
-        self.seqm_parameters = seqm_parameters
+        self.seqm_parameters = update_seqm_parameters(seqm_parameters)
 
     def forward(self, const, coordinates, species, P, learned_parameters=dict(), step=0, *args, **kwargs):
 
         coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, D = \
             self.energy(const, coordinates, species, P, learned_parameters=learned_parameters, all_terms=True, step=step, *args, **kwargs)
-        L = Hf.sum()
-        if const.do_timing:
-            t0 = time.time()
-        gv = [coordinates]
-        gradients = grad(L, gv)
-        coordinates.grad = gradients[0]
-        # """
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["Force"].append(t1 - t0)
-        with torch.no_grad():
-            force = -coordinates.grad.clone()
-            coordinates.grad.zero_()
-        # return force, Etot, D.detach()
-        del Etot, Eelec, Enuc, Eiso, EnucAB, L
+
+        force = torch.autograd.grad(Hf.sum(), coordinates)[0].detach()
+
+        del Etot, Eelec, Enuc, Eiso, EnucAB
         return force, Hf, D.detach()
 
 
 class XL_BOMD(Molecular_Dynamics_Basic):
     """
-    perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
+    perform basic molecular dynamics with velocity verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
 
@@ -280,8 +249,6 @@ class XL_BOMD(Molecular_Dynamics_Basic):
     def one_step(self, const, step, mass, coordinates, velocities, species, acc, D, P, Pt, learned_parameters=dict(), *args, **kwargs):
         # cindx: show in Pt, which is the latest P
         dt = self.timestep
-        if const.do_timing:
-            t0 = time.time()
 
         with torch.no_grad():
             velocities.add_(0.5 * acc * dt)
@@ -302,16 +269,11 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             D = D.detach()
             acc = force / mass * self.acc_scale
             velocities.add_(0.5 * acc * dt)
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["MD"].append(t1 - t0)
         return coordinates, velocities, acc, D, P, Pt, Hf, force
 
     def run(self, const, steps, coordinates, velocities, species, learned_parameters=dict(), Pt=None, *args, **kwargs):
         MASS = torch.as_tensor(const.mass)
-        # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
+        # put the padding virtual atom mass finite as for acceleration, F/m evaluation.
         MASS[0] = 1.0
         mass = MASS[species].unsqueeze(2)
         acc, D = self.initialize(const, mass, coordinates, species, learned_parameters=learned_parameters, *args, **kwargs)
@@ -356,7 +318,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
 
                 # control energy shift
                 if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                    # scale velocities to adjust kinetic energy and compenstate the energy shift
+                    # scale velocities to adjust kinetic energy and compensate the energy shift
                     Eshift = Ek + L - E0
                     self.control_shift(velocities, Ek, Eshift)
                     Ek, T = self.kinetic_energy(const, mass, species, velocities)

@@ -1,7 +1,7 @@
 import torch
 
 ev = 27.21  # used in mopac7
-# 1 hatree = 27.211386 eV
+# 1 Hartree = 27.211386 eV
 # ev =  27.211386
 
 a0 = 0.529167  # used in mopac7
@@ -25,9 +25,9 @@ class Constants(torch.nn.Module):
         """
         Constructor
         length_conversion_factor : atomic unit is used for length inside seqm
-            convert the length by  oldlength*length_conversion_factor  to atomic units
-            default value assume Angstrom used outside, and times 1.0/bohr_radius
-        energy_conversion_factor : eV usedfor energy inside sqem
+            convert the length by  old_length*length_conversion_factor  to atomic units
+            default value assume Angstrom used outside, and times 1.0/Bohr_radius
+        energy_conversion_factor : eV used for energy inside seqm
             convert by multiply energy_conversion_factor
             default value assumes eV used outside
         """
@@ -35,7 +35,7 @@ class Constants(torch.nn.Module):
         super().__init__()
 
         # atomic unit for length is used in seqm
-        # 1.8897261246364832 = 1.0/0.5291772109  1.0/bohr radius
+        # 1.8897261246364832 = 1.0/0.5291772109  1.0/Bohr radius
         # factor convert length to atomic unit (default is from Angstrom to atomic unit)
         self.length_conversion_factor = length_conversion_factor
         # self.a0 = 0.529167
@@ -44,7 +44,7 @@ class Constants(torch.nn.Module):
         # factor converting energy to eV (default is eV)
         self.energy_conversion_factor = energy_conversion_factor
         # self.ev = 27.21
-        # 1 hatree = 27.211386 eV
+        # 1 Hartree = 27.211386 eV
         # self.ev =  27.211386
         # valence shell charge for each atom type
         # tore[1]=1, Hydrogen has 1.0 charge on valence shell
@@ -126,11 +126,3 @@ class Constants(torch.nn.Module):
         self.gppc = torch.nn.Parameter(gppc, requires_grad=False)
         self.eheat = torch.nn.Parameter(eheat / ev_kcalpmol, requires_grad=False)
         self.mass = torch.nn.Parameter(mass, requires_grad=False)
-        self.do_timing = False
-        if self.do_timing:
-            self.timing = {"Hcore + STO Integrals": [],
-                           "SCF": [],
-                           "Force": [],
-                           "MD": [],
-                           "D*": []
-                           }
