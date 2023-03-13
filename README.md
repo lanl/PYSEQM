@@ -44,10 +44,12 @@ model.pt
 
 ## Authors:
 
-TBD
+Maksim Kulichenko, [Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
 ## Citation:
 [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
+[Zhou, Guoqing, et al. "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics." *Proceedings of the National Academy of Sciences* 119.27 (2022): e2120333119.](https://www.pnas.org/doi/10.1073/pnas.2120333119)
+[Kulichenko, Maksim, et al. "Semi-Empirical Shadow Molecular Dynamics: A PyTorch implementation." *arXiv:2303.00689* (2023).](https://arxiv.org/abs/2303.00689)
 
 ## Acknowledgments:
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T-1
