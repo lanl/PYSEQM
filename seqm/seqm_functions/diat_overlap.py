@@ -188,7 +188,8 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     casb = ca*sb
     cacb = ca*cb
 
-
+    #####
+    #####
     di[...,0,0] = S111
     #jcallg2 = (jcall>2)
     #di[jcallg2,1,0] = S211[jcallg2,0]*ca[jcallg2,0]*sb[jcallg2,0]
@@ -224,6 +225,53 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
                      +S222[jcall4]*sb[jcall4]**2
     #on pairs with same atom, diagonal part
     #di[jcall==0,:,:] = torch.diag(torch.ones(4,dtype=dtype)).reshape((-1,4,4))
+    
+    #####
+    #####
+#     di[...,0,0] = S111
+#     #the fraction of H-H is low, may not necessary to use indexing
+#     di[...,1,0] = S211*ca*sb
+#     di[...,2,0] = S211*sa*sb
+#     di[...,3,0] = S211*cb
+    
+#     S121_jcall4 = S121[jcall4]
+#     S221_jcall4 = S221[jcall4]
+#     S222_jcall4 = S222[jcall4]
+#     casb_jcall4 = casb[jcall4]
+#     sasb_jcall4 = sasb[jcall4]
+#     cb_jcall4 = cb[jcall4]
+#     cacb_jcall4 = cacb[jcall4]
+#     sa_jcall4 = sa[jcall4]
+#     sacb_jcall4 = sacb[jcall4]
+#     ca_jcall4 = ca[jcall4]
+#     sb_jcall4 = sb[jcall4]
+    
+#     #jcall==4, pq1=pq2=2, ii=4, second - second row
+#     di[jcall4,0,1] = -S121_jcall4*casb_jcall4
+#     di[jcall4,0,2] = -S121_jcall4*sasb_jcall4
+#     di[jcall4,0,3] = -S121_jcall4*cb_jcall4
+#     di[jcall4,1,1] = -S221_jcall4*casb_jcall4**2 \
+#                      +S222_jcall4*(cacb_jcall4**2+sa_jcall4**2)
+#     di[jcall4,1,2] = -S221_jcall4*casb_jcall4*sasb_jcall4 \
+#                      +S222_jcall4*(cacb_jcall4*sacb_jcall4-sa_jcall4*ca_jcall4)
+#     di[jcall4,1,3] = -S221_jcall4*casb_jcall4*cb_jcall4 \
+#                      -S222_jcall4*cacb_jcall4*sb_jcall4
+#     di[jcall4,2,1] = -S221_jcall4*sasb_jcall4*casb_jcall4 \
+#                      +S222_jcall4*(sacb_jcall4*cacb_jcall4-ca_jcall4*sa_jcall4)
+#     di[jcall4,2,2] = -S221_jcall4*sasb_jcall4**2 \
+#                      +S222_jcall4*(sacb_jcall4**2+ca_jcall4**2)
+#     di[jcall4,2,3] = -S221_jcall4*sasb_jcall4*cb_jcall4 \
+#                      -S222_jcall4*sacb_jcall4*sb_jcall4
+#     di[jcall4,3,1] = -S221_jcall4*cb_jcall4*casb_jcall4 \
+#                      -S222_jcall4*sb_jcall4*cacb_jcall4
+#     di[jcall4,3,2] = -S221_jcall4*cb_jcall4*sasb_jcall4 \
+#                      -S222_jcall4*sb_jcall4*sacb_jcall4
+#     di[jcall4,3,3] = -S221_jcall4*cb_jcall4**2 \
+#                      +S222_jcall4*sb_jcall4**2   
+    
+    #####
+    #####
+    
     """
     return S111, S211, S121, S221, S222
 
@@ -374,16 +422,39 @@ def bintgs(x0, jcall):
     # i=0        2  1/3   1/60  1/2520     2/(m!*(m+1))
     # i=2      2/3  1/5   1/84  1/3240     2/(m!*(m+3))
     # i=4      2/5  1/7  1/108  1/3960     2/(m!*(m+5))
-    # x_cond2 = x[cond2]
-    # x_cond2_2 = torch.square(x_cond2)
-    # x_cond2_3 = x_cond2*x_cond2_2
-    # x_cond2_4 = torch.square(x_cond2_sq)
-    # x_cond2_5 = x_cond2_4 * x_cond2
-    # x_cond2_6 = x_cond2_2*x_cond2_4
+
     
-    b1[cond2] = 2.0     + x[cond2]**2/3.0 + x[cond2]**4/60.0 + x[cond2]**6/2520.0
-    b3[cond2] = 2.0/3.0 + x[cond2]**2/5.0 + x[cond2]**4/84.0 + x[cond2]**6/3240.0
-    b5[cond2] = 2.0/5.0 + x[cond2]**2/7.0 + x[cond2]**4/108.0 + x[cond2]**6/3960.0
+    #####
+    ##### OLD
+#     b1[cond2] = 2.0     + x[cond2]**2/3.0 + x[cond2]**4/60.0 + x[cond2]**6/2520.0
+#     b3[cond2] = 2.0/3.0 + x[cond2]**2/5.0 + x[cond2]**4/84.0 + x[cond2]**6/3240.0
+#     b5[cond2] = 2.0/5.0 + x[cond2]**2/7.0 + x[cond2]**4/108.0 + x[cond2]**6/3960.0
+#     #b5[cond2 & (jcall>=4)] = -x[cond2]*2.0/7.0 - x[cond2]**3/27.0 - x[cond2]**5/660.0
+
+#     # b_{i+1}(x) = \sum_m (-x)^m * (2.0 * (m+i+1)%2 ) / m! / (m+i+1)
+#     # i is odd, i = 1,3, m= 1,3,5
+#     # b_{i+1} (x) = \sum_{m=1,3,5} -x^m * 2.0/(m! * (m+i+1))
+#     # factors
+#     #      m =    1     3      5
+#     # i=1       2/3  1/15  1/420  2/(m!*(m+2))
+#     # i=3       2/5  1/21  1/540  2/(m!*(m+4))
+
+#     b2[cond2] = -2.0/3.0*x[cond2] - x[cond2]**3/15.0 - x[cond2]**5/420.0
+#     b4[cond2] = -2.0/5.0*x[cond2] - x[cond2]**3/21.0 - x[cond2]**5/540.0
+#     #b4[cond2 & (jcall>=3)] = -2.0/5.0*x[cond2] - x[cond2]**3/21.0 - x[cond2]**5/540.0
+    
+    #####
+    ##### optimized
+    x_cond2 = x[cond2]
+    x_cond2_2 = torch.square(x_cond2)
+    x_cond2_3 = x_cond2*x_cond2_2
+    x_cond2_4 = torch.square(x_cond2_2)
+    x_cond2_5 = x_cond2_4 * x_cond2
+    x_cond2_6 = x_cond2_2*x_cond2_4
+    
+    b1[cond2] = 2.0     + x_cond2_2/3.0 + x_cond2_4/60.0 + x_cond2_6/2520.0
+    b3[cond2] = 2.0/3.0 + x_cond2_2/5.0 + x_cond2_4/84.0 + x_cond2_6/3240.0
+    b5[cond2] = 2.0/5.0 + x_cond2_2/7.0 + x_cond2_4/108.0 + x_cond2_6/3960.0
     #b5[cond2 & (jcall>=4)] = -x[cond2]*2.0/7.0 - x[cond2]**3/27.0 - x[cond2]**5/660.0
 
     # b_{i+1}(x) = \sum_m (-x)^m * (2.0 * (m+i+1)%2 ) / m! / (m+i+1)
@@ -394,8 +465,11 @@ def bintgs(x0, jcall):
     # i=1       2/3  1/15  1/420  2/(m!*(m+2))
     # i=3       2/5  1/21  1/540  2/(m!*(m+4))
 
-    b2[cond2] = -2.0/3.0*x[cond2] - x[cond2]**3/15.0 - x[cond2]**5/420.0
-    b4[cond2] = -2.0/5.0*x[cond2] - x[cond2]**3/21.0 - x[cond2]**5/540.0
+    b2[cond2] = -2.0/3.0*x_cond2 - x_cond2_3/15.0 - x_cond2_5/420.0
+    b4[cond2] = -2.0/5.0*x_cond2 - x_cond2_3/21.0 - x_cond2_5/540.0
     #b4[cond2 & (jcall>=3)] = -2.0/5.0*x[cond2] - x[cond2]**3/21.0 - x[cond2]**5/540.0
+    
+    #####
+    #####
 
     return torch.cat((b1, b2, b3, b4, b5), dim=1)

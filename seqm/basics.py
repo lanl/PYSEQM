@@ -39,6 +39,10 @@ class Parser(torch.nn.Module):
         super().__init__()
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
+        if 'UHF' in seqm_parameters:
+            self.uhf = seqm_parameters['UHF']
+        else:
+            self.uhf = False
 
     def forward(self, molecule, return_mask_l=False, *args, **kwargs):
         """
@@ -68,12 +72,21 @@ class Parser(torch.nn.Module):
         n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64)
         if torch.is_tensor(molecule.tot_charge):
             n_charge -= molecule.tot_charge.reshape(-1).type(torch.int64)
-        nocc = n_charge//2
         
-        #print(nocc)
+        if self.uhf:
+            nocc_alpha = n_charge/2 + (molecule.mult-1)/2
+            nocc_beta = n_charge/2 - (molecule.mult-1)/2
+            if (nocc_alpha%1 != 0).any() or (nocc_beta%1 != 0).any():
+                raise ValueError("Invalid charge/multiplicity combination!")
+            nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)
+            nocc = nocc.type(torch.int64)
+        else:
+            nocc = n_charge//2
+            if ((n_charge%2)==1).any():
+                raise ValueError("Only closed shell system (with even number of electrons) are supported")
+        
 
-        if ((n_charge%2)==1).any():
-            raise ValueError("Only closed shell system (with even number of electrons) are supported")
+        
         t1 = (torch.arange(molsize,dtype=torch.int64,device=device)*(molsize+1)).reshape((1,-1))
         t2 = (torch.arange(nmol,dtype=torch.int64,device=device)*molsize**2).reshape((-1,1))
         maskd = (t1+t2).reshape(-1)[real_atoms]
@@ -356,6 +369,11 @@ class Energy(torch.nn.Module):
         self.Hf_flag = True
         if "Hf_flag" in seqm_parameters:
             self.Hf_flag = seqm_parameters["Hf_flag"] # Hf_flag: true return Hf, false return Etot-Eiso
+        
+        if 'UHF' in seqm_parameters:
+            self.uhf = seqm_parameters['UHF']
+        else:
+            self.uhf = False
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
@@ -377,7 +395,18 @@ class Energy(torch.nn.Module):
                                                  mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, \
                                                  parameters, P0=P0)
 
-        e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
+        if torch.is_tensor(e) and self.uhf == False:
+            e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
+        else:
+            if 0 in nocc:
+                print('Zero occupied alpha or beta orbitals found (e.g. triplet H2). HOMO-LUMO gaps are not available.')
+                e_gap = torch.tensor([])
+            else:
+                e_gap_a = e[:,0].gather(1, nocc[:,0].unsqueeze(0).T) - e[:,0].gather(1, nocc[:,0].unsqueeze(0).T-1)
+                e_gap_b = e[:,1].gather(1, nocc[:,1].unsqueeze(0).T) - e[:,1].gather(1, nocc[:,1].unsqueeze(0).T-1)
+                e_gap = torch.stack((e_gap_a, e_gap_b), dim=1)
+
+            
         #nuclear energy
         alpha = parameters['alpha']
         if self.method=='MNDO':
@@ -451,6 +480,10 @@ class Force(torch.nn.Module):
         else:
             self.create_graph = False
         self.seqm_parameters = seqm_parameters
+        if 'UHF' in seqm_parameters:
+            self.uhf = seqm_parameters['UHF']
+        else:
+            self.uhf = False
 
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, *args, **kwargs):
@@ -458,6 +491,10 @@ class Force(torch.nn.Module):
         molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
+        
+        if torch.is_tensor(e):
+            e = e.detach()
+            e_gap = e_gap.detach()
         #L = Etot.sum()
         L = Hf.sum()
         if molecule.const.do_timing:
@@ -480,4 +517,4 @@ class Force(torch.nn.Module):
             force = -molecule.coordinates.grad.detach()
             molecule.coordinates.grad.zero_()
 
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e.detach(), e_gap.detach(), charge, notconverged
+        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged

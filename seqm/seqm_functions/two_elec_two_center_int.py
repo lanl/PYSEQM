@@ -105,6 +105,10 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     wHH, riXH, ri, coreHH, coreXH, core = \
            TETCILF(ni,nj,rij, tore, \
                 da, db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b)
+    
+    #print(wHH)
+    #print(riXH)
+    #print(ri)
     #
 
     ###############################33
@@ -875,4 +879,5 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     wc[HH,0,0] = wHH
     wc[XH,:,0] = wXH
     wc[XX] = w.reshape((-1,10,10))
+    #print('w: ', wc)
     return wc, e1b, e2a

@@ -3,7 +3,7 @@ import torch
 # it is better to define mask as the same way defining maskd
 # as it will be better to do summation using the representation of P in
 
-def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp):
+def fock_u(nmol, molsize, P0, P0Alpha, P0Beta, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp):
     """
     construct fock matrix
     """
@@ -24,6 +24,12 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     # P0: shape (nmol, 4*molsize, 4*molsize)
     P = P0.reshape((nmol,molsize,4,molsize,4)) \
           .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
+    
+    PAlpha = P0Alpha.reshape((nmol,molsize,4,molsize,4)) \
+          .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
+    
+    PBeta = P0Beta.reshape((nmol,molsize,4,molsize,4)) \
+          .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
 
 
     #at this moment,  P has the same shape as M, as it is more convenient
@@ -33,6 +39,9 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     # for the diagonal block, the summation over ortitals on the same atom in Fock matrix
     F = M.clone()  # Hcore part
     Pptot = P[...,1,1]+P[...,2,2]+P[...,3,3]
+    PAlpha_ptot = PAlpha[...,1,1]+PAlpha[...,2,2]+PAlpha[...,3,3]
+    PBeta_ptot = PBeta[...,1,1]+PBeta[...,2,2]+PBeta[...,3,3]
+
     #  F_mu_mu = Hcore + \sum_nu^A P_nu_nu (g_mu_nu - 0.5 h_mu_nu) + \sum^B
     """
     #(s,s)
@@ -53,16 +62,17 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     ### http://openmopac.net/manual/1c2e.html
     #(s,s)
     TMP = torch.zeros_like(M)
-    TMP[maskd,0,0] = 0.5*P[maskd,0,0]*gss + Pptot[maskd]*(gsp-0.5*hsp)
+    TMP[maskd,0,0] = PBeta[maskd,0,0]*gss + Pptot[maskd]*gsp-PAlpha_ptot[maskd]*hsp
     for i in range(1,4):
         #(p,p)
-        TMP[maskd,i,i] = P[maskd,0,0]*(gsp-0.5*hsp) + 0.5*P[maskd,i,i]*gpp \
-                        + (Pptot[maskd] - P[maskd,i,i]) * (1.25*gp2-0.25*gpp)
+        TMP[maskd,i,i] = P[maskd,0,0]*gsp-PAlpha[maskd,0,0]*hsp + PBeta[maskd,i,i]*gpp \
+                        +(Pptot[maskd]-P[maskd,i,i])*gp2 - 0.5*(PAlpha_ptot[maskd]-PAlpha[maskd,i,i])*(gpp-gp2)
+        
         #(s,p) = (p,s) upper triangle
-        TMP[maskd,0,i] = P[maskd,0,i]*(1.5*hsp - 0.5*gsp)
+        TMP[maskd,0,i] = 2*P[maskd,0,i]*hsp - PAlpha[maskd,0,i]*(hsp+gsp)
     #(p,p*)
     for i,j in [(1,2),(1,3),(2,3)]:
-        TMP[maskd,i,j] = P[maskd,i,j]* (0.75*gpp - 1.25*gp2)
+        TMP[maskd,i,j] = P[maskd,i,j] * (gpp - gp2) - 0.5*PAlpha[maskd,i,j]*(gpp + gp2)
 
     #print('1c-2e\n', TMP)
     #print(TMP)
@@ -134,11 +144,11 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
                         [3,4,5,8],
                         [6,7,8,9]],dtype=torch.int64, device=device)
     # Pp =P[mask], P_{mu \in A, lambda \in B}
-    Pp = -0.5*P[mask]
+    #Pp = -0.5*P[mask]
     for i in range(4):
         for j in range(4):
             #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            sum[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]],dim=(1,2))
+            sum[...,i,j] = torch.sum(-PAlpha[mask]*w[...,ind[i],:][...,:,ind[j]],dim=(1,2))
     #
     F.index_add_(0,mask,sum)
 

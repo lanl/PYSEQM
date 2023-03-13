@@ -41,8 +41,7 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
     #C     (SS/OO)=11,  (SS/PP)=12,  (SO/OO)=13,  (SO/PP)=14,  (SP/OP)=15,
     #C     (OO/OO)=16,  (PP/OO)=17,  (OO/PP)=18,  (PP/PP)=19,  (PO/PO)=20,
     #C     (PP/P*P*)=21,   (P*P/P*P)=22.
-    #C *** THE STORAGE OF THE NUCLEAR ATTRACTION INTEGRALS  CORE(KL/IJ) IS
-    #C     (SS/)=1,   (SO/)=2,   (OO/)=3,   (PP/)=4
+    #C *** THE STORAGE OF THE NUCLEAR ATTRACTION INTEGRALS  CORE(KL/IJ) IS 
     #C     WHERE IJ=1 IF THE ORBITALS CENTRED ON ATOM I,  =2 IF ON ATOM J.
     # da, db, dipole charge separation
     # qa, qb, qutrupole charge separation

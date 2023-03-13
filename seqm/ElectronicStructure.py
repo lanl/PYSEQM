@@ -55,7 +55,12 @@ class Electronic_Structure(torch.nn.Module):
                         self.conservative_force_xl(molecule, P0, learned_parameters, xl_bomd_params=xl_bomd_params, *args, **kwargs)
 
         with torch.no_grad():
-            molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
+            # $$$
+            if molecule.dm.dim() ==4:
+                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0])
+                molecule.q -= self.atomic_charges(molecule.dm[:,1]) # unit +e, i.e. electron: -1.0
+            else:
+                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
             molecule.d = self.dipole(molecule.q, molecule.coordinates)
             
 

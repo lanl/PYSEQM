@@ -477,7 +477,12 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             #Pt (2,3,4,5,0,1), step=6n+2
             cindx = step%self.m
             # eq. 22 in https://doi.org/10.1063/1.3148075
-            P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            
+            #### Scaling delta function. Use eq with c if stability problems occur.
+            c = 0.9
+            P = self.coeff_D*c*molecule.dm + self.coeff_D*(1-c)*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            
+            #P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
             Pt[(self.m-1-cindx)] = P
     
         self.esdriver(molecule, learned_parameters=learned_parameters, xl_bomd_params = self.xl_bomd_params, P0=P, dm_prop='XL-BOMD', *args, **kwargs)
@@ -592,7 +597,7 @@ class KSA_XL_BOMD(XL_BOMD):
         """
         super().__init__(*args, **kwargs)
 
-    #@attach_profile_range("KSA_XL_BOMD_ONESTEP")
+    @attach_profile_range("KSA_XL_BOMD_ONESTEP")
     def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
         dt = self.timestep

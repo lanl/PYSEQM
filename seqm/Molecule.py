@@ -4,7 +4,7 @@ import time
 from .basics import Parser
 
 class Molecule(torch.nn.Module):
-    def __init__(self, const, seqm_parameters, coordinates, species, charges=0, *args, **kwargs):
+    def __init__(self, const, seqm_parameters, coordinates, species, charges=0, mult=1, *args, **kwargs):
         """
         unit for timestep is femtosecond
         output: [molecule id list, frequency N, prefix]
@@ -18,6 +18,9 @@ class Molecule(torch.nn.Module):
         self.coordinates = coordinates
         self.species = species
         self.tot_charge = charges
+        self.mult = mult
+        if not torch.is_tensor(self.mult):
+            self.mult = torch.ones(coordinates.size()[0], device = coordinates.device)
         
         self.parser = Parser(self.seqm_parameters)
         

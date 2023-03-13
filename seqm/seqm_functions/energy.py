@@ -32,10 +32,41 @@ def elec_energy(P,F,Hcore):
 
     # Eelec = 0.5 * tr(P(Hcore+F))  # matmul
     # Eelec = 0.5 * \sum P*(H+F)    # elementwise product
-
-    Eelec = 0.5*torch.sum(P*(h+F),dim=(1,2))
+    
+    if len(F.size()) == 4:
+        Eelec = 0.5*torch.sum((P[:,0]+P[:,1])*h+P[:,0]*F[:,0] + P[:,1]*F[:,1],dim=(1,2))
+    else:
+        Eelec = 0.5*torch.sum(P*(h+F),dim=(1,2))
+    # print('h\n', h)
+    # print('P\n', P)
+    # print('F\n', F)
+    # print('Eelec\n', Eelec)
 
     return Eelec
+
+# def elec_energy_open_shell(P,F,Hcore):
+#     """
+#     Get the electronic energy
+#     P: density matrix, shape (nmol, molsize*4, molsize*4)
+#     F: fock matrix, shape same as P
+#     Hcore: Hcore matrix, shape (nmol, 4*molsize, 4*molsize)
+#     return Eelec : electronic energy, shape (nmol,)
+#     P, F: full, has upper and lower triangle
+#     Hcore : only have upper triangle as constructed from hcore.py
+#     """
+#     h = Hcore.triu()+Hcore.triu(1).transpose(1,2)
+
+#     # Eelec = 0.5 * tr(P(Hcore+F))  # matmul
+#     # Eelec = 0.5 * \sum P*(H+F)    # elementwise product
+
+#     Eelec = 0.5*torch.sum(P*(h+F),dim=(1,2))
+#     # print('h\n', h)
+#     # print('P\n', P)
+#     # print('F\n', F)
+#     # print('Eelec\n', Eelec)
+
+#     return Eelec
+
 
 def elec_energy_xl(D,P,F,Hcore):
     """
