@@ -1,6 +1,5 @@
 import torch
 from .pack import *
-
 #this pseudo_diag is not efficient to be implemented in python
 #as it applies a series Jacobi transformation on eigenvectors (in place operations)
 #have to use python for loop
@@ -146,7 +145,6 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
             if cond[i]:
                 e[i,norb[i]:size] = 0.0
         
-        
     else:#need to add large diagonal values to replace 0 padding
         #Gershgorin circle theorem estimate upper bounds of eigenvalues            
         x0 = pack(x, nheavyatom, nH)
@@ -174,6 +172,7 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
                 print(x0)
             #print(x0.detach().data.numpy())
             e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
@@ -201,8 +200,6 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
 
         t*=2.0
         """
-        #print(nocc.shape)
-        #print(v.shape)
         if CHECK_DEGENERACY:
             t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
         else:
@@ -216,6 +213,8 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
         P = P.reshape(x_orig_shape)
 
     return e,P, v
+
+
 
 
 
@@ -236,7 +235,7 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
         nocc = nocc.flatten()
         x_orig_shape = x.size()
         x = x.flatten(start_dim=0, end_dim=1)
-        
+                
         e0, v0 = list(zip(*list(map(
                         lambda a,b,c: torch.symeig(pack(a,b,c),eigenvectors=True,upper=True),
                         x,nheavyatom, nH))))
@@ -248,7 +247,7 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
             P0 = list(map(
                      lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
                      v0,nocc))
-        #
+
         nmol = x.shape[0]
         norb = nheavyatom*4+nH
         e=torch.zeros(x.shape[:2], dtype=dtype, device=device)
@@ -260,12 +259,10 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
         e = e.reshape(x_orig_shape[0:3])
         v0 = tuple(map(lambda a, b : torch.stack((a,b), dim=0), v0[::2], v0[1::2]))
         P = P.reshape(x_orig_shape)
-        
-
-            
+    
     else:#need to add large diagonal values to replace 0 padding
         #Gershgorin circle theorem estimate upper bounds of eigenvalues
-
+        
         e0, v0 = list(zip(*list(map(
                         lambda a,b,c: torch.symeig(pack(a,b,c),eigenvectors=True,upper=True),
                         x,nheavyatom, nH))))
@@ -277,7 +274,7 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
             P0 = list(map(
                      lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
                      v0,nocc))
-        #
+        
         nmol = x.shape[0]
         norb = nheavyatom*4+nH
         e=torch.zeros(x.shape[:2], dtype=dtype, device=device)
@@ -295,81 +292,3 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
     return e,P, v0
 
 
-# def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
-
-#     dtype =  x.dtype
-#     device = x.device
-#     if x.dim()==2:
-#         e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
-#         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
-#         e[:(nheavyatom*4+nH)] = e0
-#     else:#need to add large diagonal values to replace 0 padding
-#         #Gershgorin circle theorem estimate upper bounds of eigenvalues
-#         x0 = pack(x, nheavyatom, nH)
-#         #print(x, '\nff', x0)
-#         #print('#########')
-#         #print(x,'\n',x0)
-#         nmol, size, _ = x0.shape
-
-#         aii = x0.diagonal(dim1=1,dim2=2)
-#         ri = torch.sum(torch.abs(x0),dim=2)-torch.abs(aii)
-#         hN = torch.max(aii+ri,dim=1)[0]
-#         dE = hN - torch.min(aii-ri,dim=1)[0] #(maximal - minimal) get range
-
-#         norb = nheavyatom*4+nH
-#         pnorb = size - norb
-#         nn = torch.max(pnorb).item()
-#         dx = 0.005
-#         mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
-#         ind = torch.arange(size, dtype=torch.int64, device=device)
-#         cond = pnorb>0
-#         for i in range(nmol):
-#             if cond[i]:
-#                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-#         try:
-#             e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
-#         except:
-#             if torch.isnan(x0).any():
-#                 print(x0)
-#             #print(x0.detach().data.numpy())
-#             e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
-#         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
-#         e[...,:size] = e0
-#         for i in range(nmol):
-#             if cond[i]:
-#                 e[i,norb[i]:size] = 0.0
-
-#     if eig_only:
-#         return e, v
-
-#     # each column of v is a eigenvectors
-#     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
-#     if x.dim()==2:
-#         if CHECK_DEGENERACY:
-#             t = construct_P(e, v, nocc)
-#         else:
-#             t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
-#     else:
-#         """
-#         t = torch.zeros_like(v)
-#         for i in range(v.shape[0]):
-#             t[i] = torch.matmul(v[i,:,:nocc[i]], v[i, :,:nocc[i]].transpose(0,1))
-
-#         t*=2.0
-#         """
-#         if CHECK_DEGENERACY:
-#             t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
-#         else:
-#             #list(map(lambda a,n : print('norm', torch.norm(v, dim=0), n), v, nocc))
-#             #print(torch.norm())
-#             t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
-    
-#     #print('t: ',t)
-#     #print('t shape: ',t.shape)
-#     #print('x shape: ',x.shape)
-
-#     P = unpack(t, nheavyatom, nH, x.shape[-1])
-#     #print('P shape: ', P.shape)
-#     #print(t, P)
-#     #print(P, v, '\n\n')
-#     return e,P, v

@@ -21,10 +21,15 @@ def unpackone(x0, nho, nHydro, size):
     return x
 
 def pack(x, nHeavy, nHydro):
+    #print(x.shape)
     nho = 4*nHeavy
+    #print('Pack ', x.dim())
+    #print(x)
     if x.dim()==2:
+        #print('pack 2')
         x0 = packone(x, nHeavy*4, nHydro, nho+nHydro)
     elif x.dim()==4:
+        #print('pack 4')
         norb = torch.max(nho+nHydro)
         x = x.flatten(start_dim=0, end_dim=1)
         x0 = torch.stack(list(map(lambda a, b, c : packone(a, b, c, norb), x, nho, nHydro)))
