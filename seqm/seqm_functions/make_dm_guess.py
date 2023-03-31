@@ -169,7 +169,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
             
             v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
             P = P.reshape(x_orig_shape)
-            molecule.dm = P
+            molecule.dm = P/2
             return P, v
         
         else:
