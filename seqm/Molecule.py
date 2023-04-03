@@ -17,10 +17,12 @@ class Molecule(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
         self.coordinates = coordinates
         self.species = species
+        if not torch.is_tensor(charges):
+            charges = charges * torch.ones(coordinates.size()[0], device=coordinates.device)
         self.tot_charge = charges
+        if not torch.is_tensor(mult):
+            mult = mult * torch.ones(coordinates.size()[0], device=coordinates.device)
         self.mult = mult
-        if not torch.is_tensor(self.mult):
-            self.mult = torch.ones(coordinates.size()[0], device = coordinates.device)
         
         self.parser = Parser(self.seqm_parameters)
         
