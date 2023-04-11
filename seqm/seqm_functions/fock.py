@@ -64,8 +64,6 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     for i,j in [(1,2),(1,3),(2,3)]:
         TMP[maskd,i,j] = P[maskd,i,j]* (0.75*gpp - 1.25*gp2)
 
-    #print('1c-2e\n', TMP)
-    #print(TMP)
     F.add_(TMP)
 
 
@@ -93,27 +91,19 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
 
     PA = (P[maskd[idxi]][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).reshape((-1,10,1))
     PB = (P[maskd[idxj]][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).reshape((-1,1,10))
-    # print('P: ', P)
-    # print('maskd: ', maskd)
-    # print('mask: ', mask)
-    # print('idxi/j: ', idxi, idxj)
-    # print('PA: ', PA)
-    # print('PB: ', PB)
-    # print('w: ', w)
+
     #suma \sum_{mu,nu \in A} P_{mu, nu in A} (mu nu, lamda sigma) = suma_{lambda sigma \in B}
     #suma shape (npairs, 10)
     suma = torch.sum(PA*w,dim=1)
     #sumb \sum_{l,s \in B} P_{l, s inB} (mu nu, l s) = sumb_{mu nu \in A}
     #sumb shape (npairs, 10)
     sumb = torch.sum(PB*w,dim=2)
-    #print('suma:\n',suma)
     #reshape back to (npairs 4,4)
     # as will use index add in the following part
     sumA = torch.zeros(w.shape[0],4,4,dtype=dtype, device=device)
     sumB = torch.zeros_like(sumA)
     sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = suma
     sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = sumb
-    #print('sumA:\n',sumA)
 
     #F^A_{mu, nu} = Hcore + \sum^A + \sum_{B} \sum_{l, s \in B} P_{l,s \in B} * (mu nu, l s)
     #\sum_B

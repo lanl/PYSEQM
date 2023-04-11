@@ -51,7 +51,6 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
              .reshape(nmol, 4*molsize, 4*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
-    #print('Eelec init: ', Eelec)
     k = 0
     while(1):
         start_time = time.time()
@@ -61,7 +60,6 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
                                                    nHeavy[notconverged],
                                                    nHydro[notconverged],
                                                    nOccMO[notconverged])
-                #print('P inter ',Pnew)
             elif sp2[0]:
                 #Pnew[notconverged] = SP2(F[notconverged], nOccMO[notconverged], sp2[1])
                 Pnew[notconverged] = unpack(
@@ -88,7 +86,6 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged] - Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
 
@@ -104,8 +101,6 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
-            #print('P final', P)
-            #print('Eelec final: ', Eelec)
             return P, notconverged
 
 #use constant mixing, open shell
@@ -121,13 +116,11 @@ def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     notconverged = torch.ones(nmol, dtype=torch.bool, device=M.device)
     F = fock_u_batch(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
-    #print('0 ', F.dim())
     
     Hcore = M.reshape(nmol,molsize,molsize,4,4) \
              .transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
     Eelec = elec_energy(P, F, Hcore)
-    #print('Eelec init: ', Eelec)
     
     Eelec_new = torch.zeros_like(Eelec)
     k = 0
@@ -139,7 +132,6 @@ def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
                                                    nHeavy[notconverged],
                                                    nHydro[notconverged],
                                                    nOccMO[notconverged])
-                #print('P inter ',P_ab)
                 P_ab[notconverged] = P_ab[notconverged] / 2.
             elif sp2[0]:
                 #Pnew[notconverged] = SP2(F[notconverged], nOccMO[notconverged], sp2[1])
@@ -167,8 +159,6 @@ def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
                 P[notconverged] = alpha * P[notconverged] + (1.0 - alpha) * P_ab[notconverged]
             F = fock_u_batch(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(Eelec_new)
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
 
@@ -184,8 +174,6 @@ def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
-            #print('P final', P)
-            #print('Eelec final: ', Eelec)
             return P, notconverged
 
         
@@ -202,7 +190,6 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
     k = 0
     F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    if not k%150: print(err)
     Pnew = torch.zeros_like(P)
     Pold = torch.zeros_like(P)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4) \
@@ -243,7 +230,6 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
                 P[notconverged] = Pnew[notconverged]
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
             """
@@ -312,9 +298,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged] - Eelec[notconverged])
-            if not k%150: print(err)
             Eelec[notconverged] = Eelec_new[notconverged]
             """
             #err = torch.max(torch.abs(F.matmul(P)-P.matmul(F)).reshape(nmol,-1),dim=1)[0]
@@ -408,7 +392,6 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             P[notconverged] = Pnew[notconverged]
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
             """
@@ -467,7 +450,6 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
 
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
             """
@@ -520,7 +502,6 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             #
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
             """
@@ -575,7 +556,6 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, \
             EMAT[notconverged,counter,:cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:]*FPPF[notconverged,:cFock,:,:], dim=(2,3))
 
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            #print(torch.max(Eelec_new-Eelec)) #make sure energy is decreasing
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
             """
@@ -763,7 +743,6 @@ class SCF(torch.autograd.Function):
         nmol = Pin.shape[0]
         molsize = Pin.shape[-1]//4
         grads = {}
-        #print('initialization')
         gv=[Pin]
         gvind=[]
         for i in range(1,8):
@@ -898,7 +877,6 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
         P0[maskd,2,2] = P0[maskd,0,0]
         P0[maskd,3,3] = P0[maskd,0,0]
         P0[maskd[Z==1],0,0] = 1.0
-        #print('P0:\n', P0)
         #P0 += torch.randn(P0.shape,dtype=P0.dtype, device=P0.device)*0.01
         P = P0.reshape(nmol,molsize,molsize,4,4) \
             .transpose(2,3) \
@@ -911,7 +889,6 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
     #    P.add_(torch.randn(P.shape,dtype=P.dtype,device=P.device)*0.001)
 
     #t1 = time.time()
-    #print('Hcore : %f sec' % (t1-t0))
     #t0 = time.time()
     #"""
     #scf_backward == 2, directly backward through scf loop
@@ -930,7 +907,6 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
                 Pconv, notconverged =  scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
                              nHydro, nHeavy, nOccMO, nmol, molsize, \
                              maskd, mask, idxi, idxj, P, eps, sp2=sp2, alpha=scf_converger[1], backward=True)
-            #print('!!!', Pconv)
         elif scf_converger[0] == 1:
             Pconv, notconverged =  scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                          nHydro, nHeavy, nOccMO, nmol, molsize, \
@@ -992,7 +968,6 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
             e, v = sym_eig_trunc(F, nHeavy, nHydro, nOccMO, eig_only=True)
         
         #t1 = time.time()
-        #print('Diag : %f sec' % (t1-t0))
         #get charge of each orbital on each atom
         charge = torch.zeros(nmol,molsize*4, molsize, device=e.device, dtype=e.dtype)
         v2 = [x**2 for x in v]

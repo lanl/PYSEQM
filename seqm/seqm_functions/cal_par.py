@@ -68,23 +68,11 @@ class additive_term_rho1(torch.autograd.Function):
             err = torch.abs(0.5*d2 - 0.5/torch.sqrt(4.0*D1_2+1.0/d2**2)-hsp).max()
             if err<eps:
                 break
-            #print(d1, d2)
         #ad = d2
         #rho1 = 0.5/d
-        #print(d2)
 
         rho1 = 0.5/d2
-        """
-        if torch.isnan(rho1).any():
-            c=torch.isnan(rho1)
-            print("inside rho1")
-            print(rho1[c])
-            print(d2[c])
-            print(hsp_ev[c])
-            print(D1[c])
-            print(hsp_ev[~c])
-            print(D1[~c])
-        """
+
         del hsp, d1, d2, d3, hsp1, hsp2
         ctx.save_for_backward(rho1, D1)
 
@@ -157,19 +145,8 @@ class additive_term_rho2(torch.autograd.Function):
                 break
         # aq = q3
         # rho2 = 0.5/q
-        #print(hpp, 0.25*q2 - 0.5/torch.sqrt(4.0*D2**2+1.0/q2**2) + 0.25/torch.sqrt(8.0*D2**2+1.0/q2**2)-hpp)
         rho2 = 0.5/q2
-        """
-        if torch.isnan(rho2).any():
-            c=torch.isnan(rho2)
-            print("inside rho2")
-            print(rho2[c])
-            print(q2[c])
-            print(hpp_ev[c])
-            print(D2[c])
-            print(hpp_ev[~c])
-            print(D2[~c])
-        """
+ 
         del hpp, q1, q2, q3, hpp1, hpp2
         ctx.save_for_backward(rho2, D2)
         return rho2

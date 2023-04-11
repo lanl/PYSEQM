@@ -112,7 +112,6 @@ class ALDataset(Dataset):
         rij = torch.zeros((self.nparis,), device=self.device)
 
         k=0
-        #print(idx)
         for i in range(self.natoms):
             if self.Z[idx, i]<=0:
                 continue
@@ -148,9 +147,7 @@ class ALDataset(Dataset):
         ##### idxi, idxj are torch. atom index across torch. whole dataset
         #can use %(batch_size*self.natoms) to bring back to torch. index for each batch
         #doesn't support random sampling  ==> fixed, shuffle is supported
-        #print(batch[0])
         nmol = len(batch)
-        #print(nmol)
         Z      = torch.cat([item[0] for item in batch])
         nHeavy = torch.cat([item[1] for item in batch])
         nHydro = torch.cat([item[2] for item in batch])

@@ -106,9 +106,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
            TETCILF(ni,nj,rij, tore, \
                 da, db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b)
     
-    #print(wHH)
-    #print(riXH)
-    #print(ri)
+
     #
 
     ###############################33
