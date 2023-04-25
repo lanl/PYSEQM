@@ -1,0 +1,1 @@
+1) Replace "seqm_modules.py" in hippynn/interfaces/pyseqm_interface/ with the file in this folder.
