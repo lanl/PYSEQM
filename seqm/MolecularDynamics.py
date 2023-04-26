@@ -193,7 +193,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             for mol in self.output['molid']:
                 fn = self.output['prefix'] + "." + str(mol) + ".xyz"
                 f = open(fn,'a+')
-                f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], Err[mol], time.time()))
+                if e_gap.dim()==2:
+                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], Err[mol], time.time()))
+                else:
+                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}/{:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0,0], e_gap[mol,1,0], Err[mol], time.time()))
                     
                 for atom in range(molecule.coordinates.shape[1]):
                     if molecule.species[mol,atom]>0:
@@ -308,12 +311,21 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 self.screen_output(i, T, Ek, molecule.Hf)
                 dump_kwargs = {}
                 if 'Info_log' in kwargs and kwargs['Info_log']:
-                    dump_kwargs['Info_log'] = [
-                        ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)]],
-                        
-                        ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
+                    
+                    if molecule.nocc.dim() == 1:
+                        dump_kwargs['Info_log'] = [
+                            ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)]],
+                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
 
-                                              ]
+                                                  ]
+                    else:
+                        dump_kwargs['Info_log'] = [
+                            ['Orbital energies alpha:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo[:,0].cpu().numpy(), 5), molecule.nocc[:,0])]],
+                            ['Orbital energies beta:\n',  ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo[:,1].cpu().numpy(), 5), molecule.nocc[:,1])]],
+                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
+
+                                                  ]
+                                                  
                     
                 self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
             del Ek, T
