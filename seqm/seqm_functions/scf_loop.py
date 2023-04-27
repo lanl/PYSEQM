@@ -703,7 +703,7 @@ class SCF(torch.autograd.Function):
             def affine_eq(u): return grad_P + grad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
             u_init = torch.zeros_like(Pin)  #TODO: better initial guess?
             u = fixed_point_anderson(affine_eq, u_init)
-            gradients = grad(Pout, gv, grad_outputs=u)
+            gradients = grad(Pout, gv, grad_outputs=u, retain_graph=True)
             for t, i in enumerate(gvind): grads[i] = gradients[t]
         else:
             gradients = [(grad_P,)]
