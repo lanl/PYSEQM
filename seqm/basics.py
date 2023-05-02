@@ -374,20 +374,20 @@ class Energy(torch.nn.Module):
                                                  parameters, P0=P0)
         
         if self.eig:
-            if self.uhf == False:
-                e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
             if self.uhf:
                 if 0 in nocc:
                     print('Zero occupied alpha or beta orbitals found (e.g. triplet H2). HOMO-LUMO gaps are not available.')
                     e_gap = torch.tensor([])
                 else:
-                    e_gap_a = e[:,0].gather(1, nocc[:,0].unsqueeze(0).T) - e[:,0].gather(1, nocc[:,0].unsqueeze(0).T-1)
-                    e_gap_b = e[:,1].gather(1, nocc[:,1].unsqueeze(0).T) - e[:,1].gather(1, nocc[:,1].unsqueeze(0).T-1)
-                    e_gap = torch.stack((e_gap_a, e_gap_b), dim=1)
+                    lumo_a, lumo_b = nocc[:,0].unsqueeze(0).T, nocc[:,1].unsqueeze(0).T
+                    e_gap_a = e[:,0].gather(1, lumo_a) - e[:,0].gather(1, lumo_a-1)
+                    e_gap_b = e[:,1].gather(1, lumo_b) - e[:,1].gather(1, lumo_b-1)
+                    e_gap = torch.stack((e_gap_a.reshape(-1), e_gap_b.reshape(-1)), dim=1)
             else:
-                e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
+                lumo = nocc.unsqueeze(0).T
+                e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
         else:
-            e_gap = torch.tensor([])
+            e_gap = None
         
         #nuclear energy
         alpha = parameters['alpha']
