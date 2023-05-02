@@ -426,8 +426,12 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     #start pulay algorithm
     while(1):
         if notconverged.any():
-            EV = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
-            EVEC[notconverged,:cFock,:cFock] = EV / EVEC[notconverged,counter:(counter+1),counter:(counter+1)]
+            EVEC[notconverged] = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
+#            EVEC[notconverged,:cFock,:cFock] /= EVEC[notconverged,counter:(counter+1),counter:(counter+1)]
+            # work-around for in-place operation (more elegant solution?)
+            EVcF = EVEC[notconverged,:cFock,:cFock].clone()
+            EVnorm = EVEC[notconverged,counter:(counter+1),counter:(counter+1)].clone()
+            EVEC[notconverged,:cFock,:cFock] = EVcF / EVnorm
             coeff = -torch.inverse(EVEC[notconverged,:(cFock+1),:(cFock+1)])[...,:-1,-1]
             F[notconverged] = torch.sum(FOCK[notconverged,:cFock,:,:]*coeff.unsqueeze(-1).unsqueeze(-1), dim=1)
             if sp2[0]:
