@@ -1,5 +1,5 @@
 import torch
-from torch.autograd import grad
+from torch.autograd import grad as agrad
 from .fock import fock
 from .fock_u_batch import fock_u_batch
 from .hcore import hcore
@@ -577,8 +577,8 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
     
     Returns
     -------
-    X : array-/Tensor-like
-        fixed point solution satisfying ``fp_fun(X) = X``
+    u_conv : array-/Tensor-like
+        fixed point solution satisfying ``fp_fun(u_conv) = u_conv``
     
     """
     # handle UHF/RHF
@@ -603,22 +603,23 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
     for k in range(2, SCF_BACKWARD_ANDERSON_MAXITER):
         n = min(k, m)
         G = F[:,:n] - X[:,:n]
-        GTG = torch.bmm(G,G.transpose(1,2))
-        E_n = torch.eye(n, dtype=u0.dtype,device=u0.device)
+        GTG = torch.bmm(G, G.transpose(1,2))
+        E_n = torch.eye(n, dtype=u0.dtype, device=u0.device)
         H[:,1:n+1,1:n+1] = GTG + lam * E_n[None]
         alpha = torch.linalg.solve(H[:,:n+1,:n+1], y[:,:n+1])[:,1:n+1,0]
         Xold = (1 - beta) * (alpha[:,None] @ X[:,:n])[:,0]
         X[:,k%m] = beta * (alpha[:,None] @ F[:,:n])[:,0] + Xold
         F[:,k%m] = fp_fun(X[:,k%m].view_as(u0)).view(nmol, -1)
-        resid = (F[:,k%m] - X[:,k%m]).norm().item()
-        resid = resid / (1e-5 + F[:,k%m].norm().item())
+        resid1 = (F[:,k%m] - X[:,k%m]).norm().item()
+        resid = resid1 / (1e-5 + F[:,k%m].norm().item())
         cond = resid < SCF_BACKWARD_ANDERSON_TOLERANCE
         if cond: break   # solver converged
     if not cond:
         msg = "Anderson solver in SCF backward did not converge for some molecule(s)"
         if RAISE_ERROR_IF_SCF_BACKWARD_FAILS: raise ValueError(msg)
         print(msg)
-    return X[:,k%m].view_as(u0)
+    u_conv = X[:,k%m].view_as(u0)
+    return u_conv
     
 
 class SCF(torch.autograd.Function):
@@ -671,7 +672,13 @@ class SCF(torch.autograd.Function):
     
     @staticmethod
     def backward(ctx, grad_P, grad1):
-        """ custom backward of SCF loop """
+        """
+        custom backward of SCF loop
+        
+        CURRENTLY DOES NOT SUPPORT DOUBLE-BACKWARD!
+        (irrelevant for dE^2/dx^2 or dy/dparam, if y is no derivative itself like forces)
+        FOR CORRECT SECOND DERIVATIVES OF DENSITY MATRIX, USE DIRECT BACKPROP.
+        """
         #TODO: clean up when fully switching to implicit autodiff
         Pin, M, w, gss, gpp, gsp, gp2, hsp, \
         nHydro, nHeavy, nOccMO, \
@@ -700,16 +707,20 @@ class SCF(torch.autograd.Function):
         diverged = None # scf backward diverged
         
         if SCF_IMPLICIT_BACKWARD:
-            def affine_eq(u): return grad_P + grad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
-            u_init = torch.zeros_like(Pin)  #TODO: better initial guess?
-            u = fixed_point_anderson(affine_eq, u_init)
-            gradients = grad(Pout, gv, grad_outputs=u, retain_graph=True)
-            for t, i in enumerate(gvind): grads[i] = gradients[t]
+            ## THIS DOES NOT SUPPORT DOUBLE BACKWARD. MAY AS WELL STOP AUTOGRAD TAPE
+            ## TODO: INCLUDING THIS PART IN GRAPH CAUSES MEMORY LEAK.
+            ##       RESOLVE THIS WHEN IMPLEMENTING DOUBLE-BACKWARD!
+            with torch.no_grad():
+                def affine_eq(u): return grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
+                u_init = torch.zeros_like(Pin)  #TODO: better initial guess?
+                u = fixed_point_anderson(affine_eq, u_init)
+                gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
+                for t, i in enumerate(gvind): grads[i] = gradients[t]
         else:
             gradients = [(grad_P,)]
             for k in range(SCF_BACKWARD_MAX_ITER+1):
                 grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-                gradients.append(grad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True))
+                gradients.append(agrad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True))
                 grad0_max =  gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
                 if converged.any():
                     err = torch.max(grad0_max[converged])
