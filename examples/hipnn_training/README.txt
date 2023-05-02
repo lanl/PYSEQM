@@ -9,7 +9,7 @@ HIPNN needs to be modified:
 
 
 Notes for training a new model:
-1) Atoms in each molecule need to be sorted in ascending order in training set, e.g. [8,6,1,1].
+1) Atoms in each molecule need to be sorted in descending order in training set, e.g. [8,6,1,1].
 2) Zero-padding should be used to make all molecules of the same length, e.g. [[6,1,1,1,1], [8,1,1,0,0], [8,6,1,1,0]].
 3) hipnn_train_model.ipynb pulls a ready-to-use training set in .npy format used in this paper https://doi.org/10.1073/pnas.2120333119.
 
