@@ -24,13 +24,16 @@ class Molecule(torch.nn.Module):
             mult = mult * torch.ones(coordinates.size()[0], device=coordinates.device)
         self.mult = mult
         
+        self.seqm_parameters = seqm_parameters
+        self.method = seqm_parameters['method']
+        
         self.parser = Parser(self.seqm_parameters)
         
         self.nmol, self.molsize, \
-        self.nHeavy, self.nHydro, self.nocc, \
+        self.nSuperHeavy, self.nHeavy, self.nHydro, self.nocc, \
         self.Z, self.maskd, self.atom_molid, \
         self.mask, self.mask_l, self.pair_molid, \
-        self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, return_mask_l=True, *args, **kwargs)
+        self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, self.method, return_mask_l=True, *args, **kwargs)
 
         MASS = torch.as_tensor(self.const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.

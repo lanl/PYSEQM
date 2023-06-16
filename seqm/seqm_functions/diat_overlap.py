@@ -4,6 +4,15 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     """
     compute the overlap matrix for each pair
     """
+    # print('args')
+    # print(ni)
+    # print(nj)
+    # print(xij)
+    # print(rij)
+    # print(zeta_a)
+    # print(zeta_b)
+    # print(qn_int)
+    
     dtype = xij.dtype
     device = xij.device
 
@@ -68,6 +77,13 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     jcall[(qni==1) & (qnj==1)] = 2
     jcall[(qni==2) & (qnj==1)] = 3
     jcall[(qni==2) & (qnj==2)] = 4
+    
+    jcall[(qni==3) & (qnj==1)] = 431
+    jcall[(qni==3) & (qnj==2)] = 5
+    jcall[(qni==3) & (qnj==3)] = 6
+    
+    print('jcall')
+    print(jcall)
     if torch.any(jcall==0):
         raise ValueError("\nError from diat.py, overlap matrix\nSome elements are not supported yet")
 
@@ -191,6 +207,9 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     #####
     #####
     di[...,0,0] = S111
+    print('diat_ovr S111')
+    print(S111)
+    
     #jcallg2 = (jcall>2)
     #di[jcallg2,1,0] = S211[jcallg2,0]*ca[jcallg2,0]*sb[jcallg2,0]
     #the fraction of H-H is low, may not necessary to use indexing

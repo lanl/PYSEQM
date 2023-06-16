@@ -1,7 +1,7 @@
 import torch
 from torch import sqrt
 from .constants import ev
-
+import sys
 #this version try to split the pairs H-H, X-H, and X-X
 # ~40% pairs are X-X, and each take 22 in ri
 # ~40% are X-H, each take 4 in ri
@@ -15,10 +15,15 @@ from .constants import ev
 # then combine them together to be in the same shape
 
 #chech repp.f
-def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b ):
+def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b,themethod ):
     """
     two electron two center integrals in local frame for each pair
     """
+    ##print(da0,db0)
+   ## print( qa0,qb0)
+   ## print( rho0a,rho0b)
+    ##print ( rho1a,rho1b)
+    ##print( rho2a,rho2b)
     dtype = r0.dtype
     device = r0.device
     # ni, nj, r0, da0, db0, qa0, qb0, rho0a, rho0b ... rho2b, shape (napirs,)
@@ -41,7 +46,8 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
     #C     (SS/OO)=11,  (SS/PP)=12,  (SO/OO)=13,  (SO/PP)=14,  (SP/OP)=15,
     #C     (OO/OO)=16,  (PP/OO)=17,  (OO/PP)=18,  (PP/PP)=19,  (PO/PO)=20,
     #C     (PP/P*P*)=21,   (P*P/P*P)=22.
-    #C *** THE STORAGE OF THE NUCLEAR ATTRACTION INTEGRALS  CORE(KL/IJ) IS 
+    #C *** THE STORAGE OF THE NUCLEAR ATTRACTION INTEGRALS  CORE(KL/IJ) IS
+    #C     (SS/)=1,   (SO/)=2,   (OO/)=3,   (PP/)=4
     #C     WHERE IJ=1 IF THE ORBITALS CENTRED ON ATOM I,  =2 IF ON ATOM J.
     # da, db, dipole charge separation
     # qa, qb, qutrupole charge separation
@@ -59,7 +65,13 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
     ev2 = ev/4.0
     ev3 = ev/8.0
     ev4 = ev/16.0
+    ##if(themethod == "PM6"):
+        ##HH = (ni==1) & (nj==1)
+        ##XH =((ni <= 12) | ((ni >= 18) & (ni <=20)) | ((ni >= 30) & (ni <= 32)) | ((ni >= 36) & (ni <= 38)) | ((ni >= 48) & (ni <= 50)) | ((ni >= 54) & (ni <= 56)) | ((ni >= 80) & (ni <= 83))) & (ni !=1) & (nj==1)
+        ##XX =((ni <= 12) | ((ni >= 18) & (ni <=20)) | ((ni >= 30) & (ni <= 32)) | ((ni >= 36) & (ni <= 38)) | ((ni >= 48) & (ni <= 50)) | ((ni >= 54) & (ni <= 56)) | ((ni >= 80) & (ni <= 83))) & (ni !=1) & \
+            ##((nj <= 12) | ((nj >= 18) & (nj <=20)) | ((nj >= 30) & (nj <= 32)) | ((nj >= 36) & (nj <= 38)) | ((nj >= 48) & (nj <= 50)) | ((nj >= 54) & (nj <= 56)) | ((nj >= 80) & (nj <= 83))) & (nj !=1)
 
+    ##else:
     HH = (ni==1) & (nj==1)
     XH = (ni>1) & (nj==1)
     XX = (ni>1) & (nj>1)
@@ -276,5 +288,5 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
     core[...,5] =  tore[ni[XX]]*ri[...,5-1]
     core[...,6] =  tore[ni[XX]]*ri[...,11-1]
     core[...,7] =  tore[ni[XX]]*ri[...,12-1]
-
+    #print('!!!!', riHH, riXH, ri)
     return riHH, riXH, ri, coreHH, coreXH, core

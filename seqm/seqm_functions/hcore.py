@@ -1,16 +1,19 @@
 import torch
 from .diat_overlap import diatom_overlap_matrix
+from .diat_overlapD import diatom_overlap_matrixD
+from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .constants import overlap_cutoff
 
-def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
-            Z, zetas,zetap, uss,upp,gss,gpp,gp2,hsp,beta, Kbeta=None):
+def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas, zetap, zetad, zs, zp, zd,  uss, upp , udd,  gss, gpp, gp2, hsp, F0SD, G2SD,  rho_core, alpha, chi, themethod, beta, Kbeta=None):
     """
     Get Hcore and two electron and two center integrals
     """
+    #t0 = time.time()
     dtype = xij.dtype
     device = xij.device
     qn_int = const.qn_int
+    qnD_int = const.qnD_int
     # pair type tensor: idxi, idxj, ni,nj,xij,rij, mask (batch dim is pair)
     # atom type tensor: Z, zetas,zetap, uss, upp , gss, gpp, gp2, hsp, beta(isbeta_pair=False)
     #                   (batch dim is atom)
@@ -53,40 +56,88 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     #h1elec(idxi, idxj, ni, nj, xij, rij, zeta_a, zeta_b, beta, ispair=False) =>  beta_mu_nu
 
     #use uss upp to the diagonal block for hcore
-    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)),dim=1)
+    if(themethod == 'PM6'):
+        zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1), zetad.unsqueeze(1)),dim=1)
+    else:
+        zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)),dim=1)
     overlap_pairs = rij<=overlap_cutoff
     #di=th.zeros((npairs,4,4),dtype=dtype, device=device)
-    di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)
-    di_my = torch.zeros((nmol*molsize*molsize, 4, 4),dtype=dtype, device=device)
-    di[overlap_pairs] = diatom_overlap_matrix(ni[overlap_pairs],
-                               nj[overlap_pairs],
-                               xij[overlap_pairs],
-                               rij[overlap_pairs],
-                               zeta[idxi][overlap_pairs],
-                               zeta[idxj][overlap_pairs],
-                               qn_int)
 
-    w, e1b, e2a = TETCI(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, gss, gpp, gp2, hsp)
+    if(themethod == 'PM6'):
+        di = torch.zeros((xij.shape[0], 9, 9),dtype=dtype, device=device)
+        di[overlap_pairs] = diatom_overlap_matrixD(ni[overlap_pairs],
+                                   nj[overlap_pairs],
+                                   xij[overlap_pairs],
+                                   rij[overlap_pairs],
+                                   zeta[idxi][overlap_pairs],
+                                   zeta[idxj][overlap_pairs],
+                                   qn_int, qnD_int)
+    elif themethod == 'PM6_SP':
+        di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)
+        di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(ni[overlap_pairs],
+                                   nj[overlap_pairs],
+                                   xij[overlap_pairs],
+                                   rij[overlap_pairs],
+                                   zeta[idxi][overlap_pairs],
+                                   zeta[idxj][overlap_pairs],
+                                   qn_int)
+    
+    else:
+        di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)
+        di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(ni[overlap_pairs],
+                                   nj[overlap_pairs],
+                                   xij[overlap_pairs],
+                                   rij[overlap_pairs],
+                                   zeta[idxi][overlap_pairs],
+                                   zeta[idxj][overlap_pairs],
+                                   qn_int)
+
+    #print(di)
+#    print("DI:", time.time() - t0)
+#    t0 = time.time()
+    #di shape (npairs,4,4)
+    #print("HI")
+    w, e1b, e2a,rho0xi,rho0xj = TETCI(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod)
+#    print("TETC:", time.time() - t0)
+#    sys.exit()
     #w shape (napirs, 10,10)
     #e1b, e2a shape (npairs, 10)
     #di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
-
     ntotatoms = nmol * molsize
-    M = torch.zeros(nmol*molsize*molsize,4,4,dtype=dtype,device=device)
+    if(themethod == 'PM6'):
+        M = torch.zeros(nmol*molsize*molsize,9,9,dtype=dtype,device=device)
+    else:
+        M = torch.zeros(nmol*molsize*molsize,4,4,dtype=dtype,device=device)
 
     #fill the upper triangle part
     #unlike the mopac, which fills the lower triangle part
     #Hcore is symmetric
-
     #diagonal part in Hcore
     #t1 = torch.tensor([i*molsize+i for i in range(molsize)],dtype=dtypeint,device=device).reshape((1,-1))
     #t2 = torch.tensor([i*molsize**2 for i in range(nmol)],dtype=dtypeint,device=device).reshape((-1,1))
     #maskd = (t1+t2).reshape(-1) # mask for diagonal blocks
     #M[...,0,0].index_add_(0,maskd,uss)
-    M[maskd,0,0] = uss
-    M[maskd,1,1] = upp
-    M[maskd,2,2] = upp
-    M[maskd,3,3] = upp
+    if(themethod == 'PM6'):
+        M[maskd,0,0] = uss
+        M[maskd,1,1] = upp
+        M[maskd,2,2] = upp
+        M[maskd,3,3] = upp
+        M[maskd,4,4] = udd
+        M[maskd,5,5] = udd
+        M[maskd,6,6] = udd
+        M[maskd,7,7] = udd
+        M[maskd,8,8] = udd
+        M.index_add_(0,maskd[idxj], e1b)
+        M.index_add_(0,maskd[idxi], e2a)
+
+    else:
+        M[maskd,0,0] = uss
+        M[maskd,1,1] = upp
+        M[maskd,2,2] = upp
+        M[maskd,3,3] = upp
+        M.index_add_(0,maskd[idxi], e1b)
+        M.index_add_(0,maskd[idxj], e2a)
+
     #warning, as for all the pairs, ni>=nj, or idxi<idxj, i.e, pairs are not symmetric
     #so in the summation below, there is no need to divide by 2
     # V_{mu,nv,B} = -ZB*(mu^A nv^A, s^B s^B), stored on e1b, e2a
@@ -131,27 +182,59 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     M[...,3,3].index_add_(0,maskd[idxj], e2a[...,9])
     """
     #e1b, e2a are reshaped to be (...,4,4) in rotate.py
-    M.index_add_(0,maskd[idxi], e1b)
-    M.index_add_(0,maskd[idxj], e2a)
 
-    #off diagonal block for Hcore
-    #M[mask,:,:] = smat
-    #check the comment out part in diat.py h1elec
-    if torch.is_tensor(Kbeta):
-        M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0 * Kbeta[:,0]
-        M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0 * Kbeta[:,1,None]
-        M[mask,1:,0]  = di[...,1:,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0 * Kbeta[:,2,None]
-        M[mask,1:,1:] = di[...,1:,1:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0 * Kbeta[:,3:,None]
-        #raise ValueError('Kbeta for each pair is not implemented yet')
+    if(themethod == 'PM6'):
+        #di = di.transpose(1,2)
+        #print(di)
+        if torch.is_tensor(Kbeta):
+            M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0* Kbeta[:,0]
+            M[mask,0,1:4]  = di[...,0,1:4]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0*Kbeta[:,1,None]
+            M[mask,1:4,0]  = di[...,1:4,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0*Kbeta[:,2,None]
+            M[mask,1:4,1:4] = di[...,1:4,1:4]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0** Kbeta[:,3:,None]
+
+            M[mask,0,4:]  = di[...,0,4:]*(beta[idxi,0:1]+beta[idxj,2:3])/2.0
+            M[mask,4:,0]  = di[...,4:,0]*(beta[idxi,2:3]+beta[idxj,0:1])/2.0
+
+
+            M[mask,1:4,4:] = di[...,1:4,4:]*(beta[idxi,1:2,None]+beta[idxj,2:3,None])/2.0
+            M[mask,4:,1:4] = di[...,4:,1:4]*(beta[idxi,2:3,None]+beta[idxj,1:2,None])/2.0
+
+            M[mask,4:,4:] =  di[...,4:,4:]*(beta[idxi,2:3,None]+beta[idxj,2:3,None])/2.0
+
+
+        else:
+            M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0
+            M[mask,0,1:4]  = di[...,0,1:4]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0
+            M[mask,1:4,0]  = di[...,1:4,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0
+            M[mask,1:4,1:4] = di[...,1:4,1:4]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0
+
+            M[mask,0,4:]  = di[...,0,4:]*(beta[idxi,0:1]+beta[idxj,2:3])/2.0
+            M[mask,4:,0]  = di[...,4:,0]*(beta[idxi,2:3]+beta[idxj,0:1])/2.0
+
+
+            M[mask,1:4,4:] = di[...,1:4,4:]*(beta[idxi,1:2,None]+beta[idxj,2:3,None])/2.0
+            M[mask,4:,1:4] = di[...,4:,1:4]*(beta[idxi,2:3,None]+beta[idxj,1:2,None])/2.0
+
+            M[mask,4:,4:] =  di[...,4:,4:]*(beta[idxi,2:3,None]+beta[idxj,2:3,None])/2.0
+
+
     else:
-        #beta is for each atom in the molecules, shape (ntotatoms,2)
-        M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0
-        M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0
-        M[mask,1:,0]  = di[...,1:,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0
-        M[mask,1:,1:] = di[...,1:,1:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0
+        if torch.is_tensor(Kbeta):
+            M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0* Kbeta[:,0]
+            M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0 * Kbeta[:,1,None]
+            M[mask,1:,0]  = di[...,1:,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0 * Kbeta[:,2,None]
+            M[mask,1:,1:] = di[...,1:,1:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0 * Kbeta[:,3:,None]
+            #raise ValueError('Kbeta for each pair is not implemented yet')
+        else:
+            #beta is for each atom in the molecules, shape (ntotatoms,2)
+            M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0
+            M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0
+            M[mask,1:,0]  = di[...,1:,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0
+            M[mask,1:,1:] = di[...,1:,1:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0
 
         #caution
         #the lower triangle part is not filled here
+
     """
     #it is easier to use M for the construction of fock matrix with density matrix
 
@@ -165,5 +248,13 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     return Hcore, w
     #"""
     #"""
-    return M, w
+    ##print(di[...,1:4,4:])
+    ##print(di[...,4:,1:4])
+    ##print(di[...,4:,4:] )
+    #print(M[mask,:,:])
+    ##print("TOTAL HCORE+INTEGRALS: ", time.time()-t0)
+    ##sys.exit()
+    ##print(di[...,4:,4:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0)
+    #print("HCORE:", time.time() - t0)
+    return M, w,rho0xi,rho0xj
     #"""

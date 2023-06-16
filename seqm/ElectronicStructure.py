@@ -56,12 +56,19 @@ class Electronic_Structure(torch.nn.Module):
 
         with torch.no_grad():
             # $$$
-            if molecule.dm.dim() ==4:
-                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0])
-                molecule.q -= self.atomic_charges(molecule.dm[:,1]) # unit +e, i.e. electron: -1.0
-            else:
-                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
-            molecule.d = self.dipole(molecule.q, molecule.coordinates)
+            if molecule.dm.dim() ==4: # open shell
+                if molecule.method == 'PM6':
+                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0], n_orbital=9)
+                    molecule.q -= self.atomic_charges(molecule.dm[:,1], n_orbital=9) # unit +e, i.e. electron: -1.0
+                else:
+                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0])
+                    molecule.q -= self.atomic_charges(molecule.dm[:,1]) # unit +e, i.e. electron: -1.0
+            else:  # closed shell
+                if molecule.method == 'PM6':
+                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm, n_orbital=9) # unit +e, i.e. electron: -1.0
+                else:
+                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
+ 
             
 
 
