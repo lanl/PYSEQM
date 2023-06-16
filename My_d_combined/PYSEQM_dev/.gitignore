@@ -1,9 +1,0 @@
-build/
-dist/
-Tests/
-Tests_A100/
-.ipynb_checkpoints/
-seqm/seqm_functions/__pycache__/
-PYSEQM.egg-info/
-**/__pycache__/
-**/.ipynb_checkpoints/
