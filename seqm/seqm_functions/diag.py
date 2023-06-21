@@ -103,6 +103,7 @@ def construct_P(e, v, nocc):
         t = 2.0*torch.matmul(coeff*v[:,:indx2], v[:,:indx2].transpose(0,1))
     else:
         t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
+    print('D eigenvector - MO C', t)
     return t
 
 
@@ -209,7 +210,8 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         e = e.reshape(x_orig_shape[0:3])
         v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
         P = P.reshape(x_orig_shape)
-
+    print('D eigenvector - MO C')
+    print(v)
     return e, P, v
 
 

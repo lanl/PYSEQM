@@ -22,8 +22,42 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     # M[maskd] take out the diagonal block
     # gss, gpp, gsp, shape (ntotatoms, )
     # P0: shape (nmol, 4*molsize, 4*molsize)
+    
+    #-------------DEBUG--------------
+    print('==============================================')
+    print("nmol", nmol)
+    print("molsize", molsize)
+    print("P0", P0.shape)
+    print(P0)
+    print("M", M.shape)
+    print(M)
+    print("maskd", maskd.shape)
+    print(maskd)
+    print("mask", mask.shape)
+    print(mask)
+    print("idxi", idxi.shape)
+    print(idxi)
+    print("idxj", idxj.shape)
+    print(idxj)
+    print("w", w.shape)
+    print(w)
+    print("gss", gss.shape)
+    print(gss)
+    print("gpp", gpp.shape)
+    print(gpp)
+    print("gsp", gsp.shape)
+    print(gsp)
+    print("gp2", gp2.shape)
+    print(gp2)
+    print("hsp", hsp.shape)
+    print(hsp)
+    
     P = P0.reshape((nmol,molsize,4,molsize,4)) \
           .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
+
+    print("P", P.shape)
+    print(P)
+
 
 
     #at this moment,  P has the same shape as M, as it is more convenient
@@ -112,13 +146,14 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     F.index_add_(0,maskd[idxj],sumA)
 
 
-    # off diagonal block part, check KAB in forck2.f
+    # off diagonal block part, check KAB in fock2.f
     # mu, nu in A
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
     sum = torch.zeros(w.shape[0],4,4,dtype=dtype, device=device)
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     #   0,     1         2       3       4         5       6      7         8        9
+    
     ind = torch.tensor([[0,1,3,6],
                         [1,2,4,7],
                         [3,4,5,8],
@@ -139,3 +174,4 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, h
     F0.add_(F0.triu(1).transpose(1,2))
 
     return F0
+

@@ -70,17 +70,21 @@ class Parser(torch.nn.Module):
         if torch.is_tensor(molecule.tot_charge):
             n_charge -= molecule.tot_charge.reshape(-1).type(torch.int64)
         
-        if self.uhf:
+        if self.uhf: # UHF
             nocc_alpha = n_charge/2. + (molecule.mult-1)/2.
             nocc_beta = n_charge/2. - (molecule.mult-1)/2.
             if (nocc_alpha%1 != 0).any() or (nocc_beta%1 != 0).any():
                 raise ValueError("Invalid charge/multiplicity combination!")
             nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)
             nocc = nocc.type(torch.int64)
-        else:
+        else: # RHF
+            print('species', molecule.species)
+            print('species.shape', molecule.species.shape)
+            norb = nHydro*1 + nHeavy*4 # number of orbitals, 1 ao per H, 4 per CNO # ! will fail for other elements
             nocc = n_charge//2
             if ((n_charge%2)==1).any():
                 raise ValueError("RHF setting requires closed shell systems (even number of electrons)")
+            nvirt = norb - nocc # number of virtual orbitals
         
         t1 = (torch.arange(molsize,dtype=torch.int64,device=device)*(molsize+1)).reshape((1,-1))
         t2 = (torch.arange(nmol,dtype=torch.int64,device=device)*molsize**2).reshape((-1,1))
@@ -122,14 +126,16 @@ class Parser(torch.nn.Module):
         # mask, pair_molid, ni, nj, idxi, idxj, xij, rij ; (npairs, )
         if not return_mask_l:
             return nmol, molsize, \
-                nHeavy, nHydro, nocc, \
-                Z, maskd, atom_molid, \
-                mask, pair_molid, ni, nj, idxi, idxj, xij, rij
+                   nHeavy, nHydro, \
+                   norb, nocc, nvirt, \
+                   Z, maskd, atom_molid, \
+                   mask, pair_molid, ni, nj, idxi, idxj, xij, rij
         else:
             return nmol, molsize, \
-                nHeavy, nHydro, nocc, \
-                Z, maskd, atom_molid, \
-                mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij
+                   nHeavy, nHydro, \
+                   norb, nocc, nvirt, \
+                   Z, maskd, atom_molid, \
+                   mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij
 
 class Parser_For_Ovr(torch.nn.Module):
     """
@@ -213,7 +219,7 @@ class Parser_For_Ovr(torch.nn.Module):
         # Z, maskd, atom_molid: (natoms, )
         # mask, pair_molid, ni, nj, idxi, idxj, xij, rij ; (npairs, )
         return nmol, molsize, \
-               nHeavy, nHydro, nocc, \
+               nHeavy, nHydro, \
                Z, maskd, atom_molid, \
                mask, pair_molid, ni, nj, idxi, idxj, xij, rij
 
@@ -304,7 +310,7 @@ class Hamiltonian(torch.nn.Module):
         """
         beta = torch.cat((parameters['beta_s'].unsqueeze(1), parameters['beta_p'].unsqueeze(1)),dim=1)
         Kbeta = parameters.get('Kbeta', None)
-        F, e, P, Hcore, w, charge, notconverged = scf_loop(const=const,
+        F, e, v, P, Hcore, w, charge, notconverged = scf_loop(const=const,
                               molsize=molsize,
                               nHeavy=nHeavy,
                               nHydro=nHydro,
@@ -339,7 +345,7 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps)
         #
-        return F, e, P, Hcore, w, charge, notconverged
+        return F, e, v, P, Hcore, w, charge, notconverged
 
 class Energy(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -355,12 +361,16 @@ class Energy(torch.nn.Module):
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
+        self.excited = seqm_parameters.get('excited', False) # 2nd arg is deafault if no key, i.e. ground state
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
         get the energy terms
         """
-        nmol, molsize, nHeavy, nHydro, nocc, Z, maskd, atom_molid, \
+        nmol, molsize, \
+        nHeavy, nHydro, \
+        norb, nocc, nvirt, \
+        Z, maskd, atom_molid, \
         mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule, *args, **kwargs)
         
         if callable(learned_parameters):
@@ -368,7 +378,8 @@ class Energy(torch.nn.Module):
             parameters = self.packpar(Z, learned_params=adict)    
         else:
             parameters = self.packpar(Z, learned_params=learned_parameters)
-        F, e, P, Hcore, w, charge, notconverged = self.hamiltonian(molecule.const, molsize, \
+            molecule.parameters = parameters
+        F, e, v, P, Hcore, w, charge, notconverged = self.hamiltonian(molecule.const, molsize, \
                                                  nHeavy, nHydro, nocc, Z, maskd, \
                                                  mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, \
                                                  parameters, P0=P0)
@@ -443,7 +454,13 @@ class Energy(torch.nn.Module):
                                          gp2=parameters['g_p2'],
                                          hsp=parameters['h_sp'])
             Hf, Eiso_sum = heat_formation(molecule.const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
-            return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
+            
+            if self.excited:
+                pass # keep w as is; 2-el repulsion integrals
+            else:
+                w = None # do not save w as atrribute - not needed for ground state
+            return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, v, w, P, charge, notconverged
+            
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough
             #index_add is used in total_energy and heat_formation function
@@ -465,11 +482,12 @@ class Force(torch.nn.Module):
     def forward(self, molecule, learned_parameters=dict(), P0=None, *args, **kwargs):
 
         molecule.coordinates.requires_grad_(True)
-        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
+        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e_mo, C_mo, w, P, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
         
         if self.eig:
-            e = e.detach()
+            e_mo = e_mo.detach()
+            C_mo = C_mo.detach()
             e_gap = e_gap.detach()
         #L = Etot.sum()
         L = Hf.sum()
@@ -490,4 +508,6 @@ class Force(torch.nn.Module):
             force = -molecule.coordinates.grad.detach()
             molecule.coordinates.grad.zero_()
 
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
+        return force.detach(), P.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e_mo, C_mo, e_gap, w, charge, notconverged
+
+# TODO rename variables to something meaningful: v -> C_mo, w -> eri_2d (as in PYSCF)

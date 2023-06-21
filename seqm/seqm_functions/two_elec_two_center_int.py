@@ -20,24 +20,32 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     #       valence shell charge for H, tore[6]=4, valence shell charge for C
 
     tore = const.tore
+    print('tore',tore)
+    
     qn = const.qn
+    print('qn', qn)
+    
     hpp = 0.5*(gpp-gp2)
     qn0=qn[Z]
     #Z==0 is for padding zero
-    isH = Z==1  # Hydrogen
-    isX = Z>2   # Heavy atom
+    isH = Z==1  # mask for Hydrogen
+    isX = Z>2   # mask for Heavy atoms 
 
-    rho_0=torch.zeros_like(qn0)
-    rho_1=torch.zeros_like(qn0)
-    rho_2=torch.zeros_like(qn0)
+    rho_0 = torch.zeros_like(qn0) # initialize #! what are rho?
+    rho_1 = torch.zeros_like(qn0)
+    rho_2 = torch.zeros_like(qn0)
+    
     dd=torch.zeros_like(qn0)
     qq=torch.zeros_like(qn0)
+    
     rho1 = additive_term_rho1.apply
     rho2 = additive_term_rho2.apply
 
-    dd[isX], qq[isX] = dd_qq(qn0[isX],zetas[isX], zetap[isX])
+    dd[isX], qq[isX] = dd_qq(qn0[isX], zetas[isX], zetap[isX])
+    
     rho_0[isH] = 0.5*ev/gss[isH]
     rho_0[isX] = 0.5*ev/gss[isX]
+    
     if torch.sum(isX)>0:
         rho_1[isX] = rho1(hsp[isX],dd[isX])
         rho_2[isX] = rho2(hpp[isX],qq[isX])
@@ -255,7 +263,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     #y[cond1XX,1-1] = -a*x[cond1XX,2-1]
     #y[x[...,1-1]<0.0,1-1] *= -1.0
 
-    y[...,1-1]=0.0
+    y[...,1-1] = 0.0
     cond1XX_X1g0 = cond1XX & ( x[...,1-1]>=0.0 )
     cond1XX_X1l0 = cond1XX & ( x[...,1-1]<0.0 )
     y[cond1XX_X1g0,1-1] = -(1.0/z2[cond1XX_X1g0])*x[cond1XX_X1g0,2-1]

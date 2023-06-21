@@ -59,6 +59,8 @@ def fock_u(nmol, molsize, P0, P0Alpha, P0Beta, M, maskd, mask, idxi, idxj, w, gs
         F[maskd,i,j].add_( P[maskd,i,j]* (0.75*gpp - 1.25*gp2) )
     #
     """
+    
+    #============ one electron block ???  probably 2e-1c ==============
     ### http://openmopac.net/manual/1c2e.html
     #(s,s)
     TMP = torch.zeros_like(M)
@@ -78,7 +80,7 @@ def fock_u(nmol, molsize, P0, P0Alpha, P0Beta, M, maskd, mask, idxi, idxj, w, gs
     #print(TMP)
     F.add_(TMP)
 
-
+    
 
     # sumation over two electron two center integrals over the neighbor atoms
 

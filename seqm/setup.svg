@@ -1,0 +1,84 @@
+digraph G {
+	graph [bb="0,0,828,202.74",
+		clusterrank=local,
+		rankdir=TB
+	];
+	node [label="\N"];
+	subgraph cluster_G {
+		graph [bb="8,8,820,194.74",
+			fillcolor="#80808018",
+			label="",
+			style="filled,rounded"
+		];
+		subgraph cluster_Molecule {
+			graph [bb="114,16,812,186.74",
+				fillcolor="#80808018",
+				label=Molecule,
+				lheight=0.21,
+				lp="463,175.24",
+				lwidth=0.72,
+				style="filled,rounded"
+			];
+			subgraph cluster_Molecule__Molecule {
+				graph [bb="280,24,804,155.74",
+					fillcolor="#80808018",
+					label="Molecule.Molecule",
+					lheight=0.21,
+					lp="542,144.24",
+					lwidth=1.50,
+					style="filled,rounded"
+				];
+				subgraph cluster_Molecule__Molecule____init__ {
+					graph [bb="446,32,796,124.74",
+						fillcolor="#80808018",
+						label="Molecule.Molecule.__init__",
+						lheight=0.21,
+						lp="621,113.24",
+						lwidth=2.18,
+						style="filled,rounded"
+					];
+					Molecule__Molecule____init____get_coordinates	[fillcolor="#ff6565b2",
+						fontcolor="#000000",
+						group=0,
+						height=0.74639,
+						label="get_coordinates\n(Molecule.py:65)",
+						pos="709,66.87",
+						style=filled,
+						width=2.1999];
+					Molecule__Molecule____init____get_species	[fillcolor="#ff6565b2",
+						fontcolor="#000000",
+						group=0,
+						height=0.74639,
+						label="get_species\n(Molecule.py:68)",
+						pos="533,66.87",
+						style=filled,
+						width=2.1999];
+				}
+				Molecule__Molecule____init__	[fillcolor="#ff9999b2",
+					fontcolor="#000000",
+					group=0,
+					height=0.74639,
+					label="__init__\n(Molecule.py:7)",
+					pos="362,66.87",
+					style=filled,
+					width=2.0624];
+			}
+			Molecule__Molecule	[fillcolor="#feccccb2",
+				fontcolor="#000000",
+				group=0,
+				height=0.74639,
+				label="Molecule\n(Molecule.py:6)",
+				pos="196,66.87",
+				style=filled,
+				width=2.0624];
+		}
+		Molecule	[fillcolor="#ffffffb2",
+			fontcolor="#000000",
+			group=0,
+			height=0.5,
+			label=Molecule,
+			pos="60,66.87",
+			style=filled,
+			width=1.2277];
+	}
+}

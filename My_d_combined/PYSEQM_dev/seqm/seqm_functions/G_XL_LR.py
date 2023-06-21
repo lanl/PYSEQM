@@ -5,7 +5,7 @@ import torch
 
 def G(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp):
     """
-    construct fock matrix
+    construct two-electron part fock matrix: G(P)
     """
     dtype = M.dtype
     device = M.device

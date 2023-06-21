@@ -27,7 +27,8 @@ class Molecule(torch.nn.Module):
         self.parser = Parser(self.seqm_parameters)
         
         self.nmol, self.molsize, \
-        self.nHeavy, self.nHydro, self.nocc, \
+        self.nHeavy, self.nHydro, \
+        self.norb, self.nocc, self.nvirt, \
         self.Z, self.maskd, self.atom_molid, \
         self.mask, self.mask_l, self.pair_molid, \
         self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, return_mask_l=True, *args, **kwargs)

@@ -45,7 +45,7 @@ class Electronic_Structure(torch.nn.Module):
         return force, density matrix, total energy of this batch
         """
         if dm_prop=='SCF':
-            molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, self.charge, self.notconverged = \
+            molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.C_mo, molecule.e_gap, molecule.w, self.charge, self.notconverged = \
                         self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
             molecule.dm = P.detach()
             
@@ -63,10 +63,6 @@ class Electronic_Structure(torch.nn.Module):
                 molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
             molecule.d = self.dipole(molecule.q, molecule.coordinates)
             
-
-
-
-        #return F, P, L
 
     def get_force(self):
         return self.force
