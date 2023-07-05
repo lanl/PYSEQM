@@ -2228,8 +2228,6 @@ def diatom_overlap_matrixD(ni,nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int):
     casb = ca*sb
     cacb = ca*cb
     di[...,0,0] = S111
-    
-    
     #jcallg2 = (jcall>2)
     #di[jcallg2,1,0] = S211[jcallg2,0]*ca[jcallg2,0]*sb[jcallg2,0]
     #the fraction of H-H is low, may not necessary to use indexing

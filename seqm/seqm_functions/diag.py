@@ -111,6 +111,8 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
+
+        #print('diag: DOING 2')
         e0, v = sym_eigh(pack(x, nheavyatom, nH))
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH)] = e0
@@ -220,6 +222,7 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
     device = x.device
     
     if x.dim()==2:
+        print('diag: DOING 2')
         e0, v = sym_eigh(pack(x, nheavyatom, nH))
         e = torch.zeros((x.shape[0]), dtype=dtype, device=device)
         e[:(nheavyatom*4+nH)] = e0

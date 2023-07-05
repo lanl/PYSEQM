@@ -92,7 +92,6 @@ def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas,
                                    zeta[idxj][overlap_pairs],
                                    qn_int)
 
-    #print(di)
 #    print("DI:", time.time() - t0)
 #    t0 = time.time()
     #di shape (npairs,4,4)
@@ -220,7 +219,7 @@ def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas,
 
     else:
         if torch.is_tensor(Kbeta):
-            M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0* Kbeta[:,0]
+            M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0 * Kbeta[:,0]
             M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0 * Kbeta[:,1,None]
             M[mask,1:,0]  = di[...,1:,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0 * Kbeta[:,2,None]
             M[mask,1:,1:] = di[...,1:,1:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0 * Kbeta[:,3:,None]

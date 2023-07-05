@@ -6,7 +6,6 @@ from torch.autograd import grad
 from .seqm_functions.constants import ev
 import os
 import time
-
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6(bugged)/PM6_SP
 """
@@ -27,7 +26,7 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'Gaussian1_L', 'Gaussian2_L',
                        'Gaussian1_M', 'Gaussian2_M'
                       ],
-               
+
                 'PM6':['U_ss', 'U_pp', 'U_dd', 'zeta_s', 'zeta_p', 'zeta_d',  'beta_s', 'beta_p',
                        'beta_d', 's_orb_exp_tail', 'p_orb_exp_tail', 'd_orb_exp_tail',
                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'F0SD', 'G2SD','rho_core',
@@ -82,17 +81,14 @@ class Parser(torch.nn.Module):
         inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device,dtype=torch.int64)
 
         Z = molecule.species.reshape(-1)[real_atoms]
-        
-        
-        
+
         if(themethod == 'PM6'): # PM6 is not implemented yet
             nHeavy = torch.sum(((molecule.species>1) & ((molecule.species <= 12) | ((molecule.species >= 18) & (molecule.species <=20)) | ((molecule.species >= 30) & (molecule.species <= 32)) | ((molecule.species >= 36) & (molecule.species <= 38)) | ((molecule.species >= 48) & (molecule.species <= 50)) | ((molecule.species >= 54) & (molecule.species <= 56)) | ((molecule.species >= 80) & (molecule.species <= 83)))),dim=1)
         else:
             nHeavy = torch.sum(molecule.species>1,dim=1)
 
         nSuperHeavy = torch.sum((((molecule.species > 12) & (molecule.species <18)) | ((molecule.species > 20) & (molecule.species <30)) | ((molecule.species > 32) & (molecule.species <36)) | ((molecule.species > 38) & (molecule.species <48)) | ((molecule.species > 50) & (molecule.species <54)) | ((molecule.species > 70) & (molecule.species <80)) | (molecule.species ==57)),dim=1)
-        
-        
+
         nHydro = torch.sum(molecule.species==1,dim=1)
         tore = molecule.const.tore
         n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64)

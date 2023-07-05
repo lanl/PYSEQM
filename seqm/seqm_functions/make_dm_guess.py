@@ -108,7 +108,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                     Kbeta=Kbeta)
     
     if not torch.is_tensor(molecule.dm) or overwrite_existing_dm==True:
-        print('Reinitializing DM')
+        #print('Reinitializing DM')
         if molecule.method == 'PM6':
             P0 = torch.zeros_like(M)  # density matrix
             P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
@@ -325,8 +325,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                 P = unpack(t, nheavyatom, nH, x.shape[-1])
 
                 v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
-                P = P.reshape(x_orig_shape)
-                molecule.dm = P / 2
+                P = P.reshape(x_orig_shape) / 2
+                molecule.dm = P
                 return P, v
         else:
             return P, None

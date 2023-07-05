@@ -58,4 +58,3 @@ def PWCCT(method='MNDO', elements=[1,6,7,8],
     return  torch.nn.Parameter(q, requires_grad=False),torch.nn.Parameter(p, requires_grad=False)
 
 
-

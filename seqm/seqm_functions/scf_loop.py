@@ -14,7 +14,7 @@ from .diag import sym_eig_trunc, sym_eig_trunc1
 from .diag_d import sym_eig_truncd, sym_eig_trunc1d
 import warnings
 import time
-from .build_two_elec_one_center_int_D import calc_integral, calc_integral_os
+from .build_two_elec_one_center_int_D import calc_integral #, calc_integral_os
 #from .check import check
 #scf_backward==0: ignore the gradient on density matrix
 #scf_backward==1: use recursive formula/implicit autodiff
@@ -218,9 +218,9 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
     """
     adaptive mixing algorithm, see cnvg.f
     """
-    nDirect1 = 50
-    alpha_direct = 0.5
-    alpha_direct_increment = (0.91-alpha_direct)/nDirect1
+    nDirect1 = 120
+    alpha_direct = 0.8
+    alpha_direct_increment = (0.95-alpha_direct)/nDirect1
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0
@@ -261,7 +261,11 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                             nHeavy[notconverged], nHydro[notconverged], 4*molsize)
             else:
                 if(themethod=='PM6'):
-                    raise ValueError('DO NOT use PM6 now')
+                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
+                                                   nSuperHeavy[notconverged],
+                                                   nHeavy[notconverged],
+                                                   nHydro[notconverged],
+                                                   nOccMO[notconverged])[1]
                 else:
                     Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                                    nHeavy[notconverged],
@@ -281,7 +285,7 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
             notconverged = err > eps
             max_err = torch.max(err).item()
             Nnot = torch.sum(notconverged).item()
-            if debug: print("scf ", k, max_err, Nnot)
+            if debug: print("scf direct", k, max_err, Nnot)
             k = k + 1
         else:
             return P, notconverged
@@ -307,7 +311,11 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                             nHeavy[notconverged], nHydro[notconverged], 4*molsize)
             else:
                 if(themethod=='PM6'):
-                    raise ValueError('DO NOT use PM6 now')
+                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
+                                                   nSuperHeavy[notconverged],
+                                                   nHeavy[notconverged],
+                                                   nHydro[notconverged],
+                                                   nOccMO[notconverged])[1]
                 else:
                     Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                              nHeavy[notconverged], nHydro[notconverged],
@@ -332,7 +340,7 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                            - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
                                            + Pold[notconverged].diagonal(dim1=1,dim2=2)
                                          )**2, dim=1 ) ).reshape(-1,1,1)
-                print(fac)
+                #print(fac)
             #
             if backward:
                 Pold = P + 0.0  # ???
@@ -348,7 +356,7 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
             notconverged = err > eps
             max_err = torch.max(err).item()
             Nnot = torch.sum(notconverged).item()
-            if debug: print("scf ", k, max_err, Nnot)
+            if debug: print("scf adapt", k, max_err, Nnot)
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
@@ -529,10 +537,12 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 2
+    nDirect1 = 50
+    alpha_direct = 0.9
+
     nAdapt = 1
     # number of maximal fock matrixes used
-    nFock = 5
+    nFock = 8
 
     """
     *      Emat is matrix with form
@@ -548,7 +558,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     """
     # F*P - P*F = [F*P]
     if(themethod == 'PM6'):
-        raise ValueError('adaptive mixing + pulay is not supported for PM6 now')
+        FPPF = torch.zeros(nmol, nFock, molsize*9, molsize*9, dtype=dtype,device=device)
     else:
         FPPF = torch.zeros(nmol, nFock, molsize*4, molsize*4, dtype=dtype,device=device)
         
@@ -621,7 +631,9 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 P = Pnew+0.0
             else:
                 Pold[notconverged] = P[notconverged]
-                P[notconverged] = Pnew[notconverged]
+                #P[notconverged] = Pnew[notconverged]
+                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
+
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
@@ -629,7 +641,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             notconverged = err > eps
             max_err = torch.max(err).item()
             Nnot = torch.sum(notconverged).item()
-            if debug: print("scf ", k, max_err, Nnot)
+            if debug: print("scf direct", k, max_err, Nnot)
             k = k + 1
         else:
             return P, notconverged
@@ -724,7 +736,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             notconverged = err > eps
             max_err = torch.max(err).item()
             Nnot = torch.sum(notconverged).item()
-            if debug: print("scf ", k, max_err, Nnot)
+            if debug: print("scf adaptive", k, max_err, Nnot)
             k = k + 1
         else:
             return P, notconverged
@@ -791,7 +803,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             Eelec[notconverged] = Eelec_new[notconverged]
             notconverged = err > eps
             if debug:
-                print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item())
+                print("scf pulay", k, torch.max(err).item(), torch.sum(notconverged).item())
             k = k + 1
         else:
             return P, notconverged
@@ -864,7 +876,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             notconverged = err > eps
             max_err = torch.max(err).item()
             Nnot = torch.sum(notconverged).item()
-            if debug: print("scf ", k, max_err, Nnot)
+            if debug: print("scf pulay", k, max_err, Nnot)
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
@@ -1079,10 +1091,10 @@ class SCF(torch.autograd.Function):
                               nHydro, nHeavy, nSuperHeavy, nOccMO, \
                               maskd, mask, idxi, idxj, eps, zetas, zetap, zetad, Z, F0SD, G2SD, notconverged, \
                               atom_molid, pair_molid)
-        
+
         return P, notconverged
-    
-    
+
+
     @staticmethod
     def backward(ctx, grad_P, grad1):
         """
@@ -1239,7 +1251,7 @@ def scf_loop(const, molsize, \
     if const.do_timing: t0 = time.time()
     M, w,rho0xi,rho0xj = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, \
                      zetas,zetap, zetad, zs, zp, zd,  uss, upp , udd, gss, gpp, gp2, hsp,F0SD, G2SD, rho_core, alpha, chi, themethod,  beta, Kbeta=Kbeta)
-    
+
     if const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()
         t1 = time.time()
@@ -1274,9 +1286,10 @@ def scf_loop(const, molsize, \
                 .transpose(2,3) \
                 .reshape(nmol, 4*molsize, 4*molsize)
         
-        if nOccMO.dim() == 2:
-            P = torch.stack((0.5*P, 0.5*P), dim=1)
-            
+        if nOccMO.dim() == 2: # alpha and beta dm for open shell
+            #print('DOING UHF!!!!!!')
+            P = torch.stack((0.55*P, 0.45*P), dim=1)
+    #print('GRAD P',P.requires_grad)
     if(themethod == 'PM6'): # PM6 does not work. ignore this part
         if nOccMO.dim() == 2: # open shell
             

@@ -69,7 +69,6 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
         #(p,p*)
         for i,j in [(1,2),(1,3),(2,3)]:
             TMP[maskd,i,j] = P[maskd,i,j]* (0.75*gpp - 1.25*gp2)
-            
         ##(d,d) should go here.  Do not know exact form
         ##for i in range(4,9):
             ##TMP[maskd,i,i] = P[maskd,i,i]*(AllIntegrals[maskd,i,i])
@@ -166,19 +165,19 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
                 TMP2[...,j,i] = TMP_d[...,i,j]
                 j = j + 1
             i = i + 1
+
+        #########
+        # i = 0
+        # j = 0
+        # while (i < TMP2.shape[1]):
+        #     j = 0
+        #     while(j < TMP2.shape[2]):
+        #         if(  (i > j)):
+        #             TMP2[...,i,j] = 0.0
+        #         j = j + 1
+        #     i = i + 1
+        ############
         
-        
-        i = 0
-        j = 0
-        while (i < TMP2.shape[1]):
-            j = 0
-            while(j < TMP2.shape[2]):
-                if(  (i > j)):
-                    TMP2[...,i,j] = 0.0
-                j = j + 1
-            i = i + 1
-        
-        #print(time.time()-t0)
         F.add_(TMP2)
         #del TMP_d, TMP2, PTMP, Pnew, Pptot
         
@@ -270,7 +269,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
         #\sum_A
         F.index_add_(0,maskd[idxj],sumA)
 
-        
+
 
     # off diagonal block part, check KAB in forck2.f
     # mu, nu in A

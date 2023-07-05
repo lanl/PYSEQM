@@ -5,7 +5,7 @@ ev = 27.21 #used in mopac7
 #ev =  27.211386
 
 # a0=0.529167  #used in mopac7
-a0 = 0.52917724899999996 # used in amber and nexmd
+a0 = 0.529167 # used in amber and nexmd
 #a0=0.5291772109
 ev_kcalpmol = 23.061  # 1 eV = 23.061 kcal/mol
 

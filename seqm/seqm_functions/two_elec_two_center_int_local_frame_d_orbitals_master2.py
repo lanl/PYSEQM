@@ -21,19 +21,12 @@ import time
 
 #chech repp.f
 def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, qa0d,qb0d, dpa0d, dpb0d, dsa0d, dsb0d, dda0d, ddb0d, rho0ad,rho0bd, rho1ad,rho1bd, rho2ad,rho2bd, rho3ad,rho3bd, rho4ad,rho4bd, rho5ad,rho5bd, rho6ad,rho6bd, dd, themethod,rotationMatrix, ri, riXH,drho_corea,drho_coreb, riXHPM6, riPM6a, riPM6b  ):
-    
-    
     """
     two electron two center integrals in local frame for each pair
     """
 ##    t = time.time()
     dtype = r0d.dtype
     device = r0d.device
-    ##print(rho0a,rho1a, rho2a, rho3a, rho4a, rho5a, rho6a)
-    ##print(rho0b,rho1b, rho2b, rho3b, rho4b, rho5b, rho6b)
-    ##print(da0,db0, qa0,qb0, dpa0, dpb0, dsa0, dsb0, dda0, ddb0)
-    ##print(rho3a)
-    ##sys.exit()
     # ni, nj, r0, da0, db0, qa0, qb0, rho0a, rho0b ... rho2b, shape (napirs,)
     # tore: dictionary type tensor tore[1]=1,
     #       valence shell charge for H, tore[6]=4, valence shell charge for C
@@ -86,222 +79,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
          (((nj > 12) & (nj <18)) | ((nj > 20) & (nj <30)) | ((nj > 32) & (nj <36)) | ((nj > 38) & (nj <48)) | ((nj > 50) & (nj <54)) | ((nj > 70) & (nj <80)) | (nj ==57))
 
     Ycore = (drho_corea[YY] > 0.000) | (drho_coreb[YY] > 0.000)
-    ##rho0a = rho_corea
-    ##rho0b = rho_coreb
     if(YH.sum() > 0 ):
-        ##newAdd = rho0a[YY]
-        ##newAdd = dd[ni[YY],ni[YY]]
-        ##bcore00s = ev/torch.sqrt((r0[YY])**2+(rho0b[YY]+newAdd)**2)
-    
-        ##bcore20pp = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*ddb0[YY])**2+(newAdd+rho2b[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*ddb0[YY])**2+(newAdd+rho2b[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*ddb0[YY])**2+(newAdd+rho2b[YY])**2)
-        ##bcore10ps = ev1/torch.sqrt((r0[YY]+dpb0[YY])**2+(newAdd+rho1b[YY])**2)+ev1/torch.sqrt((r0[YY]-dpb0[YY])**2+(newAdd+rho1b[YY])**2)
-        ##bcore00d = ev/torch.sqrt((r0[YY])**2+(rho3b[YY]+newAdd)**2)
-        ##bcore20ds = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*ddb0[YY])**2+(newAdd+rho5b[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*ddb0[YY])**2+(newAdd+rho5b[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*ddb0[YY])**2+(newAdd+rho5b[YY])**2)
-        ##bcore20dd = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*ddb0[YY])**2+(newAdd+rho6b[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*ddb0[YY])**2+(newAdd+rho6b[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*ddb0[YY])**2+(newAdd+rho6b[YY])**2)
-        ##bcore10dp = ev1/torch.sqrt((r0[YY]+dpb0[YY])**2+(newAdd+rho4b[YY])**2)+ev1/torch.sqrt((r0[YY]-dpb0[YY])**2+(newAdd+rho4b[YY])**2)
-        
-        ##newAdd =rho0b[YY]
-    
-        ##core00s = ev/torch.sqrt((r0[YY])**2+(rho0a[YY]+newAdd)**2)
-        ##core00d = ev/torch.sqrt((r0[YY])**2+(rho3a[YY]+newAdd)**2)
-    
-    
-        ##core20ds = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*dda0[YY])**2+(newAdd+rho5a[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*dda0[YY])**2+(newAdd+rho5a[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*dda0[YY])**2+(newAdd+rho5a[YY])**2)
-        ##core20pp = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*dda0[YY])**2+(newAdd+rho2a[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*dda0[YY])**2+(newAdd+rho2a[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*dda0[YY])**2+(newAdd+rho2a[YY])**2)
-        ##core20dd = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*dda0[YY])**2+(newAdd+rho6a[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*dda0[YY])**2+(newAdd+rho6a[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*dda0[YY])**2+(newAdd+rho6a[YY])**2)
-    
-        ##core10ps = ev1/torch.sqrt((r0[YY]+dpa0[YY])**2+(newAdd+rho1a[YY])**2)+ev1/torch.sqrt((r0[YY]-dpa0[YY])**2+(newAdd+rho1a[YY])**2)
-        ##core10dp = ev1/torch.sqrt((r0[YY]+dpa0[YY])**2+(newAdd+rho4a[YY])**2)+ev1/torch.sqrt((r0[YY]-dpa0[YY])**2+(newAdd+rho4a[YY])**2)
-        ##coreYY = torch.zeros(YY.sum(),90,dtype=dtype, device=device)
-        ##coreYYLocal = torch.zeros(YY.sum(),90,dtype=dtype, device=device) 
-    
-    ##    coreYY[...,0] = tore[ni[YY]]*bcore00s
-    ##    coreYY[...,1] = tore[ni[YY]]*bcore10ps
-    ##    coreYY[...,2] = 0
-    ##    coreYY[...,3] = 0
-    ##    coreYY[...,4] = tore[ni[YY]]*bcore20pp + coreYY[...,0]
-    ##    coreYY[...,5] = 0
-    ##    coreYY[...,6] = 0
-    ##    coreYY[...,7] = tore[ni[YY]]*bcore20pp + coreYY[...,0]
-    ##    coreYY[...,8] = 0
-    ##    coreYY[...,9] = tore[ni[YY]]*bcore20pp + coreYY[...,0]
-    ##    coreYY[...,10] = tore[ni[YY]]*bcore20ds
-    ##    coreYY[...,11] = 0
-    ##    coreYY[...,12] = 0
-    ##    coreYY[...,13] = 0
-    ##    coreYY[...,14] = 0
-    ##    coreYY[...,15] = tore[ni[YY]]*bcore10dp
-    ##    coreYY[...,16] = 0
-    ##    coreYY[...,17] = 0
-    ##    coreYY[...,18] = 0
-    ##    coreYY[...,19] = 0
-    ##    coreYY[...,20] = 0
-    ##    coreYY[...,21] = tore[ni[YY]]*bcore10dp
-    ##    coreYY[...,22] = 0
-    ##    coreYY[...,23] = 0
-    ##    coreYY[...,24] = 0
-    ##    coreYY[...,25] = 0
-    ##    coreYY[...,26] = 0
-    ##    coreYY[...,27] = tore[ni[YY]]*bcore10dp
-    ##    coreYY[...,28] = 0
-    ##    coreYY[...,29] = 0
-    ##    coreYY[...,30] = tore[ni[YY]]*(bcore20dd+ bcore00d)
-    ##    coreYY[...,31] = 0
-    ##    coreYY[...,32] = 0
-    ##    coreYY[...,33] = 0
-    ##    coreYY[...,34] = 0
-    ##    coreYY[...,35] = coreYY[...,30]
-    ##    coreYY[...,36] = 0
-    ##    coreYY[...,37] = 0
-    ##    coreYY[...,38] = 0
-    ##    coreYY[...,39] = coreYY[...,30]
-    ##    coreYY[...,40] = 0
-    ##    coreYY[...,41] = 0
-    ##    coreYY[...,42] = coreYY[...,30]
-    ##    coreYY[...,43] = 0
-    ##    coreYY[...,44] = coreYY[...,30]
-    
-        ##coreYYLocal[...,0] = tore[ni[YY]]*core00s
-        ##coreYYLocal[...,1] = 0
-        ##coreYYLocal[...,2] = tore[ni[YY]]*core20pp + coreYYLocal[...,0]
-        ##coreYYLocal[...,3] = 0
-        ##coreYYLocal[...,4] = 0
-        ##coreYYLocal[...,5] = coreYYLocal[...,2]
-        ##coreYYLocal[...,6] = tore[ni[YY]]*core10ps
-        ##coreYYLocal[...,7] = 0
-        ##coreYYLocal[...,8] = 0
-        ##coreYYLocal[...,9] = coreYYLocal[...,2]
-        ##coreYYLocal[...,10] = 0
-        ##coreYYLocal[...,11] = 0
-        ##coreYYLocal[...,12] = 0
-        ##coreYYLocal[...,13] = 0
-        ##coreYYLocal[...,14] = tore[ni[YY]]*(core20dd+ core00d)
-        ##coreYYLocal[...,15] = tore[ni[YY]]*core20ds
-        ##coreYYLocal[...,16] = 0
-        ##coreYYLocal[...,17] = 0
-        ##coreYYLocal[...,18] = 0
-        ##coreYYLocal[...,19] = 0
-        ##coreYYLocal[...,20] = coreYYLocal[...,14]
-        ##coreYYLocal[...,21] = 0
-        ##coreYYLocal[...,22] = tore[ni[YY]]*core10dp
-        ##coreYYLocal[...,23] = 0
-        ##coreYYLocal[...,24] = 0
-        ##coreYYLocal[...,25] = 0
-        ##coreYYLocal[...,26] = 0
-        ##coreYYLocal[...,27] = coreYYLocal[...,14]
-        ##coreYYLocal[...,28] = 0
-        ##coreYYLocal[...,29] = 0
-        ##coreYYLocal[...,30] = coreYYLocal[...,22]
-        ##coreYYLocal[...,31] = 0
-        ##coreYYLocal[...,32] = 0
-        ##coreYYLocal[...,33] = 0
-        ##coreYYLocal[...,34] = 0
-        ##coreYYLocal[...,35] = coreYYLocal[...,14]
-        ##coreYYLocal[...,36] = 0
-        ##coreYYLocal[...,37] = 0
-        ##coreYYLocal[...,38] = 0
-        ##coreYYLocal[...,39] = coreYYLocal[...,22]
-        ##coreYYLocal[...,40] = 0
-        ##coreYYLocal[...,41] = 0
-        ##coreYYLocal[...,42] = 0
-        ##coreYYLocal[...,43] = 0
-        ##coreYYLocal[...,44] = coreYYLocal[...,14]
- 
-        ##coreYYLocal[...,45] = tore[nj[YY]]*bcore00s
-        ##coreYYLocal[...,46] = 0
-        ##coreYYLocal[...,47] = tore[nj[YY]]*bcore20pp + coreYYLocal[...,45]
-        ##coreYYLocal[...,48] = 0
-        ##coreYYLocal[...,49] = 0
-        ##coreYYLocal[...,50] = coreYYLocal[...,47]
-        ##coreYYLocal[...,51] = tore[nj[YY]]*bcore10ps
-        ##coreYYLocal[...,52] = 0
-        ##coreYYLocal[...,53] = 0
-        ##coreYYLocal[...,54] = coreYYLocal[...,47]
-        ##coreYYLocal[...,55] = 0
-        ##coreYYLocal[...,56] = 0
-        ##coreYYLocal[...,57] = 0
-        ##coreYYLocal[...,68] = 0
-        ##coreYYLocal[...,59] = tore[nj[YY]]*(bcore20dd+ bcore00d)
-        ##coreYYLocal[...,60] = tore[nj[YY]]*bcore20ds
-        ##coreYYLocal[...,61] = 0
-        ##coreYYLocal[...,62] = 0
-        ##coreYYLocal[...,63] = 0
-        ##coreYYLocal[...,64] = 0
-        ##coreYYLocal[...,65] = coreYYLocal[...,59]
-        ##coreYYLocal[...,66] = 0
-        ##coreYYLocal[...,67] = tore[nj[YY]]*bcore10dp
-        ##coreYYLocal[...,68] = 0
-        ##coreYYLocal[...,69] = 0
-        ##coreYYLocal[...,70] = 0
-        ##coreYYLocal[...,71] = 0
-        ##coreYYLocal[...,72] = coreYYLocal[...,59]
-        ##coreYYLocal[...,73] = 0
-        ##coreYYLocal[...,74] = 0
-        ##coreYYLocal[...,75] = coreYYLocal[...,67]
-        ##coreYYLocal[...,76] = 0
-        ##coreYYLocal[...,77] = 0
-        ##coreYYLocal[...,78] = 0
-        ##coreYYLocal[...,79] = 0
-        ##coreYYLocal[...,80] = coreYYLocal[...,59]
-        ##coreYYLocal[...,81] = 0
-        ##coreYYLocal[...,82] = 0
-        ##coreYYLocal[...,83] = 0
-        ##coreYYLocal[...,84] = coreYYLocal[...,67]
-        ##coreYYLocal[...,85] = 0
-        ##coreYYLocal[...,86] = 0
-        ##coreYYLocal[...,87] = 0
-        ##coreYYLocal[...,88] = 0
-        ##coreYYLocal[...,89] = coreYYLocal[...,59]
-        ##coreYY[...,:45] = RotateCore(coreYYLocal[...,:45],rotationMatrix,3)
-        ##coreYY[...,45:] = RotateCore(coreYYLocal[...,45:],rotationMatrix,3)
-        ##sys.exit()
-    
-    
-    ##    coreYY[...,45] = tore[ni[YY]]*core00s
-    ##    coreYY[...,46] = tore[ni[YY]]*core10ps
-    ##    coreYY[...,47] = 0
-    ##    coreYY[...,48] = 0
-    ##    coreYY[...,49] = tore[ni[YY]]*core20pp + coreYY[...,45]
-    ##    coreYY[...,50] = 0
-    ##    coreYY[...,51] = 0
-    ##    coreYY[...,52] = tore[ni[YY]]*core20pp + coreYY[...,45]
-    ##    coreYY[...,53] = 0
-    ##    coreYY[...,54] = tore[ni[YY]]*core20pp + coreYY[...,45]
-    ##    coreYY[...,55] = tore[ni[YY]]*core20ds
-    ##    coreYY[...,56] = 0
-    ##    coreYY[...,57] = 0
-    ##    coreYY[...,58] = 0
-    ##    coreYY[...,59] = 0
-    ##    coreYY[...,60] = tore[ni[YY]]*core10dp
-    ##    coreYY[...,61] = 0
-    ##    coreYY[...,62] = 0
-    ##    coreYY[...,63] = 0
-    ##    coreYY[...,64] = 0
-    ##    coreYY[...,65] = 0
-    ##    coreYY[...,66] = tore[ni[YY]]*core10dp
-    ##    coreYY[...,67] = 0
-    ##    coreYY[...,68] = 0
-    ##    coreYY[...,69] = 0
-    ##    coreYY[...,70] = 0
-    ##    coreYY[...,71] = 0
-    ##    coreYY[...,72] = tore[ni[YY]]*core10dp
-    ##   coreYY[...,73] = 0
-    ##    coreYY[...,74] = 0
-    ##    coreYY[...,75] = tore[ni[YY]]*(core20dd+ core00d)
-    ##    coreYY[...,76] = 0
-    ##    coreYY[...,77] = 0
-    ##    coreYY[...,78] = 0
-    ##    coreYY[...,79] = 0
-    ##    coreYY[...,80] = coreYY[...,75]
-    ##    coreYY[...,81] = 0
-    ##    coreYY[...,82] = 0
-    ##    coreYY[...,83] = 0
-    ##    coreYY[...,84] = coreYY[...,75]
-    ##    coreYY[...,85] = 0
-    ##    coreYY[...,86] = 0
-    ##    coreYY[...,87] = coreYY[...,75]
-    ##    coreYY[...,88] = 0
-    ##    coreYY[...,89] = coreYY[...,75]
         riYH =  torch.zeros(YH.sum(),45,dtype=dtype, device=device)
     
         r0 = r0d[YH]
@@ -328,10 +106,8 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         ##rhoSSD = (rho3a+rho6b)**2
         rhoSSD = (rho5a+rho0b)**2
         rhoSDD = (rho6a+rho0b)**2
-    
-    
-        
-    
+
+
         ########    00|00    ########
         qq = ev/torch.sqrt(r0**2+rhoSS)
         #############################
@@ -343,84 +119,13 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         DPUz_Sq = (ev1/torch.sqrt((r0+dpa0)**2+rhoSPD)-ev1/torch.sqrt((r0-dpa0)**2+rhoSPD))
         SPUz_Sq = (ev1/torch.sqrt((r0+da0)**2+rhoSSP)-ev1/torch.sqrt((r0-da0)**2+rhoSSP))
     
-        ########    00|20    ########
-        #qb0 = qb0*math.sqrt(2)
-        #dda0 = dda0*math.sqrt(2)
-        #dsa0 = dsa0*math.sqrt(2)
 
 
         #############################
     
         DDQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dda0)**2+rhoSDD)+ev2/torch.sqrt((r0+dda0)**2+rhoSDD)-ev1/torch.sqrt((r0)**2+(dda0)**2+rhoSDD)
         DSQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dsa0)**2+rhoSSD)+ev2/torch.sqrt((r0+dsa0)**2+rhoSSD)-ev1/torch.sqrt((r0)**2+(dsa0)**2+rhoSSD)
-        ##print(ev2/torch.sqrt((r0-dsa0)**2+rhoSSD),ev2/torch.sqrt((r0+dsa0)**2+rhoSSD),ev1/torch.sqrt((r0)**2+(dsa0)**2+rhoSSD))
         PPQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-qa0)**2+rhoSPP)+ev2/torch.sqrt((r0+qa0)**2+rhoSPP)-ev1/torch.sqrt((r0)**2+(da0)**2+rhoSPP)
-    
-        #qb0 = qb0/math.sqrt(2)
-#        dda0 = dda0*math.sqrt(2)
-#        dsa0 = dsa0*math.sqrt(2)
-
-        
-    
-     
- 
-    
-    
-    
-    
-
-    
-
-    
-    
-
-
-
-
-
-        ########    22|22    ########
-#        PPQxy_PPQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(qa0[YH]-qb0[YH])**2+rhoPPPP) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(qa0[YH])**2+1/2*(qb0[YH])**2+rhoPPPP)
-
-
-#        PPQxy_DSQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(qa0[YH]-dsb0[YH])**2+rhoPPSD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(qa0[YH])**2+1/2*(dsb0[YH])**2+rhoPPSD)
-
-#        PPQxy_DDQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(qa0[YH]-ddb0[YH])**2+rhoPPDD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(qa0[YH])**2+1/2*(ddb0[YH])**2+rhoPPDD)
-
-#        DSQxy_DSQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(dsa0[YH]-dsb0[YH])**2+rhoSDSD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(dsa0[YH])**2+1/2*(dsb0[YH])**2+rhoSDSD)
-
-#        DSQxy_DDQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(dsa0[YH]-ddb0[YH])**2+rhoSDDD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(dsa0[YH])**2+1/2*(ddb0[YH])**2+rhoSDDD)
-
-#        DDQxy_DDQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(dda0[YH]-ddb0[YH])**2+rhoDDDD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(dda0[YH])**2+1/2*(ddb0[YH])**2+rhoDDDD)
-
-
-        #############################
-
-
-#        DSQxy_PPQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(qb0[YH]-dsa0[YH])**2+rhoPPSD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(qb0[YH])**2+1/2*(dsa0[YH])**2+rhoPPSD)
-
-#        DDQxy_PPQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(qb0[YH]-dda0[YH])**2+rhoPPDD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(qb0[YH])**2+1/2*(dda0[YH])**2+rhoPPDD)
-#        DDQxy_DSQxy = ev1/torch.sqrt((r0[YH])**2+1/2*(dsb0[YH]-dda0[YH])**2+rhoSDDD) -\
-#                      ev1/torch.sqrt((r0[YH])**2+1/2*(dsb0[YH])**2+1/2*(dda0[YH])**2+rhoSDDD)
-
-
-
-
-
-
-
-
-    
-
-
-
 
 
 
@@ -454,32 +159,14 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         #####Dx2-y2Dx2-y2|SS#####
         riYH[...,35]=DDq_Sq*1.000000*1.000000+DDQtzx_onehalfQtxy_Sq*-1.333333*1.000000
 
-        ##print(riYH)
-        ##sys.exit()
         coreYH = torch.zeros(YH.sum(),46,dtype=dtype, device=device)
         coreYHLocal = torch.zeros(YH.sum(),46,dtype=dtype, device=device)
-        ##print(r0[YH]**2,rhoSS)
-        ##print(ni,nj)
-        ##print(tore[ni[YH]],tore[nj[YH]])
-        ##sys.exit()
-#        L = torch.zeros(wXH.shape[0])
-#        i = 0
-#        k = 0
-#        for n in YH:
-#            if (XH[k] == True and YH[k] == True):
-#                L[i] = True
-#                i = i + 1
-#            if (XH[k] == True and YH[k] == False):
-#                L[i] = False
-#                i = i + 1
-#            k = k + 1
-#        LL = L.bool()
+
         YYH = (((ni[XH] > 12) & (ni[XH] <18)) | ((ni[XH] > 20) & (ni[XH] <30)) | ((ni[XH] > 32) & (ni[XH] <36)) | ((ni[XH] > 38) & (ni[XH] <48)) | ((ni[XH] > 50) & (ni[XH] <54)) | ((ni[XH] > 70) & (ni[XH] <80)) | (ni[XH] ==57))  & (nj[XH]==1)
 
 
         coreYHLocal[...,0] = tore[ni[YH]]*riXHPM6[YYH,1-1]
 
-        ##print(coreYHLocal)
         coreYHLocal[...,1] = tore[nj[YH]]*riXH[YYH,1-1]  
         coreYHLocal[...,3] = tore[nj[YH]]*riXH[YYH,4-1]
         coreYHLocal[...,7] = tore[nj[YH]]*riXH[YYH,2-1]
@@ -492,241 +179,11 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         coreYHLocal[...,28] = tore[nj[YH]]*riYH[...,14]
         coreYH[...,0] = coreYHLocal[...,0]
         coreYH[...,1:] = RotateCore(coreYHLocal[...,1:],rotationMatrix[YH,...,...],3)
-        ##print(tore[nj[YH]]*riYH[...,0])
-        ##print(tore[nj[YH]]*riYH[...,6])
-        ##print(tore[nj[YH]]*riYH[...,9])
-        ##print(tore[nj[YH]]*riYH[...,2],tore[nj[YH]]*riYH[...,5])
-        ##print(tore[nj[YH]]*riYH[...,36])
-        ##print(tore[nj[YH]]*riYH[...,39])
-        ##print(tore[nj[YH]]*riYH[...,44])
-        ##print(tore[nj[YH]]*riYH[...,22],tore[nj[YH]]*riYH[...,30])
-        ##print(tore[nj[YH]]*riYH[...,35],tore[nj[YH]]*riYH[...,27])
-        ##print(tore[nj[YH]]*riYH[...,20],tore[nj[YH]]*riYH[...,14])
-        ##print(coreYH[...,1:])
-        ##print(coreYHLocal[...,1:])
-        ##print(coreYH[...,1:])
-        ##sys.exit()
-
-
-        ##print(DDq_DDq,DDq_DDQtzx_onehalfQtxy,DDQtzx_onehalfQtxy_DDq,DDQtzx_onehalfQtxy_DDQtzx_onehalfQtxy)
-        ##print(tore[ni[YH]]*riYH[...,1775],tore[ni[YH]]*riYH[...,1980])
     else:
         coreYH = torch.zeros(YH.sum(),46,dtype=dtype, device=device)
         riYH =  torch.zeros(YH.sum(),45,dtype=dtype, device=device)
     if(YX.sum() > 0 ):
-        ##newAdd = rho0a[YX]
-        ##newAdd = dd[ni[YX],ni[YX]]
-        ##bcore00s = ev/torch.sqrt((r0[YX])**2+(rho0b[YX]+newAdd)**2)
-    
-        ##bcore20pp = ev2/torch.sqrt((r0[YX]-math.sqrt(2)*ddb0[YX])**2+(newAdd+rho2b[YX])**2)+ev2/torch.sqrt((r0[YX]+math.sqrt(2)*ddb0[YX])**2+(newAdd+rho2b[YX])**2)-ev1/torch.sqrt((r0[YX])**2+(math.sqrt(2)*ddb0[YX])**2+(newAdd+rho2b[YX])**2)
-        ##bcore10ps = ev1/torch.sqrt((r0[YX]+dpb0[YX])**2+(newAdd+rho1b[YX])**2)+ev1/torch.sqrt((r0[YX]-dpb0[YX])**2+(newAdd+rho1b[YX])**2)
-        ##bcore00d = ev/torch.sqrt((r0[YX])**2+(rho3b[YX]+newAdd)**2)
-        ##bcore20ds = ev2/torch.sqrt((r0[YX]-math.sqrt(2)*ddb0[YX])**2+(newAdd+rho5b[YX])**2)+ev2/torch.sqrt((r0[YX]+math.sqrt(2)*ddb0[YX])**2+(newAdd+rho5b[YX])**2)-ev1/torch.sqrt((r0[YX])**2+(math.sqrt(2)*ddb0[YX])**2+(newAdd+rho5b[YX])**2)
-        ##bcore20dd = ev2/torch.sqrt((r0[YX]-math.sqrt(2)*ddb0[YX])**2+(newAdd+rho6b[YX])**2)+ev2/torch.sqrt((r0[YX]+math.sqrt(2)*ddb0[YX])**2+(newAdd+rho6b[YX])**2)-ev1/torch.sqrt((r0[YX])**2+(math.sqrt(2)*ddb0[YX])**2+(newAdd+rho6b[YX])**2)
-        ##bcore10dp = ev1/torch.sqrt((r0[YX]+dpb0[YX])**2+(newAdd+rho4b[YX])**2)+ev1/torch.sqrt((r0[YX]-dpb0[YX])**2+(newAdd+rho4b[YX])**2)
-        
-        ##newAdd =rho0b[YX]
-    
-        ##core00s = ev/torch.sqrt((r0[YX])**2+(rho0a[YX]+newAdd)**2)
-        ##core00d = ev/torch.sqrt((r0[YX])**2+(rho3a[YX]+newAdd)**2)
-    
-    
-        ##core20ds = ev2/torch.sqrt((r0[YX]-math.sqrt(2)*dda0[YX])**2+(newAdd+rho5a[YX])**2)+ev2/torch.sqrt((r0[YX]+math.sqrt(2)*dda0[YX])**2+(newAdd+rho5a[YX])**2)-ev1/torch.sqrt((r0[YX])**2+(math.sqrt(2)*dda0[YX])**2+(newAdd+rho5a[YX])**2)
-        ##core20pp = ev2/torch.sqrt((r0[YX]-math.sqrt(2)*dda0[YX])**2+(newAdd+rho2a[YX])**2)+ev2/torch.sqrt((r0[YX]+math.sqrt(2)*dda0[YX])**2+(newAdd+rho2a[YX])**2)-ev1/torch.sqrt((r0[YX])**2+(math.sqrt(2)*dda0[YX])**2+(newAdd+rho2a[YX])**2)
-        ##core20dd = ev2/torch.sqrt((r0[YX]-math.sqrt(2)*dda0[YX])**2+(newAdd+rho6a[YX])**2)+ev2/torch.sqrt((r0[YX]+math.sqrt(2)*dda0[YX])**2+(newAdd+rho6a[YX])**2)-ev1/torch.sqrt((r0[YX])**2+(math.sqrt(2)*dda0[YX])**2+(newAdd+rho6a[YX])**2)
-    
-        ##core10ps = ev1/torch.sqrt((r0[YX]+dpa0[YX])**2+(newAdd+rho1a[YX])**2)+ev1/torch.sqrt((r0[YX]-dpa0[YX])**2+(newAdd+rho1a[YX])**2)
-        ##core10dp = ev1/torch.sqrt((r0[YX]+dpa0[YX])**2+(newAdd+rho4a[YX])**2)+ev1/torch.sqrt((r0[YX]-dpa0[YX])**2+(newAdd+rho4a[YX])**2)
-        ##coreYX = torch.zeros(YX.sum(),90,dtype=dtype, device=device)
-        ##coreYXLocal = torch.zeros(YX.sum(),90,dtype=dtype, device=device) 
-    
-    ##    coreYX[...,0] = tore[ni[YX]]*bcore00s
-    ##    coreYX[...,1] = tore[ni[YX]]*bcore10ps
-    ##    coreYX[...,2] = 0
-    ##    coreYX[...,3] = 0
-    ##    coreYX[...,4] = tore[ni[YX]]*bcore20pp + coreYX[...,0]
-    ##    coreYX[...,5] = 0
-    ##    coreYX[...,6] = 0
-    ##    coreYX[...,7] = tore[ni[YX]]*bcore20pp + coreYX[...,0]
-    ##    coreYX[...,8] = 0
-    ##    coreYX[...,9] = tore[ni[YX]]*bcore20pp + coreYX[...,0]
-    ##    coreYX[...,10] = tore[ni[YX]]*bcore20ds
-    ##    coreYX[...,11] = 0
-    ##    coreYX[...,12] = 0
-    ##    coreYX[...,13] = 0
-    ##    coreYX[...,14] = 0
-    ##    coreYX[...,15] = tore[ni[YX]]*bcore10dp
-    ##    coreYX[...,16] = 0
-    ##    coreYX[...,17] = 0
-    ##    coreYX[...,18] = 0
-    ##    coreYX[...,19] = 0
-    ##    coreYX[...,20] = 0
-    ##    coreYX[...,21] = tore[ni[YX]]*bcore10dp
-    ##    coreYX[...,22] = 0
-    ##    coreYX[...,23] = 0
-    ##    coreYX[...,24] = 0
-    ##    coreYX[...,25] = 0
-    ##    coreYX[...,26] = 0
-    ##    coreYX[...,27] = tore[ni[YX]]*bcore10dp
-    ##    coreYX[...,28] = 0
-    ##    coreYX[...,29] = 0
-    ##    coreYX[...,30] = tore[ni[YX]]*(bcore20dd+ bcore00d)
-    ##    coreYX[...,31] = 0
-    ##    coreYX[...,32] = 0
-    ##    coreYX[...,33] = 0
-    ##    coreYX[...,34] = 0
-    ##    coreYX[...,35] = coreYX[...,30]
-    ##    coreYX[...,36] = 0
-    ##    coreYX[...,37] = 0
-    ##    coreYX[...,38] = 0
-    ##    coreYX[...,39] = coreYX[...,30]
-    ##    coreYX[...,40] = 0
-    ##    coreYX[...,41] = 0
-    ##    coreYX[...,42] = coreYX[...,30]
-    ##    coreYX[...,43] = 0
-    ##    coreYX[...,44] = coreYX[...,30]
-    
-        ##coreYXLocal[...,0] = tore[ni[YX]]*core00s
-        ##coreYXLocal[...,1] = 0
-        ##coreYXLocal[...,2] = tore[ni[YX]]*core20pp + coreYXLocal[...,0]
-        ##coreYXLocal[...,3] = 0
-        ##coreYXLocal[...,4] = 0
-        ##coreYXLocal[...,5] = coreYXLocal[...,2]
-        ##coreYXLocal[...,6] = tore[ni[YX]]*core10ps
-        ##coreYXLocal[...,7] = 0
-        ##coreYXLocal[...,8] = 0
-        ##coreYXLocal[...,9] = coreYXLocal[...,2]
-        ##coreYXLocal[...,10] = 0
-        ##coreYXLocal[...,11] = 0
-        ##coreYXLocal[...,12] = 0
-        ##coreYXLocal[...,13] = 0
-        ##coreYXLocal[...,14] = tore[ni[YX]]*(core20dd+ core00d)
-        ##coreYXLocal[...,15] = tore[ni[YX]]*core20ds
-        ##coreYXLocal[...,16] = 0
-        ##coreYXLocal[...,17] = 0
-        ##coreYXLocal[...,18] = 0
-        ##coreYXLocal[...,19] = 0
-        ##coreYXLocal[...,20] = coreYXLocal[...,14]
-        ##coreYXLocal[...,21] = 0
-        ##coreYXLocal[...,22] = tore[ni[YX]]*core10dp
-        ##coreYXLocal[...,23] = 0
-        ##coreYXLocal[...,24] = 0
-        ##coreYXLocal[...,25] = 0
-        ##coreYXLocal[...,26] = 0
-        ##coreYXLocal[...,27] = coreYXLocal[...,14]
-        ##coreYXLocal[...,28] = 0
-        ##coreYXLocal[...,29] = 0
-        ##coreYXLocal[...,30] = coreYXLocal[...,22]
-        ##coreYXLocal[...,31] = 0
-        ##coreYXLocal[...,32] = 0
-        ##coreYXLocal[...,33] = 0
-        ##coreYXLocal[...,34] = 0
-        ##coreYXLocal[...,35] = coreYXLocal[...,14]
-        ##coreYXLocal[...,36] = 0
-        ##coreYXLocal[...,37] = 0
-        ##coreYXLocal[...,38] = 0
-        ##coreYXLocal[...,39] = coreYXLocal[...,22]
-        ##coreYXLocal[...,40] = 0
-        ##coreYXLocal[...,41] = 0
-        ##coreYXLocal[...,42] = 0
-        ##coreYXLocal[...,43] = 0
-        ##coreYXLocal[...,44] = coreYXLocal[...,14]
- 
-        ##coreYXLocal[...,45] = tore[nj[YX]]*bcore00s
-        ##coreYXLocal[...,46] = 0
-        ##coreYXLocal[...,47] = tore[nj[YX]]*bcore20pp + coreYXLocal[...,45]
-        ##coreYXLocal[...,48] = 0
-        ##coreYXLocal[...,49] = 0
-        ##coreYXLocal[...,50] = coreYXLocal[...,47]
-        ##coreYXLocal[...,51] = tore[nj[YX]]*bcore10ps
-        ##coreYXLocal[...,52] = 0
-        ##coreYXLocal[...,53] = 0
-        ##coreYXLocal[...,54] = coreYXLocal[...,47]
-        ##coreYXLocal[...,55] = 0
-        ##coreYXLocal[...,56] = 0
-        ##coreYXLocal[...,57] = 0
-        ##coreYXLocal[...,68] = 0
-        ##coreYXLocal[...,59] = tore[nj[YX]]*(bcore20dd+ bcore00d)
-        ##coreYXLocal[...,60] = tore[nj[YX]]*bcore20ds
-        ##coreYXLocal[...,61] = 0
-        ##coreYXLocal[...,62] = 0
-        ##coreYXLocal[...,63] = 0
-        ##coreYXLocal[...,64] = 0
-        ##coreYXLocal[...,65] = coreYXLocal[...,59]
-        ##coreYXLocal[...,66] = 0
-        ##coreYXLocal[...,67] = tore[nj[YX]]*bcore10dp
-        ##coreYXLocal[...,68] = 0
-        ##coreYXLocal[...,69] = 0
-        ##coreYXLocal[...,70] = 0
-        ##coreYXLocal[...,71] = 0
-        ##coreYXLocal[...,72] = coreYXLocal[...,59]
-        ##coreYXLocal[...,73] = 0
-        ##coreYXLocal[...,74] = 0
-        ##coreYXLocal[...,75] = coreYXLocal[...,67]
-        ##coreYXLocal[...,76] = 0
-        ##coreYXLocal[...,77] = 0
-        ##coreYXLocal[...,78] = 0
-        ##coreYXLocal[...,79] = 0
-        ##coreYXLocal[...,80] = coreYXLocal[...,59]
-        ##coreYXLocal[...,81] = 0
-        ##coreYXLocal[...,82] = 0
-        ##coreYXLocal[...,83] = 0
-        ##coreYXLocal[...,84] = coreYXLocal[...,67]
-        ##coreYXLocal[...,85] = 0
-        ##coreYXLocal[...,86] = 0
-        ##coreYXLocal[...,87] = 0
-        ##coreYXLocal[...,88] = 0
-        ##coreYXLocal[...,89] = coreYXLocal[...,59]
-        ##coreYX[...,:45] = RotateCore(coreYXLocal[...,:45],rotationMatrix,3)
-        ##coreYX[...,45:] = RotateCore(coreYXLocal[...,45:],rotationMatrix,3)
-        ##sys.exit()
-    
-    
-    ##    coreYX[...,45] = tore[ni[YX]]*core00s
-    ##    coreYX[...,46] = tore[ni[YX]]*core10ps
-    ##    coreYX[...,47] = 0
-    ##    coreYX[...,48] = 0
-    ##    coreYX[...,49] = tore[ni[YX]]*core20pp + coreYX[...,45]
-    ##    coreYX[...,50] = 0
-    ##    coreYX[...,51] = 0
-    ##    coreYX[...,52] = tore[ni[YX]]*core20pp + coreYX[...,45]
-    ##    coreYX[...,53] = 0
-    ##    coreYX[...,54] = tore[ni[YX]]*core20pp + coreYX[...,45]
-    ##    coreYX[...,55] = tore[ni[YX]]*core20ds
-    ##    coreYX[...,56] = 0
-    ##    coreYX[...,57] = 0
-    ##    coreYX[...,58] = 0
-    ##    coreYX[...,59] = 0
-    ##    coreYX[...,60] = tore[ni[YX]]*core10dp
-    ##    coreYX[...,61] = 0
-    ##    coreYX[...,62] = 0
-    ##    coreYX[...,63] = 0
-    ##    coreYX[...,64] = 0
-    ##    coreYX[...,65] = 0
-    ##    coreYX[...,66] = tore[ni[YX]]*core10dp
-    ##    coreYX[...,67] = 0
-    ##    coreYX[...,68] = 0
-    ##    coreYX[...,69] = 0
-    ##    coreYX[...,70] = 0
-    ##    coreYX[...,71] = 0
-    ##    coreYX[...,72] = tore[ni[YX]]*core10dp
-    ##   coreYX[...,73] = 0
-    ##    coreYX[...,74] = 0
-    ##    coreYX[...,75] = tore[ni[YX]]*(core20dd+ core00d)
-    ##    coreYX[...,76] = 0
-    ##    coreYX[...,77] = 0
-    ##    coreYX[...,78] = 0
-    ##    coreYX[...,79] = 0
-    ##    coreYX[...,80] = coreYX[...,75]
-    ##    coreYX[...,81] = 0
-    ##    coreYX[...,82] = 0
-    ##    coreYX[...,83] = 0
-    ##    coreYX[...,84] = coreYX[...,75]
-    ##    coreYX[...,85] = 0
-    ##    coreYX[...,86] = 0
-    ##    coreYX[...,87] = coreYX[...,75]
-    ##    coreYX[...,88] = 0
-    ##    coreYX[...,89] = coreYX[...,75]
+
         riYX =  torch.zeros(YX.sum(),450,dtype=dtype, device=device)
     
         r0 = r0d[YX]
@@ -748,8 +205,6 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         rho5a = rho5ad[YX]
         rho6a = rho6ad[YX]
     
-    
-    
         rhoSS = (rho0a+rho0b)**2
         rhoSDD0 = (rho3a+rho0b)**2 
         rhoSSP = (rho1a+rho0b)**2
@@ -758,24 +213,13 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         rhoSSD = (rho5a+rho0b)**2
         rhoSDD = (rho6a+rho0b)**2
 
-
-
-    
         rhoDD0SP = (rho3a+rho1b)**2
 
-    
         rhoDD0PP = (rho3a+rho2b)**2
 
-
-
-
-
-    
         rhoSPSP = (rho1a+rho1b)**2
         rhoSPPD = (rho4a+rho1b)**2
 
-
-    
         rhoSPPP = (rho2a+rho1b)**2
         rhoSPSD = (rho5a+rho1b)**2
         rhoSPDD = (rho6a+rho1b)**2
@@ -786,9 +230,6 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         rhoPPSD = (rho5a+rho2b)**2
 
 
-
-        
-    
         ########    00|00    ########
         qq = ev/torch.sqrt(r0**2+rhoSS)
         #############################
@@ -809,32 +250,9 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
 
         ########    00|20    ########
         qb0 = qb0*math.sqrt(2)
-        #dda0 = dda0*math.sqrt(2)
-        #dsa0 = dsa0*math.sqrt(2)
-
 
 
         Sq_PPQtzx_onehalfQtxy = ev2/torch.sqrt((r0-(2)*qb0)**2+rhoSPP)+ev2/torch.sqrt((r0+(2)*qb0)**2+rhoSPP)-ev1/torch.sqrt((r0)**2+((0)*db0)**2+rhoSPP)
-        ##print (rhoSPP,2*qb0,r0)
-        ##print (1/torch.sqrt((r0-(2)*qb0)**2+rhoSPP),1/torch.sqrt((r0+(2)*qb0)**2+rhoSPP),1/torch.sqrt((r0)**2+0.0*(db0)**2+rhoSPP)) 
-        ##print (ev2/torch.sqrt((r0-(2)*qb0)**2+rhoSPP),ev2/torch.sqrt((r0+(2)*qb0)**2+rhoSPP),ev1/torch.sqrt((r0)**2+0.0*(db0)**2+rhoSPP))
-        ##print(Sq_PPQtzx_onehalfQtxy)
-        ##sys.exit()
-        ##DDq_DDQtzx_onehalfQtxy = ev2/torch.sqrt((r0+math.sqrt(1)*ddb0)**2+rhoDD0DD)+ev2/torch.sqrt((r0-math.sqrt(1)*ddb0)**2+rhoDD0DD)-ev1/torch.sqrt(r0**2+2*ddb0**2+rhoDD0DD)
-        #print(ev/torch.sqrt((r0+math.sqrt(1)*ddb0)**2+rhoDD0DD),ev/torch.sqrt((r0-math.sqrt(1)*ddb0)**2+rhoDD0DD),-ev/torch.sqrt(r0**2+2*ddb0**2+rhoDD0DD))
-        ##print( "THGDVGDFGDFG")
-        ##print(ev/torch.sqrt((r0-math.sqrt(1)*dsb0)**2+rhoSSD),ev/torch.sqrt((r0+math.sqrt(1)*dsb0)**2+rhoSSD),ev/torch.sqrt((r0)**2+(math.sqrt(1)*dsb0)**2+rhoSSD))
-        ##print(rhoSSD)
-        ##print(ev/torch.sqrt((r0-dsb0)**2+rhoSSD),ev/torch.sqrt((r0+dsb0)**2+rhoSSD),ev/torch.sqrt((r0)**2+(dsb0)**2+rhoSSD))
-        ##print ("HOWDY")
-        ##print(rho3a)
-        ##print(rho6b)
-        ##rint((r0-math.sqrt(1)*dsb0)**2)
-        ##print((r0+math.sqrt(1)*dsb0)**2)
-        ##print((r0)**2+(math.sqrt(1)*dsb0)**2)
-        ##print(rho3a,rho6b)
-        ##print(DDq_DDQtzx_onehalfQtxy)
-       ## sys.exit()
 
         DDq_PPQtzx_onehalfQtxy = ev2/torch.sqrt((r0-qb0)**2+rhoDD0PP)+ev2/torch.sqrt((r0+qb0)**2+rhoDD0PP)-ev1/torch.sqrt((r0)**2+(qb0)**2+rhoDD0PP)
         #############################
@@ -845,16 +263,9 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
 
         PPQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-qa0)**2+rhoSPP)+ev2/torch.sqrt((r0+qa0)**2+rhoSPP)-ev1/torch.sqrt((r0)**2+(da0)**2+rhoSPP)
  
-    
-        #qa0 = qa0/math.sqrt(2)
-        #qb0 = qb0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        #dda0 = dda0/math.sqrt(2)
-        #dsa0 = dsa0/math.sqrt(2)
-        
-    
 
-     
+
         ########    11|11    ########
         SPUpi_SPUpi = ev1/torch.sqrt(r0**2+(da0-qb0)**2+rhoSPSP)-ev1/torch.sqrt(r0**2+(da0+qb0)**2+rhoSPSP)
         #############################
@@ -875,7 +286,6 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         ########    11|21    ########
         dsa0 = dsa0/math.sqrt(2)
         dda0 = dda0/math.sqrt(2)
-        #db0 = db0/math.sqrt(2)
 
         SPUpi_PPQpiz = -(-ev2/torch.sqrt((r0-qb0)**2+(da0-qb0)**2+rhoSPPP) + \
                        ev2/torch.sqrt((r0-qb0)**2+(da0+qb0)**2+rhoSPPP) + \
@@ -899,19 +309,11 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                        ev2/torch.sqrt((r0-dda0)**2+(db0+dda0)**2+rhoSPDD) + \
                        ev2/torch.sqrt((r0+dda0)**2+(db0-dda0)**2+rhoSPDD) - \
                        ev2/torch.sqrt((r0+dda0)**2+(db0+dda0)**2+rhoSPDD))
-        #PPQpiz_SPUpi =1000000000
-        #DSQpiz_SPUpi =1000000000 
-        #DDQpiz_SPUpi =1000000000
-        #print(SPUpi_PPQpiz,PPQpiz_SPUpi)
-        #sys.exit()
         dsa0 = dsa0*math.sqrt(2)
         dda0 = dda0*math.sqrt(2)
         #db0 = db0*math.sqrt(2)
- 
-    
-    
-    
-    
+
+
         ########    10|20    ########
         qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
@@ -951,18 +353,10 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                                    ev3/torch.sqrt((r0+db0+math.sqrt(1)*dda0)**2+rhoSPDD) + \
                                    ev2/torch.sqrt((r0-db0)**2+(math.sqrt(1)*dda0)**2+rhoSPDD) - \
                                    ev2/torch.sqrt((r0+db0)**2+(math.sqrt(1)*dda0)**2+rhoSPDD))
-        #PPQtzx_onehalfQtxy_SPUz  = 100000000
-        #DSQtzx_onehalfQtxy_SPUz = 100000000
-        #DDQtzx_onehalfQtxy_SPUz = 100000000
         qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-#        qa0 = qa0/math.sqrt(2)
-#        qb0 = qb0/math.sqrt(2)
 
 
-
-
-    
         ########    20|20    ########
         #qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
@@ -986,8 +380,6 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
 
 
 
-
-    
         #############################
         
         DSQtzx_onehalfQtxy_PPQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(qb0-dsa0)**2+rhoPPSD) + \
@@ -1019,19 +411,12 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                                                  ev2/torch.sqrt(r0**2+(qb0+dda0)**2+rhoPPDD) -\
                                                  ev1/torch.sqrt(r0**2+qb0**2+dda0**2+rhoPPDD))
  
-        #qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        #dda0 = dda0/math.sqrt(2)
-        #dsa0 = dsa0/math.sqrt(2)
 
 
-    
-    
         ########    21|21    ########
         dsa0 = dsa0/math.sqrt(2)
         dda0 = dda0/math.sqrt(2) 
-#        qb0 = qb0*math.sqrt(2)
-#        qa0 = qa0*math.sqrt(2)
 
         PPQpiz_PPQpiz =  ev3/torch.sqrt((r0+qa0-qb0)**2+(qa0-qb0)**2+rhoPPPP) - \
                          ev3/torch.sqrt((r0+qa0-qb0)**2+(qa0+qb0)**2+rhoPPPP) - \
@@ -1062,15 +447,10 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                          ev3/torch.sqrt((r0-qb0+dda0)**2+(qb0-dda0)**2+rhoPPDD) - \
                          ev3/torch.sqrt((r0-qb0+dda0)**2+(qb0+dda0)**2+rhoPPDD)
         dsa0 = dsa0*math.sqrt(2)
-        #qb0 = qb0*math.sqrt(2)
         dda0 = dda0*math.sqrt(2)    
     
-    
-    
         ########    22|22    ########
-#        qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
-#        dda0 = dda0*math.sqrt(2)
 
         PPQxy_PPQxy = ev2/torch.sqrt((r0)**2+(qa0-qb0)**2+rhoPPPP) + \
                       ev2/torch.sqrt((r0)**2+(qa0+qb0)**2+rhoPPPP) - \
@@ -1085,19 +465,11 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                       ev2/torch.sqrt((r0)**2+(qb0+dda0)**2+rhoPPDD) - \
                       ev1/torch.sqrt((r0)**2+(qb0)**2+(dda0)**2+rhoPPDD)
 
-#        qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-#        dda0 = dda0/math.sqrt(2)
-
-    
-
-
 
 
         ########    22|2-2    ########
-#        qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
-#        dda0 = dda0*math.sqrt(2)
         tildaPPQxy_PPQxy = ev2/torch.sqrt((r0)**2+(qa0-qb0)**2+rhoPPPP) + \
                       ev2/torch.sqrt((r0)**2+(qa0+qb0)**2+rhoPPPP) - \
                       ev1/torch.sqrt((r0)**2+(qa0)**2+(qb0)**2+rhoPPPP)
@@ -1112,46 +484,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                       ev1/torch.sqrt((r0)**2+(qb0)**2+(dda0)**2+rhoPPDD)
 
 
-#        qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-#        dda0 = dda0/math.sqrt(2)
-
-
-        ########    22|22    ########
-#        PPQxy_PPQxy = ev1/torch.sqrt((r0)**2+1/2*(qa0-qb0)**2+rhoPPPP) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(qa0)**2+1/2*(qb0)**2+rhoPPPP)
-
-
-#        PPQxy_DSQxy = ev1/torch.sqrt((r0)**2+1/2*(qa0-dsb0)**2+rhoPPSD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(qa0)**2+1/2*(dsb0)**2+rhoPPSD)
-
-#        PPQxy_DDQxy = ev1/torch.sqrt((r0)**2+1/2*(qa0-ddb0)**2+rhoPPDD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(qa0)**2+1/2*(ddb0)**2+rhoPPDD)
-
-#        DSQxy_DSQxy = ev1/torch.sqrt((r0)**2+1/2*(dsa0-dsb0)**2+rhoSDSD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(dsa0)**2+1/2*(dsb0)**2+rhoSDSD)
-
-#        DSQxy_DDQxy = ev1/torch.sqrt((r0)**2+1/2*(dsa0-ddb0)**2+rhoSDDD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(dsa0)**2+1/2*(ddb0)**2+rhoSDDD)
-
-#        DDQxy_DDQxy = ev1/torch.sqrt((r0)**2+1/2*(dda0-ddb0)**2+rhoDDDD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(dda0)**2+1/2*(ddb0)**2+rhoDDDD)
-
-
-        #############################
-
-
-#        DSQxy_PPQxy = ev1/torch.sqrt((r0)**2+1/2*(qb0-dsa0)**2+rhoPPSD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(qb0)**2+1/2*(dsa0)**2+rhoPPSD)
-
-#        DDQxy_PPQxy = ev1/torch.sqrt((r0)**2+1/2*(qb0-dda0)**2+rhoPPDD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(qb0)**2+1/2*(dda0)**2+rhoPPDD)
-#        DDQxy_DSQxy = ev1/torch.sqrt((r0)**2+1/2*(dsb0-dda0)**2+rhoSDDD) -\
-#                      ev1/torch.sqrt((r0)**2+1/2*(dsb0)**2+1/2*(dda0)**2+rhoSDDD)
-
-
-
-
 
 
 
@@ -1410,48 +743,15 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         
         
 
-
         coreYX = torch.zeros(YX.sum(),55,dtype=dtype, device=device)
         coreYXLocal = torch.zeros(YX.sum(),55,dtype=dtype, device=device)
         YYX = (ni[XX]>1) & (nj[XX]>1) & (((ni[XX] > 12) & (ni[XX] <18)) | ((ni[XX] > 20) & (ni[XX] <30)) | ((ni[XX] > 32) & (ni[XX] <36)) | ((ni[XX] > 38) & (ni[XX] <48)) | ((ni[XX] > 50) & (ni[XX] <54)) | ((ni[XX] > 70) & (ni[XX] <80)) | (ni[XX] ==57)) & \
          ((nj[XX] <= 12) | ((nj[XX] >= 18) & (nj[XX] <=20)) | ((nj[XX] >= 30) & (nj[XX] <= 32)) | ((nj[XX] >= 36) & (nj[XX] <= 38)) | ((nj[XX] >= 48) & (nj[XX] <= 50)) | ((nj[XX] >= 54) & (nj[XX] <= 56)) | ((nj[XX] >= 80) & (nj[XX] <= 83)))
 
-        ##print(r0[YX]**2,rhoSS)
-#        coreYXLocal[...,0] = tore[ni[YX]]*riPM6a[YX,1-1]
-#        coreYXLocal[...,2] = tore[ni[YX]]*riPM6a[YX,12-1]   ##PP
-#        coreYXLocal[...,5] = tore[ni[YX]]*riPM6a[YX,12-1]  ## PP
-#        coreYXLocal[...,6] = tore[ni[YX]]*riPM6a[YX,5-1]  ##SP
-#        coreYXLocal[...,9] = tore[ni[YX]]*riPM6a[YX,11-1]  ##PP
-        ##print(coreYXLocal)
-#        coreYXLocal[...,10] = tore[nj[YX]]*ri[YX,1-1]  
-#        coreYXLocal[...,12] = tore[nj[YX]]*ri[YX,4-1]
-#        coreYXLocal[...,15] = tore[nj[YX]]*ri[YX,4-1]
-#        coreYXLocal[...,16] = tore[nj[YX]]*ri[YX,2-1]
-#        coreYXLocal[...,19] = tore[nj[YX]]*ri[YX,3-1]
-#        coreYXLocal[...,24] = tore[nj[YX]]*riYX[...,14]
-#        coreYXLocal[...,26] = tore[nj[YX]]*riYX[...,16]
-#        coreYXLocal[...,30] = tore[nj[YX]]*riYX[...,20]
-#        coreYXLocal[...,31] = tore[nj[YX]]*riYX[...,21]
-#        coreYXLocal[...,34] = tore[nj[YX]]*riYX[...,24]
-#        coreYXLocal[...,37] = tore[nj[YX]]*riYX[...,27]
-#        coreYXLocal[...,40] = tore[nj[YX]]*riYX[...,30]
-#        coreYXLocal[...,45] = tore[nj[YX]]*riYX[...,35]
-#        coreYXLocal[...,54] = tore[nj[YX]]*riYX[...,44]
         coreYXLocal[...,0] = tore[ni[YX]]*riPM6a[YYX,1-1]
         coreYXLocal[...,2] = tore[ni[YX]]*riPM6a[YYX,12-1]   ##PP
         coreYXLocal[...,6] = tore[ni[YX]]*riPM6a[YYX,5-1]  ##SP
         coreYXLocal[...,9] = tore[ni[YX]]*riPM6a[YYX,11-1]  ##PP
-        #print(ri)
-#        print(riPM6a[YX,1-1],riPM6b[YX,1-1])
-#        print(riPM6a[YX,12-1],riPM6b[YX,12-1])
-#        print(riPM6a[YX,5-1],riPM6b[YX,5-1])
-#        print(riPM6a[YX,11-1],riPM6b[YX,11-1])
-
-#        print(coreYXLocal[...,:10])
-#        print(coreYXLocal[...,10:])
-
-#        sys.exit()
-        ##print(coreYXLocal)
         coreYXLocal[...,10] = tore[nj[YX]]*riPM6b[YYX,1-1]
         coreYXLocal[...,12] = tore[nj[YX]]*riPM6b[YYX,4-1]
         coreYXLocal[...,16] = tore[nj[YX]]*riPM6b[YYX,2-1]
@@ -1462,247 +762,17 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         coreYXLocal[...,31] = tore[nj[YX]]*riYX[...,10]
         coreYXLocal[...,34] = tore[nj[YX]]*riYX[...,11]
         coreYXLocal[...,37] = tore[nj[YX]]*riYX[...,14]
-#        print(coreYXLocal[...,:10])
 
 
         coreYX[...,:10] = RotateCore(coreYXLocal[...,:10],rotationMatrix[YX,...,...],2)
         coreYX[...,10:] = RotateCore(coreYXLocal[...,10:],rotationMatrix[YX,...,...],3)
-        ##print(tore[nj[YX]]*riYX[...,0])
-        ##print(tore[nj[YX]]*riYX[...,6])
-        ##print(tore[nj[YX]]*riYX[...,9])
-        ##print(tore[nj[YX]]*riYX[...,2],tore[nj[YX]]*riYX[...,5])
-        ##print(tore[nj[YX]]*riYX[...,36])
-        ##print(tore[nj[YX]]*riYX[...,39])
-        ##print(tore[nj[YX]]*riYX[...,44])
-        ##print(tore[nj[YX]]*riYX[...,22],tore[nj[YX]]*riYX[...,30])
-        ##print(tore[nj[YX]]*riYX[...,35],tore[nj[YX]]*riYX[...,27])
-        ##print(tore[nj[YX]]*riYX[...,20],tore[nj[YX]]*riYX[...,14])
-#        print(RotateCore(coreYXLocal[...,:10],rotationMatrix[YX,...,...],2))
-        ##print(coreYXLocal)
-        ##print(coreYX[...,10:])
-        ##sys.exit()
 
-
-        ##print(DDq_DDq,DDq_DDQtzx_onehalfQtxy,DDQtzx_onehalfQtxy_DDq,DDQtzx_onehalfQtxy_DDQtzx_onehalfQtxy)
-        ##print(tore[ni[YX]]*riYX[...,1775],tore[ni[YX]]*riYX[...,1980])
     else:
         coreYX = torch.zeros(YX.sum(),55,dtype=dtype, device=device)
         riYX =  torch.zeros(YX.sum(),450,dtype=dtype, device=device)
 
     if(YY.sum() > 0 ):
-        ##newAdd = rho0a[YY]
-        ##newAdd = dd[ni[YY],ni[YY]]
-        ##bcore00s = ev/torch.sqrt((r0[YY])**2+(rho0b[YY]+newAdd)**2)
-    
-        ##bcore20pp = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*ddb0[YY])**2+(newAdd+rho2b[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*ddb0[YY])**2+(newAdd+rho2b[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*ddb0[YY])**2+(newAdd+rho2b[YY])**2)
-        ##bcore10ps = ev1/torch.sqrt((r0[YY]+dpb0[YY])**2+(newAdd+rho1b[YY])**2)+ev1/torch.sqrt((r0[YY]-dpb0[YY])**2+(newAdd+rho1b[YY])**2)
-        ##bcore00d = ev/torch.sqrt((r0[YY])**2+(rho3b[YY]+newAdd)**2)
-        ##bcore20ds = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*ddb0[YY])**2+(newAdd+rho5b[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*ddb0[YY])**2+(newAdd+rho5b[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*ddb0[YY])**2+(newAdd+rho5b[YY])**2)
-        ##bcore20dd = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*ddb0[YY])**2+(newAdd+rho6b[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*ddb0[YY])**2+(newAdd+rho6b[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*ddb0[YY])**2+(newAdd+rho6b[YY])**2)
-        ##bcore10dp = ev1/torch.sqrt((r0[YY]+dpb0[YY])**2+(newAdd+rho4b[YY])**2)+ev1/torch.sqrt((r0[YY]-dpb0[YY])**2+(newAdd+rho4b[YY])**2)
-        
-        ##newAdd =rho0b[YY]
-    
-        ##core00s = ev/torch.sqrt((r0[YY])**2+(rho0a[YY]+newAdd)**2)
-        ##core00d = ev/torch.sqrt((r0[YY])**2+(rho3a[YY]+newAdd)**2)
-    
-    
-        ##core20ds = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*dda0[YY])**2+(newAdd+rho5a[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*dda0[YY])**2+(newAdd+rho5a[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*dda0[YY])**2+(newAdd+rho5a[YY])**2)
-        ##core20pp = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*dda0[YY])**2+(newAdd+rho2a[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*dda0[YY])**2+(newAdd+rho2a[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*dda0[YY])**2+(newAdd+rho2a[YY])**2)
-        ##core20dd = ev2/torch.sqrt((r0[YY]-math.sqrt(2)*dda0[YY])**2+(newAdd+rho6a[YY])**2)+ev2/torch.sqrt((r0[YY]+math.sqrt(2)*dda0[YY])**2+(newAdd+rho6a[YY])**2)-ev1/torch.sqrt((r0[YY])**2+(math.sqrt(2)*dda0[YY])**2+(newAdd+rho6a[YY])**2)
-    
-        ##core10ps = ev1/torch.sqrt((r0[YY]+dpa0[YY])**2+(newAdd+rho1a[YY])**2)+ev1/torch.sqrt((r0[YY]-dpa0[YY])**2+(newAdd+rho1a[YY])**2)
-        ##core10dp = ev1/torch.sqrt((r0[YY]+dpa0[YY])**2+(newAdd+rho4a[YY])**2)+ev1/torch.sqrt((r0[YY]-dpa0[YY])**2+(newAdd+rho4a[YY])**2)
-        ##coreYY = torch.zeros(YY.sum(),90,dtype=dtype, device=device)
-        ##coreYYLocal = torch.zeros(YY.sum(),90,dtype=dtype, device=device) 
-    
-    ##    coreYY[...,0] = tore[ni[YY]]*bcore00s
-    ##    coreYY[...,1] = tore[ni[YY]]*bcore10ps
-    ##    coreYY[...,2] = 0
-    ##    coreYY[...,3] = 0
-    ##    coreYY[...,4] = tore[ni[YY]]*bcore20pp + coreYY[...,0]
-    ##    coreYY[...,5] = 0
-    ##    coreYY[...,6] = 0
-    ##    coreYY[...,7] = tore[ni[YY]]*bcore20pp + coreYY[...,0]
-    ##    coreYY[...,8] = 0
-    ##    coreYY[...,9] = tore[ni[YY]]*bcore20pp + coreYY[...,0]
-    ##    coreYY[...,10] = tore[ni[YY]]*bcore20ds
-    ##    coreYY[...,11] = 0
-    ##    coreYY[...,12] = 0
-    ##    coreYY[...,13] = 0
-    ##    coreYY[...,14] = 0
-    ##    coreYY[...,15] = tore[ni[YY]]*bcore10dp
-    ##    coreYY[...,16] = 0
-    ##    coreYY[...,17] = 0
-    ##    coreYY[...,18] = 0
-    ##    coreYY[...,19] = 0
-    ##    coreYY[...,20] = 0
-    ##    coreYY[...,21] = tore[ni[YY]]*bcore10dp
-    ##    coreYY[...,22] = 0
-    ##    coreYY[...,23] = 0
-    ##    coreYY[...,24] = 0
-    ##    coreYY[...,25] = 0
-    ##    coreYY[...,26] = 0
-    ##    coreYY[...,27] = tore[ni[YY]]*bcore10dp
-    ##    coreYY[...,28] = 0
-    ##    coreYY[...,29] = 0
-    ##    coreYY[...,30] = tore[ni[YY]]*(bcore20dd+ bcore00d)
-    ##    coreYY[...,31] = 0
-    ##    coreYY[...,32] = 0
-    ##    coreYY[...,33] = 0
-    ##    coreYY[...,34] = 0
-    ##    coreYY[...,35] = coreYY[...,30]
-    ##    coreYY[...,36] = 0
-    ##    coreYY[...,37] = 0
-    ##    coreYY[...,38] = 0
-    ##    coreYY[...,39] = coreYY[...,30]
-    ##    coreYY[...,40] = 0
-    ##    coreYY[...,41] = 0
-    ##    coreYY[...,42] = coreYY[...,30]
-    ##    coreYY[...,43] = 0
-    ##    coreYY[...,44] = coreYY[...,30]
-    
-        ##coreYYLocal[...,0] = tore[ni[YY]]*core00s
-        ##coreYYLocal[...,1] = 0
-        ##coreYYLocal[...,2] = tore[ni[YY]]*core20pp + coreYYLocal[...,0]
-        ##coreYYLocal[...,3] = 0
-        ##coreYYLocal[...,4] = 0
-        ##coreYYLocal[...,5] = coreYYLocal[...,2]
-        ##coreYYLocal[...,6] = tore[ni[YY]]*core10ps
-        ##coreYYLocal[...,7] = 0
-        ##coreYYLocal[...,8] = 0
-        ##coreYYLocal[...,9] = coreYYLocal[...,2]
-        ##coreYYLocal[...,10] = 0
-        ##coreYYLocal[...,11] = 0
-        ##coreYYLocal[...,12] = 0
-        ##coreYYLocal[...,13] = 0
-        ##coreYYLocal[...,14] = tore[ni[YY]]*(core20dd+ core00d)
-        ##coreYYLocal[...,15] = tore[ni[YY]]*core20ds
-        ##coreYYLocal[...,16] = 0
-        ##coreYYLocal[...,17] = 0
-        ##coreYYLocal[...,18] = 0
-        ##coreYYLocal[...,19] = 0
-        ##coreYYLocal[...,20] = coreYYLocal[...,14]
-        ##coreYYLocal[...,21] = 0
-        ##coreYYLocal[...,22] = tore[ni[YY]]*core10dp
-        ##coreYYLocal[...,23] = 0
-        ##coreYYLocal[...,24] = 0
-        ##coreYYLocal[...,25] = 0
-        ##coreYYLocal[...,26] = 0
-        ##coreYYLocal[...,27] = coreYYLocal[...,14]
-        ##coreYYLocal[...,28] = 0
-        ##coreYYLocal[...,29] = 0
-        ##coreYYLocal[...,30] = coreYYLocal[...,22]
-        ##coreYYLocal[...,31] = 0
-        ##coreYYLocal[...,32] = 0
-        ##coreYYLocal[...,33] = 0
-        ##coreYYLocal[...,34] = 0
-        ##coreYYLocal[...,35] = coreYYLocal[...,14]
-        ##coreYYLocal[...,36] = 0
-        ##coreYYLocal[...,37] = 0
-        ##coreYYLocal[...,38] = 0
-        ##coreYYLocal[...,39] = coreYYLocal[...,22]
-        ##coreYYLocal[...,40] = 0
-        ##coreYYLocal[...,41] = 0
-        ##coreYYLocal[...,42] = 0
-        ##coreYYLocal[...,43] = 0
-        ##coreYYLocal[...,44] = coreYYLocal[...,14]
- 
-        ##coreYYLocal[...,45] = tore[nj[YY]]*bcore00s
-        ##coreYYLocal[...,46] = 0
-        ##coreYYLocal[...,47] = tore[nj[YY]]*bcore20pp + coreYYLocal[...,45]
-        ##coreYYLocal[...,48] = 0
-        ##coreYYLocal[...,49] = 0
-        ##coreYYLocal[...,50] = coreYYLocal[...,47]
-        ##coreYYLocal[...,51] = tore[nj[YY]]*bcore10ps
-        ##coreYYLocal[...,52] = 0
-        ##coreYYLocal[...,53] = 0
-        ##coreYYLocal[...,54] = coreYYLocal[...,47]
-        ##coreYYLocal[...,55] = 0
-        ##coreYYLocal[...,56] = 0
-        ##coreYYLocal[...,57] = 0
-        ##coreYYLocal[...,68] = 0
-        ##coreYYLocal[...,59] = tore[nj[YY]]*(bcore20dd+ bcore00d)
-        ##coreYYLocal[...,60] = tore[nj[YY]]*bcore20ds
-        ##coreYYLocal[...,61] = 0
-        ##coreYYLocal[...,62] = 0
-        ##coreYYLocal[...,63] = 0
-        ##coreYYLocal[...,64] = 0
-        ##coreYYLocal[...,65] = coreYYLocal[...,59]
-        ##coreYYLocal[...,66] = 0
-        ##coreYYLocal[...,67] = tore[nj[YY]]*bcore10dp
-        ##coreYYLocal[...,68] = 0
-        ##coreYYLocal[...,69] = 0
-        ##coreYYLocal[...,70] = 0
-        ##coreYYLocal[...,71] = 0
-        ##coreYYLocal[...,72] = coreYYLocal[...,59]
-        ##coreYYLocal[...,73] = 0
-        ##coreYYLocal[...,74] = 0
-        ##coreYYLocal[...,75] = coreYYLocal[...,67]
-        ##coreYYLocal[...,76] = 0
-        ##coreYYLocal[...,77] = 0
-        ##coreYYLocal[...,78] = 0
-        ##coreYYLocal[...,79] = 0
-        ##coreYYLocal[...,80] = coreYYLocal[...,59]
-        ##coreYYLocal[...,81] = 0
-        ##coreYYLocal[...,82] = 0
-        ##coreYYLocal[...,83] = 0
-        ##coreYYLocal[...,84] = coreYYLocal[...,67]
-        ##coreYYLocal[...,85] = 0
-        ##coreYYLocal[...,86] = 0
-        ##coreYYLocal[...,87] = 0
-        ##coreYYLocal[...,88] = 0
-        ##coreYYLocal[...,89] = coreYYLocal[...,59]
-        ##coreYY[...,:45] = RotateCore(coreYYLocal[...,:45],rotationMatrix,3)
-        ##coreYY[...,45:] = RotateCore(coreYYLocal[...,45:],rotationMatrix,3)
-        ##sys.exit()
-    
-    
-    ##    coreYY[...,45] = tore[ni[YY]]*core00s
-    ##    coreYY[...,46] = tore[ni[YY]]*core10ps
-    ##    coreYY[...,47] = 0
-    ##    coreYY[...,48] = 0
-    ##    coreYY[...,49] = tore[ni[YY]]*core20pp + coreYY[...,45]
-    ##    coreYY[...,50] = 0
-    ##    coreYY[...,51] = 0
-    ##    coreYY[...,52] = tore[ni[YY]]*core20pp + coreYY[...,45]
-    ##    coreYY[...,53] = 0
-    ##    coreYY[...,54] = tore[ni[YY]]*core20pp + coreYY[...,45]
-    ##    coreYY[...,55] = tore[ni[YY]]*core20ds
-    ##    coreYY[...,56] = 0
-    ##    coreYY[...,57] = 0
-    ##    coreYY[...,58] = 0
-    ##    coreYY[...,59] = 0
-    ##    coreYY[...,60] = tore[ni[YY]]*core10dp
-    ##    coreYY[...,61] = 0
-    ##    coreYY[...,62] = 0
-    ##    coreYY[...,63] = 0
-    ##    coreYY[...,64] = 0
-    ##    coreYY[...,65] = 0
-    ##    coreYY[...,66] = tore[ni[YY]]*core10dp
-    ##    coreYY[...,67] = 0
-    ##    coreYY[...,68] = 0
-    ##    coreYY[...,69] = 0
-    ##    coreYY[...,70] = 0
-    ##    coreYY[...,71] = 0
-    ##    coreYY[...,72] = tore[ni[YY]]*core10dp
-    ##   coreYY[...,73] = 0
-    ##    coreYY[...,74] = 0
-    ##    coreYY[...,75] = tore[ni[YY]]*(core20dd+ core00d)
-    ##    coreYY[...,76] = 0
-    ##    coreYY[...,77] = 0
-    ##    coreYY[...,78] = 0
-    ##    coreYY[...,79] = 0
-    ##    coreYY[...,80] = coreYY[...,75]
-    ##    coreYY[...,81] = 0
-    ##    coreYY[...,82] = 0
-    ##    coreYY[...,83] = 0
-    ##    coreYY[...,84] = coreYY[...,75]
-    ##    coreYY[...,85] = 0
-    ##    coreYY[...,86] = 0
-    ##    coreYY[...,87] = coreYY[...,75]
-    ##    coreYY[...,88] = 0
-    ##    coreYY[...,89] = coreYY[...,75]
+
         riYY =  torch.zeros(YY.sum(),2025,dtype=dtype, device=device)
         
         r0 = r0d[YY] 
@@ -1714,9 +784,16 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         dpb0 = dpb0d[YY]
         dsa0 = dsa0d[YY]
         dsb0 = dsb0d[YY]
+
+        ######
+        ### dda0 and ddb0 probably should be swapped. Don't know why.
+        ######
         dda0 = dda0d[YY]
         ddb0 = ddb0d[YY]
-        
+        ######
+
+
+
         rho0a = rho0ad[YY]
         rho0b = rho0bd[YY]
         rho1a = rho1ad[YY]
@@ -1807,6 +884,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         ########    00|00    ########
         qq = ev/torch.sqrt(r0**2+rhoSS)
         Sq_DDq = ev/torch.sqrt(r0**2+rhoD0SD)
+        #print('build', r0, r0**2, rhoD0SD)
         DDq_DDq = ev/torch.sqrt(r0**2+rhoDD0DD0)
         #############################
         DDq_Sq = ev/torch.sqrt(r0**2+rhoSDD0)
@@ -1828,36 +906,18 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         ########    00|20    ########
         qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
+        ### $$$$ possible fix is to comment line below ###
         #dda0 = dda0*math.sqrt(2)
-        #ddb0 = ddb0*math.sqrt(2)
-        ##dsa0 = dsa0*math.sqrt(2)
+        dsa0 = dsa0*math.sqrt(2)
 
 
         Sq_DDQtzx_onehalfQtxy = ev2/torch.sqrt((r0-ddb0)**2+rhoDDS)+ev2/torch.sqrt((r0+ddb0)**2+rhoDDS)-ev1/torch.sqrt((r0)**2+(ddb0)**2+rhoDDS)
         Sq_DSQtzx_onehalfQtxy = ev2/torch.sqrt((r0-dsb0)**2+rhoSDS)+ev2/torch.sqrt((r0+dsb0)**2+rhoSDS)-ev1/torch.sqrt((r0)**2+(dsb0)**2+rhoSDS)
-
         Sq_PPQtzx_onehalfQtxy = ev2/torch.sqrt((r0-(2)*qb0)**2+rhoPPS)+ev2/torch.sqrt((r0+(2)*qb0)**2+rhoPPS)-ev1/torch.sqrt((r0)**2+((0)*db0)**2+rhoPPS)
-        ##print (rhoSPP,2*qb0,r0)
-        ##print (1/torch.sqrt((r0-(2)*qb0)**2+rhoSPP),1/torch.sqrt((r0+(2)*qb0)**2+rhoSPP),1/torch.sqrt((r0)**2+0.0*(db0)**2+rhoSPP)) 
 
-        ##sys.exit()
-        DDq_DDQtzx_onehalfQtxy = ev2/torch.sqrt((r0-ddb0)**2+rhoDDDD0)+ev2/torch.sqrt((r0+ddb0)**2+rhoDDDD0)-ev1/torch.sqrt((r0)**2+(ddb0)**2+rhoDDDD0)
-        
-        ##DDq_DDQtzx_onehalfQtxy = ev2/torch.sqrt((r0+math.sqrt(1)*ddb0)**2+rhoDD0DD)+ev2/torch.sqrt((r0-math.sqrt(1)*ddb0)**2+rhoDD0DD)-ev1/torch.sqrt(r0**2+2*ddb0**2+rhoDD0DD)
-        #print(ev/torch.sqrt((r0+math.sqrt(1)*ddb0)**2+rhoDD0DD),ev/torch.sqrt((r0-math.sqrt(1)*ddb0)**2+rhoDD0DD),-ev/torch.sqrt(r0**2+2*ddb0**2+rhoDD0DD))
-        ##print( "THGDVGDFGDFG")
-        ##print(ev/torch.sqrt((r0-math.sqrt(1)*dsb0)**2+rhoSSD),ev/torch.sqrt((r0+math.sqrt(1)*dsb0)**2+rhoSSD),ev/torch.sqrt((r0)**2+(math.sqrt(1)*dsb0)**2+rhoSSD))
-        ##print(rhoSSD)
-        ##print(ev/torch.sqrt((r0-dsb0)**2+rhoSSD),ev/torch.sqrt((r0+dsb0)**2+rhoSSD),ev/torch.sqrt((r0)**2+(dsb0)**2+rhoSSD))
-        ##print ("HOWDY")
-        ##print(rho3a)
-        ##print(rho6b)
-        ##rint((r0-math.sqrt(1)*dsb0)**2)
-        ##print((r0+math.sqrt(1)*dsb0)**2)
-        ##print((r0)**2+(math.sqrt(1)*dsb0)**2)
-        ##print(rho3a,rho6b)
-        ##print(DDq_DDQtzx_onehalfQtxy)
-       ## sys.exit()
+        ### $$$$ Possible fix ###
+        #DDq_DDQtzx_onehalfQtxy = ev2/torch.sqrt((r0-ddb0)**2+rhoDD0DD)+ev2/torch.sqrt((r0+ddb0)**2+rhoDD0DD)-ev1/torch.sqrt((r0)**2+(ddb0)**2+rhoDD0DD)
+        DDq_DDQtzx_onehalfQtxy =  ev2/torch.sqrt((r0-ddb0)**2+rhoDD0DD)-ev1/torch.sqrt((r0)**2+(ddb0)**2+rhoDD0DD)+ev2/torch.sqrt((r0+ddb0)**2+rhoDD0DD)
 
         DDq_DSQtzx_onehalfQtxy = ev2/torch.sqrt((r0-dsb0)**2+rhoSDDD0)+ev2/torch.sqrt((r0+dsb0)**2+rhoSDDD0)-ev1/torch.sqrt((r0)**2+(dsb0)**2+rhoSDDD0)
         DDq_PPQtzx_onehalfQtxy = ev2/torch.sqrt((r0-qb0)**2+rhoPPDD0)+ev2/torch.sqrt((r0+qb0)**2+rhoPPDD0)-ev1/torch.sqrt((r0)**2+(qb0)**2+rhoPPDD0)
@@ -1865,18 +925,19 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
     
         DDQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dda0)**2+rhoSDD)+ev2/torch.sqrt((r0+dda0)**2+rhoSDD)-ev1/torch.sqrt((r0)**2+(dda0)**2+rhoSDD)
         DSQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dsa0)**2+rhoSSD)+ev2/torch.sqrt((r0+dsa0)**2+rhoSSD)-ev1/torch.sqrt((r0)**2+(dsa0)**2+rhoSSD)
-
         PPQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-qa0)**2+rhoSPP)+ev2/torch.sqrt((r0+qa0)**2+rhoSPP)-ev1/torch.sqrt((r0)**2+(da0)**2+rhoSPP)
-    
-        DDQtzx_onehalfQtxy_DDq = ev2/torch.sqrt((r0-dda0)**2+rhoDD0DD)+ev2/torch.sqrt((r0+dda0)**2+rhoDD0DD)-ev1/torch.sqrt((r0)**2+(dda0)**2+rhoDD0DD)
+        
+        ### $$$$ Possible fix ###
+        #DDQtzx_onehalfQtxy_DDq = ev2/torch.sqrt((r0-dda0)**2+rhoDD0DD)+ev2/torch.sqrt((r0+dda0)**2+rhoDD0DD)-ev1/torch.sqrt((r0)**2+(dda0)**2+rhoDD0DD)
+        DDQtzx_onehalfQtxy_DDq = ev2/torch.sqrt((r0-dda0)**2+rhoDDDD0)+ev2/torch.sqrt((r0+dda0)**2+rhoDDDD0)-ev1/torch.sqrt((r0)**2+(dda0)**2+rhoDDDD0)
+
         DSQtzx_onehalfQtxy_DDq = ev2/torch.sqrt((r0-dsa0)**2+rhoDD0SD)+ev2/torch.sqrt((r0+dsa0)**2+rhoDD0SD)-ev1/torch.sqrt((r0)**2+(dsa0)**2+rhoDD0SD)
         PPQtzx_onehalfQtxy_DDq = ev2/torch.sqrt((r0-qa0)**2+rhoDD0PP)+ev2/torch.sqrt((r0+qa0)**2+rhoDD0PP)-ev1/torch.sqrt((r0)**2+(qa0)**2+rhoDD0PP)
     
         qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        #dda0 = dda0/math.sqrt(2)
-        #ddb0 = ddb0/math.sqrt(2)
-        ##dsa0 = dsa0/math.sqrt(2)
+        dda0 = dda0/math.sqrt(2)
+        dsa0 = dsa0/math.sqrt(2)
 
     
      
@@ -1976,8 +1037,8 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         ########    10|20    ########
         qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
-        ##ddb0 = ddb0*math.sqrt(2)
-        ##dda0 = dda0*math.sqrt(2)
+        ddb0 = ddb0*math.sqrt(2)
+        dda0 = dda0*math.sqrt(2)
         SPUz_PPQtzx_onehalfQtxy = -ev3/torch.sqrt((r0-da0-math.sqrt(1)*qb0)**2+rhoPPSP) - \
                                    ev3/torch.sqrt((r0-da0+math.sqrt(1)*qb0)**2+rhoPPSP) + \
                                    ev3/torch.sqrt((r0+da0-math.sqrt(1)*qb0)**2+rhoPPSP) + \
@@ -2054,25 +1115,18 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                                    ev2/torch.sqrt((r0+dpb0)**2+(math.sqrt(1)*dda0)**2+rhoPDDD))
         qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        ##ddb0 = ddb0/math.sqrt(2)
-        ##dda0 = dda0/math.sqrt(2)
+        ddb0 = ddb0/math.sqrt(2)
+        dda0 = dda0/math.sqrt(2)
 
 
-#        SPUz_PPQtzx_onehalfQtxy = -SPUz_PPQtzx_onehalfQtxy
-#        SPUz_DSQtzx_onehalfQtxy = -SPUz_DSQtzx_onehalfQtxy
-#        SPUz_DDQtzx_onehalfQtxy = -SPUz_DDQtzx_onehalfQtxy
-#        DPUz_PPQtzx_onehalfQtxy = -DPUz_PPQtzx_onehalfQtxy
-#        DPUz_DSQtzx_onehalfQtxy = -DPUz_DSQtzx_onehalfQtxy
-#        DPUz_DDQtzx_onehalfQtxy = -DPUz_DDQtzx_onehalfQtxy
-
-    
         ########    20|20    ########
         qa0=qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
-        #ddb0 = ddb0*math.sqrt(2)
-        #dda0 = dda0*math.sqrt(2)
-        #dsa0 = dsa0*math.sqrt(2)
-        #dsb0 = dsb0*math.sqrt(2)
+        ### $$$$ possible fix is to comment line below ###
+        ddb0 = ddb0*math.sqrt(2)
+        dda0 = dda0*math.sqrt(2)
+        dsa0 = dsa0*math.sqrt(2)
+        dsb0 = dsb0*math.sqrt(2)
 
         PPQtzx_onehalfQtxy_PPQtzx_onehalfQtxy =(ev3/torch.sqrt(r0**2+(qa0-qb0)**2+rhoPPPP) + \
                                                 ev3/torch.sqrt(r0**2+(qa0+qb0)**2+rhoPPPP) - \
@@ -2152,8 +1206,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                                               0.25*(ev2/torch.sqrt(r0**2+(dsa0-dsb0)**2+rhoSDSD) +\
                                                  ev2/torch.sqrt(r0**2+(dsa0+dsb0)**2+rhoSDSD) -\
                                                  ev1/torch.sqrt(r0**2+dsa0**2+dsb0**2+rhoSDSD))
-        #ddb0 = ddb0*math.sqrt(2)
-        #dda0 = dda0*math.sqrt(2)
+ 
         DDQtzx_onehalfQtxy_DDQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(dda0-ddb0)**2+rhoDDDD) + \
                                                 ev3/torch.sqrt(r0**2+(dda0+ddb0)**2+rhoDDDD) - \
                                                 ev3/torch.sqrt((r0+ddb0)**2+dda0**2+rhoDDDD) - \
@@ -2168,72 +1221,67 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                                                  ev2/torch.sqrt(r0**2+(dda0+ddb0)**2+rhoDDDD) -\
                                                  ev1/torch.sqrt(r0**2+dda0**2+ddb0**2+rhoDDDD))
 
-        
-                #############################
 
-        
-        DSQtzx_onehalfQtxy_PPQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(qb0-dsa0)**2+rhoPPSD) + \
-                                                ev3/torch.sqrt(r0**2+(qb0+dsa0)**2+rhoPPSD) - \
-                                                ev3/torch.sqrt((r0+dsa0)**2+qb0**2+rhoPPSD) - \
-                                                ev3/torch.sqrt((r0-dsa0)**2+qb0**2+rhoPPSD) + \
-                                                ev4/torch.sqrt((r0-dsa0+qb0)**2+rhoPPSD) + \
-                                                ev4/torch.sqrt((r0+dsa0-qb0)**2+rhoPPSD) + \
-                                                ev4/torch.sqrt((r0+dsa0+qb0)**2+rhoPPSD) + \
-                                                ev4/torch.sqrt((r0-dsa0-qb0)**2+rhoPPSD) - \
-                                                ev3/torch.sqrt((r0-qb0)**2+dsa0**2+rhoPPSD) - \
-                                                ev3/torch.sqrt((r0+qb0)**2+dsa0**2+rhoPPSD)) -  \
-                                              0.25*(ev2/torch.sqrt(r0**2+(qb0-dsa0)**2+rhoPPSD) +\
-                                                 ev2/torch.sqrt(r0**2+(qb0+dsa0)**2+rhoPPSD) -\
-                                                 ev1/torch.sqrt(r0**2+qb0**2+dsa0**2+rhoPPSD))
+        #############################
+
+
+        DSQtzx_onehalfQtxy_PPQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(qa0-dsb0)**2+rhoPPSD) + \
+                                                ev3/torch.sqrt(r0**2+(qa0+dsb0)**2+rhoPPSD) - \
+                                                ev3/torch.sqrt((r0+dsb0)**2+qa0**2+rhoPPSD) - \
+                                                ev3/torch.sqrt((r0-dsb0)**2+qa0**2+rhoPPSD) + \
+                                                ev4/torch.sqrt((r0-dsb0+qa0)**2+rhoPPSD) + \
+                                                ev4/torch.sqrt((r0+dsb0-qa0)**2+rhoPPSD) + \
+                                                ev4/torch.sqrt((r0+dsb0+qa0)**2+rhoPPSD) + \
+                                                ev4/torch.sqrt((r0-dsb0-qa0)**2+rhoPPSD) - \
+                                                ev3/torch.sqrt((r0-qa0)**2+dsb0**2+rhoPPSD) - \
+                                                ev3/torch.sqrt((r0+qa0)**2+dsb0**2+rhoPPSD)) -  \
+                                              0.25*(ev2/torch.sqrt(r0**2+(qa0-dsb0)**2+rhoPPSD) +\
+                                                 ev2/torch.sqrt(r0**2+(qa0+dsb0)**2+rhoPPSD) -\
+                                                 ev1/torch.sqrt(r0**2+qa0**2+dsb0**2+rhoPPSD))
 
  
 
-        DDQtzx_onehalfQtxy_PPQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(qb0-dda0)**2+rhoPPDD) + \
-                                                ev3/torch.sqrt(r0**2+(qb0+dda0)**2+rhoPPDD) - \
-                                                ev3/torch.sqrt((r0+dda0)**2+qb0**2+rhoPPDD) - \
-                                                ev3/torch.sqrt((r0-dda0)**2+qb0**2+rhoPPDD) + \
-                                                ev4/torch.sqrt((r0-dda0+qb0)**2+rhoPPDD) + \
-                                                ev4/torch.sqrt((r0+dda0-qb0)**2+rhoPPDD) + \
-                                                ev4/torch.sqrt((r0+dda0+qb0)**2+rhoPPDD) + \
-                                                ev4/torch.sqrt((r0-dda0-qb0)**2+rhoPPDD) - \
-                                                ev3/torch.sqrt((r0-qb0)**2+dda0**2+rhoPPDD) - \
-                                                ev3/torch.sqrt((r0+qb0)**2+dda0**2+rhoPPDD))- \
-                                              0.25*(ev2/torch.sqrt(r0**2+(qb0-dda0)**2+rhoPPDD) +\
-                                                 ev2/torch.sqrt(r0**2+(qb0+dda0)**2+rhoPPDD) -\
-                                                 ev1/torch.sqrt(r0**2+qb0**2+dda0**2+rhoPPDD))
+        DDQtzx_onehalfQtxy_PPQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(qa0-ddb0)**2+rhoPPDD) + \
+                                                ev3/torch.sqrt(r0**2+(qa0+ddb0)**2+rhoPPDD) - \
+                                                ev3/torch.sqrt((r0+ddb0)**2+qa0**2+rhoPPDD) - \
+                                                ev3/torch.sqrt((r0-ddb0)**2+qa0**2+rhoPPDD) + \
+                                                ev4/torch.sqrt((r0-ddb0+qa0)**2+rhoPPDD) + \
+                                                ev4/torch.sqrt((r0+ddb0-qa0)**2+rhoPPDD) + \
+                                                ev4/torch.sqrt((r0+ddb0+qa0)**2+rhoPPDD) + \
+                                                ev4/torch.sqrt((r0-ddb0-qa0)**2+rhoPPDD) - \
+                                                ev3/torch.sqrt((r0-qa0)**2+ddb0**2+rhoPPDD) - \
+                                                ev3/torch.sqrt((r0+qa0)**2+ddb0**2+rhoPPDD))- \
+                                              0.25*(ev2/torch.sqrt(r0**2+(qa0-ddb0)**2+rhoPPDD) +\
+                                                 ev2/torch.sqrt(r0**2+(qa0+ddb0)**2+rhoPPDD) -\
+                                                 ev1/torch.sqrt(r0**2+qa0**2+ddb0**2+rhoPPDD))
 
 
-        DDQtzx_onehalfQtxy_DSQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(dsb0-dda0)**2+rhoSDDD) + \
-                                                ev3/torch.sqrt(r0**2+(dsb0+dda0)**2+rhoSDDD) - \
-                                                ev3/torch.sqrt((r0+dda0)**2+dsb0**2+rhoSDDD) - \
-                                                ev3/torch.sqrt((r0-dda0)**2+dsb0**2+rhoSDDD) + \
-                                                ev4/torch.sqrt((r0-dda0+dsb0)**2+rhoSDDD) + \
-                                                ev4/torch.sqrt((r0+dda0-dsb0)**2+rhoSDDD) + \
-                                                ev4/torch.sqrt((r0+dda0+dsb0)**2+rhoSDDD) + \
-                                                ev4/torch.sqrt((r0-dda0-dsb0)**2+rhoSDDD) - \
-                                                ev3/torch.sqrt((r0-dsb0)**2+dda0**2+rhoSDDD) - \
-                                                ev3/torch.sqrt((r0+dsb0)**2+dda0**2+rhoSDDD))- \
-                                              0.25*(ev2/torch.sqrt(r0**2+(dsb0-dda0)**2+rhoSDDD) +\
-                                                 ev2/torch.sqrt(r0**2+(dsb0+dda0)**2+rhoSDDD) -\
-                                                 ev1/torch.sqrt(r0**2+dsb0**2+dda0**2+rhoSDDD))
+        DDQtzx_onehalfQtxy_DSQtzx_onehalfQtxy = (ev3/torch.sqrt(r0**2+(dsa0-ddb0)**2+rhoSDDD) + \
+                                                ev3/torch.sqrt(r0**2+(dsa0+ddb0)**2+rhoSDDD) - \
+                                                ev3/torch.sqrt((r0+ddb0)**2+dsa0**2+rhoSDDD) - \
+                                                ev3/torch.sqrt((r0-ddb0)**2+dsa0**2+rhoSDDD) + \
+                                                ev4/torch.sqrt((r0-ddb0+dsa0)**2+rhoSDDD) + \
+                                                ev4/torch.sqrt((r0+ddb0-dsa0)**2+rhoSDDD) + \
+                                                ev4/torch.sqrt((r0+ddb0+dsa0)**2+rhoSDDD) + \
+                                                ev4/torch.sqrt((r0-ddb0-dsa0)**2+rhoSDDD) - \
+                                                ev3/torch.sqrt((r0-dsa0)**2+ddb0**2+rhoSDDD) - \
+                                                ev3/torch.sqrt((r0+dsa0)**2+ddb0**2+rhoSDDD))- \
+                                              0.25*(ev2/torch.sqrt(r0**2+(dsa0-ddb0)**2+rhoSDDD) +\
+                                                 ev2/torch.sqrt(r0**2+(dsa0+ddb0)**2+rhoSDDD) -\
+                                                 ev1/torch.sqrt(r0**2+dsa0**2+ddb0**2+rhoSDDD))
 
     
         qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        #ddb0 = ddb0/math.sqrt(2)
-        #dda0 = dda0/math.sqrt(2)
-        #dsa0 = dsa0/math.sqrt(2)
-        #dsb0 = dsb0/math.sqrt(2)
+        ddb0 = ddb0/math.sqrt(2)
+        dda0 = dda0/math.sqrt(2)
+        dsa0 = dsa0/math.sqrt(2)
+        dsb0 = dsb0/math.sqrt(2)
 
 
-    
-    
         ########    21|21    ########
         dsb0 = dsb0/math.sqrt(2) 
         dsa0 = dsa0/math.sqrt(2)
-        dda0 = dda0/math.sqrt(2)
-        ddb0 = ddb0/math.sqrt(2)
-
         PPQpiz_PPQpiz =  ev3/torch.sqrt((r0+qa0-qb0)**2+(qa0-qb0)**2+rhoPPPP) - \
                          ev3/torch.sqrt((r0+qa0-qb0)**2+(qa0+qb0)**2+rhoPPPP) - \
                          ev3/torch.sqrt((r0+qa0+qb0)**2+(qa0-qb0)**2+rhoPPPP) + \
@@ -2316,19 +1364,14 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                          ev3/torch.sqrt((r0-qb0+dda0)**2+(qb0+dda0)**2+rhoPPDD)
         dsb0 = dsb0*math.sqrt(2)
         dsa0 = dsa0*math.sqrt(2)
-        dda0 = dda0*math.sqrt(2)
-        ddb0 = ddb0*math.sqrt(2)
-
-        
-    
     
     
     
         ########    22|22    ########
         qa0 = qa0*math.sqrt(2)
-        ##ddb0 = ddb0*math.sqrt(2)
+        ddb0 = ddb0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
-        ##dda0 = dda0*math.sqrt(2)
+        dda0 = dda0*math.sqrt(2)
 
         PPQxy_PPQxy = ev2/torch.sqrt((r0)**2+(qa0-qb0)**2+rhoPPPP) + \
                       ev2/torch.sqrt((r0)**2+(qa0+qb0)**2+rhoPPPP) - \
@@ -2366,17 +1409,17 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
                       ev2/torch.sqrt((r0)**2+(dsb0+dda0)**2+rhoSDDD) - \
                       ev1/torch.sqrt((r0)**2+(dsb0)**2+(dda0)**2+rhoSDDD)
         qa0 = qa0/math.sqrt(2)
-        ##ddb0 = ddb0/math.sqrt(2)
+        ddb0 = ddb0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        ##dda0 = dda0/math.sqrt(2)
+        dda0 = dda0/math.sqrt(2)
 
 
 
         ########    22|2-2    ########
         qa0 = qa0*math.sqrt(2)
         qb0 = qb0*math.sqrt(2)
-        ##ddb0 = ddb0*math.sqrt(2)
-        ##dda0 = dda0*math.sqrt(2)
+        ddb0 = ddb0*math.sqrt(2)
+        dda0 = dda0*math.sqrt(2)
         tildaPPQxy_PPQxy = ev2/torch.sqrt((r0)**2+(qa0-qb0)**2+rhoPPPP) + \
                       ev2/torch.sqrt((r0)**2+(qa0+qb0)**2+rhoPPPP) - \
                       ev1/torch.sqrt((r0)**2+(qa0)**2+(qb0)**2+rhoPPPP)
@@ -2414,70 +1457,11 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
 
         qa0 = qa0/math.sqrt(2)
         qb0 = qb0/math.sqrt(2)
-        ##ddb0 = ddb0/math.sqrt(2)
-        ##dda0 = dda0/math.sqrt(2)
-
-
-        ########    22|22    ########
-#        PPQxy_PPQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(qa0[YY]-qb0[YY])**2+rhoPPPP) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(qa0[YY])**2+1/2*(qb0[YY])**2+rhoPPPP)
-
-
-#        PPQxy_DSQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(qa0[YY]-dsb0[YY])**2+rhoPPSD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(qa0[YY])**2+1/2*(dsb0[YY])**2+rhoPPSD)
-
-#        PPQxy_DDQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(qa0[YY]-ddb0[YY])**2+rhoPPDD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(qa0[YY])**2+1/2*(ddb0[YY])**2+rhoPPDD)
-
-#        DSQxy_DSQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(dsa0[YY]-dsb0[YY])**2+rhoSDSD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(dsa0[YY])**2+1/2*(dsb0[YY])**2+rhoSDSD)
-
-#        DSQxy_DDQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(dsa0[YY]-ddb0[YY])**2+rhoSDDD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(dsa0[YY])**2+1/2*(ddb0[YY])**2+rhoSDDD)
-
-#        DDQxy_DDQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(dda0[YY]-ddb0[YY])**2+rhoDDDD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(dda0[YY])**2+1/2*(ddb0[YY])**2+rhoDDDD)
-
-
-        #############################
-
-
-#        DSQxy_PPQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(qb0[YY]-dsa0[YY])**2+rhoPPSD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(qb0[YY])**2+1/2*(dsa0[YY])**2+rhoPPSD)
-
-#        DDQxy_PPQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(qb0[YY]-dda0[YY])**2+rhoPPDD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(qb0[YY])**2+1/2*(dda0[YY])**2+rhoPPDD)
-#        DDQxy_DSQxy = ev1/torch.sqrt((r0[YY])**2+1/2*(dsb0[YY]-dda0[YY])**2+rhoSDDD) -\
-#                      ev1/torch.sqrt((r0[YY])**2+1/2*(dsb0[YY])**2+1/2*(dda0[YY])**2+rhoSDDD)
+        ddb0 = ddb0/math.sqrt(2)
+        dda0 = dda0/math.sqrt(2)
 
 
 
-
-
-
-
-
-    
-
-
-
-
-
-
-        ############################## D|D ##############################
-#        L = torch.zeros(w.shape[0])
-#        i = 0
-#        k = 0
-#        for n in YH:
-#            if (XX[k] == True and YY[k] == True):
-#                L[i] = True
-#                i = i + 1
-#            if (XX[k] == True and YY[k] == False):
-#                L[i] = False
-#                i = i + 1
-#            k = k + 1
-#        LL = L.bool()
-        
         #####SS|DxyDxy#####
         riYY[...,1980]=Sq_DDq*1.000000*1.000000+Sq_DDQtzx_onehalfQtxy*1.000000*-1.333333
         
@@ -2528,12 +1512,11 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         
         #####SPx|PxDz2#####
         riYY[...,543]=SPUpi_DPUpi*1.000000*-0.577350
+        #print('build',riYY[...,543])
         
         #####SPx|Dz2Dxz#####
         riYY[...,858]=SPUpi_DDQpiz*1.000000*0.577350
-        ##print(riYY[...,858])
-        ##sys.exit()Shouldbezero????????
-        
+
         #####SPx|DyzDxy#####
         riYY[...,1893]=SPUpi_DDQpiz*1.000000*1.000000
         
@@ -4028,9 +3011,6 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         YYY = (((ni[XX] > 12) & (ni[XX] <18)) | ((ni[XX] > 20) & (ni[XX] <30)) | ((ni[XX] > 32) & (ni[XX] <36)) | ((ni[XX] > 38) & (ni[XX] <48)) | ((ni[XX] > 50) & (ni[XX] <54)) | ((ni[XX] > 70) & (ni[XX] <80)) | (ni[XX] ==57)) &\
          (((nj[XX] > 12) & (nj[XX] <18)) | ((nj[XX] > 20) & (nj[XX] <30)) | ((nj[XX] > 32) & (nj[XX] <36)) | ((nj[XX] > 38) & (nj[XX] <48)) | ((nj[XX] > 50) & (nj[XX] <54)) | ((nj[XX] > 70) & (nj[XX] <80)) | (nj[XX] ==57))
 
-        ##print(r0[YY]**2,rhoSS)
-        ##print(riPM6[LL,...])
-        ##sys.exit()
         coreYYLocal[...,0] = tore[nj[YY]]*riPM6b[YYY,1-1]
         coreYYLocal[...,2] = tore[nj[YY]]*riPM6b[YYY,4-1]   ##PP
         coreYYLocal[...,6] = tore[nj[YY]]*riPM6b[YYY,2-1]  ##SP
@@ -4052,38 +3032,21 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
         coreYYLocal[...,66] = tore[ni[YY]]*riYY[...,450]
         coreYYLocal[...,69] = tore[ni[YY]]*riYY[...,495]
         coreYYLocal[...,72] = tore[ni[YY]]*riYY[...,630]
-        
 
         if(drho_corea.sum() > 0 or drho_coreb.sum() > 0 ):
-
-            rho_corea = torch.zeros_like(drho_corea[YY])
-            rho_coreb = torch.zeros_like(drho_coreb[YY])
-            msk1 = drho_corea[YY] != 0.0
-            msk2 = drho_coreb[YY] != 0.0
-            msk3 = rho0a != 0.0
-            msk4 = rho0b != 0.0
-      
-
-            rho_corea[msk3] = rho0a[msk3]
-            rho_coreb[msk4] = rho0b[msk4]
-            rho_corea[msk1] = drho_corea[YY][msk1]
-            rho_coreb[msk2] = drho_coreb[YY][msk2]
-            
+            rho_coreb = drho_coreb[YY]
+            rho_corea = drho_corea[YY]
             rhoSDD0 = (rho_coreb+rho3a)**2
             rhoD0SD = (rho_corea+rho3b)**2
     
             rhoSDD = (rho_coreb+rho6a)**2
             rhoSPD = (rho_coreb+rho4a)**2
-            rhoSSD = (rho5a+rho_coreb)**2
+            rhoSSD = (rho5b+rho_corea)**2
     
     
             rhoDDS = (rho_corea+rho6b)**2
             rhoPDS = (rho_corea+rho4b)**2
-            rhoSDS = (rho5b+rho_corea)**2
-    
-    
-    
-    
+            rhoSDS = (rho5a+rho_coreb)**2
     
     
             Sq_DDq = ev/torch.sqrt(r0**2+rhoD0SD)
@@ -4100,9 +3063,9 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
             DDQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dda0)**2+rhoSDD)+ev2/torch.sqrt((r0+dda0)**2+rhoSDD)-ev1/torch.sqrt((r0)**2+(dda0)**2+rhoSDD)
     
     
-            Sq_DSQtzx_onehalfQtxy = ev2/torch.sqrt((r0-dsb0)**2+rhoSDS)+ev2/torch.sqrt((r0+dsb0)**2+rhoSDS)-ev1/torch.sqrt((r0)**2+(dsb0)**2+rhoSDS)
+            Sq_DSQtzx_onehalfQtxy = ev2/torch.sqrt((r0-dsb0)**2+rhoSSD)+ev2/torch.sqrt((r0+dsb0)**2+rhoSSD)-ev1/torch.sqrt((r0)**2+(dsb0)**2+rhoSSD)
             #############################
-            DSQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dsa0)**2+rhoSSD)+ev2/torch.sqrt((r0+dsa0)**2+rhoSSD)-ev1/torch.sqrt((r0)**2+(dsa0)**2+rhoSSD)
+            DSQtzx_onehalfQtxy_Sq = ev2/torch.sqrt((r0-dsa0)**2+rhoSDS)+ev2/torch.sqrt((r0+dsa0)**2+rhoSDS)-ev1/torch.sqrt((r0)**2+(dsa0)**2+rhoSDS)
     
             qa0 = qa0/math.sqrt(2)
             qb0 = qb0/math.sqrt(2)
@@ -4111,7 +3074,6 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
             Sq_DPUz = -(ev1/torch.sqrt((r0+dpb0)**2+rhoPDS)-ev1/torch.sqrt((r0-dpb0)**2+rhoPDS))
             #############################
             DPUz_Sq = (ev1/torch.sqrt((r0+dpa0)**2+rhoSPD)-ev1/torch.sqrt((r0-dpa0)**2+rhoSPD))
-    
     
     
             coreYYLocal[Ycore,14] = tore[nj[YY][Ycore]]*(DDq_Sq[Ycore]*1.000000*1.000000 + DDQtzx_onehalfQtxy_Sq[Ycore]*-1.333333*1.000000)
@@ -4130,34 +3092,9 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, q
             coreYYLocal[Ycore,69] = tore[ni[YY][Ycore]]*(Sq_DPUz[Ycore]*1.000000*1.154701)
             coreYYLocal[Ycore,72] = tore[ni[YY][Ycore]]*(Sq_DDq[Ycore]*1.000000*1.000000 + Sq_DDQtzx_onehalfQtxy[Ycore]*1.000000*1.333333)
     
-        ##print(coreYYLocal[Ycore,59],coreYYLocal[Ycore,14])
-        ##print(coreYYLocal)
-        ##sys.exit()
- 
-        
-        
-        
         coreYY[...,:45] = RotateCore(coreYYLocal[...,:45],rotationMatrix[YY,...,...],3)
         coreYY[...,45:] = RotateCore(coreYYLocal[...,45:],rotationMatrix[YY,...,...],3)
-        #print(coreYYLocal)
-        #print(coreYYLocal[Ycore,75],coreYYLocal[Ycore,30])
-        ##print(tore[nj[YY]]*riYY[...,6])
-        ##print(tore[nj[YY]]*riYY[...,9])
-        ##print(tore[nj[YY]]*riYY[...,2],tore[nj[YY]]*riYY[...,5])
-        ##print(tore[nj[YY]]*riYY[...,36])
-        ##print(tore[nj[YY]]*riYY[...,39])
-        ##print(tore[nj[YY]]*riYY[...,44])
-        ##print(tore[nj[YY]]*riYY[...,22],tore[nj[YY]]*riYY[...,30])
-        ##print(tore[nj[YY]]*riYY[...,35],tore[nj[YY]]*riYY[...,27])
-        ##print(tore[nj[YY]]*riYY[...,20],tore[nj[YY]]*riYY[...,14])
-
-
-        ##print(DDq_DDq,DDq_DDQtzx_onehalfQtxy,DDQtzx_onehalfQtxy_DDq,DDQtzx_onehalfQtxy_DDQtzx_onehalfQtxy)
-        ##print(tore[ni[YY]]*riYY[...,1775],tore[ni[YY]]*riYY[...,1980])
     else:
         coreYY = torch.zeros(YY.sum(),90,dtype=dtype, device=device)
         riYY =  torch.zeros(YY.sum(),2025,dtype=dtype, device=device)
-    
-    
-
     return riYH, riYX, riYY, coreYH, coreYX, coreYY

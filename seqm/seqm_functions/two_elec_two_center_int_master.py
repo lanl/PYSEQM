@@ -1,12 +1,12 @@
 import torch
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
-from .two_elec_two_center_int_local_frame_d_orbitals import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
+from .two_elec_two_center_int_local_frame_d_orbitals_master3 import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
 from .cal_par import *
 from .constants import ev
 import sys
+import math
 import numpy
-
-import scipy.special
+#import scipy.special
 from .parameters import  PWCCT
 from .RotationMatrixD import *
 #two electron two center integrals
@@ -94,7 +94,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
             AIJ63[i]    = AIJL(zetad[i],zetad[i],qn0[i]-1,qn0[i]-1,2)
 
                                    
-        elif (j > 12 and j <18) or (j > 32 and j <36) or (j > 50 and j <54):
+        elif (j > 32 and j <36) or (j > 50 and j <54):
             dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i],zd[i],qn0[i],zs[i],qn0[i],zd[i])
             dpAdditiveTerm[i]   = (4/15)*GetSlaterCondonParameter(1,qn0[i],zp[i],qn0[i],zd[i],qn0[i],zp[i],qn0[i],zd[i])
             ddAdditiveTerm[i]   = (4/49)*GetSlaterCondonParameter(2,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
@@ -146,13 +146,13 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     rho_1[isX] = rho1(hsp[isX],dd[isX])
     rho_2[isX] = rho2(hpp[isX],qq[isX])
     rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
-    ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
+    ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])        
 
     
     w, e1b, e2a = \
         rotate(ni, nj, xij, rij, \
                tore, dd[idxi],dd[idxj], \
-               qq[idxi],qq[idxj], \
+               qq[idxi], qq[idxj], \
                dp[idxi],dp[idxj], \
                ds[idxi],ds[idxj], \
                dorbdorb[idxi],dorbdorb[idxj], \
@@ -179,7 +179,10 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     return w, e1b, e2a,rho0aTMP,rho0bTMP
 
 #rotate: rotate the two electron two center integrals from local frame to molecule frame
-def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
+def rotate(ni,nj,xij,rij,
+           tore,da,db, qa,
+           qb, dpa, dpb, dsa, 
+           dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
     """
     rotate the two elecron two center integrals from local frame to molecule frame
     """
@@ -233,17 +236,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     HH = (ni==1) & (nj==1)
     XH = (ni>1) & (nj==1) 
     XX = (ni>1) & (nj>1) 
-    #rij = torch.where(rij>cutoff, torch.tensor(cutoff,dtype=dtype),rij)
-    #ni>=nj
-    #
-    #w[1] (s s/s s)
-    #wHH = ri[1]
 
-    #riHH, riXH, ri, coreHH, coreXH, core = \
-#    wHH, riXH, ri, coreHH, coreXH, core = \
-#           TETCILF(nj,ni,rij, tore, \
-#                db, da, qb,qa, rho0b,rho0a, rho1b,rho1a, rho2b,rho2a,themethod)
-##    t=time.time()
     wHH, riXH, ri, coreHH, coreXH, core = \
            TETCILF(ni,nj,rij, tore, \
                 da, db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)
@@ -268,23 +261,11 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
                 da, db, qa,qb, rho0aTMP,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)
 
 
-    #print(ri)
-    #print(riPM6b)
-    #print(riPM6a)
-    #sys.exit()
-
-    
-    #
     ###############################33
     # X-H hevay atom - Hydrogen
     xXH=-xij[XH]
     yXH=torch.zeros(xXH.shape[0],2,dtype=dtype, device=device)
     zXH=torch.zeros_like(xXH)
-    #cond1 = torch.abs(xXH[...,3-1])>0.99999999
-    #xXH[...,3-1] = torch.where(xXH[...,3-1]>0.99999999, torch.tensor([1.0],dtype=dtype, xXH[...,3-1]))
-    #xXH[...,3-1] = torch.where(xXH[...,3-1]<-0.99999999, torch.tensor([-1.0],dtype=dtype, xXH[...,3-1]))
-    #zXH[...,3-1] = torch,where(cond1, torch.tensor([0.0],dtype=dtype),
-    #                           torch.sqrt(1.0-xXH[...,3-1]**2))
     """
     pytorch new version doesn't support modify z and z depends on a , a depends on z
     zXH[...,3-1] =  torch.sqrt(1.0-xXH[...,3-1]**2)
@@ -469,8 +450,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     yz22 = 2.0*y[...,2-1]*z[...,2-1]
     yz31 = y[...,1-1]*z[...,3-1]
     yz32 = y[...,2-1]*z[...,3-1]
-    ##print(x,y,z)
-    ##sys.exit()
+    
     w = torch.zeros(ri.shape[0],100,dtype=dtype, device=device)
 
 
@@ -1041,29 +1021,14 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     e2a[XX,1,3] = -core[...,6]*xx31 - core[...,7]*zz31
     e2a[XX,2,3] = -core[...,6]*xx32 - core[...,7]*zz32
     e2a[XX,3,3] = -core[...,6]*xx33 - core[...,7]*zz33
-#    print ( " NONPM6:", time.time() - t0)
 #    t0 = time.time()
     if themethod == "PM6":
 #        t0 = time.time()
         dRotationMatrix = GenerateRotationMatrix(xij)
-#        print( "GENERATE R: ",time.time() - t0)
-##        print(riXH)
-##        print(wXH)
-#        t = time.time()
         riYH, riYX, riYY, coreYH, coreYX, coreYY = \
                 TETCILFDO(ni,nj,rij, tore, \
                 da, db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, \
-                rho0a,rho0b, rho1a,rho1b, rho2ad,rho2bd, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, \
-                  dRotationMatrix,ri,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
-#        print("2E2C: ", time.time()-t, " (two_elec_two_center_int_local_frame_d_orbitals.py,two_elec_two_center_int_local_frame_d_orbitals)")
-#        t0 = time.time()
-
-
-#        trash, garbage, waste, notneeded, justneed, coreYY = \
-#                TETCILFDO(ni,nj,rij, tore, \
-#                da, db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, \
-#                rho_corea,rho_coreb, rho1a,rho1b, rho2ad,rho2bd, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, dRotationMatrix,w,ri,wXH,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
-
+                rho0a,rho0b, rho1a,rho1b, rho2ad,rho2bd, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, dRotationMatrix,ri,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
 
 
         e1bD = torch.zeros((rij.shape[0],9,9),dtype=dtype, device=device)
@@ -1290,48 +1255,14 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
         e1bD[YY,8,8] = -coreYY[...,89]
 
 
-        ########## XX ##########
-#        e1bD[XX,0,0] = e1b[XX,0,0]
-#        e1bD[XX,0,1] = e1b[XX,0,1]
-#        e1bD[XX,1,1] = e1b[XX,1,1]
-#        e1bD[XX,0,2] = e1b[XX,0,2]
-#        e1bD[XX,1,2] = e1b[XX,1,2]
-#        e1bD[XX,2,2] = e1b[XX,2,2]
-#        e1bD[XX,0,3] = e1b[XX,0,3]
-#        e1bD[XX,1,3] = e1b[XX,1,3]
-#        e1bD[XX,2,3] = e1b[XX,2,3]
- #       e1bD[XX,3,3] = e1b[XX,3,3]
-
-#        e2aD[XX,0,0] = e2a[XX,0,0]
-#        e2aD[XX,0,1] = e2a[XX,0,1]
-#        e2aD[XX,1,1] = e2a[XX,1,1]
-#        e2aD[XX,0,2] = e2a[XX,0,2]
-##        e2aD[XX,1,2] = e2a[XX,1,2]
-#        e2aD[XX,2,2] = e2a[XX,2,2]
-##        e2aD[XX,0,3] = e2a[XX,0,3]
-##        e2aD[XX,1,3] = e2a[XX,1,3]
-##        e2aD[XX,2,3] = e2a[XX,2,3]
-##        e2aD[XX,3,3] = e2a[XX,3,3]
-
-
-
         wc  = torch.zeros(rij.shape[0],45,45,dtype=dtype, device=device)
-        ##print(wc.shape)
-        ##print(dRotationMatrix.shape)
-        ##sys.exit()
-
-#        wc[HH,0,0] = wHH
-#        wc[XH,:10,0] = wXH
-#       wc[XX,:10,:10] = w.reshape((-1,10,10))
-
-
 
         wc[YH,0,:45] = riYH
         wc[YX,:10,:45] = riYX.reshape((-1,10,45))
         wc[YY] = riYY.reshape((-1,45,45))
         #wc[YY] = torch.transpose(riYY.reshape((-1,45,45)),1,2)
-       # print(w.reshape((-1,10,10))[...,0,:])
-        #print(w.reshape((-1,10,10))[...,:,0])
+        #print('wc[YY]')
+        #print(wc[YY])
 
 
         wc[HH,0,0] = wHH
@@ -1339,92 +1270,23 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
         wc[XX,:10,:10] = w.reshape((-1,10,10))
 
         KK = YH | YX | YY
-        ##ac = torch.zeros(rij.shape[0],9,9,dtype=dtype, device=device)
+
         wcRotated = wc.clone()
-#        print ( "MOST PM6:", time.time() - t0)
-#        t0 = time.time()
-#        kk = torch.load('file.pt')
-#        i = 0
-#        while ( i < riYX.shape[1]):
-#             j = 0
-#             while ( j < wc.shape[2]):
-#                 if(riYX[0,i] != kk[0,i]):
-#                     print("WHY" , i, riYX[0,i],kk[0,i])
- #                j = j + 1
-#                 i = i + 1
-#        sys.exit()
-    
-            #print(w.reshape((-1,10,10))[...,0,:])
-        #print(w.reshape((-1,10,10))[...,:,0])
-        #t0 = time.time()
-        #print(wc[0,0,:])
         wcRotated[~KK,...,...] = torch.transpose(wc[~KK,...,...],1,2)
         wcRotated[KK,...,...] = Rotate2Center2Electron(wc[KK,...,...],dRotationMatrix[KK,...,...])
-#        print ("ROTATION TIME:", time.time()-t0)
-#        wc[HH,0,0] = wHH
-#        wc[XH,:10,0] = wXH
-#        wc[XX,:10,:10] = torch.transpose(w.reshape((-1,10,10)), 1, 2)
-         
-#        print(wcRotated.shape)
-#        sys.exit()
-        #print ( "ROTATION:", time.time() - t0)
-#        torch.transpose(wcRotated[YH,...,...],1,2)
-#        torch.transpose(wcRotated[YX,...,...],1,2)
-##        wcR = wcRotated.clone()
-##        i = 0 
-        #while (i < 45):
-        #    j = 0
-        #    while (j < 45):
-        #        wcRotated[YH,i,j] = wcR[YH,j,i]
-        #        j = j + 1
-        #    i = i + 1
-##        print(wc[0,0:10,0])
-##        print(w.reshape((-1,10,10)))
-##        print(XX)
-        ##print(wc[0,0:45,2])
-        ##print(wcRotated[0,6,0:45])
-        ##sys.exit()
 
-##        i = 0
-##        while( i <10):
-##           j = 0
-##           while ( j <10):
-#               wcRotated[...,i,j] = wcR[...,j,i]
-##               j = j +1
-##           i = i + 1
-
-        ##wcRotated[KK,:10,:10] = wc[...,:10,:10]
-        ##e1bD[KK,:4,:4] = e1b[...,...,...,]
-        ##e2aD[KK,:4,:4] = e2a[...,...,...,]
-##        print(e1bD)
-##        print(e2aD)
-##        sys.exit()
-##        hh = torch.zeros_like(e1bD)
-        ##kk = torch.zeros_like(e1bD)
-##        dc = torch.zeros(rij.shape[0],45,45,dtype=dtype, device=device)
-        ##print(e1bD,e2aD)
-        ##wc = dc 
-        ##print(e1bD[...,:4,:4])
-        ##print(e2aD[...,:4,:4])
-        #print(wcRotated[0,0,0:45])
-#        print(e1bD)
-#        print(e2aD)
-        #sys.exit()
-        ##print(KK)
-        ##print(wc)
         return wcRotated, e1bD, e2aD
+    
     wc  = torch.zeros(rij.shape[0],10,10,dtype=dtype, device=device)
     wc[HH,0,0] = wHH
     wc[XH,:,0] = wXH
     wc[XX] = w.reshape((-1,10,10))
-    ##print(e1b)
-    ##sys.exit()
-    
+
     return wc, e1b, e2a
 
 
 def GetSlaterCondonParameter(K,NA,EA,NB,EB,NC,EC,ND,ED):
-
+    
 
 #     CALCULATE THE RADIAL PART OF ONE-CENTER TWO-ELECTRON INTEGRALS
 #     (SLATER-CONDON PARAMETER).
@@ -1465,6 +1327,66 @@ def GetSlaterCondonParameter(K,NA,EA,NB,EB,NC,EC,ND,ED):
       S2     = 0
       M      = NCD-K
       I      = 1
+        
+      while(I <= M):
+          S0     = S0*E/ECD
+          S1     = S1+S0*(binom(NCD-K-1,I-1)-binom(NCD+K+1-1,I-1))/binom(N-1,I-1)
+          I = I + 1
+      M1     = M+1
+      M2     = NCD+K+1
+      I      = M1
+      while(I <= M2):
+          S0     = S0*E/ECD
+          S2     = S2+S0*binom(M2-1,I-1)/binom(N-1,I-1)
+          I = I + 1
+      S3     = math.exp(AE*N-ACD*M2-AAB*(NAB-K))/binom(N-1,M2-1)
+      slaterCondon = C*(S1-S2+S3)
+      return slaterCondon
+
+def GetSlaterCondonParameter_test(K,NA,EA,NB,EB,NC,EC,ND,ED):
+    
+
+#     CALCULATE THE RADIAL PART OF ONE-CENTER TWO-ELECTRON INTEGRALS
+#     (SLATER-CONDON PARAMETER).
+#     K     - TYPE OF INTEGRAL, CAN BE EQUAL TO 0,1,2,3,4 IN SPD-BASIS
+#     NA,NB - PRINCIPLE QUANTUM NUMBER OF AO, ELECTRON 1
+#     EA,EB - EXPONENTS OF AO, ELECTRON 1
+#     NC,ND - PRINCIPLE QUANTUM NUMBER OF AO, ELECTRON 2
+#     EC,ED - EXPONENTS OF AO, ELECTRON 2
+      NA = int(NA)
+      NB = int(NB)
+      NC = int(NC)
+      ND = int(ND)
+
+
+
+
+      AEA    = math.log(EA)
+      AEB    = math.log(EB)
+      AEC    = math.log(EC)
+      AED    = math.log(ED)
+      NAB    = NA+NB
+      NCD    = NC+ND
+      ECD    = EC+ED
+      EAB    = EA+EB
+      E      = ECD+EAB
+      N      = NAB+NCD
+      AE     = math.log(E)
+      A2     = math.log(2)
+      ACD    = math.log(ECD)
+      AAB    = math.log(EAB)
+      C      = math.exp(math.log(math.factorial(N-1))+NA*AEA+NB*AEB+NC*AEC+ND*AED 
+                   +0.5*(AEA+AEB+AEC+AED)+A2*(N+2) 
+                   -0.5*(math.log(math.factorial(2*NA))+math.log(math.factorial(2*NB))   
+                   +math.log(math.factorial(2*NC))+math.log(math.factorial(2*ND)))-AE*N)
+      C      = C*ev
+      S0     = 1/E
+      S1     = 0
+      S2     = 0
+      M      = NCD-K
+      I      = 1
+      #print('NAAA\n',NA ,NB ,NC ,ND ,AEA,AEB,AEC,AED,NAB,NCD,ECD,EAB,E  ,N  ,AE ,A2 ,ACD,AAB,C ,S0 ,S1 ,S2 ,M)
+        
       while(I <= M):
           S0     = S0*E/ECD
           S1     = S1+S0*(binom(NCD-K-1,I-1)-binom(NCD+K+1-1,I-1))/binom(N-1,I-1)
@@ -1481,16 +1403,7 @@ def GetSlaterCondonParameter(K,NA,EA,NB,EB,NC,EC,ND,ED):
       return slaterCondon
 
 def binom(a, b):
-#      j = 0
-#      try:
-#          k = torch.zeros_like(a)
-#          while( j < a.shape[0]):
-#              n = math.factorial(a[j])
-#              m = math.factorial(b[j])
-#              o = math.factorial(a[j]-b[j])
-#              k[j] = n/(m*(o))
-#              j = j + 1
-#      except:
+
       n = math.factorial(a)
       m = math.factorial(b)
       o = math.factorial(a-b)

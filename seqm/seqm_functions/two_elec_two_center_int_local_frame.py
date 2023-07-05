@@ -288,5 +288,4 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
     core[...,5] =  tore[ni[XX]]*ri[...,5-1]
     core[...,6] =  tore[ni[XX]]*ri[...,11-1]
     core[...,7] =  tore[ni[XX]]*ri[...,12-1]
-    #print('!!!!', riHH, riXH, ri)
     return riHH, riXH, ri, coreHH, coreXH, core
