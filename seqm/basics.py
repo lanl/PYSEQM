@@ -58,6 +58,7 @@ class Parser(torch.nn.Module):
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
+        self.hipnn_automatic_doublet = seqm_parameters.get('HIPNN_automatic_doublet', False)
 
     def forward(self, molecule, themethod, return_mask_l=False, *args, **kwargs):
         """
@@ -91,15 +92,25 @@ class Parser(torch.nn.Module):
 
         nHydro = torch.sum(molecule.species==1,dim=1)
         tore = molecule.const.tore
-        n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64)
+        n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64) # number of valence electrons, N*|e|
         if torch.is_tensor(molecule.tot_charge):
             n_charge -= molecule.tot_charge.reshape(-1).type(torch.int64)
         
         if self.uhf:
             nocc_alpha = n_charge/2. + (molecule.mult-1)/2.
             nocc_beta = n_charge/2. - (molecule.mult-1)/2.
-            if (nocc_alpha%1 != 0).any() or (nocc_beta%1 != 0).any():
-                raise ValueError("Invalid charge/multiplicity combination!")
+            if ((nocc_alpha%1 != 0).any() or (nocc_beta%1 != 0).any()):
+                ### if self.hipnn_automatic_doublet = True, the block below assumes no multiplicity was provided (i.e. all provided as default singlets)
+                ### and converts molecules with odd number of electrons to doublets.
+                if not self.hipnn_automatic_doublet:
+                    raise ValueError("Invalid charge/multiplicity combination!")
+                else:
+                    #print('alpha beta',nocc_alpha, nocc_beta)
+                    nocc_alpha[nocc_alpha%1 != 0] += 0.5
+                    nocc_beta[nocc_beta%1 != 0] -= 0.5
+                    print('hipnn_automatic_doublet flag is True. Molecules with odd number of electrons are treated as doublets.\n')
+                    
+                    #print('alpha beta',nocc_alpha, '\n', nocc_beta, '\n')
             nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)
             nocc = nocc.type(torch.int64)
         else:
@@ -476,7 +487,6 @@ class Energy(torch.nn.Module):
         
         molecule.parameters = parameters
         
-        #print(Hcore)
         
         if self.eig:
             if self.uhf:

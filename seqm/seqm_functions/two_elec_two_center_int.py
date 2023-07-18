@@ -94,7 +94,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
             AIJ63[i]    = AIJL(zetad[i],zetad[i],qn0[i]-1,qn0[i]-1,2)
 
                                    
-        elif (j > 12 and j <18) or (j > 32 and j <36) or (j > 50 and j <54):
+        elif ((j > 12 and j <18) or (j > 32 and j <36) or (j > 50 and j <54)) and themethod == "PM6":
             dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i],zd[i],qn0[i],zs[i],qn0[i],zd[i])
             dpAdditiveTerm[i]   = (4/15)*GetSlaterCondonParameter(1,qn0[i],zp[i],qn0[i],zd[i],qn0[i],zp[i],qn0[i],zd[i])
             ddAdditiveTerm[i]   = (4/49)*GetSlaterCondonParameter(2,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])

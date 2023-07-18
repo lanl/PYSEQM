@@ -189,8 +189,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                     e0,v = sym_eigh(x0)
                 except:
                     if torch.isnan(x0).any():
-                        print(x0)
-                    #print(x0.detach().data.numpy())
+                        print('isnan(x0) #1 in DM guess', x0)
                     e0,v = sym_eigh(x0)
                 e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
                 e[...,:size] = e0
@@ -277,8 +276,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                 try:
                     e0, v = sym_eigh(x0)
                 except:
-                    if torch.isnan(x0).any(): print(x0)
-                    #print(x0.detach().data.numpy())
+                    if torch.isnan(x0).any(): print('isnan(x0) #2 in DM guess', x0)
                     e0, v = sym_eigh(x0)
                 e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
                 e[...,:size] = e0
@@ -287,10 +285,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
 
                 # $$$ the code below can and SHOULD be optimized. Too many reshapes
 
-                #print(v.shape)
                 e = e.reshape(x_orig_shape[0:3])
                 v = v.reshape(int(v.shape[0]/2), 2, v.shape[1], v.shape[2])
-                #print(v.shape)
 
                 v_lumo = v[:,0].gather(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1))
                 v_homo = v[:,0].gather(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1)
@@ -318,10 +314,6 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                     #print(torch.norm())
                     t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
 
-                # print(t.shape)
-                # print(nheavyatom.shape)
-                # print(nH.shape)
-                # print(x.shape)
                 P = unpack(t, nheavyatom, nH, x.shape[-1])
 
                 v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])

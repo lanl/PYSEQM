@@ -214,13 +214,20 @@ def scf_forward0_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
 def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1,0.0,1], backward=False):
     """
     adaptive mixing algorithm, see cnvg.f
     """
-    nDirect1 = 120
-    alpha_direct = 0.8
-    alpha_direct_increment = (0.95-alpha_direct)/nDirect1
+    try:
+        alpha_direct = scf_converger[1]
+    except:
+        alpha_direct = 0.0
+
+    try:
+        nDirect1 = scf_converger[2]
+    except:
+        nDirect1 = 1
+    alpha_direct_increment = (0.94-alpha_direct)/nDirect1
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0
@@ -365,13 +372,20 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
 def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1,0.0,1], backward=False):
     """
     adaptive mixing algorithm, see cnvg.f
     """
-    nDirect1 = 60
-    alpha_direct = 0.6
-    alpha_direct_increment = (0.91-alpha_direct)/nDirect1
+    try:
+        alpha_direct = scf_converger[1]
+    except:
+        alpha_direct = 0.0
+
+    try:
+        nDirect1 = scf_converger[2]
+    except:
+        nDirect1 = 1
+    alpha_direct_increment = (0.8-alpha_direct)/nDirect1
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0
@@ -496,7 +510,7 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             if backward:
                 P_ab_old = P + 0.0  # ???
                 P = (1. + fac_register[-1]) * P_ab_new - fac_register[-1] * P
-                print(fac_register[-1])
+                #print(fac_register[-1])
             else:
                 P_ab_old[notconverged] = P[notconverged]
                 # if init_fac:
@@ -542,7 +556,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
     nAdapt = 1
     # number of maximal fock matrixes used
-    nFock = 8
+    nFock = 6
 
     """
     *      Emat is matrix with form
@@ -1077,15 +1091,21 @@ class SCF(torch.autograd.Function):
         else:
             if SCF.converger[0] == 1: # adaptive mixing
                 if P.dim() == 4:
-                    scf_forward = scf_forward1_u
+                    P, notconverged = scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
+                           nHydro, nHeavy, nSuperHeavy, nOccMO, \
+                           nmol, molsize, \
+                           maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger)
                 else:
-                    scf_forward = scf_forward1
+                    P, notconverged = scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
+                                                nHydro, nHeavy, nSuperHeavy, nOccMO, \
+                                                nmol, molsize, \
+                                                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger)
             elif SCF.converger[0] == 2: # adaptive mixing, then pulay
-                scf_forward = scf_forward2
-            P, notconverged = scf_forward(M, w, W, gss, gpp, gsp, gp2, hsp, \
+                P, notconverged = scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                            nHydro, nHeavy, nSuperHeavy, nOccMO, \
                            nmol, molsize, \
                            maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2)
+
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
         ctx.save_for_backward(P, M, w, W, gss, gpp, gsp, gp2, hsp, \
                               nHydro, nHeavy, nSuperHeavy, nOccMO, \
@@ -1327,12 +1347,12 @@ def scf_loop(const, molsize, \
                 Pconv, notconverged =  scf_forward1_u(  M, w, W, gss, gpp, gsp, gp2, hsp, \
                          nHydro, nHeavy, nSuperHeavy, nOccMO, \
                          nmol, molsize, \
-                         maskd, mask, idxi, idxj, P, eps, themethod, zs, zp, zd, Z, F0SD, G2SD, sp2=sp2, backward=True)
+                         maskd, mask, idxi, idxj, P, eps, themethod, zs, zp, zd, Z, F0SD, G2SD, sp2=sp2, scf_converger = scf_converger, backward=True)
             else:
                 Pconv, notconverged =  scf_forward1(  M, w, W, gss, gpp, gsp, gp2, hsp, \
                          nHydro, nHeavy, nSuperHeavy, nOccMO, \
                          nmol, molsize, \
-                         maskd, mask, idxi, idxj, P, eps, themethod, zs, zp, zd, Z, F0SD, G2SD, sp2=sp2, backward=True)
+                         maskd, mask, idxi, idxj, P, eps, themethod, zs, zp, zd, Z, F0SD, G2SD, sp2=sp2, scf_converger = scf_converger, backward=True)
         else:
             raise ValueError("""For direct backpropagation through scf,
                                 must use constant mixing at this moment\n
