@@ -1,0 +1,7 @@
+{
+    "autoDocstring.includeExtendedSummary": false,
+    "autoDocstring.docstringFormat": "google",
+    "autoDocstring.startOnNewLine": true,
+    "autoDocstring.includeName": false,
+    "autoDocstring.logLevel": "Debug"
+}

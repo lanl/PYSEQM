@@ -78,8 +78,8 @@ class Parser(torch.nn.Module):
             nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)
             nocc = nocc.type(torch.int64)
         else: # RHF
-            print('species', molecule.species)
-            print('species.shape', molecule.species.shape)
+            # print('species', molecule.species)
+            # print('species.shape', molecule.species.shape)
             norb = nHydro*1 + nHeavy*4 # number of orbitals, 1 ao per H, 4 per CNO # ! will fail for other elements
             nocc = n_charge//2
             if ((n_charge%2)==1).any():

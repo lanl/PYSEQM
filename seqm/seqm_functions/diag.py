@@ -210,8 +210,8 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         e = e.reshape(x_orig_shape[0:3])
         v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
         P = P.reshape(x_orig_shape)
-    print('D eigenvector - MO C')
-    print(v)
+    # print('D eigenvector - MO C')
+    # print(v)
     return e, P, v
 
 
