@@ -214,7 +214,7 @@ def scf_forward0_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
 def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1,0.0,1], backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1, 0.0, 0.0, 1], backward=False):
     """
     adaptive mixing algorithm, see cnvg.f
     """
@@ -224,10 +224,15 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
         alpha_direct = 0.0
 
     try:
-        nDirect1 = scf_converger[2]
+        alpha_direct_upper = scf_converger[2]
+    except:
+        alpha_direct_upper = 0.0
+
+    try:
+        nDirect1 = scf_converger[3]
     except:
         nDirect1 = 1
-    alpha_direct_increment = (0.94-alpha_direct)/nDirect1
+    alpha_direct_increment = (alpha_direct_upper-alpha_direct)/nDirect1
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0
@@ -372,7 +377,7 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
 def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1,0.0,1], backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1, 0.0, 0.0, 1], backward=False):
     """
     adaptive mixing algorithm, see cnvg.f
     """
@@ -382,10 +387,15 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
         alpha_direct = 0.0
 
     try:
-        nDirect1 = scf_converger[2]
+        alpha_direct_upper = scf_converger[2]
+    except:
+        alpha_direct_upper = 0.0
+
+    try:
+        nDirect1 = scf_converger[3]
     except:
         nDirect1 = 1
-    alpha_direct_increment = (0.8-alpha_direct)/nDirect1
+    alpha_direct_increment = (alpha_direct_upper-alpha_direct)/nDirect1
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0

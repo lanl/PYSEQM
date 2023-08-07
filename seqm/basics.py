@@ -108,7 +108,7 @@ class Parser(torch.nn.Module):
                     #print('alpha beta',nocc_alpha, nocc_beta)
                     nocc_alpha[nocc_alpha%1 != 0] += 0.5
                     nocc_beta[nocc_beta%1 != 0] -= 0.5
-                    print('hipnn_automatic_doublet flag is True. Molecules with odd number of electrons are treated as doublets.\n')
+                    #print('hipnn_automatic_doublet flag is True. Molecules with odd number of electrons are treated as doublets.\n')
                     
                     #print('alpha beta',nocc_alpha, '\n', nocc_beta, '\n')
             nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)
