@@ -615,7 +615,7 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*5) + (dm_element_err > eps*15)
+            notconverged = (err > eps) + (dm_err > eps*5) + (dm_element_err > eps*10)
             max_err = torch.max(err)
             Nnot = torch.sum(notconverged).item()
             #print(Eelec_new[notconverged])
