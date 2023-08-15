@@ -303,7 +303,11 @@ class degen_symeig(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, A):
-        eival, eivec = torch.linalg.eigh(A, UPLO='U')
+        try:
+            eival, eivec = torch.linalg.eigh(A, UPLO='U')
+        except:
+            print(A)
+            raise ValueError("PROBLEMS with torch.linalg.eigh")
         ctx.save_for_backward(eival, eivec)
         return eival, eivec
 
