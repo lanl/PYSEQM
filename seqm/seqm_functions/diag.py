@@ -234,9 +234,17 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
         x_orig_shape = x.size()
         x = x.flatten(start_dim=0, end_dim=1)
         
-        e0, v0 = list(zip(*list(map(
-                        lambda a, b, c: sym_eigh(pack(a, b, c)),
-                        x, nheavyatom, nH))))
+        ######################################################################################
+        ######################################################################################
+        try:
+            e0, v0 = list(zip(*list(map(
+                            lambda a, b, c: sym_eigh(pack(a, b, c)),
+                            x, nheavyatom, nH))))
+        except:
+            raise ValueError("PROBLEMS {} {}!!!".format(nheavyatom, nH))
+        ######################################################################################
+        ######################################################################################
+        
         if CHECK_DEGENERACY:
             P0 = list(map(
                      lambda e, v, nc : construct_P(e, v, nc),
