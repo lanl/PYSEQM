@@ -21,6 +21,7 @@ def unpackone(x0, nho, nHydro, size):
     return x
 
 def pack(x, nHeavy, nHydro):
+    print(nHeavy, nHydro)
     nho = 4*nHeavy
     if x.dim()==2:
         x0 = packone(x, nHeavy*4, nHydro, nho+nHydro)
