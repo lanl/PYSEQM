@@ -235,7 +235,7 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
         x = x.flatten(start_dim=0, end_dim=1)
         
         e0, v0 = list(zip(*list(map(
-                        lambda a, b, c: sym_eigh(pack(a, b, c), nheavyatom, nH),
+                        lambda a, b, c: sym_eigh(pack(a, b, c)),
                         x, nheavyatom, nH))))
         if CHECK_DEGENERACY:
             P0 = list(map(
@@ -302,12 +302,12 @@ class degen_symeig(torch.autograd.Function):
     Based on idea in M.F. Kasim, arXiv:2011.04366 (2020)
     """
     @staticmethod
-    def forward(ctx, A, nheavyatom, nH):
+    def forward(ctx, A):
         try:
             eival, eivec = torch.linalg.eigh(A, UPLO='U')
         except:
             print(A)
-            raise ValueError("PROBLEMS with torch.linalg.eigh\n {} \n {} {} !!!".format(A, nheavyatom, nH))
+            raise ValueError("PROBLEMS with torch.linalg.eigh\n {} !!!".format(A))
         ctx.save_for_backward(eival, eivec)
         return eival, eivec
 
