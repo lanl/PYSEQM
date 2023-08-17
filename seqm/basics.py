@@ -469,6 +469,9 @@ class Energy(torch.nn.Module):
         """
         get the energy terms
         """
+        global MOLEC
+        MOLEC = molecule 
+
         nmol, molsize, \
         nSuperHeavy, nHeavy, nHydro, nocc, \
         Z, maskd, atom_molid, \

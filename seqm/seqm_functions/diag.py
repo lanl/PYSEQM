@@ -303,6 +303,8 @@ class degen_symeig(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, A):
+        global MOLEC
+        print(MOLEC.coordinates)
         try:
             eival, eivec = torch.linalg.eigh(A, UPLO='U')
         except:
