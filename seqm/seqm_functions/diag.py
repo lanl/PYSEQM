@@ -236,12 +236,9 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
         
         ######################################################################################
         ######################################################################################
-        try:
-            e0, v0 = list(zip(*list(map(
-                            lambda a, b, c: sym_eigh(pack(a, b, c)),
-                            x, nheavyatom, nH))))
-        except:
-            raise ValueError("PROBLEMS {} {}!!!".format(nheavyatom, nH))
+        e0, v0 = list(zip(*list(map(
+                        lambda a, b, c: sym_eigh(pack(a, b, c)),
+                        x, nheavyatom, nH))))
         ######################################################################################
         ######################################################################################
         

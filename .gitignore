@@ -4,6 +4,7 @@ Tests/
 Tests_A100/
 .ipynb_checkpoints/
 seqm/seqm_functions/__pycache__/
+examples/hipnn_train_reactive/combined_datasets/30_cut/
 PYSEQM.egg-info/
 **/__pycache__/
 **/.ipynb_checkpoints/
