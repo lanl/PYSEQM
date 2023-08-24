@@ -1469,7 +1469,7 @@ def scf_loop(const, molsize, \
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
         print('did not converge', nnot)
-        print('not converged: ', notconverged.nonzero())
+        print('not converged: ', notconverged.nonzero().squeeze())
         warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, MAX_ITER))
         if RAISE_ERROR_IF_SCF_FORWARD_FAILS:
             raise ValueError("SCF for some the molecules in the batch doesn't converge")
