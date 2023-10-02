@@ -14,7 +14,8 @@ import math
 
 
 def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
-        const = Constants().to(Z.device)
+        const = Constants()
+        
         #### populations elements with d-oribitals
         isY = (zetad != 0)
         j = 0
@@ -26,20 +27,20 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
         psindex = const.qn_int[Z]
         dindex = const.qnD_int[Z]
         j = 0
-        R016 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R066 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R244 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R246 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R466 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R266 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R036 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R155 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R125 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R236 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R234 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
-        R355 = torch.zeros(zetap.shape[0],dtype = torch.double, device=Z.device)
+        R016 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R066 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R244 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R246 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R466 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R266 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R036 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R155 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R125 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R236 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R234 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R355 = torch.zeros(zetap.shape[0],dtype = torch.double)
         for k in zetad:
-            if(zetad[j] > 0 ):
+            if(dindex[j] > 0 ):
                 R016[j]   = GetSlaterCondonParameter(0,int(psindex[j]),zetas[j],int(psindex[j]),zetas[j],int(dindex[j]),zetad[j],int(dindex[j]),zetad[j])
                 R066[j]   = GetSlaterCondonParameter(0,int(dindex[j]),zetad[j],int(dindex[j]),zetad[j],int(dindex[j]),zetad[j],int(dindex[j]),zetad[j])
                 R244[j]   = GetSlaterCondonParameter(2,int(psindex[j]),zetas[j],int(dindex[j]),zetad[j],int(psindex[j]),zetas[j],int(dindex[j]),zetad[j])
@@ -51,7 +52,7 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
                 if ( abs(G2SD[j]) > 10**(-9)):
                     R244[j] = G2SD[j]
 
-            if(zetap[j] > 0 and zetad[j] > 0 ):
+            if(psindex[j] > 0 and dindex[j] > 0 ):
                 R036[j]   = GetSlaterCondonParameter(0,int(psindex[j]),zetap[j],int(psindex[j]),zetap[j],int(dindex[j]),zetad[j],int(dindex[j]),zetad[j])
                 R155[j]   = GetSlaterCondonParameter(1,int(psindex[j]),zetap[j],int(dindex[j]),zetad[j],int(psindex[j]),zetap[j],int(dindex[j]),zetad[j])
                 R125[j]   = GetSlaterCondonParameter(1,int(psindex[j]),zetas[j],int(psindex[j]),zetap[j],int(psindex[j]),zetap[j],int(dindex[j]),zetad[j])
@@ -60,8 +61,10 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
                 R355[j]   = GetSlaterCondonParameter(3,int(psindex[j]),zetap[j],int(dindex[j]),zetad[j],int(psindex[j]),zetap[j],int(dindex[j]),zetad[j])
             j = j + 1
 
-        integral = torch.zeros(zetap.shape[0],53,dtype=torch.double, device=Z.device)
-
+        integral = torch.zeros(zetap.shape[0],53,dtype=torch.double)
+        #print("HERE")
+        #print(R016,R066,R244,R246,R466,R266)
+        #print(R036,R155,R125,R236,R234,R355)
 
 
         half = 0.5
@@ -125,10 +128,9 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
         integral[isY,51-1] = R066[isY] + (FOUR/49.0)*R266[isY] - (34.0/441.0)*R466[isY]
         integral[isY,52-1] = (35.0/441.0)*R466[isY]
 
-
-        TMP = torch.zeros(size,9,9, device = device )
-        FLocal = torch.zeros(size,45, device = device)
-        W = torch.zeros(size,243, device = device)
+        
+        
+        W = torch.zeros(size,243)
         IntRf1 = [ \
         19,19,19,19,19, 3, 3, 8, 3, 3,33,33, 8,27,25,35,33,15, 8, 3, \
          3,34, 3,27,15,33,35, 8,28,25,33,33, 3, 2, 3, 3,34,24,35, 3, \
@@ -175,36 +177,9 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
         32,50,37,44,14,39,22,48,11,32,49,37,44, 1, 6, 6, 7,51,38,22, \
         31,38,29]
 
-        IntIJ = [ \
-         1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, \
-         4, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 8, 8, 8, 8, 9, \
-         9, 9, 9,10,10,10,10,10,10,11,11,11,11,11,11,12,12,12,12,12, \
-        13,13,13,13,13,14,14,14,15,15,15,15,15,15,15,15,15,15,16,16, \
-        16,16,16,17,17,17,17,17,18,18,18,19,19,19,19,19,20,20,20,20, \
-        20,21,21,21,21,21,21,21,21,21,21,21,21,22,22,22,22,22,22,22, \
-        22,22,23,23,23,23,23,24,24,24,24,24,25,25,25,25,26,26,26,26, \
-        26,26,27,27,27,27,27,28,28,28,28,28,28,28,28,28,28,29,29,29, \
-        29,29,30,30,30,31,31,31,31,31,32,32,32,32,32,33,33,33,33,33, \
-        34,34,34,34,35,35,35,35,35,36,36,36,36,36,36,36,36,36,36,36, \
-        36,37,37,37,37,38,38,38,38,38,39,39,39,39,39,40,40,40,41,42, \
-        42,42,42,42,43,43,43,43,44,44,44,44,44,45,45,45,45,45,45,45, \
-        45,45,45  ]
 
-        IntKL = [ \
-        15,21,28,36,45,12,19,23,39,11,15,21,22,26,28,36,45,13,24,32, \
-        38,34,37,43,11,15,21,22,26,28,36,45,17,25,31,16,20,27,44,29, \
-        33,35,42,15,21,22,28,36,45, 3, 6,11,21,26,36, 2,12,19,23,39, \
-         4,13,24,32,38,14,17,31, 1, 3, 6,10,15,21,22,28,36,45, 8,16, \
-        20,27,44, 7,14,17,25,31,18,30,40, 2,12,19,23,39, 8,16,20,27, \
-        44, 1, 3, 6,10,11,15,21,22,26,28,36,45, 3, 6,10,15,21,22,28, \
-        36,45, 2,12,19,23,39, 4,13,24,32,38, 7,17,25,31, 3, 6,11,21, \
-        26,36, 8,16,20,27,44, 1, 3, 6,10,15,21,22,28,36,45, 9,29,33, \
-        35,42,18,30,40, 7,14,17,25,31, 4,13,24,32,38, 9,29,33,35,42, \
-         5,34,37,43, 9,29,33,35,42, 1, 3, 6,10,11,15,21,22,26,28,36, \
-        45, 5,34,37,43, 4,13,24,32,38, 2,12,19,23,39,18,30,40,41, 9, \
-        29,33,35,42, 5,34,37,43, 8,16,20,27,44, 1, 3, 6,10,15,21,22, \
-        28,36,45]
         j = 0
+        
         while (j < 243):
             i1 = IntRf1[j]
             i2 = IntRf2[j]
