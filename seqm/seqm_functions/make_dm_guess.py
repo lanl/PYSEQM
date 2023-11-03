@@ -84,28 +84,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     nmol = molecule.nHeavy.shape[0]
     tore = molecule.const.tore
     
-    M, w,rho0xi,rho0xj = hcore(molecule.const, nmol, molecule.molsize, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z, \
-                    zetas=zetas,
-                    zetap=zetap,
-                    zetad=zetad,
-                    zs=zs,
-                    zp=zp,
-                    zd=zd,
-                    uss=uss,
-                    upp=upp,
-                    udd=udd,
-                    gss=gss,
-                    gpp=gpp,
-                    gp2=gp2,
-                    hsp=hsp,
-                    F0SD = F0SD, 
-                    G2SD = G2SD,
-                    rho_core = rho_core,
-                    alpha = alp,
-                    chi = chi,
-                    themethod = molecule.method,
-                    beta=beta,
-                    Kbeta=Kbeta)
+    M, w,rho0xi,rho0xj = hcore(molecule)
     
     if not torch.is_tensor(molecule.dm) or overwrite_existing_dm==True:
         #print('Reinitializing DM')

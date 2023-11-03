@@ -193,10 +193,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             for mol in self.output['molid']:
                 fn = self.output['prefix'] + "." + str(mol) + ".xyz"
                 f = open(fn,'a+')
-                if e_gap.dim()==2:
-                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], Err[mol], time.time()))
+                if e_gap.dim()==1:
+                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol], Err[mol], time.time()))
                 else:
-                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}/{:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0,0], e_gap[mol,1,0], Err[mol], time.time()))
+                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}/{:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], e_gap[mol,1], Err[mol], time.time()))
                     
                 for atom in range(molecule.coordinates.shape[1]):
                     if molecule.species[mol,atom]>0:
@@ -609,7 +609,7 @@ class KSA_XL_BOMD(XL_BOMD):
         """
         super().__init__(*args, **kwargs)
 
-    @attach_profile_range("KSA_XL_BOMD_ONESTEP")
+    #@attach_profile_range("KSA_XL_BOMD_ONESTEP")
     def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
         dt = self.timestep

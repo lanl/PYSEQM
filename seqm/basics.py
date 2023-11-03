@@ -317,7 +317,7 @@ class Hamiltonian(torch.nn.Module):
         # 1: use recursive formula go back through SCF loop
         # 2: direct backprop through SCF loop
 
-    def forward(self, themethod, const, molsize, nSuperHeavy, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, alpha, chi, P0=None):
+    def forward(self, molecule, themethod, P0=None):
         """
         SCF loop
         const : Constants instance
@@ -344,54 +344,9 @@ class Hamiltonian(torch.nn.Module):
         v : eigenvectors of F
         """
         
-        if(themethod == 'PM6'): # PM6 not implemented yet. Only PM6_SP
-            beta = torch.cat((parameters['beta_s'].unsqueeze(1), parameters['beta_p'].unsqueeze(1), parameters['beta_d'].unsqueeze(1)),dim=1)
-            udd=parameters['U_dd']
-        else:
-            beta = torch.cat((parameters['beta_s'].unsqueeze(1), parameters['beta_p'].unsqueeze(1)),dim=1)        
-        
-        Kbeta = parameters.get('Kbeta', None)
         
         if(themethod == 'PM6'): # not implemented yet
-            F, e, P, Hcore, w, charge,rho0xi,rho0xj, notconverged = scf_loop(const=const,
-                                  molsize=molsize,
-                                  nSuperHeavy = nSuperHeavy,
-                                  nHeavy=nHeavy,
-                                  nHydro=nHydro,
-                                  nOccMO=nocc,
-                                  maskd=maskd,
-                                  mask=mask,
-                                  atom_molid=atom_molid,
-                                  pair_molid=pair_molid,
-                                  idxi=idxi,
-                                  idxj=idxj,
-                                  ni=ni,
-                                  nj=nj,
-                                  xij=xij,
-                                  rij=rij,
-                                  Z=Z,
-                                  zetas=parameters['zeta_s'],
-                                  zetap=parameters['zeta_p'],
-                                  zetad=parameters['zeta_d'],
-                                  zs=parameters['s_orb_exp_tail'],
-                                  zp=parameters['p_orb_exp_tail'],
-                                  zd=parameters['d_orb_exp_tail'],
-                                  uss=parameters['U_ss'],
-                                  upp=parameters['U_pp'],
-                                  udd=parameters['U_dd'],
-                                  gss=parameters['g_ss'],
-                                  gsp=parameters['g_sp'],
-                                  gpp=parameters['g_pp'],
-                                  gp2=parameters['g_p2'],
-                                  hsp=parameters['h_sp'],
-                                  F0SD = parameters['F0SD'], 
-                                  G2SD = parameters['G2SD'],
-                                  rho_core = parameters['rho_core'],
-                                  alpha = alpha,
-                                  chi = chi,
-                                  themethod = themethod,
-                                  beta=beta,
-                                  Kbeta=Kbeta,
+            F, e, P, Hcore, w, charge,rho0xi,rho0xj, notconverged, eig_vec = scf_loop(molecule,
                                   eps = self.eps,
                                   P=P0,
                                   sp2=self.sp2,
@@ -401,45 +356,7 @@ class Hamiltonian(torch.nn.Module):
                                   scf_backward_eps=self.scf_backward_eps)
 
         else:
-            F, e, P, Hcore, w, charge, rho0xi,rho0xj, notconverged = scf_loop(const=const,
-                              molsize=molsize,
-                              nSuperHeavy = nSuperHeavy,
-                              nHeavy=nHeavy,
-                              nHydro=nHydro,
-                              nOccMO=nocc,
-                              maskd=maskd,
-                              mask=mask,
-                              atom_molid=atom_molid,
-                              pair_molid=pair_molid,
-                              idxi=idxi,
-                              idxj=idxj,
-                              ni=ni,
-                              nj=nj,
-                              xij=xij,
-                              rij=rij,
-                              Z=Z,
-                              zetas=parameters['zeta_s'],
-                              zetap=parameters['zeta_p'],
-                              zetad=torch.zeros_like(parameters['zeta_s']),
-                              zs=torch.zeros_like(parameters['zeta_s']),
-                              zp=torch.zeros_like(parameters['zeta_s']),
-                              zd=torch.zeros_like(parameters['zeta_s']),
-                              uss=parameters['U_ss'],
-                              upp=parameters['U_pp'],
-                              udd=torch.zeros_like(parameters['U_ss']),
-                              gss=parameters['g_ss'],
-                              gsp=parameters['g_sp'],
-                              gpp=parameters['g_pp'],
-                              gp2=parameters['g_p2'],
-                              hsp=parameters['h_sp'],
-                              F0SD = torch.zeros_like(parameters['U_ss']),
-                              G2SD = torch.zeros_like(parameters['U_ss']),
-                              rho_core = torch.zeros_like(parameters['U_ss']),
-                              alpha = alpha,
-                              chi = chi,
-                              themethod = themethod,
-                              beta=beta,
-                              Kbeta=Kbeta,
+            F, e, P, Hcore, w, charge, rho0xi,rho0xj, notconverged, eig_vec = scf_loop(molecule,
                               eps = self.eps,
                               P=P0,
                               sp2=self.sp2,
@@ -448,7 +365,7 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps)
         #
-        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, notconverged
+        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, notconverged, eig_vec
 
 class Energy(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -470,95 +387,114 @@ class Energy(torch.nn.Module):
         get the energy terms
         """
 
-        nmol, molsize, \
-        nSuperHeavy, nHeavy, nHydro, nocc, \
-        Z, maskd, atom_molid, \
-        mask, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule, self.method, *args, **kwargs)
+        molecule.nmol, molecule.molsize, \
+        molecule.nSuperHeavy, molecule.nHeavy, molecule.nHydro, molecule.nocc, \
+        molecule.Z, molecule.maskd, molecule.atom_molid, \
+        molecule.mask, molecule.pair_molid, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.xij, molecule.rij = self.parser(molecule, self.method, *args, **kwargs)
         
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
-            parameters, alp, chi = self.packpar(Z, learned_params = adict)   
+            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = adict)   
         else:
-            parameters, alp, chi = self.packpar(Z, learned_params = learned_parameters)
-        F, e, P, Hcore, w, charge, rho0xi,rho0xj, notconverged =  self.hamiltonian(self.method, molecule.const, molsize, \
-                                                 nSuperHeavy, nHeavy, nHydro, nocc, \
-                                                 Z, maskd, \
-                                                 mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, \
-                                                 parameters, alp, chi, P0=P0)
+            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = learned_parameters)
+
+
+        if(molecule.method == 'PM6'): # PM6 not implemented yet. Only PM6_SP
+            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1), molecule.parameters['beta_d'].unsqueeze(1)),dim=1)
+        else:
+            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1)),dim=1)        
+            molecule.parameters['zeta_d'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            molecule.parameters['s_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            molecule.parameters['p_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            molecule.parameters['d_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+
+            molecule.parameters['U_dd'] = torch.zeros_like(molecule.parameters['U_ss'])
+            molecule.parameters['F0SD'] = torch.zeros_like(molecule.parameters['U_ss'])
+            molecule.parameters['G2SD'] = torch.zeros_like(molecule.parameters['U_ss'])
+            molecule.parameters['rho_core'] = torch.zeros_like(molecule.parameters['U_ss'])
+
         
-        molecule.parameters = parameters
+        molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
+        
+        F, e, P, Hcore, w, charge, rho0xi,rho0xj, notconverged, eig_vec =  self.hamiltonian(molecule, self.method, \
+                                                 P0=P0)
+        
+        
         
         
         if self.eig:
             if self.uhf:
-                if 0 in nocc:
+                if 0 in molecule.nocc:
                     print('Zero occupied alpha or beta orbitals found (e.g. triplet H2). HOMO-LUMO gaps are not available.')
                     e_gap = torch.tensor([])
                 else:
-                    lumo_a, lumo_b = nocc[:,0].unsqueeze(0).T, nocc[:,1].unsqueeze(0).T
+                    lumo_a, lumo_b = molecule.nocc[:,0].unsqueeze(0).T, molecule.nocc[:,1].unsqueeze(0).T
                     e_gap_a = e[:,0].gather(1, lumo_a) - e[:,0].gather(1, lumo_a-1)
                     e_gap_b = e[:,1].gather(1, lumo_b) - e[:,1].gather(1, lumo_b-1)
                     e_gap = torch.stack((e_gap_a.reshape(-1), e_gap_b.reshape(-1)), dim=1)
             else:
-                lumo = nocc.unsqueeze(0).T
+                lumo = molecule.nocc.unsqueeze(0).T
                 e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
         else:
             e_gap = None
         
+        molecule.eig_vec = eig_vec
+        
         #nuclear energy
-        alpha = parameters['alpha']
+        alpha = molecule.parameters['alpha']
         if self.method=='MNDO':
             parnuc = (alpha,)
         elif self.method=='AM1' or self.method=='PM6' or self.method=='PM6_SP':
-            K = torch.stack((parameters['Gaussian1_K'],
-                             parameters['Gaussian2_K'],
-                             parameters['Gaussian3_K'],
-                             parameters['Gaussian4_K']),dim=1)
+            K = torch.stack((molecule.parameters['Gaussian1_K'],
+                             molecule.parameters['Gaussian2_K'],
+                             molecule.parameters['Gaussian3_K'],
+                             molecule.parameters['Gaussian4_K']),dim=1)
             #
-            L = torch.stack((parameters['Gaussian1_L'],
-                             parameters['Gaussian2_L'],
-                             parameters['Gaussian3_L'],
-                             parameters['Gaussian4_L']),dim=1)
-            #
-            M = torch.stack((parameters['Gaussian1_M'],
-                             parameters['Gaussian2_M'],
-                             parameters['Gaussian3_M'],
-                             parameters['Gaussian4_M']),dim=1)
+            L = torch.stack((molecule.parameters['Gaussian1_L'],
+                             molecule.parameters['Gaussian2_L'],
+                             molecule.parameters['Gaussian3_L'],
+                             molecule.parameters['Gaussian4_L']),dim=1)
+            #molecule.
+            M = torch.stack((molecule.parameters['Gaussian1_M'],
+                             molecule.parameters['Gaussian2_M'],
+                             molecule.parameters['Gaussian3_M'],
+                             molecule.parameters['Gaussian4_M']),dim=1)
             #
             parnuc = (alpha, K, L, M)
         elif self.method=='PM3':
-            K = torch.stack((parameters['Gaussian1_K'],
-                             parameters['Gaussian2_K']),dim=1)
+            K = torch.stack((molecule.parameters['Gaussian1_K'],
+                             molecule.parameters['Gaussian2_K']),dim=1)
             #
-            L = torch.stack((parameters['Gaussian1_L'],
-                             parameters['Gaussian2_L']),dim=1)
+            L = torch.stack((molecule.parameters['Gaussian1_L'],
+                             molecule.parameters['Gaussian2_L']),dim=1)
             #
-            M = torch.stack((parameters['Gaussian1_M'],
-                             parameters['Gaussian2_M']),dim=1)
+            M = torch.stack((molecule.parameters['Gaussian1_M'],
+                             molecule.parameters['Gaussian2_M']),dim=1)
             #
             parnuc = (alpha, K, L, M)
 
-        if 'g_ss_nuc' in parameters:
-            g = parameters['g_ss_nuc']
-            rho0a = 0.5 * ev / g[idxi]
-            rho0b = 0.5 * ev / g[idxj]
-            gam = ev / torch.sqrt(rij**2 + (rho0a + rho0b)**2)
+        if 'g_ss_nuc' in molecule.parameters:
+            g = molecule.parameters['g_ss_nuc']
+            rho0a = 0.5 * ev / g[molecule.idxi]
+            rho0b = 0.5 * ev / g[molecule.idxj]
+            gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b)**2)
         else:
             gam = w[...,0,0]
         
-        EnucAB = pair_nuclear_energy(Z, molecule.const, nmol, ni, nj, idxi, idxj, rij, rho0xi,rho0xj,alp, chi, gam=gam, method=self.method, parameters=parnuc)
+        EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
+                                     rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
         if all_terms:
-            Etot, Enuc = total_energy(nmol, pair_molid,EnucAB, Eelec)
-            Eiso = elec_energy_isolated_atom(molecule.const, Z,
-                                         uss=parameters['U_ss'],
-                                         upp=parameters['U_pp'],
-                                         gss=parameters['g_ss'],
-                                         gpp=parameters['g_pp'],
-                                         gsp=parameters['g_sp'],
-                                         gp2=parameters['g_p2'],
-                                         hsp=parameters['h_sp'])
-            Hf, Eiso_sum = heat_formation(molecule.const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
+            Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
+            Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
+                                         uss=molecule.parameters['U_ss'],
+                                         upp=molecule.parameters['U_pp'],
+                                         gss=molecule.parameters['g_ss'],
+                                         gpp=molecule.parameters['g_pp'],
+                                         gsp=molecule.parameters['g_sp'],
+                                         gp2=molecule.parameters['g_p2'],
+                                         hsp=molecule.parameters['h_sp'])
+            Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough

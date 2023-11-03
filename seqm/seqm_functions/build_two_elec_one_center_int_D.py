@@ -24,21 +24,21 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
         ####
         psindex = Z.clone()
         dindex  = Z.clone()
-        psindex = const.qn_int[Z]
-        dindex = const.qnD_int[Z]
+        psindex = const.qn_int.to(device)[Z]
+        dindex = const.qnD_int.to(device)[Z]
         j = 0
-        R016 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R066 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R244 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R246 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R466 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R266 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R036 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R155 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R125 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R236 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R234 = torch.zeros(zetap.shape[0],dtype = torch.double)
-        R355 = torch.zeros(zetap.shape[0],dtype = torch.double)
+        R016 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R066 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R244 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R246 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R466 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R266 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R036 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R155 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R125 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R236 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R234 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
+        R355 = torch.zeros(zetap.shape[0],dtype = torch.double, device = device)
         for k in zetad:
             if(dindex[j] > 0 ):
                 R016[j]   = GetSlaterCondonParameter(0,int(psindex[j]),zetas[j],int(psindex[j]),zetas[j],int(dindex[j]),zetad[j],int(dindex[j]),zetad[j])
@@ -61,7 +61,7 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
                 R355[j]   = GetSlaterCondonParameter(3,int(psindex[j]),zetap[j],int(dindex[j]),zetad[j],int(psindex[j]),zetap[j],int(dindex[j]),zetad[j])
             j = j + 1
 
-        integral = torch.zeros(zetap.shape[0],53,dtype=torch.double)
+        integral = torch.zeros(zetap.shape[0],53,dtype=torch.double, device = device)
         #print("HERE")
         #print(R016,R066,R244,R246,R466,R266)
         #print(R036,R155,R125,R236,R234,R355)
@@ -130,7 +130,7 @@ def calc_integral(zetas, zetap, zetad, Z, size, maskd, P0, F0SD, G2SD):
 
         
         
-        W = torch.zeros(size,243)
+        W = torch.zeros(size,243, device = device)
         IntRf1 = [ \
         19,19,19,19,19, 3, 3, 8, 3, 3,33,33, 8,27,25,35,33,15, 8, 3, \
          3,34, 3,27,15,33,35, 8,28,25,33,33, 3, 2, 3, 3,34,24,35, 3, \

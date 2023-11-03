@@ -31,6 +31,8 @@ from .basics import Parser, Parser_For_Ovr, Pack_Parameters
 from .seqm_functions.fock import fock
 from .seqm_functions.G_XL_LR import G
 from .seqm_functions.fermi_q import Fermi_Q
+from .seqm_functions.build_two_elec_one_center_int_D import calc_integral #, calc_integral_os
+
 from .seqm_functions.canon_dm_prt import Canon_DM_PRT
 from .seqm_functions.hcore import hcore
 from .seqm_functions.diag import sym_eig_trunc
@@ -62,35 +64,42 @@ class EnergyXL(torch.nn.Module):
         D: Density Matrix, F=>D  (SP2)
         P: Dynamics Field Tensor
         """
-        nmol, molsize, \
-        nHeavy, nHydro, nocc, \
-        Z, maskd, atom_molid, \
-        mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij = self.parser(molecule, return_mask_l=True, *args, **kwargs)
+
+        molecule.nmol, molecule.molsize, \
+        molecule.nSuperHeavy, molecule.nHeavy, molecule.nHydro, molecule.nocc, \
+        molecule.Z, molecule.maskd, molecule.atom_molid, \
+        molecule.mask, molecule.pair_molid, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.xij, molecule.rij = self.parser(molecule, self.method, *args, **kwargs)
+
         
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
-            parameters = self.packpar(Z, learned_params = adict)    
+            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = adict)   
         else:
-            parameters = self.packpar(Z, learned_params = learned_parameters)
-        beta = torch.cat((parameters['beta_s'].unsqueeze(1), parameters['beta_p'].unsqueeze(1)),dim=1)
-        if "Kbeta" in parameters:
-            Kbeta = parameters["Kbeta"]
+            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = learned_parameters)
+
+        
+        if(molecule.method == 'PM6'): # PM6 not implemented yet. Only PM6_SP
+            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1), molecule.parameters['beta_d'].unsqueeze(1)),dim=1)
         else:
-            Kbeta = None
+            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1)),dim=1)        
+            molecule.parameters['zeta_d'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            molecule.parameters['s_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            molecule.parameters['p_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            molecule.parameters['d_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+
+            molecule.parameters['U_dd'] = torch.zeros_like(molecule.parameters['U_ss'])
+            molecule.parameters['F0SD'] = torch.zeros_like(molecule.parameters['U_ss'])
+            molecule.parameters['G2SD'] = torch.zeros_like(molecule.parameters['U_ss'])
+            molecule.parameters['rho_core'] = torch.zeros_like(molecule.parameters['U_ss'])
+
+        
+        molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
+
+
         if molecule.const.do_timing:
             t0 = time.time()
 
-        M, w = hcore(molecule.const, nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, \
-                     zetas=parameters['zeta_s'],
-                     zetap=parameters['zeta_p'],
-                     uss=parameters['U_ss'],
-                     upp=parameters['U_pp'],
-                     gss=parameters['g_ss'],
-                     gpp=parameters['g_pp'],
-                     gp2=parameters['g_p2'],
-                     hsp=parameters['h_sp'],
-                     beta=beta,
-                     Kbeta=Kbeta)
+        M, w, rho0xi, rho0xj = hcore(molecule)
 
         if molecule.const.do_timing:
             if torch.cuda.is_available():
@@ -98,16 +107,40 @@ class EnergyXL(torch.nn.Module):
             t1 = time.time()
             molecule.const.timing["Hcore + STO Integrals"].append(t1-t0)
 
-        Hcore = M.reshape(nmol,molsize,molsize,4,4) \
+        Hcore = M.reshape(molecule.nmol,molecule.molsize,molecule.molsize,4,4) \
                  .transpose(2,3) \
-                 .reshape(nmol, 4*molsize, 4*molsize)
+                 .reshape(molecule.nmol, 4*molecule.molsize, 4*molecule.molsize)
 
-        F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, \
-                 gss=parameters['g_ss'],
-                 gpp=parameters['g_pp'],
-                 gsp=parameters['g_sp'],
-                 gp2=parameters['g_p2'],
-                 hsp=parameters['h_sp'])
+        if(molecule.method == 'PM6'): # PM6 does not work. ignore this part
+            if molecule.nocc.dim() == 2: # open shell
+                
+                W, W_exch = calc_integral_os(molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
+                                            molecule.Z, nmol*molecule.molsize*molecule.molsize, molecule.maskd, P, molecule.parameters['F0SD'], molecule.parameters['G2SD'])
+                W = torch.stack((W, W_exch))
+                #print(W_exch)
+            else:
+                W = calc_integral(molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
+                                molecule.Z, nmol*molecule.molsize*molecule.molsize, molecule.maskd, P, molecule.parameters['F0SD'], molecule.parameters['G2SD'])
+                W_exch = torch.tensor([0], device=molecule.nocc.device)
+        else:
+            W = torch.tensor([0], device=molecule.nocc.device)
+            W_exch = torch.tensor([0], device=molecule.nocc.device)
+            
+        
+        F = fock(molecule.nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, w, W, \
+                molecule.parameters['g_ss'],
+                molecule.parameters['g_pp'],
+                molecule.parameters['g_sp'],
+                molecule.parameters['g_p2'],
+                molecule.parameters['h_sp'],
+                molecule.method,
+                molecule.parameters['s_orb_exp_tail'],
+                molecule.parameters['p_orb_exp_tail'],
+                molecule.parameters['d_orb_exp_tail'],
+                molecule.Z,
+                molecule.parameters['F0SD'],
+                molecule.parameters['G2SD'])
+
 
         
         if 'max_rank' in xl_bomd_params: # Krylov
@@ -119,10 +152,12 @@ class EnergyXL(torch.nn.Module):
             Temp = xl_bomd_params['T_el']
             kB = 8.61739e-5 # eV/K, kB = 6.33366256e-6 Ry/K, kB = 3.166811429e-6 Ha/K, #kB = 3.166811429e-6 #Ha/K
             with torch.no_grad():
-                D,S_Ent,QQ,e,Fe_occ,mu0, Occ_mask = Fermi_Q(F, Temp, nocc, nHeavy, nHydro, kB, scf_backward = self.scf_backward) # Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent
+                D,S_Ent,QQ,e,Fe_occ,mu0, Occ_mask = Fermi_Q(F, Temp, molecule.nocc, molecule.nHeavy, molecule.nHydro, kB, scf_backward = self.scf_backward) # Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent
 
                 EEnt = -2.*Temp*S_Ent
-                e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
+                lumo = molecule.nocc.unsqueeze(0).T
+                e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
+                #e_gap = e.gather(1, molecule.nocc.unsqueeze(0).T) - e.gather(1, molecule.nocc.unsqueeze(0).T-1)
 
                 Rank = xl_bomd_params['max_rank']
                 K0 = 1.0
@@ -148,15 +183,23 @@ class EnergyXL(torch.nn.Module):
                     V[:,:,:,k] = V[:,:,:,k]/torch.linalg.norm(V[:,:,:,k], ord='fro', dim=(1,2)).view(-1, 1, 1)
 
                     d_D = V[:,:,:,k]
-                    FO1 = G(nmol, molsize, d_D, M, maskd, mask, idxi, idxj, w, \
-                                    gss=parameters['g_ss'],
-                                    gpp=parameters['g_pp'],
-                                    gsp=parameters['g_sp'],
-                                    gp2=parameters['g_p2'],
-                                    hsp=parameters['h_sp'])
+                    
+                    FO1 = G(molecule.nmol, molecule.molsize, d_D, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, w, W, \
+                            molecule.parameters['g_ss'],
+                            molecule.parameters['g_pp'],
+                            molecule.parameters['g_sp'],
+                            molecule.parameters['g_p2'],
+                            molecule.parameters['h_sp'],
+                            molecule.method,
+                            molecule.parameters['s_orb_exp_tail'],
+                            molecule.parameters['p_orb_exp_tail'],
+                            molecule.parameters['d_orb_exp_tail'],
+                            molecule.Z,
+                            molecule.parameters['F0SD'],
+                            molecule.parameters['G2SD'])
 
                     # $$$ multiply by 2 ???
-                    PO1 = Canon_DM_PRT(FO1,Temp,nHeavy,nHydro,QQ,e,mu0,8, kB, Occ_mask)
+                    PO1 = Canon_DM_PRT(FO1,Temp,molecule.nHeavy,molecule.nHydro,QQ,e,mu0,8, kB, Occ_mask)
 
                     W[:,:,:,k] = K0*(PO1 - V[:,:,:,k])
                     dW = W[:,:,:,k]
@@ -193,12 +236,13 @@ class EnergyXL(torch.nn.Module):
                 t0 = time.time()
             with torch.no_grad():
                 if sp2[0]:
-                    D = unpack(SP2(pack(F, nHeavy, nHydro), nocc, sp2[1]), nHeavy, nHydro, F.shape[-1])
+                    D = unpack(SP2(pack(F, molecule.nHeavy, molecule.nHydro), molecule.nocc, sp2[1]), molecule.nHeavy, molecule.nHydro, F.shape[-1])
                     e_gap = torch.zeros(molecule.species.shape[0],1)
-                    e = torch.zeros(molecule.species.shape[0], molecule.nocc)
+                    e = torch.zeros(molecule.species.shape[0], molecule.molecule.nocc)
                 else:
-                    e, D = sym_eig_trunc(F,nHeavy, nHydro, nocc)[0:2]
-                    e_gap = e.gather(1, nocc.unsqueeze(0).T) - e.gather(1, nocc.unsqueeze(0).T-1)
+                    e, D = sym_eig_trunc(F,molecule.nHeavy, molecule.nHydro, molecule.nocc)[0:2]
+                    lumo = molecule.nocc.unsqueeze(0).T
+                    e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
                     #print('adfdfa',F, '\nfg', sym_eig_trunc(F,nHeavy, nHydro, nocc))
                     
             EEnt = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
@@ -215,51 +259,61 @@ class EnergyXL(torch.nn.Module):
             
 
         #nuclear energy
-        alpha = parameters['alpha']
+        alpha = molecule.parameters['alpha']
         if self.method=='MNDO':
             parnuc = (alpha,)
-        elif self.method=='AM1':
-            K = torch.stack((parameters['Gaussian1_K'],
-                             parameters['Gaussian2_K'],
-                             parameters['Gaussian3_K'],
-                             parameters['Gaussian4_K']),dim=1)
+        elif self.method=='AM1' or self.method=='PM6' or self.method=='PM6_SP':
+            K = torch.stack((molecule.parameters['Gaussian1_K'],
+                             molecule.parameters['Gaussian2_K'],
+                             molecule.parameters['Gaussian3_K'],
+                             molecule.parameters['Gaussian4_K']),dim=1)
             #
-            L = torch.stack((parameters['Gaussian1_L'],
-                             parameters['Gaussian2_L'],
-                             parameters['Gaussian3_L'],
-                             parameters['Gaussian4_L']),dim=1)
-            #
-            M = torch.stack((parameters['Gaussian1_M'],
-                             parameters['Gaussian2_M'],
-                             parameters['Gaussian3_M'],
-                             parameters['Gaussian4_M']),dim=1)
+            L = torch.stack((molecule.parameters['Gaussian1_L'],
+                             molecule.parameters['Gaussian2_L'],
+                             molecule.parameters['Gaussian3_L'],
+                             molecule.parameters['Gaussian4_L']),dim=1)
+            #molecule.
+            M = torch.stack((molecule.parameters['Gaussian1_M'],
+                             molecule.parameters['Gaussian2_M'],
+                             molecule.parameters['Gaussian3_M'],
+                             molecule.parameters['Gaussian4_M']),dim=1)
             #
             parnuc = (alpha, K, L, M)
         elif self.method=='PM3':
-            K = torch.stack((parameters['Gaussian1_K'],
-                             parameters['Gaussian2_K']),dim=1)
+            K = torch.stack((molecule.parameters['Gaussian1_K'],
+                             molecule.parameters['Gaussian2_K']),dim=1)
             #
-            L = torch.stack((parameters['Gaussian1_L'],
-                             parameters['Gaussian2_L']),dim=1)
+            L = torch.stack((molecule.parameters['Gaussian1_L'],
+                             molecule.parameters['Gaussian2_L']),dim=1)
             #
-            M = torch.stack((parameters['Gaussian1_M'],
-                             parameters['Gaussian2_M']),dim=1)
+            M = torch.stack((molecule.parameters['Gaussian1_M'],
+                             molecule.parameters['Gaussian2_M']),dim=1)
             #
             parnuc = (alpha, K, L, M)
 
-        EnucAB = pair_nuclear_energy(molecule.const, nmol, ni, nj, idxi, idxj, rij, gam=w[...,0,0], method=self.method, parameters=parnuc)
+        if 'g_ss_nuc' in molecule.parameters:
+            g = molecule.parameters['g_ss_nuc']
+            rho0a = 0.5 * ev / g[molecule.idxi]
+            rho0b = 0.5 * ev / g[molecule.idxj]
+            gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b)**2)
+        else:
+            gam = w[...,0,0]
+        
+        
+        EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
+                                     rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy_xl(D,P,F,Hcore)
         if all_terms:
-            Etot, Enuc = total_energy(nmol, pair_molid,EnucAB, Eelec)
-            Eiso = elec_energy_isolated_atom(molecule.const, Z,
-                                         uss=parameters['U_ss'],
-                                         upp=parameters['U_pp'],
-                                         gss=parameters['g_ss'],
-                                         gpp=parameters['g_pp'],
-                                         gsp=parameters['g_sp'],
-                                         gp2=parameters['g_p2'],
-                                         hsp=parameters['h_sp'])
-            Hf, Eiso_sum = heat_formation(molecule.const, nmol,atom_molid, Z, Etot, Eiso, flag=self.Hf_flag)
+            Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
+            Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
+                                         uss=molecule.parameters['U_ss'],
+                                         upp=molecule.parameters['U_pp'],
+                                         gss=molecule.parameters['g_ss'],
+                                         gpp=molecule.parameters['g_pp'],
+                                         gsp=molecule.parameters['g_sp'],
+                                         gp2=molecule.parameters['g_p2'],
+                                         hsp=molecule.parameters['h_sp'])
+            Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol,molecule.atom_molid, molecule.Z, Etot, Eiso, flag=self.Hf_flag)
             return Hf, Etot, Eelec, EEnt, Enuc, Eiso_sum, EnucAB, D, dP2dt2, Error, e_gap, e, Fe_occ
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough

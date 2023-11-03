@@ -9,11 +9,15 @@ import numpy
 import scipy.special
 from .parameters import  PWCCT
 from .RotationMatrixD import *
+import time
 #two electron two center integrals
 def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod):
     """
     two electron two center integrals in molecule frame
     """
+    
+    t0 = time.time()
+
     #t = time.time()
     dtype = xij.dtype
     device = xij.device
@@ -108,7 +112,10 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
         i = i + 1
             
 
-#    print(time.time() - t)
+    #print("PRE-ROTATE:", time.time() - t0)
+
+    t1 =     time.time()
+
     dp= AIJ52/math.sqrt(5)
     isY = qnd[Z] > 0
     D = torch.sqrt(AIJ43*math.sqrt(1.0000/15.0000))*math.sqrt(2.0000)
@@ -127,7 +134,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     FG1=3/49*245/27*dp3
     DP = torch.zeros_like(qn0)
     DP[isY] = POIJ(1,D[isY],FG[isY]-1.8000*FG1[isY])
-    ##print(AIJ63, "YER")
     D        = AIJ63/7.0000
     D        = torch.sqrt(2.0000*D)
     dorbdorb = D
@@ -136,19 +142,21 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     DD = torch.zeros_like(qn0)
     DD[isY] = POIJ(2,D[isY],FG[isY]-(20.0000/35.0000)*FG1[isY])
 #    y = torch.sqrt((2*qn0+1)*(2*qn0+2)/20.00000) / zetap
-    ##print (y)
 #    x = POIJ(2,y*math.sqrt(2),hpp[isY])
-    ##print (x)
 
     rho_0 = 0.5*ev/gss
-    ##print(isX,isY)
     
     rho_1[isX] = rho1(hsp[isX],dd[isX])
     rho_2[isX] = rho2(hpp[isX],qq[isX])
     rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
     ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
 
+    #print("PRE-ROTATE2:", time.time() - t1)
+
     
+    
+
+    t1 = time.time()
     w, e1b, e2a = \
         rotate(ni, nj, xij, rij, \
                tore, dd[idxi],dd[idxj], \
@@ -168,6 +176,9 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
                DD[idxi]*isY[idxi],DD[idxj]*isY[idxj], \
                alpha, themethod,rho_2d[idxi],rho_2d[idxj],rho_core[idxi],rho_core[idxj])
 
+    #print("ROTATE:",     time.time() - t1)
+
+
     rho0aTMP = rho_0[idxi].clone()
     rho0bTMP = rho_0[idxj].clone()
     A = (rho_core[idxi] != 0.000)
@@ -183,6 +194,9 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     """
     rotate the two elecron two center integrals from local frame to molecule frame
     """
+    
+    t1 = time.time()
+
     dtype =  xij.dtype
     device = xij.device
 #    t0 =    time.time() 
@@ -268,10 +282,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
                 da, db, qa,qb, rho0aTMP,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)
 
 
-    #print(ri)
-    #print(riPM6b)
-    #print(riPM6a)
-    #sys.exit()
 
     
     #
@@ -434,7 +444,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     y[cond1XX,2-1] = torch.abs(a * x[cond1XX,1-1])
     #y[3] is not used
 
-
+    
     xx11 = x[...,1-1]**2
     xx21 = x[...,2-1]*x[...,1-1]
     xx22 = x[...,2-1]**2
@@ -471,6 +481,8 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     yz32 = y[...,2-1]*z[...,3-1]
     ##print(x,y,z)
     ##sys.exit()
+
+    
     w = torch.zeros(ri.shape[0],100,dtype=dtype, device=device)
 
 
@@ -874,6 +886,11 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
        + (ri[...,18-1]*xx33 + ri[...,19-1]*zz33 ) * zz33 \
        + ri[...,20-1]*xz33*xz33
     #
+    
+    #print('TIME INNER 2c2e:', time.time()-t1)
+
+    t1 = time.time()
+
     """
     #
     css1,csp1,cpps1,cppp1 = core[1:,1]
@@ -1043,6 +1060,9 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     e2a[XX,3,3] = -core[...,6]*xx33 - core[...,7]*zz33
 #    print ( " NONPM6:", time.time() - t0)
 #    t0 = time.time()
+
+    
+
     if themethod == "PM6":
 #        t0 = time.time()
         dRotationMatrix = GenerateRotationMatrix(xij)
@@ -1057,12 +1077,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
                   dRotationMatrix,ri,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
 #        print("2E2C: ", time.time()-t, " (two_elec_two_center_int_local_frame_d_orbitals.py,two_elec_two_center_int_local_frame_d_orbitals)")
 #        t0 = time.time()
-
-
-#        trash, garbage, waste, notneeded, justneed, coreYY = \
-#                TETCILFDO(ni,nj,rij, tore, \
-#                da, db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, \
-#                rho_corea,rho_coreb, rho1a,rho1b, rho2ad,rho2bd, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, dRotationMatrix,w,ri,wXH,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
 
 
 
@@ -1339,79 +1353,15 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
         wc[XX,:10,:10] = w.reshape((-1,10,10))
 
         KK = YH | YX | YY
-        ##ac = torch.zeros(rij.shape[0],9,9,dtype=dtype, device=device)
         wcRotated = wc.clone()
 #        print ( "MOST PM6:", time.time() - t0)
-#        t0 = time.time()
-#        kk = torch.load('file.pt')
-#        i = 0
-#        while ( i < riYX.shape[1]):
-#             j = 0
-#             while ( j < wc.shape[2]):
-#                 if(riYX[0,i] != kk[0,i]):
-#                     print("WHY" , i, riYX[0,i],kk[0,i])
- #                j = j + 1
-#                 i = i + 1
-#        sys.exit()
-    
-            #print(w.reshape((-1,10,10))[...,0,:])
-        #print(w.reshape((-1,10,10))[...,:,0])
+
         #t0 = time.time()
         #print(wc[0,0,:])
         wcRotated[~KK,...,...] = torch.transpose(wc[~KK,...,...],1,2)
         wcRotated[KK,...,...] = Rotate2Center2Electron(wc[KK,...,...],dRotationMatrix[KK,...,...])
 #        print ("ROTATION TIME:", time.time()-t0)
-#        wc[HH,0,0] = wHH
-#        wc[XH,:10,0] = wXH
-#        wc[XX,:10,:10] = torch.transpose(w.reshape((-1,10,10)), 1, 2)
-         
-#        print(wcRotated.shape)
-#        sys.exit()
-        #print ( "ROTATION:", time.time() - t0)
-#        torch.transpose(wcRotated[YH,...,...],1,2)
-#        torch.transpose(wcRotated[YX,...,...],1,2)
-##        wcR = wcRotated.clone()
-##        i = 0 
-        #while (i < 45):
-        #    j = 0
-        #    while (j < 45):
-        #        wcRotated[YH,i,j] = wcR[YH,j,i]
-        #        j = j + 1
-        #    i = i + 1
-##        print(wc[0,0:10,0])
-##        print(w.reshape((-1,10,10)))
-##        print(XX)
-        ##print(wc[0,0:45,2])
-        ##print(wcRotated[0,6,0:45])
-        ##sys.exit()
 
-##        i = 0
-##        while( i <10):
-##           j = 0
-##           while ( j <10):
-#               wcRotated[...,i,j] = wcR[...,j,i]
-##               j = j +1
-##           i = i + 1
-
-        ##wcRotated[KK,:10,:10] = wc[...,:10,:10]
-        ##e1bD[KK,:4,:4] = e1b[...,...,...,]
-        ##e2aD[KK,:4,:4] = e2a[...,...,...,]
-##        print(e1bD)
-##        print(e2aD)
-##        sys.exit()
-##        hh = torch.zeros_like(e1bD)
-        ##kk = torch.zeros_like(e1bD)
-##        dc = torch.zeros(rij.shape[0],45,45,dtype=dtype, device=device)
-        ##print(e1bD,e2aD)
-        ##wc = dc 
-        ##print(e1bD[...,:4,:4])
-        ##print(e2aD[...,:4,:4])
-        #print(wcRotated[0,0,0:45])
-#        print(e1bD)
-#        print(e2aD)
-        #sys.exit()
-        ##print(KK)
-        ##print(wc)
         return wcRotated, e1bD, e2aD
     wc  = torch.zeros(rij.shape[0],10,10,dtype=dtype, device=device)
     wc[HH,0,0] = wHH
@@ -1419,6 +1369,8 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     wc[XX] = w.reshape((-1,10,10))
     ##print(e1b)
     ##sys.exit()
+
+    #print('TIME INNER 2c2e:', time.time()-t1)
     
     return wc, e1b, e2a
 
