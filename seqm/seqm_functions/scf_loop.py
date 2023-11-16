@@ -57,7 +57,10 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
     W: some integrals in PM6. zero in PM3 and PM6_SP.)
     """
     Pnew = torch.zeros_like(P)
+    Pold = torch.zeros_like(P)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
+    dm_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
+    dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp,themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
     if(themethod == 'PM6'):
@@ -112,20 +115,35 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                                         nHydro[notconverged],
                                                         nOccMO[notconverged])
         if backward:
+            Pold = P + 0.0  # ???
             P = alpha * P + (1.0 - alpha) * Pnew
         else:
+            Pold[notconverged] = P[notconverged]
             P[notconverged] = alpha * P[notconverged] + (1.0 - alpha) * Pnew[notconverged]
         
         F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
+
+        dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
+                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
+                    )
+        
+        max_dm_err = torch.max(dm_err)
+        max_dm_element_err = torch.max(dm_element_err)
+
+        dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
+        
         #print(F)
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
         err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
         
         Eelec[notconverged] = Eelec_new[notconverged]
-        notconverged = err > eps
+        notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
+        max_err = torch.max(err)
+        Nnot = torch.sum(notconverged).item()
         if debug:
-            end_time = time.time()
-            print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item(),  end_time-start_time )
+            print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            
         if not notconverged.any(): break
     return P, notconverged
 
