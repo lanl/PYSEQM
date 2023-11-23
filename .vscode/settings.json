@@ -3,5 +3,24 @@
     "autoDocstring.docstringFormat": "google",
     "autoDocstring.startOnNewLine": true,
     "autoDocstring.includeName": false,
-    "autoDocstring.logLevel": "Debug"
+    "autoDocstring.logLevel": "Debug",
+    "todohighlight.exclude": [
+
+        "**/node_modules/**",
+        "**/bower_components/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.vscode/**",
+        "**/.github/**",
+        "**/_output/**",
+        "**/*.min.*",
+        "**/*.map",
+        "**/.next/**"
+    ],
+    "todohighlight.defaultStyle": {
+
+    },
+    "todohighlight.keywords": [
+        
+    ]
 }
