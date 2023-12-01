@@ -172,7 +172,7 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         try:
             e0, v = sym_eigh(x0)
         except:
-            if torch.isnan(x0).any(): print(x0)
+            if torch.isnan(x0).any(): print('NaN problem\n',x0)
             e0, v = sym_eigh(x0)
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0

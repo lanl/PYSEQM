@@ -1,0 +1,58 @@
+restarting <class 'hippynn.databases.ondisk.DirectoryDatabase'>
+Arrays found:  {'R': 'R.npy', 'Z': 'Z.npy', 'EtEi': 'EtEi.npy', 'Gradient_ev': 'Gradient_ev.npy'}
+Data types:
+{'R': dtype('float64'), 'Z': dtype('int64'), 'EtEi': dtype('float64'), 'Gradient_ev': dtype('float64')}
+All arrays:
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | dtype('float64')   | (618409, 18, 3)                          |
+| Z                  | dtype('int64')     | (618409, 18)                             |
+| EtEi               | dtype('float64')   | (618409,)                                |
+| Gradient_ev        | dtype('float64')   | (618409, 18, 3)                          |
+--------------------------------------------------------------------------------------
+Database: Using auto-generated data indices
+Arrays for split: ignore
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([556568, 18, 3])              |
+| Z                  | torch.int64        | torch.Size([556568, 18])                 |
+| EtEi               | torch.float64      | torch.Size([556568])                     |
+| Gradient_ev        | torch.float64      | torch.Size([556568, 18, 3])              |
+| indices            | torch.int64        | torch.Size([556568])                     |
+| split_indices      | torch.int64        | torch.Size([556568])                     |
+--------------------------------------------------------------------------------------
+Arrays for split: test
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([6184, 18, 3])                |
+| Z                  | torch.int64        | torch.Size([6184, 18])                   |
+| EtEi               | torch.float64      | torch.Size([6184])                       |
+| Gradient_ev        | torch.float64      | torch.Size([6184, 18, 3])                |
+| indices            | torch.int64        | torch.Size([6184])                       |
+| split_indices      | torch.int64        | torch.Size([6184])                       |
+--------------------------------------------------------------------------------------
+Arrays for split: valid
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([6184, 18, 3])                |
+| Z                  | torch.int64        | torch.Size([6184, 18])                   |
+| EtEi               | torch.float64      | torch.Size([6184])                       |
+| Gradient_ev        | torch.float64      | torch.Size([6184, 18, 3])                |
+| indices            | torch.int64        | torch.Size([6184])                       |
+| split_indices      | torch.int64        | torch.Size([6184])                       |
+--------------------------------------------------------------------------------------
+Arrays for split: train
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([49473, 18, 3])               |
+| Z                  | torch.int64        | torch.Size([49473, 18])                  |
+| EtEi               | torch.float64      | torch.Size([49473])                      |
+| Gradient_ev        | torch.float64      | torch.Size([49473, 18, 3])               |
+| indices            | torch.int64        | torch.Size([49473])                      |
+| split_indices      | torch.int64        | torch.Size([49473])                      |
+--------------------------------------------------------------------------------------

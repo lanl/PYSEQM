@@ -43,6 +43,11 @@ import time
 
 from .tools import attach_profile_range
 
+
+# number of iterations in canon_dm_prt.py (m)
+CANON_DM_PRT_ITER = 8
+
+
 class EnergyXL(torch.nn.Module):
     def __init__(self, seqm_parameters):
         """
@@ -199,7 +204,7 @@ class EnergyXL(torch.nn.Module):
                             molecule.parameters['G2SD'])
 
                     # $$$ multiply by 2 ???
-                    PO1 = Canon_DM_PRT(FO1,Temp,molecule.nHeavy,molecule.nHydro,QQ,e,mu0,8, kB, Occ_mask)
+                    PO1 = Canon_DM_PRT(FO1,Temp,molecule.nHeavy,molecule.nHydro,QQ,e,mu0,CANON_DM_PRT_ITER, kB, Occ_mask)
 
                     W[:,:,:,k] = K0*(PO1 - V[:,:,:,k])
                     dW = W[:,:,:,k]

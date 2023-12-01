@@ -4,6 +4,8 @@ from seqm.seqm_functions.constants import Constants
 from seqm.seqm_functions.parameters import params
 from seqm.seqm_functions.energy import elec_energy_isolated_atom
 from seqm.Molecule import Molecule
+from seqm.seqm_functions.make_dm_guess import make_dm_guess
+
 
 from .check import check, check_dist
 
@@ -167,10 +169,21 @@ def pack_par(obj, species, par_atom, par_bond=None):
 
     for i in range(obj.n_output_parameters):
         # learned_parameters[obj.learned[i]] = par_atom[cond,i]*obj.weight[i]+obj.p[Z,i]
+        # print('000')
+        # print(obj.learned[i])
+        # print('par_atom',par_atom[:, i])
+        # print('weight',obj.weight[i])
+        # print('p',obj.p[Z, i])
         learned_parameters[obj.learned[i]] = par_atom[:, i] * obj.weight[i] + obj.p[Z, i]
 
+    
+    
     for x in ["zeta_s", "zeta_p", "g_ss", "h_sp", "alpha", "Gaussian1_L", "Gaussian2_L", "Gaussian3_L", "Gaussian4_L"]:
+        #print('111')
         if x in obj.learned:
+            # print(x)
+            # print(learned_parameters[x])
+            # print(obj.softplus(learned_parameters[x]))
             learned_parameters[x] = obj.softplus(learned_parameters[x]) + eps
 
     assert ("g_pp" in obj.learned and "g_p2" in obj.learned) or (
@@ -218,6 +231,7 @@ class SEQM_Energy(torch.nn.Module):
         self.filedir = seqm_parameters["parameter_file_dir"]
         self.p = params(method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.learned)
         self.softplus = torch.nn.Softplus(beta=5.0)
+        self.tanh = torch.nn.Tanh()
         self.weight = []
         for term in self.learned:
             if "zeta" in term or "alpha" in term or "Gaussian" in term:
@@ -265,6 +279,7 @@ class SEQM_All(torch.nn.Module):
         self.filedir = seqm_parameters["parameter_file_dir"]
         self.p = params(method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.learned)
         self.softplus = torch.nn.Softplus(beta=5.0)
+        self.tanh = torch.nn.Tanh()
         self.weight = []
         for term in self.learned:
             if "zeta" in term or "alpha" in term or "Gaussian" in term:
@@ -281,10 +296,22 @@ class SEQM_All(torch.nn.Module):
         """
         learned_parameters = pack_par(self, species, par_atom)
         
-        molecule = Molecule(self.const, self.seqm_parameters, coordinates, species).to(species.device)
+        molecule = Molecule(self.const, self.seqm_parameters, coordinates, species, learned_parameters=learned_parameters).to(species.device)
+
+        if self.seqm_parameters.get('UHF', False) and self.seqm_parameters.get('BS', False):
+            #print('DOING OS-BS')
+            with torch.no_grad():
+                dm = make_dm_guess(molecule, self.seqm_parameters, mix_homo_lumo=True, mix_coeff=0.3, learned_parameters=learned_parameters, overwrite_existing_dm=True)[0]
+                #print('DOING BS\n')
+                #dm = molecule.dm.clone().detach()
+            #del molecule
+            #molecule = Molecule(self.const, self.seqm_parameters, coordinates, species).to(species.device)
+        else:
+            #print('DOING CS')
+            dm = None
 
         Etot_m_Eiso, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, P, charge, notconverged = self.energy(
-            molecule, learned_parameters=learned_parameters, all_terms=True
+            molecule, learned_parameters=learned_parameters, all_terms=True, P0=dm,
         )
         n_molecule, n_atom = species.shape
         atomic_charge = self.const.tore[species] - P.diagonal(dim1=1, dim2=2).reshape(n_molecule, n_atom, -1).sum(dim=2)

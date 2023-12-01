@@ -8,7 +8,7 @@ With D3H4
 ONCH: -1755.6142, -1310.7154,  -914.8211,    -2.6722
 
 
-BIASES fro Eatomiz
+BIASES for Eatomiz
 Non-D3H4
 ONCH: -0.0548, -0.2329, -0.0251, -0.2406
 

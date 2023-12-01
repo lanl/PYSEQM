@@ -1,0 +1,259 @@
+Autosaving every 20 seconds
+Determined Inputs: ["Positions(db_name='R')", "Species(db_name='Z')-true", "Species(db_name='Z')", 'SEQM_Energy.Etot_m_Eiso-true']
+Determined Outputs: ['Atom_Mask', 'SEQM_Atom_Params.atom_charges', 'SEQM_MaskMolAtom_Pred', 'Scale', 'SEQM_MaskMol_Pred', 'SEQM_MolMask', 'SEQM_PerAtom_Pred', 'L^P_Reg(HIPNN_seqm,p=2)', 'PeratomTrue']
+Determined Targets: ['SEQM_Energy.Etot_m_Eiso', 'gradients']
+Device was not specified. Attempting to default to device: cuda:0
+Inputs:
+	 I0 : PositionsNode('Positions(db_name='R')')<0x7f4d64515580>
+	 I1 : LossTrueNode('Species(db_name='Z')-true')<0x7f4c43cde820>
+	 I2 : SpeciesNode('Species(db_name='Z')')<0x7f4d64515850>
+	 I3 : LossTrueNode('SEQM_Energy.Etot_m_Eiso-true')<0x7f4c43c7c8e0>
+Outputs:
+	 O0 : AtomMaskNode('Atom_Mask')<0x7f4c43c7cca0>
+	 O1 : IndexNode('SEQM_Atom_Params.atom_charges')<0x7f4c43c668b0>
+	 O2 : SEQM_MaskOnMolAtomNode('SEQM_MaskMolAtom_Pred')<0x7f4c43c7cac0>
+	 O3 : ScaleNode('Scale')<0x7f4d64515af0>
+	 O4 : SEQM_MaskOnMolNode('SEQM_MaskMol_Pred')<0x7f4c43c7cf10>
+	 O5 : SEQM_MolMaskNode('SEQM_MolMask')<0x7f4c43c7c340>
+	 O6 : SEQM_MaskOnMolNode('SEQM_PerAtom_Pred')<0x7f4c43cde760>
+	 O7 : _LPReg('L^P_Reg(HIPNN_seqm,p=2)')<0x7f4c43cde3a0>
+	 O8 : PerAtom('PeratomTrue')<0x7f4c43cde7f0>
+Order:
+I3-------------------> H0  : Atleast2D(LossTrueNode('SEQM_Energy.Etot_m_Eiso-true')<0x7f4c43c7c8e0>)
+I2-------------------> H1  : OneHot
+I2-------------------> O0  : Atom_Mask
+H1-------------------> H3  : OneHot.encoding
+H1-------------------> H4  : OneHot.nonblank
+H4,H3----------------> H5  : PaddingIndexer
+H5-------------------> H6  : PaddingIndexer.indexed_features
+H5-------------------> H7  : PaddingIndexer.real_atoms
+H5-------------------> H8  : PaddingIndexer.inv_real_atoms
+H4,I0,H7,H8----------> H9  : PairIndexer
+H9-------------------> H10 : PairIndexer.pair_dist
+H5-------------------> H11 : PaddingIndexer.mol_index
+H5-------------------> H12 : PaddingIndexer.n_atoms_max
+H9-------------------> H13 : PairIndexer.pair_coord
+H9-------------------> H14 : PairIndexer.pair_second
+H5-------------------> H15 : PaddingIndexer.atom_index
+H5-------------------> H16 : PaddingIndexer.n_molecules
+H9-------------------> H17 : PairIndexer.pair_first
+H10,H17,H6,H14-------> H18 : HIPNN_seqm
+H18------------------> O7  : L^P_Reg(HIPNN_seqm,p=2)
+H18------------------> H20 : SEQM_Atom_Params
+H20------------------> O1  : SEQM_Atom_Params.atom_charges
+H20------------------> H22 : SEQM_Atom_Params.partial_sums
+H20------------------> H23 : SEQM_Atom_Params.charge_hierarchality
+I2,O1,I0-------------> H24 : SEQM_Energy
+H24------------------> H25 : SEQM_Energy.mol_energy
+H24------------------> H26 : SEQM_Energy.Etot_m_Eiso
+H26,I2---------------> H27 : PeratomPredicted
+H26,I0---------------> H28 : gradients
+H24------------------> H29 : SEQM_Energy.isolated_atom_energy
+H24------------------> H30 : SEQM_Energy.orbital_energies
+H24------------------> H31 : SEQM_Energy.atomic_charge
+H24------------------> H32 : SEQM_Energy.notconverged
+H32------------------> O3  : Scale
+H32------------------> O5  : SEQM_MolMask
+O0,O5,H28------------> O2  : SEQM_MaskMolAtom_Pred
+H24------------------> H36 : SEQM_Energy.nuclear_energy
+H24------------------> H37 : SEQM_Energy.single_particle_density_matrix
+H24------------------> H38 : SEQM_Energy.electric_energy
+H24------------------> H39 : SEQM_Energy.orbital_charges
+H26,O5---------------> O4  : SEQM_MaskMol_Pred
+O5,H27---------------> O6  : SEQM_PerAtom_Pred
+H0,I1----------------> O8  : PeratomTrue
+Arrays found:  {'R': 'R.npy', 'Z': 'Z.npy', 'EtEi': 'EtEi.npy', 'Gradient_ev': 'Gradient_ev.npy'}
+Data types:
+{'R': dtype('float64'), 'Z': dtype('int64'), 'EtEi': dtype('float64'), 'Gradient_ev': dtype('float64')}
+All arrays:
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | dtype('float64')   | (618409, 18, 3)                          |
+| Z                  | dtype('int64')     | (618409, 18)                             |
+| EtEi               | dtype('float64')   | (618409,)                                |
+| Gradient_ev        | dtype('float64')   | (618409, 18, 3)                          |
+--------------------------------------------------------------------------------------
+Database: Using auto-generated data indices
+Arrays for split: ignore
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([615316, 18, 3])              |
+| Z                  | torch.int64        | torch.Size([615316, 18])                 |
+| EtEi               | torch.float64      | torch.Size([615316])                     |
+| Gradient_ev        | torch.float64      | torch.Size([615316, 18, 3])              |
+| indices            | torch.int64        | torch.Size([615316])                     |
+| split_indices      | torch.int64        | torch.Size([615316])                     |
+--------------------------------------------------------------------------------------
+Arrays for split: test
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([309, 18, 3])                 |
+| Z                  | torch.int64        | torch.Size([309, 18])                    |
+| EtEi               | torch.float64      | torch.Size([309])                        |
+| Gradient_ev        | torch.float64      | torch.Size([309, 18, 3])                 |
+| indices            | torch.int64        | torch.Size([309])                        |
+| split_indices      | torch.int64        | torch.Size([309])                        |
+--------------------------------------------------------------------------------------
+Arrays for split: valid
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([309, 18, 3])                 |
+| Z                  | torch.int64        | torch.Size([309, 18])                    |
+| EtEi               | torch.float64      | torch.Size([309])                        |
+| Gradient_ev        | torch.float64      | torch.Size([309, 18, 3])                 |
+| indices            | torch.int64        | torch.Size([309])                        |
+| split_indices      | torch.int64        | torch.Size([309])                        |
+--------------------------------------------------------------------------------------
+Arrays for split: train
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([2475, 18, 3])                |
+| Z                  | torch.int64        | torch.Size([2475, 18])                   |
+| EtEi               | torch.float64      | torch.Size([2475])                       |
+| Gradient_ev        | torch.float64      | torch.Size([2475, 18, 3])                |
+| indices            | torch.int64        | torch.Size([2475])                       |
+| split_indices      | torch.int64        | torch.Size([2475])                       |
+--------------------------------------------------------------------------------------
+SetupParams(device='cuda', controller=<hippynn.experiment.controllers.PatienceController object at 0x7f4c42695e80>, stopping_key=None, optimizer=<class 'torch.optim.adam.Adam'>, learning_rate=None, scheduler=None, batch_size=None, eval_batch_size=None, max_epochs=None, fraction_train_eval=0.1)
+Using device:  cuda
+Beginning training.
+Model:
+Inputs:
+	 I0 : PositionsNode('Positions(db_name='R')')<0x7f4d64515580>
+	 I1 : LossTrueNode('Species(db_name='Z')-true')<0x7f4c43cde820>
+	 I2 : SpeciesNode('Species(db_name='Z')')<0x7f4d64515850>
+	 I3 : LossTrueNode('SEQM_Energy.Etot_m_Eiso-true')<0x7f4c43c7c8e0>
+Outputs:
+	 O0 : AtomMaskNode('Atom_Mask')<0x7f4c43c7cca0>
+	 O1 : IndexNode('SEQM_Atom_Params.atom_charges')<0x7f4c43c668b0>
+	 O2 : SEQM_MaskOnMolAtomNode('SEQM_MaskMolAtom_Pred')<0x7f4c43c7cac0>
+	 O3 : ScaleNode('Scale')<0x7f4d64515af0>
+	 O4 : SEQM_MaskOnMolNode('SEQM_MaskMol_Pred')<0x7f4c43c7cf10>
+	 O5 : SEQM_MolMaskNode('SEQM_MolMask')<0x7f4c43c7c340>
+	 O6 : SEQM_MaskOnMolNode('SEQM_PerAtom_Pred')<0x7f4c43cde760>
+	 O7 : _LPReg('L^P_Reg(HIPNN_seqm,p=2)')<0x7f4c43cde3a0>
+	 O8 : PerAtom('PeratomTrue')<0x7f4c43cde7f0>
+Order:
+I3-------------------> H0  : Atleast2D(LossTrueNode('SEQM_Energy.Etot_m_Eiso-true')<0x7f4c43c7c8e0>)
+I2-------------------> H1  : OneHot
+I2-------------------> O0  : Atom_Mask
+H1-------------------> H3  : OneHot.encoding
+H1-------------------> H4  : OneHot.nonblank
+H4,H3----------------> H5  : PaddingIndexer
+H5-------------------> H6  : PaddingIndexer.indexed_features
+H5-------------------> H7  : PaddingIndexer.real_atoms
+H5-------------------> H8  : PaddingIndexer.inv_real_atoms
+H4,I0,H7,H8----------> H9  : PairIndexer
+H9-------------------> H10 : PairIndexer.pair_dist
+H5-------------------> H11 : PaddingIndexer.mol_index
+H5-------------------> H12 : PaddingIndexer.n_atoms_max
+H9-------------------> H13 : PairIndexer.pair_coord
+H9-------------------> H14 : PairIndexer.pair_second
+H5-------------------> H15 : PaddingIndexer.atom_index
+H5-------------------> H16 : PaddingIndexer.n_molecules
+H9-------------------> H17 : PairIndexer.pair_first
+H10,H17,H6,H14-------> H18 : HIPNN_seqm
+H18------------------> O7  : L^P_Reg(HIPNN_seqm,p=2)
+H18------------------> H20 : SEQM_Atom_Params
+H20------------------> O1  : SEQM_Atom_Params.atom_charges
+H20------------------> H22 : SEQM_Atom_Params.partial_sums
+H20------------------> H23 : SEQM_Atom_Params.charge_hierarchality
+I2,O1,I0-------------> H24 : SEQM_Energy
+H24------------------> H25 : SEQM_Energy.mol_energy
+H24------------------> H26 : SEQM_Energy.Etot_m_Eiso
+H26,I2---------------> H27 : PeratomPredicted
+H26,I0---------------> H28 : gradients
+H24------------------> H29 : SEQM_Energy.isolated_atom_energy
+H24------------------> H30 : SEQM_Energy.orbital_energies
+H24------------------> H31 : SEQM_Energy.atomic_charge
+H24------------------> H32 : SEQM_Energy.notconverged
+H32------------------> O3  : Scale
+H32------------------> O5  : SEQM_MolMask
+O0,O5,H28------------> O2  : SEQM_MaskMolAtom_Pred
+H24------------------> H36 : SEQM_Energy.nuclear_energy
+H24------------------> H37 : SEQM_Energy.single_particle_density_matrix
+H24------------------> H38 : SEQM_Energy.electric_energy
+H24------------------> H39 : SEQM_Energy.orbital_charges
+H26,O5---------------> O4  : SEQM_MaskMol_Pred
+O5,H27---------------> O6  : SEQM_PerAtom_Pred
+H0,I1----------------> O8  : PeratomTrue
+Model Params:
+cuda:0 Fixed torch.int64 torch.Size([9]) moddict.node1.species_map
+cuda:0 Learned torch.float64 torch.Size([20, 60, 4]) moddict.node18.blocks.0.0.base_layer.int_weights
+cuda:0 Learned torch.float64 torch.Size([1, 20]) moddict.node18.blocks.0.0.base_layer.sensitivity.mu
+cuda:0 Learned torch.float64 torch.Size([1, 20]) moddict.node18.blocks.0.0.base_layer.sensitivity.sigma
+cuda:0 Learned torch.float64 torch.Size([60, 4]) moddict.node18.blocks.0.0.base_layer.selfint.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.0.base_layer.selfint.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.0.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.0.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 4]) moddict.node18.blocks.0.0.adjust_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.1.base_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.1.base_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.1.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.1.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.2.base_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.2.base_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.2.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.2.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.3.base_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.3.base_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.0.3.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.0.3.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([20, 60, 60]) moddict.node18.blocks.1.0.base_layer.int_weights
+cuda:0 Learned torch.float64 torch.Size([1, 20]) moddict.node18.blocks.1.0.base_layer.sensitivity.mu
+cuda:0 Learned torch.float64 torch.Size([1, 20]) moddict.node18.blocks.1.0.base_layer.sensitivity.sigma
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.0.base_layer.selfint.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.0.base_layer.selfint.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.0.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.0.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.1.base_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.1.base_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.1.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.1.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.2.base_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.2.base_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.2.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.2.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.3.base_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.3.base_layer.bias
+cuda:0 Learned torch.float64 torch.Size([60, 60]) moddict.node18.blocks.1.3.res_layer.weight
+cuda:0 Learned torch.float64 torch.Size([60]) moddict.node18.blocks.1.3.res_layer.bias
+cuda:0 Learned torch.float64 torch.Size([9, 4]) moddict.node20.layers.0.weight
+cuda:0 Learned torch.float64 torch.Size([9]) moddict.node20.layers.0.bias
+cuda:0 Learned torch.float64 torch.Size([9, 60]) moddict.node20.layers.1.weight
+cuda:0 Learned torch.float64 torch.Size([9]) moddict.node20.layers.1.bias
+cuda:0 Learned torch.float64 torch.Size([9, 60]) moddict.node20.layers.2.weight
+cuda:0 Learned torch.float64 torch.Size([9]) moddict.node20.layers.2.bias
+cuda:0 Fixed torch.float64 torch.Size([9, 9]) moddict.node24.p
+cuda:0 Fixed torch.float64 torch.Size([9]) moddict.node24.weight
+cuda:0 Fixed torch.float64 torch.Size([9, 21]) moddict.node24.energy.packpar.p
+cuda:0 Fixed torch.float64 torch.Size([9, 9]) moddict.node24.energy.packpar.alpha
+cuda:0 Fixed torch.float64 torch.Size([9, 9]) moddict.node24.energy.packpar.chi
+cuda:0 Fixed torch.float64 torch.Size([]) moddict.node24.energy.hamiltonian.eps
+cuda:0 Fixed torch.float64 torch.Size([]) moddict.node24.energy.hamiltonian.scf_backward_eps
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.atomic_num
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.tore
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.iso
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.qn
+cuda:0 Fixed torch.int64 torch.Size([73]) moddict.node24.const.qn_int
+cuda:0 Fixed torch.int64 torch.Size([73]) moddict.node24.const.qnD_int
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.ussc
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.uppc
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.gssc
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.gspc
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.hspc
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.gp2c
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.gppc
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.eheat
+cuda:0 Fixed torch.float64 torch.Size([73]) moddict.node24.const.mass
+Total Count: 135010
+At least 20 epochs will be run
+__________________________________________________
+Epoch 0:
+Learning rate:     5e-05
+Training Batches:   0%|          | 0/39 [00:00<?, ?batch/s]                                                           

@@ -1,0 +1,122 @@
+Determined Inputs: ["Positions(db_name='R')", "Species(db_name='Z')", 'SEQM_Energy.Etot_m_Eiso-true', "Species(db_name='Z')-true"]
+Determined Outputs: ['Atom_Mask', 'PeratomTrue', 'SEQM_Atom_Params.atom_charges', 'SEQM_MolMask', 'SEQM_MaskMol_Pred', 'SEQM_PerAtom_Pred', 'Scale', 'SEQM_MaskMolAtom_Pred', 'L^P_Reg(HIPNN_seqm,p=2)']
+Determined Targets: ['SEQM_Energy.Etot_m_Eiso', 'gradients']
+Device was not specified. Attempting to default to device: cuda:0
+Inputs:
+	 I0 : PositionsNode('Positions(db_name='R')')<0x7f2c7cac2100>
+	 I1 : SpeciesNode('Species(db_name='Z')')<0x7f2c7cac2130>
+	 I2 : LossTrueNode('SEQM_Energy.Etot_m_Eiso-true')<0x7f2c7cab2640>
+	 I3 : LossTrueNode('Species(db_name='Z')-true')<0x7f2c7caaffd0>
+Outputs:
+	 O0 : AtomMaskNode('Atom_Mask')<0x7f2c7cab2a00>
+	 O1 : PerAtom('PeratomTrue')<0x7f2c7caaffa0>
+	 O2 : IndexNode('SEQM_Atom_Params.atom_charges')<0x7f2c7ca9ea90>
+	 O3 : SEQM_MolMaskNode('SEQM_MolMask')<0x7f2c7cab2ac0>
+	 O4 : SEQM_MaskOnMolNode('SEQM_MaskMol_Pred')<0x7f2c7cab26d0>
+	 O5 : SEQM_MaskOnMolNode('SEQM_PerAtom_Pred')<0x7f2c7caaff10>
+	 O6 : ScaleNode('Scale')<0x7f2c7ca92f40>
+	 O7 : SEQM_MaskOnMolAtomNode('SEQM_MaskMolAtom_Pred')<0x7f2c7cab29a0>
+	 O8 : _LPReg('L^P_Reg(HIPNN_seqm,p=2)')<0x7f2c7cb2c9d0>
+Order:
+I1-------------------> O0  : Atom_Mask
+I2-------------------> H1  : Atleast2D(LossTrueNode('SEQM_Energy.Etot_m_Eiso-true')<0x7f2c7cab2640>)
+I1-------------------> H2  : OneHot
+H2-------------------> H3  : OneHot.encoding
+H2-------------------> H4  : OneHot.nonblank
+H3,H4----------------> H5  : PaddingIndexer
+H5-------------------> H6  : PaddingIndexer.n_molecules
+H5-------------------> H7  : PaddingIndexer.indexed_features
+H5-------------------> H8  : PaddingIndexer.n_atoms_max
+H5-------------------> H9  : PaddingIndexer.inv_real_atoms
+H5-------------------> H10 : PaddingIndexer.real_atoms
+I0,H4,H10,H9---------> H11 : PairIndexer
+H11------------------> H12 : PairIndexer.pair_dist
+H11------------------> H13 : PairIndexer.pair_first
+H11------------------> H14 : PairIndexer.pair_second
+H14,H7,H12,H13-------> H15 : HIPNN_seqm
+H15------------------> H16 : SEQM_Atom_Params
+H15------------------> O8  : L^P_Reg(HIPNN_seqm,p=2)
+H16------------------> O2  : SEQM_Atom_Params.atom_charges
+H11------------------> H19 : PairIndexer.pair_coord
+H16------------------> H20 : SEQM_Atom_Params.partial_sums
+H16------------------> H21 : SEQM_Atom_Params.charge_hierarchality
+I0,I1,O2-------------> H22 : SEQM_Energy
+H22------------------> H23 : SEQM_Energy.atomic_charge
+H22------------------> H24 : SEQM_Energy.notconverged
+H24------------------> O3  : SEQM_MolMask
+H22------------------> H26 : SEQM_Energy.orbital_charges
+H22------------------> H27 : SEQM_Energy.isolated_atom_energy
+H22------------------> H28 : SEQM_Energy.nuclear_energy
+H22------------------> H29 : SEQM_Energy.electric_energy
+H22------------------> H30 : SEQM_Energy.single_particle_density_matrix
+H22------------------> H31 : SEQM_Energy.orbital_energies
+H22------------------> H32 : SEQM_Energy.Etot_m_Eiso
+H32,I1---------------> H33 : PeratomPredicted
+H32,I0---------------> H34 : gradients
+O0,O3,H34------------> O7  : SEQM_MaskMolAtom_Pred
+H32,O3---------------> O4  : SEQM_MaskMol_Pred
+O3,H33---------------> O5  : SEQM_PerAtom_Pred
+H24------------------> O6  : Scale
+H22------------------> H39 : SEQM_Energy.mol_energy
+H5-------------------> H40 : PaddingIndexer.mol_index
+H1,I3----------------> O1  : PeratomTrue
+H5-------------------> H42 : PaddingIndexer.atom_index
+Arrays found:  {'R': 'R.npy', 'Z': 'Z.npy', 'EtEi': 'EtEi.npy', 'Gradient_ev': 'Gradient_ev.npy'}
+Data types:
+{'R': dtype('float64'), 'Z': dtype('int64'), 'EtEi': dtype('float64'), 'Gradient_ev': dtype('float64')}
+All arrays:
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | dtype('float64')   | (618409, 18, 3)                          |
+| Z                  | dtype('int64')     | (618409, 18)                             |
+| EtEi               | dtype('float64')   | (618409,)                                |
+| Gradient_ev        | dtype('float64')   | (618409, 18, 3)                          |
+--------------------------------------------------------------------------------------
+Database: Using auto-generated data indices
+Arrays for split: ignore
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([556568, 18, 3])              |
+| Z                  | torch.int64        | torch.Size([556568, 18])                 |
+| EtEi               | torch.float64      | torch.Size([556568])                     |
+| Gradient_ev        | torch.float64      | torch.Size([556568, 18, 3])              |
+| indices            | torch.int64        | torch.Size([556568])                     |
+| split_indices      | torch.int64        | torch.Size([556568])                     |
+--------------------------------------------------------------------------------------
+Arrays for split: test
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([6184, 18, 3])                |
+| Z                  | torch.int64        | torch.Size([6184, 18])                   |
+| EtEi               | torch.float64      | torch.Size([6184])                       |
+| Gradient_ev        | torch.float64      | torch.Size([6184, 18, 3])                |
+| indices            | torch.int64        | torch.Size([6184])                       |
+| split_indices      | torch.int64        | torch.Size([6184])                       |
+--------------------------------------------------------------------------------------
+Arrays for split: valid
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([6184, 18, 3])                |
+| Z                  | torch.int64        | torch.Size([6184, 18])                   |
+| EtEi               | torch.float64      | torch.Size([6184])                       |
+| Gradient_ev        | torch.float64      | torch.Size([6184, 18, 3])                |
+| indices            | torch.int64        | torch.Size([6184])                       |
+| split_indices      | torch.int64        | torch.Size([6184])                       |
+--------------------------------------------------------------------------------------
+Arrays for split: train
+--------------------------------------------------------------------------------------
+| Name               | dtype              | shape                                    |
+--------------------------------------------------------------------------------------
+| R                  | torch.float64      | torch.Size([49473, 18, 3])               |
+| Z                  | torch.int64        | torch.Size([49473, 18])                  |
+| EtEi               | torch.float64      | torch.Size([49473])                      |
+| Gradient_ev        | torch.float64      | torch.Size([49473, 18, 3])               |
+| indices            | torch.int64        | torch.Size([49473])                      |
+| split_indices      | torch.int64        | torch.Size([49473])                      |
+--------------------------------------------------------------------------------------
+SetupParams(device='cuda', controller=<hippynn.experiment.controllers.PatienceController object at 0x7f2c7c9ce5e0>, stopping_key=None, optimizer=<class 'torch.optim.adam.Adam'>, learning_rate=None, scheduler=None, batch_size=None, eval_batch_size=None, max_epochs=None, fraction_train_eval=0.1)
+Using device:  cuda
