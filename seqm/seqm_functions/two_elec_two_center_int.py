@@ -11,7 +11,8 @@ from .parameters import  PWCCT
 from .RotationMatrixD import *
 import time
 #two electron two center integrals
-def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod):
+def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, 
+                            zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod):
     """
     two electron two center integrals in molecule frame
     """
@@ -253,11 +254,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #w[1] (s s/s s)
     #wHH = ri[1]
 
-    #riHH, riXH, ri, coreHH, coreXH, core = \
-#    wHH, riXH, ri, coreHH, coreXH, core = \
-#           TETCILF(nj,ni,rij, tore, \
-#                db, da, qb,qa, rho0b,rho0a, rho1b,rho1a, rho2b,rho2a,themethod)
-##    t=time.time()
     wHH, riXH, ri, coreHH, coreXH, core = \
            TETCILF(ni,nj,rij, tore, \
                 da, db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)
@@ -290,11 +286,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     xXH=-xij[XH]
     yXH=torch.zeros(xXH.shape[0],2,dtype=dtype, device=device)
     zXH=torch.zeros_like(xXH)
-    #cond1 = torch.abs(xXH[...,3-1])>0.99999999
-    #xXH[...,3-1] = torch.where(xXH[...,3-1]>0.99999999, torch.tensor([1.0],dtype=dtype, xXH[...,3-1]))
-    #xXH[...,3-1] = torch.where(xXH[...,3-1]<-0.99999999, torch.tensor([-1.0],dtype=dtype, xXH[...,3-1]))
-    #zXH[...,3-1] = torch,where(cond1, torch.tensor([0.0],dtype=dtype),
-    #                           torch.sqrt(1.0-xXH[...,3-1]**2))
+
     """
     pytorch new version doesn't support modify z and z depends on a , a depends on z
     zXH[...,3-1] =  torch.sqrt(1.0-xXH[...,3-1]**2)
@@ -311,9 +303,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #zXH[...,2-1]=0.0
     zXH[cond1XH,2-1] = -aXH*xXH[cond1XH,2-1]*xXH[cond1XH,3-1]
     """
-    #modify the code
-    #xXH.register_hook(print)
-    #zXH2 = torch.sqrt(1.0-xXH[...,3-1]**2)
+
     zXH2 = torch.zeros_like(xXH[...,2])
     cond_xXH2 = torch.abs(xXH[...,3-1])<1.0
     zXH2[cond_xXH2] = torch.sqrt(1.0-xXH[cond_xXH2,3-1]**2)
@@ -891,131 +881,11 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
     t1 = time.time()
 
-    """
-    #
-    css1,csp1,cpps1,cppp1 = core[1:,1]
-    css2,csp2,cpps2,cppp2 = core[1:,2]
-    e1b[1] = -css1
-    #if(natorb(ni).eq.4) then
-    if ni>1:
-        # currently only s and p orbitals
-        e1b[2] = -csp1 *x[1]
-        e1b[3] = -cpps1*xx11-cppp1*yyzz11
-        e1b[4] = -csp1 *x[2]
-        e1b[5] = -cpps1*xx21-cppp1*yyzz21
-        e1b[6] = -cpps1*xx22-cppp1*yyzz22
-        e1b[7] = -csp1 *x[3]
-        e1b[8] = -cpps1*xx31-cppp1*zz31
-        e1b[9] = -cpps1*xx32-cppp1*zz32
-        e1b[10] = -cpps1*xx33-cppp1*zz33
-
-    e2a[1] = -css2
-    #if(natorb(nj).eq.4) then
-    if nj>1:
-        e2a[2] = -csp2 *x[1]
-        e2a[3] = -cpps2*xx11-cppp2*yyzz11
-        e2a[4] = -csp2 *x[2]
-        e2a[5] = -cpps2*xx21-cppp2*yyzz21
-        e2a[6] = -cpps2*xx22-cppp2*yyzz22
-        e2a[7] = -csp2 *x[3]
-        e2a[8] = -cpps2*xx31-cppp2*zz31
-        e2a[9] = -cpps2*xx32-cppp2*zz32
-        e2a[10] = -cpps2*xx33-cppp2*zz33
-    """
-    """
-    e1bHH = -coreHH[...,0]
-    e2aHH = -coreHH[...,1]
-
-    e1bXH = torch.zeros(coreXH.shape[0],10,dtype=dtype, device=device)
-    e1bXH[...,1-1] = -coreXH[...,0]
-    e1bXH[...,2-1] = -coreXH[...,1]*xXH[...,1-1]
-    e1bXH[...,3-1] = -coreXH[...,2]*xx11XH - coreXH[...,3]*yyzz11XH
-    e1bXH[...,4-1] = -coreXH[...,1]*xXH[...,2-1]
-    e1bXH[...,5-1] = -coreXH[...,2]*xx21XH - coreXH[...,3]*yyzz21XH
-    e1bXH[...,6-1] = -coreXH[...,2]*xx22XH - coreXH[...,3]*yyzz22XH
-    e1bXH[...,7-1] = -coreXH[...,1]*xXH[...,3-1]
-    e1bXH[...,8-1] = -coreXH[...,2]*xx31XH - coreXH[...,3]*zz31XH
-    e1bXH[...,9-1] = -coreXH[...,2]*xx32XH - coreXH[...,3]*zz32XH
-    e1bXH[...,10-1] = -coreXH[...,2]*xx33XH - coreXH[...,3]*zz33XH
-    e2aXH = -coreXH[...,4]
-
-    e1b = torch.zeros(core.shape[0],10,dtype=dtype, device=device)
-    e2a = torch.zeros_like(e1b)
-    e1b[...,1-1] = -core[...,0]
-    e1b[...,2-1] = -core[...,1]*x[...,1-1]
-    e1b[...,3-1] = -core[...,2]*xx11 - core[...,3]*yyzz11
-    e1b[...,4-1] = -core[...,1]*x[...,2-1]
-    e1b[...,5-1] = -core[...,2]*xx21 - core[...,3]*yyzz21
-    e1b[...,6-1] = -core[...,2]*xx22 - core[...,3]*yyzz22
-    e1b[...,7-1] = -core[...,1]*x[...,3-1]
-    e1b[...,8-1] = -core[...,2]*xx31 - core[...,3]*zz31
-    e1b[...,9-1] = -core[...,2]*xx32 - core[...,3]*zz32
-    e1b[...,10-1] = -core[...,2]*xx33 - core[...,3]*zz33
-
-    e2a[...,1-1] = -core[...,4]
-    e2a[...,2-1] = -core[...,5]*x[...,1-1]
-    e2a[...,3-1] = -core[...,6]*xx11 - core[...,7]*yyzz11
-    e2a[...,4-1] = -core[...,5]*x[...,2-1]
-    e2a[...,5-1] = -core[...,6]*xx21 - core[...,7]*yyzz21
-    e2a[...,6-1] = -core[...,6]*xx22 - core[...,7]*yyzz22
-    e2a[...,7-1] = -core[...,5]*x[...,3-1]
-    e2a[...,8-1] = -core[...,6]*xx31 - core[...,7]*zz31
-    e2a[...,9-1] = -core[...,6]*xx32 - core[...,7]*zz32
-    e2a[...,10-1] = -core[...,6]*xx33 - core[...,7]*zz33
-
-    return wHH, e1bHH, e2aHH, wXH, e1bXH, e2aXH, w, e1b, e2a
-    """
     #combine w, e1b, e2a
-
-
 
 
     # as index_add_ is used later, which is slow, so
     # change e1b, e2a to shape (npairs, 4,4), only need to do index_add once
-    """
-    e1b = torch.zeros(rij.shape[0],10,dtype=dtype, device=device)
-    e2a = torch.zeros_like(e1b)
-
-    e1b[HH,0] = -coreHH[...,0]
-    e2a[HH,0] = -coreHH[...,1]
-
-    #e1bXH = torch.zeros(coreXH.shape[0],10,dtype=dtype, device=device)
-    e1b[XH,1-1] = -coreXH[...,0]
-    e1b[XH,2-1] = -coreXH[...,1]*xXH[...,1-1]
-    e1b[XH,3-1] = -coreXH[...,2]*xx11XH - coreXH[...,3]*yyzz11XH
-    e1b[XH,4-1] = -coreXH[...,1]*xXH[...,2-1]
-    e1b[XH,5-1] = -coreXH[...,2]*xx21XH - coreXH[...,3]*yyzz21XH
-    e1b[XH,6-1] = -coreXH[...,2]*xx22XH - coreXH[...,3]*yyzz22XH
-    e1b[XH,7-1] = -coreXH[...,1]*xXH[...,3-1]
-    e1b[XH,8-1] = -coreXH[...,2]*xx31XH - coreXH[...,3]*zz31XH
-    e1b[XH,9-1] = -coreXH[...,2]*xx32XH - coreXH[...,3]*zz32XH
-    e1b[XH,10-1] = -coreXH[...,2]*xx33XH - coreXH[...,3]*zz33XH
-    e2a[XH,0] = -coreXH[...,4]
-
-    #e1b = torch.zeros(core.shape[0],10,dtype=dtype, device=device)
-    #e2a = torch.zeros_like(e1b)
-    e1b[XX,1-1] = -core[...,0]
-    e1b[XX,2-1] = -core[...,1]*x[...,1-1]
-    e1b[XX,3-1] = -core[...,2]*xx11 - core[...,3]*yyzz11
-    e1b[XX,4-1] = -core[...,1]*x[...,2-1]
-    e1b[XX,5-1] = -core[...,2]*xx21 - core[...,3]*yyzz21
-    e1b[XX,6-1] = -core[...,2]*xx22 - core[...,3]*yyzz22
-    e1b[XX,7-1] = -core[...,1]*x[...,3-1]
-    e1b[XX,8-1] = -core[...,2]*xx31 - core[...,3]*zz31
-    e1b[XX,9-1] = -core[...,2]*xx32 - core[...,3]*zz32
-    e1b[XX,10-1] = -core[...,2]*xx33 - core[...,3]*zz33
-
-    e2a[XX,1-1] = -core[...,4]
-    e2a[XX,2-1] = -core[...,5]*x[...,1-1]
-    e2a[XX,3-1] = -core[...,6]*xx11 - core[...,7]*yyzz11
-    e2a[XX,4-1] = -core[...,5]*x[...,2-1]
-    e2a[XX,5-1] = -core[...,6]*xx21 - core[...,7]*yyzz21
-    e2a[XX,6-1] = -core[...,6]*xx22 - core[...,7]*yyzz22
-    e2a[XX,7-1] = -core[...,5]*x[...,3-1]
-    e2a[XX,8-1] = -core[...,6]*xx31 - core[...,7]*zz31
-    e2a[XX,9-1] = -core[...,6]*xx32 - core[...,7]*zz32
-    e2a[XX,10-1] = -core[...,6]*xx33 - core[...,7]*zz33
-    """
 
     e1b = torch.zeros((rij.shape[0],4,4),dtype=dtype, device=device)
     e2a = torch.zeros_like(e1b)
@@ -1023,7 +893,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     e1b[HH,0,0] = -coreHH[...,0]
     e2a[HH,0,0] = -coreHH[...,1]
 
-    #e1bXH = torch.zeros(coreXH.shape[0],10,dtype=dtype, device=device)
     e1b[XH,0,0] = -coreXH[...,0]
     e1b[XH,0,1] = -coreXH[...,1]*xXH[...,1-1]
     e1b[XH,1,1] = -coreXH[...,2]*xx11XH - coreXH[...,3]*yyzz11XH
@@ -1035,8 +904,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     e1b[XH,2,3] = -coreXH[...,2]*xx32XH - coreXH[...,3]*zz32XH
     e1b[XH,3,3] = -coreXH[...,2]*xx33XH - coreXH[...,3]*zz33XH
     e2a[XH,0,0] = -coreXH[...,4]
-    #e1b = torch.zeros(core.shape[0],10,dtype=dtype, device=device)
-    #e2a = torch.zeros_like(e1b)
+
     e1b[XX,0,0] = -core[...,0]
     e1b[XX,0,1] = -core[...,1]*x[...,1-1]
     e1b[XX,1,1] = -core[...,2]*xx11 - core[...,3]*yyzz11
@@ -1058,46 +926,26 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     e2a[XX,1,3] = -core[...,6]*xx31 - core[...,7]*zz31
     e2a[XX,2,3] = -core[...,6]*xx32 - core[...,7]*zz32
     e2a[XX,3,3] = -core[...,6]*xx33 - core[...,7]*zz33
-#    print ( " NONPM6:", time.time() - t0)
-#    t0 = time.time()
-
     
 
     if themethod == "PM6":
-#        t0 = time.time()
         dRotationMatrix = GenerateRotationMatrix(xij)
-#        print( "GENERATE R: ",time.time() - t0)
-##        print(riXH)
-##        print(wXH)
-#        t = time.time()
+
         riYH, riYX, riYY, coreYH, coreYX, coreYY = \
                 TETCILFDO(ni,nj,rij, tore, \
                 da, db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, \
                 rho0a,rho0b, rho1a,rho1b, rho2ad,rho2bd, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, \
                   dRotationMatrix,ri,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
-#        print("2E2C: ", time.time()-t, " (two_elec_two_center_int_local_frame_d_orbitals.py,two_elec_two_center_int_local_frame_d_orbitals)")
-#        t0 = time.time()
+
 
 
 
         e1bD = torch.zeros((rij.shape[0],9,9),dtype=dtype, device=device)
         e2aD = torch.zeros_like(e1bD)
         ########## HH ##########
-#        e1bD[HH,0,0] = e1b[HH,0,0]
-#        e2aD[HH,0,0] = e2a[HH,0,0] 
+
  
         ########## XH ##########
-#        e1bD[XH,0,0] = e1b[XH,0,0]
-#        e1bD[XH,0,1] = e1b[XH,0,1]
-#        e1bD[XH,1,1] = e1b[XH,1,1]
-#        e1bD[XH,0,2] = e1b[XH,0,2]
-#        e1bD[XH,1,2] = e1b[XH,1,2]
-#        e1bD[XH,2,2] = e1b[XH,2,2]
-#        e1bD[XH,0,3] = e1b[XH,0,3]
-#        e1bD[XH,1,3] = e1b[XH,1,3]
-#        e1bD[XH,2,3] = e1b[XH,2,3]
-#        e1bD[XH,3,3] = e1b[XH,3,3]
-#        e2aD[XH,0,0] = e2a[XH,0,0]
         e1bD[ HH | XH | XX, :4, :4] = e2a
         e2aD[ HH | XH | XX, :4, :4] = e1b
 
@@ -1305,47 +1153,14 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
 
         ########## XX ##########
-#        e1bD[XX,0,0] = e1b[XX,0,0]
-#        e1bD[XX,0,1] = e1b[XX,0,1]
-#        e1bD[XX,1,1] = e1b[XX,1,1]
-#        e1bD[XX,0,2] = e1b[XX,0,2]
-#        e1bD[XX,1,2] = e1b[XX,1,2]
-#        e1bD[XX,2,2] = e1b[XX,2,2]
-#        e1bD[XX,0,3] = e1b[XX,0,3]
-#        e1bD[XX,1,3] = e1b[XX,1,3]
-#        e1bD[XX,2,3] = e1b[XX,2,3]
- #       e1bD[XX,3,3] = e1b[XX,3,3]
-
-#        e2aD[XX,0,0] = e2a[XX,0,0]
-#        e2aD[XX,0,1] = e2a[XX,0,1]
-#        e2aD[XX,1,1] = e2a[XX,1,1]
-#        e2aD[XX,0,2] = e2a[XX,0,2]
-##        e2aD[XX,1,2] = e2a[XX,1,2]
-#        e2aD[XX,2,2] = e2a[XX,2,2]
-##        e2aD[XX,0,3] = e2a[XX,0,3]
-##        e2aD[XX,1,3] = e2a[XX,1,3]
-##        e2aD[XX,2,3] = e2a[XX,2,3]
-##        e2aD[XX,3,3] = e2a[XX,3,3]
 
 
 
         wc  = torch.zeros(rij.shape[0],45,45,dtype=dtype, device=device)
-        ##print(wc.shape)
-        ##print(dRotationMatrix.shape)
-        ##sys.exit()
-
-#        wc[HH,0,0] = wHH
-#        wc[XH,:10,0] = wXH
-#       wc[XX,:10,:10] = w.reshape((-1,10,10))
-
-
 
         wc[YH,0,:45] = riYH
         wc[YX,:10,:45] = riYX.reshape((-1,10,45))
         wc[YY] = riYY.reshape((-1,45,45))
-        #wc[YY] = torch.transpose(riYY.reshape((-1,45,45)),1,2)
-       # print(w.reshape((-1,10,10))[...,0,:])
-        #print(w.reshape((-1,10,10))[...,:,0])
 
 
         wc[HH,0,0] = wHH
@@ -1354,23 +1169,15 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
         KK = YH | YX | YY
         wcRotated = wc.clone()
-#        print ( "MOST PM6:", time.time() - t0)
 
-        #t0 = time.time()
-        #print(wc[0,0,:])
         wcRotated[~KK,...,...] = torch.transpose(wc[~KK,...,...],1,2)
         wcRotated[KK,...,...] = Rotate2Center2Electron(wc[KK,...,...],dRotationMatrix[KK,...,...])
-#        print ("ROTATION TIME:", time.time()-t0)
 
         return wcRotated, e1bD, e2aD
     wc  = torch.zeros(rij.shape[0],10,10,dtype=dtype, device=device)
     wc[HH,0,0] = wHH
     wc[XH,:,0] = wXH
     wc[XX] = w.reshape((-1,10,10))
-    ##print(e1b)
-    ##sys.exit()
-
-    #print('TIME INNER 2c2e:', time.time()-t1)
     
     return wc, e1b, e2a
 

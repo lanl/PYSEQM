@@ -19,11 +19,6 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
     """
     two electron two center integrals in local frame for each pair
     """
-    ##print(da0,db0)
-   ## print( qa0,qb0)
-   ## print( rho0a,rho0b)
-    ##print ( rho1a,rho1b)
-    ##print( rho2a,rho2b)
     dtype = r0.dtype
     device = r0.device
     # ni, nj, r0, da0, db0, qa0, qb0, rho0a, rho0b ... rho2b, shape (napirs,)

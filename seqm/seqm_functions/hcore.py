@@ -64,7 +64,6 @@ def hcore(molecule):
     else:
         zeta = torch.cat((molecule.parameters['zeta_s'].unsqueeze(1), molecule.parameters['zeta_p'].unsqueeze(1)),dim=1)
     overlap_pairs = molecule.rij<=overlap_cutoff
-    #di=th.zeros((npairs,4,4),dtype=dtype, device=device)
 
     if(molecule.method == 'PM6'):
         di = torch.zeros((molecule.xij.shape[0], 9, 9),dtype=dtype, device=device)
@@ -95,11 +94,8 @@ def hcore(molecule):
                                    zeta[molecule.idxj][overlap_pairs],
                                    qn_int)
 
-#    print("DI:", time.time() - t0)
     t0 = time.time()
-    #print('DOING 2c2e time test')
     #di shape (npairs,4,4)
-    #print("HI")
     
     w, e1b, e2a,rho0xi,rho0xj = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z,\
                                     molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
@@ -107,8 +103,6 @@ def hcore(molecule):
                                     molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
                                     molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
                                     molecule.alp, molecule.chi, molecule.method)
-    #print("TETC:", time.time() - t0)
-    #sys.exit()
     #w shape (napirs, 10,10)
     #e1b, e2a shape (npairs, 10)
     #di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
@@ -193,8 +187,6 @@ def hcore(molecule):
     #e1b, e2a are reshaped to be (...,4,4) in rotate.py
 
     if(molecule.method == 'PM6'):
-        #di = di.transpose(1,2)
-        #print(di)
         if torch.is_tensor(molecule.parameters['Kbeta']):
             M[molecule.mask,0,0]   = di[...,0,0]*(molecule.parameters['beta'][molecule.idxi,0]+molecule.parameters['beta'][molecule.idxj,0])/2.0* molecule.parameters['Kbeta'][:,0]
             M[molecule.mask,0,1:4]  = di[...,0,1:4]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,1:2])/2.0*molecule.parameters['Kbeta'][:,1,None]
@@ -256,14 +248,5 @@ def hcore(molecule):
     #what will be used in SCF is Hcore and w
     return Hcore, w
     #"""
-    #"""
-    ##print(di[...,1:4,4:])
-    ##print(di[...,4:,1:4])
-    ##print(di[...,4:,4:] )
-    #print(M[mask,:,:])
-    ##print("TOTAL HCORE+INTEGRALS: ", time.time()-t0)
-    ##sys.exit()
-    ##print(di[...,4:,4:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0)
-    #print("HCORE:", time.time() - t0)
+
     return M, w,rho0xi,rho0xj
-    #"""

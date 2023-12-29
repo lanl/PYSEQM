@@ -7,7 +7,7 @@ from .seqm_functions.constants import ev
 import os
 import time
 """
-Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6(bugged)/PM6_SP
+Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
 """
 
 parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
@@ -37,6 +37,15 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       ],
                
                 'PM6_SP':['U_ss', 'U_pp', 'zeta_s', 'zeta_p',  'beta_s', 'beta_p',
+                          's_orb_exp_tail', 'p_orb_exp_tail',
+                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'F0SD', 'G2SD','rho_core',
+                       'alpha', 'EISOL',
+                       'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
+                       'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
+                       'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
+                      ],
+                      
+                'PM6_SP_STAR':['U_ss', 'U_pp', 'zeta_s', 'zeta_p',  'beta_s', 'beta_p',
                           's_orb_exp_tail', 'p_orb_exp_tail',
                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'F0SD', 'G2SD','rho_core',
                        'alpha', 'EISOL',
@@ -399,7 +408,7 @@ class Energy(torch.nn.Module):
             molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = learned_parameters)
 
 
-        if(molecule.method == 'PM6'): # PM6 not implemented yet. Only PM6_SP
+        if(molecule.method == 'PM6'):
             molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1), molecule.parameters['beta_d'].unsqueeze(1)),dim=1)
         else:
             molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1)),dim=1)        
@@ -444,7 +453,7 @@ class Energy(torch.nn.Module):
         alpha = molecule.parameters['alpha']
         if self.method=='MNDO':
             parnuc = (alpha,)
-        elif self.method=='AM1' or self.method=='PM6' or self.method=='PM6_SP':
+        elif self.method=='AM1' or self.method=='PM6' or self.method=='PM6_SP' or self.method=='PM6_SP_STAR':
             K = torch.stack((molecule.parameters['Gaussian1_K'],
                              molecule.parameters['Gaussian2_K'],
                              molecule.parameters['Gaussian3_K'],

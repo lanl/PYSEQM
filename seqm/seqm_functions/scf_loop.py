@@ -662,7 +662,7 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*5) + (dm_element_err > eps*10)
+            notconverged = (err > eps) + (dm_err > eps*10) + (dm_element_err > eps*15)
             max_err = torch.max(err)
             Nnot = torch.sum(notconverged).item()
             #print(Eelec_new[notconverged])
@@ -694,8 +694,8 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 7
-    alpha_direct = 0.8
+    nDirect1 = 8
+    alpha_direct = 0.65
 
     nAdapt = 1
     # number of maximal fock matrixes used

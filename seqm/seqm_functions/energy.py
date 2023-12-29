@@ -131,7 +131,7 @@ def pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij,rho0xi,rho0xj, a
         t6 = torch.sum(K[idxj]*torch.exp(-L[idxj]*(rija.reshape((-1,1))-M[idxj])**2),dim=1)
         
         EnucAB = t1*(1.0+t2+t3) + t4*(t5 + t6)
-    elif method =='PM6' or method =='PM6_SP':
+    elif method =='PM6' or method =='PM6_SP' or method =='PM6_SP_STAR':
         
         _, K, L, M = parameters
         #K, L , M shape (natoms,2 or 4)
@@ -160,7 +160,7 @@ def pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij,rho0xi,rho0xj, a
 
         EnucAB = expo2 + t4*(t5 + t6)
     else:
-        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP")
+        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR")
     return EnucAB
 
 def total_energy(nmol, pair_molid, EnucAB, Eelec):
