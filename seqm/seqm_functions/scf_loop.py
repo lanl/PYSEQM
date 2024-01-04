@@ -471,16 +471,18 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
     """
     adaptive mixing algorithm, see cnvg.f
     """
-    n_direct_static_steps_left  = 5
+    #print(scf_converger)
+    n_direct_static_steps_left  = 32
     n_direct_static_steps_right = 5
 
     try:
-        alpha_direct = scf_converger[1]
+        #alpha_direct = scf_converger[1]*torch.ones(P.size()[0], device = M.device).view(-1, 1, 1,1)
+        alpha_direct = 0.5*torch.ones(P.size()[0], device = M.device).view(-1, 1, 1,1)
     except:
         alpha_direct = 0.0
 
     try:
-        alpha_direct_upper = scf_converger[2]
+        alpha_direct_upper = torch.tensor(scf_converger[2], device = M.device)
     except:
         alpha_direct_upper = 0.0
 
@@ -551,9 +553,11 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             P_ab_old[notconverged] = P[notconverged]
             #P[notconverged] = P_ab_new[notconverged]
             P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * P_ab_new[notconverged]
-
+            
+        
         if i >= n_direct_static_steps_left and i < nDirect1-n_direct_static_steps_right:
-            alpha_direct += alpha_direct_increment
+            #alpha_direct += alpha_direct_increment
+            alpha_direct = scf_converger[1] + alpha_direct_increment*(i - n_direct_static_steps_left)
         elif i >= nDirect1 - n_direct_static_steps_right:
             alpha_direct = alpha_direct_upper
             
@@ -568,6 +572,11 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
         max_dm_element_err = torch.max(dm_element_err)
 
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
+        
+        #print(torch.max(Eelec_new[notconverged]-Eelec[notconverged]), torch.max(alpha_direct))
+        if i >= 0 and i < n_direct_static_steps_left: # for initial static mixing
+            alpha_direct = alpha_direct + ((Eelec_new[notconverged]-Eelec[notconverged]).view(-1, 1, 1,1) > -0.0001)*(0.9-alpha_direct)/4
+
         err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
         Eelec[notconverged] = Eelec_new[notconverged]
         #notconverged = err > eps
@@ -662,7 +671,7 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*10) + (dm_element_err > eps*15)
+            notconverged = (err > eps) + (dm_err > eps*20) + (dm_element_err > eps*15)
             max_err = torch.max(err)
             Nnot = torch.sum(notconverged).item()
             #print(Eelec_new[notconverged])
