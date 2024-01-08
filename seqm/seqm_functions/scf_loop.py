@@ -474,6 +474,10 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #print(scf_converger)
     n_direct_static_steps_left  = 32
     n_direct_static_steps_right = 5
+    
+    #########################################
+    eps =  1.5e-5 ###########################
+    #########################################
 
     try:
         #alpha_direct = scf_converger[1]*torch.ones(P.size()[0], device = M.device).view(-1, 1, 1,1)
@@ -492,7 +496,7 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             nDirect1 = n_direct_static_steps_left + n_direct_static_steps_right + 1
     except:
         nDirect1 = 1
-    alpha_direct_increment = (alpha_direct_upper-alpha_direct)/(nDirect1 - n_direct_static_steps_left - n_direct_static_steps_right)
+    alpha_direct_increment = (alpha_direct_upper-scf_converger[1])/(nDirect1 - n_direct_static_steps_left - n_direct_static_steps_right)
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0
@@ -554,7 +558,10 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
             #P[notconverged] = P_ab_new[notconverged]
             P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * P_ab_new[notconverged]
             
-        
+        #try:
+        #    print(min(alpha_direct), max(alpha_direct))
+        #except:
+        #    print(alpha_direct)
         if i >= n_direct_static_steps_left and i < nDirect1-n_direct_static_steps_right:
             #alpha_direct += alpha_direct_increment
             alpha_direct = scf_converger[1] + alpha_direct_increment*(i - n_direct_static_steps_left)
