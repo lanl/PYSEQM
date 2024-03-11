@@ -472,11 +472,11 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
     adaptive mixing algorithm, see cnvg.f
     """
     #print(scf_converger)
-    n_direct_static_steps_left  = 32
+    n_direct_static_steps_left  = 15
     n_direct_static_steps_right = 5
     
     #########################################
-    eps =  1.5e-5 ###########################
+    #eps =  1.5e-5 ###########################
     #########################################
 
     try:
