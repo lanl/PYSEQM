@@ -73,7 +73,14 @@ def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,
 
     # Hydrogen - Hydrogen
     #aeeHH = (rho0a[HH]+rho0b[HH])**2
+
     riHH = ev/sqrt(r0[HH]**2+(rho0a[HH]+rho0b[HH])**2)
+#     exp_mask = torch.ones(r0[HH].shape)
+#     c_cut = 5.
+#     exp = torch.exp(-0.25*(r0[HH]-c_cut)**2)
+#     exp_mask[r0[HH]>c_cut] = exp[r0[HH]>c_cut]
+#     riHH = ev/sqrt(r0[HH]**2 + exp_mask * (rho0a[HH]+rho0b[HH])**2)
+
     coreHH = torch.zeros(HH.sum(),2,dtype=dtype, device=device)
     #ni=nj=1
     coreHH[...,0] = tore[1]*riHH

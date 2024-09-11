@@ -1,3 +1,4 @@
+
 import torch
 import time
 
@@ -6,8 +7,7 @@ import time
 # it is better to define mask as the same way defining maskd
 # as it will be better to do summation using the representation of P in
 
-def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp,
-         themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
+def G(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
     """
     construct fock matrix
     """
@@ -37,7 +37,8 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
     # to use here
     # while for diagonalization, may have to reshape
     # for the diagonal block, the summation over ortitals on the same atom in Fock matrix
-    F = M.clone()  # Hcore part
+    F = torch.zeros(M.shape, dtype=M.dtype, device=M.device)
+
     Pptot = P[...,1,1]+P[...,2,2]+P[...,3,3]
     #  F_mu_mu = Hcore + \sum_nu^A P_nu_nu (g_mu_nu - 0.5 h_mu_nu) + \sum^B
     """
@@ -90,7 +91,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
         #W = calc_integral(zetas, zetap, zetad, Z, size, maskd, P, F0SD, G2SD)
         PTMP = P.clone()
         TMP = torch.zeros(size,9,9, device = P0.device )
-        FLocal = torch.zeros(size,45, device = P0.device)
+        FLocal = torch.zeros(size,45)
         tril_indices = torch.tril_indices(row=9, col=9, offset=0)
         tril1_indices = [[1,2,2,3,3,3,4,4,4,4,5,5,5,5,5,6,6,6,6,6,6,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8],
                          [0,0,1,0,1,2,0,1,2,3,0,1,2,3,4,0,1,2,3,4,5,0,1,2,3,4,5,6,0,1,2,3,4,5,6,7]]
@@ -285,7 +286,6 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
     # mu, nu in A
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-    
     if(themethod == 'PM6'):
         sum = torch.zeros(w.shape[0],9,9,dtype=dtype, device=device)
     else:
@@ -324,14 +324,14 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
     #
     F.index_add_(0,mask,sum)
 
-    if(themethod == 'PM6'):
-        F0 = F.reshape(nmol,molsize,molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molsize, 9*molsize)
-    else:
-        F0 = F.reshape(nmol,molsize,molsize,4,4) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 4*molsize, 4*molsize)
+    # if(themethod == 'PM6'):
+    #     F0 = F.reshape(nmol,molsize,molsize,9,9) \
+    #              .transpose(2,3) \
+    #              .reshape(nmol, 9*molsize, 9*molsize)
+    # else:
+    #     F0 = F.reshape(nmol,molsize,molsize,4,4) \
+    #              .transpose(2,3) \
+    #              .reshape(nmol, 4*molsize, 4*molsize)
     F0.add_(F0.triu(1).transpose(1,2))
 
     return F0

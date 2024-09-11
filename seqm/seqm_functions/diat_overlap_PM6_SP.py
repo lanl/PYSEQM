@@ -101,6 +101,7 @@ def diatom_overlap_matrix_PM6_SP(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
 
     S222 = th.zeros_like(S221)
 
+
     #print(id(S111))
     # s-s
     jcall2 = (jcall==2) #ii=1
@@ -156,7 +157,6 @@ def diatom_overlap_matrix_PM6_SP(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
                   (A22[jcall4,4]*(B22[jcall4,0]-B22[jcall4,2]) \
                   -B22[jcall4,4]*(A22[jcall4,0]-A22[jcall4,2]) \
                   -A22[jcall4,2]*B22[jcall4,0]+B22[jcall4,2]*A22[jcall4,0])
-
 
 
 
@@ -266,7 +266,7 @@ def diatom_overlap_matrix_PM6_SP(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
 ###up to here
 
 
-
+    
     #
     #form di
     #check di_index.txt
@@ -294,6 +294,7 @@ def diatom_overlap_matrix_PM6_SP(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     #all not listed are 0.0
 
     #check di_index.txt for details
+    del A111, B111, A211, B211, A121, B121, A22, B22
 
     sasb = sa*sb
     sacb = sa*cb
@@ -332,6 +333,8 @@ def diatom_overlap_matrix_PM6_SP(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
                      -S222*sb*sacb
     di[...,3,3] = -S221*cb**2 \
                      +S222*sb**2
+    del S111, S121, S211, sasb, sacb, casb, cacb, ca, sa
+
     #on pairs with same atom, diagonal part
     #di[jcall==0,:,:] = th.diag(th.ones(4,dtype=dtype)).reshape((-1,4,4))
     

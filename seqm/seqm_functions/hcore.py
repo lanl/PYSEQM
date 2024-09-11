@@ -8,10 +8,12 @@ import time
 import sys
 
 
-def hcore(molecule):
+def hcore(molecule, doTETCI=True):
     """
     Get Hcore and two electron and two center integrals
     """
+    #If doTETCI is False, w, e1b, e2a,rho0xi,rho0xj will not be computed, i.e. no pairwise interactions in diagonal summations nad no 2c-2e ints.
+    #Option for SEDACS.
     #t0 = time.time()
     dtype = molecule.xij.dtype
     device = molecule.xij.device
@@ -77,13 +79,13 @@ def hcore(molecule):
     elif molecule.method == 'PM6_SP':
         di = torch.zeros((molecule.xij.shape[0], 4, 4),dtype=dtype, device=device)
         di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(molecule.ni[overlap_pairs],
-                                   molecule.nj[overlap_pairs],
-                                   molecule.xij[overlap_pairs],
-                                   molecule.rij[overlap_pairs],
-                                   zeta[molecule.idxi][overlap_pairs],
-                                   zeta[molecule.idxj][overlap_pairs],
-                                   qn_int)
-    
+                                molecule.nj[overlap_pairs],
+                                molecule.xij[overlap_pairs],
+                                molecule.rij[overlap_pairs],
+                                zeta[molecule.idxi][overlap_pairs],
+                                zeta[molecule.idxj][overlap_pairs],
+                                qn_int)
+        
     else:
         di = torch.zeros((molecule.xij.shape[0], 4, 4),dtype=dtype, device=device)
         di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(molecule.ni[overlap_pairs],
@@ -97,12 +99,19 @@ def hcore(molecule):
     t0 = time.time()
     #di shape (npairs,4,4)
     
-    w, e1b, e2a,rho0xi,rho0xj = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z,\
-                                    molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
-                                    molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
-                                    molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
-                                    molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
-                                    molecule.alp, molecule.chi, molecule.method)
+    if doTETCI:
+        print('Doing TETCI.')
+        tic = time.time()
+        w, e1b, e2a,rho0xi,rho0xj = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z,\
+                                        molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
+                                        molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
+                                        molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
+                                        molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
+                                        molecule.alp, molecule.chi, molecule.method)
+        print('Time to compute TETCI', time.time() - tic)
+    else:
+        #print('w, e1b, e2a,rho0xi,rho0xj will not be computed')
+        w, e1b, e2a,rho0xi,rho0xj = None, None, None, None, None
     #w shape (napirs, 10,10)
     #e1b, e2a shape (npairs, 10)
     #di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
@@ -130,16 +139,18 @@ def hcore(molecule):
         M[molecule.maskd,6,6] = molecule.parameters['U_dd']
         M[molecule.maskd,7,7] = molecule.parameters['U_dd']
         M[molecule.maskd,8,8] = molecule.parameters['U_dd']
-        M.index_add_(0,molecule.maskd[molecule.idxj], e1b)
-        M.index_add_(0,molecule.maskd[molecule.idxi], e2a)
+        if doTETCI:
+            M.index_add_(0,molecule.maskd[molecule.idxj], e1b)
+            M.index_add_(0,molecule.maskd[molecule.idxi], e2a)
 
     else:
         M[molecule.maskd,0,0] = molecule.parameters['U_ss']
         M[molecule.maskd,1,1] = molecule.parameters['U_pp']
         M[molecule.maskd,2,2] = molecule.parameters['U_pp']
         M[molecule.maskd,3,3] = molecule.parameters['U_pp']
-        M.index_add_(0,molecule.maskd[molecule.idxi], e1b)
-        M.index_add_(0,molecule.maskd[molecule.idxj], e2a)
+        if doTETCI:
+            M.index_add_(0,molecule.maskd[molecule.idxi], e1b)
+            M.index_add_(0,molecule.maskd[molecule.idxj], e2a)
 
     #warning, as for all the pairs, ni>=nj, or idxi<idxj, i.e, pairs are not symmetric
     #so in the summation below, there is no need to divide by 2
@@ -249,4 +260,4 @@ def hcore(molecule):
     return Hcore, w
     #"""
 
-    return M, w,rho0xi,rho0xj
+    return M, w, rho0xi, rho0xj

@@ -133,18 +133,18 @@ class EnergyXL(torch.nn.Module):
             
         
         F = fock(molecule.nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, w, W, \
-                molecule.parameters['g_ss'],
-                molecule.parameters['g_pp'],
-                molecule.parameters['g_sp'],
-                molecule.parameters['g_p2'],
-                molecule.parameters['h_sp'],
-                molecule.method,
-                molecule.parameters['s_orb_exp_tail'],
-                molecule.parameters['p_orb_exp_tail'],
-                molecule.parameters['d_orb_exp_tail'],
-                molecule.Z,
-                molecule.parameters['F0SD'],
-                molecule.parameters['G2SD'])
+                 molecule.parameters['g_ss'],
+                 molecule.parameters['g_pp'],
+                 molecule.parameters['g_sp'],
+                 molecule.parameters['g_p2'],
+                 molecule.parameters['h_sp'],
+                 molecule.method,
+                 molecule.parameters['s_orb_exp_tail'],
+                 molecule.parameters['p_orb_exp_tail'],
+                 molecule.parameters['d_orb_exp_tail'],
+                 molecule.Z,
+                 molecule.parameters['F0SD'],
+                 molecule.parameters['G2SD'])
 
 
         

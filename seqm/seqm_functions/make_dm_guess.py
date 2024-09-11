@@ -84,12 +84,12 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     nmol = molecule.nHeavy.shape[0]
     tore = molecule.const.tore
     
-    M, w,rho0xi,rho0xj = hcore(molecule)
+    
     
     if not torch.is_tensor(molecule.dm) or overwrite_existing_dm==True:
         #print('Reinitializing DM')
         if molecule.method == 'PM6':
-            P0 = torch.zeros_like(M)  # density matrix
+            P0 = torch.zeros(molecule.nmol*molecule.molsize*molecule.molsize,9,9,dtype=molecule.coordinates.dtype,device=molecule.coordinates.device)  # density matrix
             P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
             P0[molecule.maskd,1,1] = P0[molecule.maskd,0,0]
             P0[molecule.maskd,2,2] = P0[molecule.maskd,0,0]
@@ -100,7 +100,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                 .reshape(nmol, 9*molecule.molsize, 9*molecule.molsize)
             
         else:
-            P0 = torch.zeros_like(M)  # density matrix
+            P0 = torch.zeros(molecule.nmol*molecule.molsize*molecule.molsize,4,4,dtype=molecule.coordinates.dtype,device=molecule.coordinates.device)  # density matrix
             P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
             P0[molecule.maskd,1,1] = P0[molecule.maskd,0,0]
             P0[molecule.maskd,2,2] = P0[molecule.maskd,0,0]
@@ -129,6 +129,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     if molecule.nocc.dim() == 2:
         P = molecule.dm
         if mix_homo_lumo:
+            M, w,rho0xi,rho0xj = hcore(molecule)
             if molecule.method == 'PM6':
                 x = fock_u_batch(nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, \
                                    w, W, gss, gpp, gsp, gp2, hsp, molecule.method, zetas, zetap, zetad, molecule.Z, F0SD, G2SD)

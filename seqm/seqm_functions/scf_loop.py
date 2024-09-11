@@ -118,6 +118,11 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                                         nHeavy[notconverged],
                                                         nHydro[notconverged],
                                                         nOccMO[notconverged])
+                print('GRAD:', Pnew[notconverged].requires_grad)
+                # Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], 900, nOccMO[notconverged],
+                #         nHeavy[notconverged],
+                #         nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
+
         if backward:
             Pold = P + 0.0  # ???
             P = alpha * P + (1.0 - alpha) * Pnew
@@ -126,7 +131,6 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
             P[notconverged] = alpha * P[notconverged] + (1.0 - alpha) * Pnew[notconverged]
         
         F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-
         dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
                                  /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
                     )
@@ -710,12 +714,12 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 8
-    alpha_direct = 0.65
+    nDirect1 = 10
+    alpha_direct = 0.9
 
     nAdapt = 1
     # number of maximal fock matrixes used
-    nFock = 6
+    nFock = 5
 
     """
     *      Emat is matrix with form
@@ -1108,6 +1112,9 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
+            print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                    k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+
             return P, notconverged
 
         

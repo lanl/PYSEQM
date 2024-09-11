@@ -20,7 +20,8 @@ import time
 
 
 #chech repp.f
-def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore, da0d,db0d, qa0d,qb0d, dpa0d, dpb0d, dsa0d, dsb0d, dda0d, ddb0d, rho0ad,rho0bd, rho1ad,rho1bd, rho2ad,rho2bd, rho3ad,rho3bd, rho4ad,rho4bd, rho5ad,rho5bd, rho6ad,rho6bd, dd, themethod,rotationMatrix, ri, riXH,drho_corea,drho_coreb, riXHPM6, riPM6a, riPM6b  ):
+def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore,
+                                                   da0d,db0d, qa0d,qb0d, dpa0d, dpb0d, dsa0d, dsb0d, dda0d, ddb0d, rho0ad,rho0bd, rho1ad,rho1bd, rho2ad,rho2bd, rho3ad,rho3bd, rho4ad,rho4bd, rho5ad,rho5bd, rho6ad,rho6bd, dd, themethod,rotationMatrix, ri, riXH,drho_corea,drho_coreb, riXHPM6, riPM6a, riPM6b  ):
     
     
     """

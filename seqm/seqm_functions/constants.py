@@ -51,7 +51,7 @@ class Constants(torch.nn.Module):
         #tore[1]=1, Hydrogen has 1.0 charge on valence shell
         self.label=['0',
                'H',                                                                                            'He',
-               'Li','Be',                                                            'B',' C', ' N',' O',' F', 'Ne',
+               'Li','Be',                                                            'B', 'C',  'N', 'O', 'F', 'Ne',
                'Na','Mg',                                                            'Al','Si',' P',' S', 'Cl','Ar',
                'K', 'Ca','Sc', 'Ti', 'V ', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn', 'Ga','Ge',' As','Se','Br','Kr',
                'Rb','Sr','Y ', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In','Sn',' Sb','Te','I','Kr',

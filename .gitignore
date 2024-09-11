@@ -5,7 +5,9 @@ Tests_A100/
 .ipynb_checkpoints/
 seqm/seqm_functions/__pycache__/
 examples/hipnn_train_reactive/combined_datasets/30_cut/
+examples/hipnn_train_reactive/combined_datasets/15_cut/XH/
 examples/hipnn_train_reactive/combined_datasets/15_cut/DM_star_3-5_epoch_34.npy
+examples/hipnn_train_reactive/combined_datasets/15_cut/DM_star_3-5_epoch_58.npy
 examples/hipnn_train_reactive/combined_datasets/15_cut/DM_star_3-5.npy
 examples/hipnn_train_reactive/combined_datasets/15_cut/DM_6-5.npy
 examples/hipnn_train_reactive/combined_datasets/15_cut/DM.npy

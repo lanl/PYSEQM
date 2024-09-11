@@ -4,8 +4,12 @@ from .seqm_functions.energy import *
 from .seqm_functions.parameters import params, PWCCT
 from torch.autograd import grad
 from .seqm_functions.constants import ev
+from .seqm_functions.pack import pack
+
 import os
 import time
+import copy
+
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
 """
@@ -403,9 +407,9 @@ class Energy(torch.nn.Module):
         
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
-            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = adict)   
+            molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(self.packpar(molecule.Z, learned_params = adict)   )
         else:
-            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params = learned_parameters)
+            molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(self.packpar(molecule.Z, learned_params = learned_parameters))
 
 
         if(molecule.method == 'PM6'):
@@ -493,6 +497,8 @@ class Energy(torch.nn.Module):
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
+        print(pack(Hcore, molecule.nHeavy, molecule.nHydro))
+        torch.save(F, 'nanostar_hcore_py.pt')
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
@@ -523,7 +529,7 @@ class Force(torch.nn.Module):
         self.eig = seqm_parameters.get('eig', False)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, molecule, learned_parameters=dict(), P0=None, *args, **kwargs):
+    def forward(self, molecule, learned_parameters=dict(), P0=None, do_force=True, *args, **kwargs):
 
         molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
@@ -533,22 +539,26 @@ class Force(torch.nn.Module):
             e = e.detach()
             e_gap = e_gap.detach()
         #L = Etot.sum()
-        L = Hf.sum()
-        if molecule.const.do_timing: t0 = time.time()
+        if do_force:
+            L = Hf.sum()
+            if molecule.const.do_timing: t0 = time.time()
 
-        #gv = [coordinates]
-        #gradients  = grad(L, gv,create_graph=self.create_graph)
-        L.backward(create_graph=self.create_graph)
-        if molecule.const.do_timing:
-            if torch.cuda.is_available(): torch.cuda.synchronize()
-            t1 = time.time()
-            molecule.const.timing["Force"].append(t1 - t0)
-        #force = -gradients[0] 
-        if self.create_graph:
-            force = -molecule.coordinates.grad.clone()
-            with torch.no_grad(): molecule.coordinates.grad.zero_()
+            #gv = [coordinates]
+            #gradients  = grad(L, gv,create_graph=self.create_graph)
+            #torch.save(D.detach(), 'gs_1_P_py.pt')
+            L.backward(create_graph=self.create_graph)
+            if molecule.const.do_timing:
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+                t1 = time.time()
+                molecule.const.timing["Force"].append(t1 - t0)
+            #force = -gradients[0] 
+            if self.create_graph:
+                force = -molecule.coordinates.grad.clone()
+                with torch.no_grad(): molecule.coordinates.grad.zero_()
+            else:
+                force = -molecule.coordinates.grad.detach()
+                molecule.coordinates.grad.zero_()
         else:
-            force = -molecule.coordinates.grad.detach()
-            molecule.coordinates.grad.zero_()
+            force = torch.tensor([])
 
         return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged

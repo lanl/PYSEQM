@@ -1,6 +1,6 @@
 import numpy as np
 
-def read_xyz(files):
+def read_xyz(files, sort = True):
     '''
     reads xyz structure from a list (files) of files names
     '''
@@ -32,7 +32,7 @@ def read_xyz(files):
                 coords.append([element_dict[lines[i].split()[0]], float(lines[i].split()[1]), float(lines[i].split()[2]), float(lines[i].split()[3])])
         COORDINATES.append(coords)
     COORDINATES = np.array(COORDINATES)
-    COORDINATES = np.array([x[(-1*x[ :, 0]).argsort()] for x in COORDINATES])
+    if sort: COORDINATES = np.array([x[(-1*x[ :, 0]).argsort()] for x in COORDINATES])
 
     SPECIES =COORDINATES[:,:,0].astype(int)
     COORDINATES = COORDINATES[:,:,1:4]
