@@ -166,6 +166,7 @@ class Parser(torch.nn.Module):
         xij = paircoord / pairdist.unsqueeze(1)
         mask = real_atoms[idxi] * molsize + real_atoms[idxj]%molsize
         mask_l = real_atoms[idxj] * molsize + real_atoms[idxi]%molsize
+        #mask_l = torch.sort(mask_l)[0]
         pair_molid = atom_molid[idxi] # doesn't matter atom_molid[idxj]
         # nmol, molsize : scalar
         # nHeavy, nHydro, nocc : (nmol,)
@@ -497,7 +498,7 @@ class Energy(torch.nn.Module):
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
-        print(pack(Hcore, molecule.nHeavy, molecule.nHydro))
+        #print(pack(Hcore, molecule.nHeavy, molecule.nHydro))
         torch.save(F, 'nanostar_hcore_py.pt')
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
@@ -560,5 +561,7 @@ class Force(torch.nn.Module):
                 molecule.coordinates.grad.zero_()
         else:
             force = torch.tensor([])
+            return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec, Enuc, Eiso.detach(), e, e_gap, charge, notconverged
+
 
         return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged

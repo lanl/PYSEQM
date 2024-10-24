@@ -200,18 +200,20 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     
                 for atom in range(molecule.coordinates.shape[1]):
                     if molecule.species[mol,atom]>0:
-                        f.write("{} {:15.5f} {:15.5f} {:15.5f} {:15.5f} {:15.5f} {:15.5f} {:15.5f} {:15.5f} {:15.5f} {:15.5f}\n".format(
+                        f.write("{} {:15.5f} {:15.5f} {:15.5f}\n".format(
                                                     molecule.const.label[molecule.species[mol,atom].item()],
                                                     molecule.coordinates[mol,atom,0],
                                                     molecule.coordinates[mol,atom,1],
                                                     molecule.coordinates[mol,atom,2], 
-                                                    velocities[mol,atom,0],
-                                                    velocities[mol,atom,1],
-                                                    velocities[mol,atom,2],
-                                                    forces[mol,atom,0],
-                                                    forces[mol,atom,1],
-                                                    forces[mol,atom,2],
-                                                    q[mol,atom]))
+                                                    # velocities[mol,atom,0],
+                                                    # velocities[mol,atom,1],
+                                                    # velocities[mol,atom,2],
+                                                    # forces[mol,atom,0],
+                                                    # forces[mol,atom,1],
+                                                    # forces[mol,atom,2],
+                                                    # q[mol,atom]
+                                                    )
+                                                    )
                 f.close()
                 
             if 'Info_log' in kwargs:

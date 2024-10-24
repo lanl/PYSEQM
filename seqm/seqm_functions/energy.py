@@ -28,7 +28,7 @@ def elec_energy_isolated_atom(const, Z, uss, upp, gss, gpp, gsp, gp2, hsp):
 
 
 
-def elec_energy(P,F,Hcore):
+def elec_energy(P,F,Hcore, doTriu = True):
     """
     Get the electronic energy
     P: density matrix, shape (nmol, molsize*4, molsize*4)
@@ -38,7 +38,10 @@ def elec_energy(P,F,Hcore):
     P, F: full, has upper and lower triangle
     Hcore : only have upper triangle as constructed from hcore.py
     """
-    h = Hcore.triu()+Hcore.triu(1).transpose(1,2)
+    if doTriu:
+        h = Hcore.triu()+Hcore.triu(1).transpose(1,2)
+    else:
+        h = Hcore
 
     # Eelec = 0.5 * tr(P(Hcore+F))  # matmul
     # Eelec = 0.5 * \sum P*(H+F)    # elementwise product

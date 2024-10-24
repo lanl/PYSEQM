@@ -18,7 +18,7 @@ import time
 CHECK_DEGENERACY = False
 
 
-def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4, learned_parameters=dict(), overwrite_existing_dm=False):
+def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4, learned_parameters=dict(), overwrite_existing_dm=False, assignDM = True):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     packpar = Pack_Parameters(seqm_parameters).to(molecule.coordinates.device)
     
@@ -113,7 +113,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
         if molecule.nocc.dim() == 2:
             P = torch.stack((0.5*P, 0.5*P), dim=1)
         
-        molecule.dm = P
+        if assignDM:
+            molecule.dm = P
     
     if(molecule.method == 'PM6'):
         if molecule.nocc.dim() == 2: # open shell
@@ -216,7 +217,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
 
                 v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
                 P = P.reshape(x_orig_shape)
-                molecule.dm = P
+                if assignDM:
+                    molecule.dm = P
                 return P, v
             
             else:
@@ -298,7 +300,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
 
                 v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
                 P = P.reshape(x_orig_shape) / 2
-                molecule.dm = P
+                if assignDM:
+                    molecule.dm = P
                 return P, v
         else:
             return P, None

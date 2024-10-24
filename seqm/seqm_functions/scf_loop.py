@@ -118,7 +118,7 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                                         nHeavy[notconverged],
                                                         nHydro[notconverged],
                                                         nOccMO[notconverged])
-                print('GRAD:', Pnew[notconverged].requires_grad)
+                #print('GRAD:', Pnew[notconverged].requires_grad)
                 # Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], 900, nOccMO[notconverged],
                 #         nHeavy[notconverged],
                 #         nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
