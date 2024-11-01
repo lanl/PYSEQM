@@ -5,7 +5,7 @@ from .basics import Parser, Pack_Parameters
 import copy
 
 class Molecule(torch.nn.Module):
-    def __init__(self, const, seqm_parameters, coordinates, species, charges=0, mult=1, learned_parameters=dict(), *args, **kwargs):
+    def __init__(self, const, seqm_parameters, coordinates, species, charges=0, mult=1, learned_parameters=dict(), do_large_tensors=True, *args, **kwargs):
         """
         unit for timestep is femtosecond
         output: [molecule id list, frequency N, prefix]
@@ -17,7 +17,7 @@ class Molecule(torch.nn.Module):
         self.const = const
         self.seqm_parameters = seqm_parameters
         self.coordinates = coordinates
-        self.coordinates.requires_grad_(True)
+        self.coordinates.requires_grad_(do_large_tensors)
         self.species = species
         if not torch.is_tensor(charges):
             charges = charges * torch.ones(coordinates.size()[0], device=coordinates.device)
@@ -36,7 +36,7 @@ class Molecule(torch.nn.Module):
         self.nSuperHeavy, self.nHeavy, self.nHydro, self.nocc, \
         self.Z, self.maskd, self.atom_molid, \
         self.mask, self.mask_l, self.pair_molid, \
-        self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, self.method, return_mask_l=True, *args, **kwargs)
+        self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, self.method, return_mask_l=True, do_large_tensors=do_large_tensors, *args, **kwargs)
 
         # C = 30
         # y1 = self.rij.clone()

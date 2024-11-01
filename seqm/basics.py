@@ -73,13 +73,14 @@ class Parser(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.hipnn_automatic_doublet = seqm_parameters.get('HIPNN_automatic_doublet', False)
 
-    def forward(self, molecule, themethod, return_mask_l=False, *args, **kwargs):
+    def forward(self, molecule, themethod, return_mask_l=False, do_large_tensors=True, *args, **kwargs):
         """
         constants : instance of Class Constants
         species : atom types for atom in each molecules,
                   shape (nmol, molsize),  dtype: torch.int64
         coordinates : atom position, shape (nmol, molsize, 3)
         charges: total charge for each molecule, shape (nmol,), 0 if None
+        do_large_tensors: option to skip computation of idxi, idxj, ni, nj, rij, xij. For SEDACS only.
         """
         device = molecule.coordinates.device
         dtype = molecule.coordinates.dtype
@@ -90,9 +91,6 @@ class Parser(torch.nn.Module):
 
         atom_index = torch.arange(nmol*molsize, device=device,dtype=torch.int64)
         real_atoms = atom_index[nonblank.reshape(-1)>0]
-
-        inv_real_atoms = torch.zeros((nmol*molsize,), device=device,dtype=torch.int64)
-        inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device,dtype=torch.int64)
 
         Z = molecule.species.reshape(-1)[real_atoms]
 
@@ -136,38 +134,59 @@ class Parser(torch.nn.Module):
         t1 = (torch.arange(molsize,dtype=torch.int64,device=device)*(molsize+1)).reshape((1,-1))
         t2 = (torch.arange(nmol,dtype=torch.int64,device=device)*molsize**2).reshape((-1,1))
         maskd = (t1+t2).reshape(-1)[real_atoms]
-        atom_molid = torch.arange(nmol, device=device,dtype=torch.int64).unsqueeze(1).expand(-1,molsize).reshape(-1)[nonblank.reshape(-1)>0]
 
-        nonblank_pairs = (nonblank.unsqueeze(1)*nonblank.unsqueeze(2)).reshape(-1)
-        pair_first = atom_index.reshape(nmol, molsize) \
-                               .unsqueeze(2) \
-                               .expand(nmol,molsize,molsize) \
-                               .reshape(-1)
-        #
-        pair_second = atom_index.reshape(nmol, molsize) \
-                                .unsqueeze(1) \
+        
+
+        if do_large_tensors:
+            atom_molid = torch.arange(nmol, device=device,dtype=torch.int64).unsqueeze(1).expand(-1,molsize).reshape(-1)[nonblank.reshape(-1)>0]
+
+            nonblank_pairs = (nonblank.unsqueeze(1)*nonblank.unsqueeze(2)).reshape(-1)
+            pair_first = atom_index.reshape(nmol, molsize) \
+                                .unsqueeze(2) \
                                 .expand(nmol,molsize,molsize) \
                                 .reshape(-1)
-        #
-        paircoord_raw = (molecule.coordinates.unsqueeze(1)-molecule.coordinates.unsqueeze(2)).reshape(-1,3)
-        pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
-        close_pairs = pairdist_sq < self.outercutoff**2
-        
-        pairs = (pair_first < pair_second) * nonblank_pairs * close_pairs
-        
-        paircoord = paircoord_raw[pairs]
-        pairdist = torch.sqrt(pairdist_sq[pairs])
-        rij = pairdist * molecule.const.length_conversion_factor
+            #
+            pair_second = atom_index.reshape(nmol, molsize) \
+                                    .unsqueeze(1) \
+                                    .expand(nmol,molsize,molsize) \
+                                    .reshape(-1)
+            #
+            paircoord_raw = (molecule.coordinates.unsqueeze(1)-molecule.coordinates.unsqueeze(2)).reshape(-1,3)
+            pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
+            close_pairs = pairdist_sq < self.outercutoff**2
+            
+            pairs = (pair_first < pair_second) * nonblank_pairs * close_pairs
+            
+            paircoord = paircoord_raw[pairs]
+            pairdist = torch.sqrt(pairdist_sq[pairs])
+            rij = pairdist * molecule.const.length_conversion_factor
 
-        idxi = inv_real_atoms[pair_first[pairs]]
-        idxj = inv_real_atoms[pair_second[pairs]]
-        ni = Z[idxi]
-        nj = Z[idxj]
-        xij = paircoord / pairdist.unsqueeze(1)
-        mask = real_atoms[idxi] * molsize + real_atoms[idxj]%molsize
-        mask_l = real_atoms[idxj] * molsize + real_atoms[idxi]%molsize
-        #mask_l = torch.sort(mask_l)[0]
-        pair_molid = atom_molid[idxi] # doesn't matter atom_molid[idxj]
+            inv_real_atoms = torch.zeros((nmol*molsize,), device=device,dtype=torch.int64)
+            inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device,dtype=torch.int64)
+
+            idxi = inv_real_atoms[pair_first[pairs]]
+            idxj = inv_real_atoms[pair_second[pairs]]
+            ni = Z[idxi]
+            nj = Z[idxj]
+            xij = paircoord / pairdist.unsqueeze(1)
+            mask = real_atoms[idxi] * molsize + real_atoms[idxj]%molsize
+            mask_l = real_atoms[idxj] * molsize + real_atoms[idxi]%molsize
+            #mask_l = torch.sort(mask_l)[0]
+            pair_molid = atom_molid[idxi] # doesn't matter atom_molid[idxj]
+
+        else:
+            print('dsfdsfds')
+            atom_molid = None
+            idxi = None
+            idxj = None
+            ni = None
+            nj = None
+            rij = None
+            xij = None
+            mask = None
+            mask_l = None
+            pair_molid = None
+
         # nmol, molsize : scalar
         # nHeavy, nHydro, nocc : (nmol,)
         # Z, maskd, atom_molid: (natoms, )
