@@ -175,7 +175,6 @@ class Parser(torch.nn.Module):
             pair_molid = atom_molid[idxi] # doesn't matter atom_molid[idxj]
 
         else:
-            print('dsfdsfds')
             atom_molid = None
             idxi = None
             idxj = None
