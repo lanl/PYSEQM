@@ -114,14 +114,14 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                                    nHydro[notconverged],
                                                    nOccMO[notconverged])[1]
             else:
-                e, Pnew[notconverged], v = sym_eig_trunc(F[notconverged],
-                                                        nHeavy[notconverged],
-                                                        nHydro[notconverged],
-                                                        nOccMO[notconverged])
+                # e, Pnew[notconverged], v = sym_eig_trunc(F[notconverged],
+                #                                         nHeavy[notconverged],
+                #                                         nHydro[notconverged],
+                #                                         nOccMO[notconverged])
                 #print('GRAD:', Pnew[notconverged].requires_grad)
-                # Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], 900, nOccMO[notconverged],
-                #         nHeavy[notconverged],
-                #         nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
+                Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], 3000, nOccMO[notconverged],
+                        nHeavy[notconverged],
+                        nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
 
         if backward:
             Pold = P + 0.0  # ???
