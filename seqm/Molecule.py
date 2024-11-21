@@ -16,7 +16,8 @@ class Molecule(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.const = const
         self.seqm_parameters = seqm_parameters
-        self.coordinates = coordinates
+        #self.coordinates = coordinates
+        self.coordinates = torch.nn.Parameter(coordinates)
         self.coordinates.requires_grad_(do_large_tensors)
         self.species = species
         if not torch.is_tensor(charges):
