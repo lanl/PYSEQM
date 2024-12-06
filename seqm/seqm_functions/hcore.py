@@ -102,7 +102,7 @@ def hcore(molecule, doTETCI=True):
     if doTETCI:
         #print('Doing TETCI.')
         tic = time.time()
-        w, e1b, e2a,rho0xi,rho0xj = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z,\
+        w, e1b, e2a,rho0xi,rho0xj, riXH, ri = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z,\
                                         molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
                                         molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
                                         molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
@@ -111,7 +111,7 @@ def hcore(molecule, doTETCI=True):
         #print('Time to compute TETCI', time.time() - tic)
     else:
         #print('w, e1b, e2a,rho0xi,rho0xj will not be computed')
-        w, e1b, e2a,rho0xi,rho0xj = None, None, None, None, None
+        w, e1b, e2a,rho0xi,rho0xj, riXH, ri = None, None, None, None, None, None, None
     #w shape (napirs, 10,10)
     #e1b, e2a shape (npairs, 10)
     #di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
@@ -260,4 +260,4 @@ def hcore(molecule, doTETCI=True):
     return Hcore, w
     #"""
 
-    return M, w, rho0xi, rho0xj
+    return M, w, rho0xi, rho0xj, riXH, ri

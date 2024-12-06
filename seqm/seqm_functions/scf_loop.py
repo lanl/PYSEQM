@@ -1494,7 +1494,7 @@ def scf_loop(molecule, \
     nmol = molecule.nHeavy.shape[0]
     tore = molecule.const.tore
     if molecule.const.do_timing: t0 = time.time()
-    M, w,rho0xi,rho0xj = hcore(molecule)
+    M, w,rho0xi,rho0xj, riXH, ri = hcore(molecule)
 
     if molecule.const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -1661,6 +1661,6 @@ def scf_loop(molecule, \
         else:
             charge = None
         
-        return F, e,    Pconv, Hcore, w, charge, rho0xi, rho0xj, notconverged, v
+        return F, e,    Pconv, Hcore, w, charge, rho0xi, rho0xj, riXH, ri, notconverged, v
     else:
-        return F, None, Pconv, Hcore, w, None,   rho0xi, rho0xj, notconverged, None
+        return F, None, Pconv, Hcore, w, None,   rho0xi, rho0xj, riXH, ri, notconverged, None

@@ -104,7 +104,7 @@ class EnergyXL(torch.nn.Module):
         if molecule.const.do_timing:
             t0 = time.time()
 
-        M, w, rho0xi, rho0xj = hcore(molecule)
+        M, w, rho0xi, rho0xj, _, _ = hcore(molecule)
 
         if molecule.const.do_timing:
             if torch.cuda.is_available():

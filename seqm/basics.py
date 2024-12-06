@@ -5,6 +5,7 @@ from .seqm_functions.parameters import params, PWCCT
 from torch.autograd import grad
 from .seqm_functions.constants import ev
 from .seqm_functions.pack import pack
+from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
 
 import os
 import time
@@ -378,7 +379,7 @@ class Hamiltonian(torch.nn.Module):
         
         
         if(themethod == 'PM6'): # not implemented yet
-            F, e, P, Hcore, w, charge,rho0xi,rho0xj, notconverged, eig_vec = scf_loop(molecule,
+            F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, eig_vec = scf_loop(molecule,
                                   eps = self.eps,
                                   P=P0,
                                   sp2=self.sp2,
@@ -388,7 +389,7 @@ class Hamiltonian(torch.nn.Module):
                                   scf_backward_eps=self.scf_backward_eps)
 
         else:
-            F, e, P, Hcore, w, charge, rho0xi,rho0xj, notconverged, eig_vec = scf_loop(molecule,
+            F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec = scf_loop(molecule,
                               eps = self.eps,
                               P=P0,
                               sp2=self.sp2,
@@ -397,7 +398,7 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps)
         #
-        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, notconverged, eig_vec
+        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, eig_vec
 
 class Energy(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -448,7 +449,7 @@ class Energy(torch.nn.Module):
         
         molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
         
-        F, e, P, Hcore, w, charge, rho0xi,rho0xj, notconverged, eig_vec =  self.hamiltonian(molecule, self.method, \
+        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
         
         
@@ -516,8 +517,91 @@ class Energy(torch.nn.Module):
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
-        #print(pack(Hcore, molecule.nHeavy, molecule.nHydro))
-        torch.save(F, 'nanostar_hcore_py.pt')
+        
+        analytical_gradient = kwargs.get('analytical_gradient',[False])
+        if analytical_gradient[0]:
+            # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so 
+            # we can save on memory since the compuational graph doesn't have to be stored.
+            with torch.no_grad():
+                beta = molecule.parameters['beta']
+                # if "Kbeta" in parameters:
+                #     Kbeta = parameters["Kbeta"]
+                # else:
+                #     Kbeta = None
+                if analytical_gradient[1].lower() == 'analytical':
+                    molecule.ground_analytical_gradient =  scf_analytic_grad( P=P, 
+                              const=molecule.const,
+                              method = self.method,
+                              molsize=molecule.molsize,
+                              # nHeavy=nHeavy,
+                              # nHydro=nHydro,
+                              # nOccMO=nocc,
+                              maskd=molecule.maskd,
+                              mask=molecule.mask,
+                              # atom_molid=atom_molid,
+                              # pair_molid=pair_molid,
+                              idxi=molecule.idxi,
+                              idxj=molecule.idxj,
+                              ni=molecule.ni,
+                              nj=molecule.nj,
+                              xij=molecule.xij,
+                              # Xij = Xij,
+                              rij=molecule.rij,
+                              Z=molecule.Z,
+                              gam=gam,
+                              parnuc = parnuc,
+                              zetas=molecule.parameters['zeta_s'],
+                              zetap=molecule.parameters['zeta_p'],
+                              # uss=parameters['U_ss'],
+                              # upp=parameters['U_pp'],
+                              gss=molecule.parameters['g_ss'],
+                              # gsp=parameters['g_sp'],
+                              gpp=molecule.parameters['g_pp'],
+                              gp2=molecule.parameters['g_p2'],
+                              hsp=molecule.parameters['h_sp'],
+                              beta=beta,
+                              ri=ri,
+                              riXH=riXH,
+                              # Kbeta=Kbeta,
+                              # sp2=self.sp2,
+                             )
+                elif analytical_gradient[1].lower()=='numerical':
+
+                    molecule.ground_analytical_gradient =  scf_grad( P=P, 
+                              molecule = molecule,
+                              const=molecule.const,
+                              method = self.method,
+                              molsize=molecule.molsize,
+                              # nHeavy=nHeavy,
+                              # nHydro=nHydro,
+                              # nOccMO=nocc,
+                              maskd=molecule.maskd,
+                              mask=molecule.mask,
+                              # atom_molid=atom_molid,
+                              # pair_molid=pair_molid,
+                              idxi=molecule.idxi,
+                              idxj=molecule.idxj,
+                              ni=molecule.ni,
+                              nj=molecule.nj,
+                              xij=molecule.xij,
+                              # Xij = Xij,
+                              rij=molecule.rij,
+                              Z=molecule.Z,
+                              parnuc = parnuc,
+                              zetas=molecule.parameters['zeta_s'],
+                              zetap=molecule.parameters['zeta_p'],
+                              # uss=parameters['U_ss'],
+                              # upp=parameters['U_pp'],
+                              gss=molecule.parameters['g_ss'],
+                              # gsp=parameters['g_sp'],
+                              gpp=molecule.parameters['g_pp'],
+                              gp2=molecule.parameters['g_p2'],
+                              hsp=molecule.parameters['h_sp'],
+                              beta=beta,
+                              # Kbeta=Kbeta,
+                              # sp2=self.sp2,
+                             )
+
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
@@ -550,13 +634,19 @@ class Force(torch.nn.Module):
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, do_force=True, *args, **kwargs):
 
-        molecule.coordinates.requires_grad_(True)
+        analytical_gradient = kwargs.get('analytical_gradient',[False])
+        if not analytical_gradient[0]:
+            molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
         
         if self.eig:
             e = e.detach()
             e_gap = e_gap.detach()
+
+        if analytical_gradient[0]:
+            force = -molecule.ground_analytical_gradient
+            return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
         #L = Etot.sum()
         if do_force:
             L = Hf.sum()

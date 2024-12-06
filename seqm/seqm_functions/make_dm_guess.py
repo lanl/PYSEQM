@@ -130,7 +130,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     if molecule.nocc.dim() == 2:
         P = molecule.dm
         if mix_homo_lumo:
-            M, w,rho0xi,rho0xj = hcore(molecule)
+            M, w,rho0xi,rho0xj, _, _ = hcore(molecule)
             if molecule.method == 'PM6':
                 x = fock_u_batch(nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, \
                                    w, W, gss, gpp, gsp, gp2, hsp, molecule.method, zetas, zetap, zetad, molecule.Z, F0SD, G2SD)

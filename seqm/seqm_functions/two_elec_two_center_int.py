@@ -158,7 +158,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     
 
     t1 = time.time()
-    w, e1b, e2a = \
+    w, e1b, e2a, riXH, ri = \
         rotate(ni, nj, xij, rij, \
                tore, dd[idxi],dd[idxj], \
                qq[idxi],qq[idxj], \
@@ -188,7 +188,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     rho0aTMP[A] =rho_core[idxi][A]
     rho0bTMP[B] =rho_core[idxj][B]
     
-    return w, e1b, e2a,rho0aTMP,rho0bTMP
+    return w, e1b, e2a,rho0aTMP,rho0bTMP, riXH, ri
 
 #rotate: rotate the two electron two center integrals from local frame to molecule frame
 def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
@@ -268,18 +268,15 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
        rho0aTMP[A] =rho_corea[A]
        rho0bTMP[B] =rho_coreb[B]
-       trash, riXHPM6, riPM6b, notneeded, dont, need = \
+       _, riXHPM6, riPM6b, _, _, _ = \
            TETCILF(ni,nj,rij, tore, \
                 da, db, qa,qb, rho0a,rho0bTMP, rho1a,rho1b, rho2a,rho2b,themethod)
 
 
-       trash, riXHPM6, riPM6a, notneeded, dont, need = \
+       _, riXHPM6, riPM6a, _, _, _ = \
            TETCILF(ni,nj,rij, tore, \
                 da, db, qa,qb, rho0aTMP,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)
 
-
-
-    
     #
     ###############################33
     # X-H hevay atom - Hydrogen
@@ -1173,13 +1170,13 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
         wcRotated[~KK,...,...] = torch.transpose(wc[~KK,...,...],1,2)
         wcRotated[KK,...,...] = Rotate2Center2Electron(wc[KK,...,...],dRotationMatrix[KK,...,...])
 
-        return wcRotated, e1bD, e2aD
+        return wcRotated, e1bD, e2aD, None, None
     wc  = torch.zeros(rij.shape[0],10,10,dtype=dtype, device=device)
     wc[HH,0,0] = wHH
     wc[XH,:,0] = wXH
     wc[XX] = w.reshape((-1,10,10))
     
-    return wc, e1b, e2a
+    return wc, e1b, e2a, riXH, ri
 
 
 def GetSlaterCondonParameter(K,NA,EA,NB,EB,NC,EC,ND,ED):
