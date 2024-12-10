@@ -7,6 +7,7 @@ from .diat_overlap import diatom_overlap_matrix
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .energy import pair_nuclear_energy
 
+# @profile
 def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi,idxj, ni,nj,xij,rij, gam, parnuc,
             Z, gss,gpp,gp2,hsp, beta, zetas,zetap,riXH,ri):
     """
@@ -16,8 +17,8 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi,idxj, ni,nj,x
     Dewar, Michael JS, and Yukio Yamaguchi. "Analytical first derivatives of the energy in MNDO." Computers & Chemistry 2.1 (1978): 25-29.
     https://doi.org/10.1016/0097-8485(78)80005-9
     """
-    torch.set_printoptions(precision=6)
-    torch.set_printoptions(linewidth=110)
+    # torch.set_printoptions(precision=6)
+    # torch.set_printoptions(linewidth=110)
 
     # Xij (= Xj-Xi) is the vector from j to i in Angstroms
     # xij (= xj-xi) is the *unit* vector from j to i
@@ -129,6 +130,7 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi,idxj, ni,nj,x
     grad = grad.reshape(nmol,molsize,3)
     return grad
 
+# @profile
 def scf_grad(P, molecule, const, method, mask, maskd, molsize, idxi,idxj, ni,nj,xij,rij, parnuc,
             Z, gss,gpp,gp2,hsp, beta, zetas,zetap):
     """
@@ -137,8 +139,8 @@ def scf_grad(P, molecule, const, method, mask, maskd, molsize, idxi,idxj, ni,nj,
     The gradient is calculated in a pseudo-numerical fashion. The derivatives of the overlap, the core-core repulsions and the two-electron integrals in
     the atomic orbital basis are calculated using finite-differnce.
     """
-    torch.set_printoptions(precision=6)
-    torch.set_printoptions(linewidth=110)
+    # torch.set_printoptions(precision=6)
+    # torch.set_printoptions(linewidth=110)
 
     # Xij (= Xj-Xi) is the vector from j to i in Angstroms
     # xij (= xj-xi) is the *unit* vector from j to i

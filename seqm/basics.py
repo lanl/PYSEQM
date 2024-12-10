@@ -522,8 +522,9 @@ class Energy(torch.nn.Module):
         if analytical_gradient[0]:
             # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so 
             # we can save on memory since the compuational graph doesn't have to be stored.
+            beta = molecule.parameters['beta']
+            if molecule.const.do_timing: t0 = time.time()
             with torch.no_grad():
-                beta = molecule.parameters['beta']
                 # if "Kbeta" in parameters:
                 #     Kbeta = parameters["Kbeta"]
                 # else:
@@ -601,6 +602,10 @@ class Energy(torch.nn.Module):
                               # Kbeta=Kbeta,
                               # sp2=self.sp2,
                              )
+            if molecule.const.do_timing:
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+                t1 = time.time()
+                molecule.const.timing["Force"].append(t1 - t0)
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
