@@ -9,8 +9,8 @@ from .energy import pair_nuclear_energy
 
 
 # @profile
-def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, gam, parnuc, Z, gss, gpp,
-                      gp2, hsp, beta, zetas, zetap, riXH, ri):
+def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, gam, parnuc, Z,
+                      gss, gpp, gp2, hsp, beta, zetas, zetap, riXH, ri):
     """
     Calculate the gradient of the ground state SCF energy
     in the units of ev/Angstrom
@@ -18,6 +18,9 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
     Dewar, Michael JS, and Yukio Yamaguchi. "Analytical first derivatives of the energy in MNDO." Computers & Chemistry 2.1 (1978): 25-29.
     https://doi.org/10.1016/0097-8485(78)80005-9
     """
+    if method not in {'PM3', 'AM1', 'MNDO'}:
+        raise Exception("Analytical gradients implented only for MNDO, AM1 and PM3 methods")
+
     # torch.set_printoptions(precision=6)
     # torch.set_printoptions(linewidth=110)
 
@@ -26,12 +29,9 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
     Xij = xij * rij.unsqueeze(1) * a0
     dtype = Xij.dtype
     device = Xij.device
-    nmol = P.shape[0]
+    nmol = molecule.species.shape[0]
     npairs = Xij.shape[0]
     qn_int = const.qn_int  # Principal quantum number of the valence shell
-
-    # Define the gradient tensor
-    grad = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
     # I will use this tensor to store the gradient of the overlap matrix elements, and then that of the exchange integrals
     overlap_KAB_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
@@ -57,9 +57,28 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
     # Derivative of pair-nuclear Energy or E_core-core
     # pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
     pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters=parnuc)
+    return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad,
+                                                mask, maskd, idxi, idxj)
+
+
+def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad, mask,
+                                         maskd, idxi, idxj):
+
+    dtype = P0.dtype
+    device = P0.device
+    nmol = molecule.species.shape[0]
+
+    unrestricted = True if P0.dim() == 4 else False
 
     # Assembly
-    P0 = P.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+    if unrestricted:
+        P = (P0[:,0]+P0[:,1]).reshape((nmol,molsize,4,molsize,4)) \
+              .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
+
+        PAlpha_ = P0.transpose(0,1).reshape((2,nmol,molsize,4,molsize,4)) \
+              .transpose(3,4).reshape(2,nmol*molsize*molsize,4,4)
+    else:
+        P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
 
     # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
 
@@ -72,13 +91,27 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
     ind = torch.tensor([[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device)
     # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
     # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
-    Pp = -0.5 * P0[mask]
-    for i in range(4):
-        for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            overlap_KAB_x[..., i, j] += torch.sum(Pp.unsqueeze(1) * (w_x[..., ind[i], :][..., :, ind[j]]), dim=(2, 3))
+    if unrestricted:
+        # sum_ = torch.empty(2,npairs,3,4,4,dtype=dtype,device=device)
+        sum_ = overlap_KAB_x.unsqueeze(0).expand(2, *overlap_KAB_x.shape).clone()
+        Pp = PAlpha_[:, mask].unsqueeze(2)
+        for i in range(4):
+            for j in range(4):
+                # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
+                sum_[..., i, j] -= torch.sum(Pp * w_x[None, ..., ind[i], :][..., :, ind[j]], dim=(3, 4))
 
-    pair_grad.add_((P0[mask, None, :, :] * overlap_KAB_x).sum(dim=(2, 3)))
+        pair_grad.add_((Pp * sum_).sum(dim=(0, 3, 4)))
+        del sum_
+        # pair_grad.add_((P[mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
+
+    else:
+        Pp = P[mask].unsqueeze(1)
+        for i in range(4):
+            for j in range(4):
+                # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
+                overlap_KAB_x[..., i, j] -= 0.5 * torch.sum(Pp * (w_x[..., ind[i], :][..., :, ind[j]]), dim=(2, 3))
+
+        pair_grad.add_((Pp * overlap_KAB_x).sum(dim=(2, 3)))
 
     # Coulomb integrals
     #F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
@@ -92,11 +125,10 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
     weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
 
     indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P0[maskd[idxi]][..., indices[0], indices[1]] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
-    PB = (P0[maskd[idxj]][..., indices[0], indices[1]] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
+    PA = (P[maskd[idxi]][..., indices[0], indices[1]] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
+    PB = (P[maskd[idxj]][..., indices[0], indices[1]] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
-    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
 
     # Collect in sumA and sumB tensors
     # reususe overlap_KAB_x here instead of creating new arrays
@@ -110,15 +142,21 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
 
     sumB = overlap_KAB_x
     sumB.zero_()
+    # Also aliasing suma to sumb in order to reuse memory. Be careful if changing this code in the future
+    sumb = suma
+    sumb[:, :, :] = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
     sumB[..., indices[0], indices[1]] = sumb
     e1b_x.add_(sumB)
 
     # Core-elecron interaction
     e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
     e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
-    pair_grad.add_((P0[maskd[idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
-                   (P0[maskd[idxi], None, :, :] * e1b_x).sum(dim=(2, 3)))
-    # pair_grad.add_((P0[maskd[idxj],None,:,:]*e2a_x.triu(1)).sum(dim=(2,3)) + (P0[maskd[idxi],None,:,:]*e1b_x.triu(1)).sum(dim=(2,3)))
+    pair_grad.add_((P[maskd[idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
+                   (P[maskd[idxi], None, :, :] * e1b_x).sum(dim=(2, 3)))
+    # pair_grad.add_((P[maskd[idxj],None,:,:]*e2a_x.triu(1)).sum(dim=(2,3)) + (P[maskd[idxi],None,:,:]*e1b_x.triu(1)).sum(dim=(2,3)))
+
+    # Define the gradient tensor
+    grad = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
     grad.index_add_(0, idxi, pair_grad)
     grad.index_add_(0, idxj, pair_grad, alpha=-1.0)
@@ -129,8 +167,8 @@ def scf_analytic_grad(P, const, method, mask, maskd, molsize, idxi, idxj, ni, nj
 
 
 # @profile
-def scf_grad(P, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, parnuc, Z, gss, gpp, gp2,
-             hsp, beta, zetas, zetap):
+def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, parnuc, Z, beta, zetas,
+             zetap):
     """
     Calculate the gradient of the ground state SCF energy
     in the units of ev/Angstrom
@@ -145,12 +183,9 @@ def scf_grad(P, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, n
     Xij = xij * rij.unsqueeze(1) * a0
     dtype = Xij.dtype
     device = Xij.device
-    nmol = P.shape[0]
+    nmol = molecule.species.shape[0]
     npairs = Xij.shape[0]
     qn_int = const.qn_int  # Principal quantum number of the valence shell
-
-    # Define the gradient tensor
-    grad = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
     # I will use this tensor to store the gradient of the overlap matrix, and then that of the exchange integrals
     overlap_KAB_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
@@ -202,74 +237,8 @@ def scf_grad(P, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, n
         w_x[:, coord, ...] = (w_plus - w_minus) / (2.0 * delta)
         pair_grad[:, coord] = (EnucAB_plus - EnucAB_minus) / (2.0 * delta)
 
-    # Assembly
-    P0 = P.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
-
-    # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
-
-    # Exchange integrals
-    # mu, nu in A
-    # lambda, sigma in B
-    # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    #   0,     1         2       3       4         5       6      7         8        9
-    ind = torch.tensor([[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device)
-    # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
-    # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
-    Pp = -0.5 * P0[mask]
-    for i in range(4):
-        for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            overlap_KAB_x[..., i, j] += torch.sum(Pp.unsqueeze(1) * (w_x[..., ind[i], :][..., :, ind[j]]), dim=(2, 3))
-
-    pair_grad.add_((P0[mask, None, :, :] * overlap_KAB_x).sum(dim=(2, 3)))
-
-    # Coulomb integrals
-    #F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
-    #as only upper triangle part is done, and put in order
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    #weight for them are
-    #  1       2       1        2        2        1        2       2        2       1
-
-    weight = torch.tensor([1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device).reshape(
-        (-1, 10))
-    weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
-
-    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P0[maskd[idxi]][..., indices[0], indices[1]] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
-    PB = (P0[maskd[idxj]][..., indices[0], indices[1]] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
-
-    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
-    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-
-    # Collect in sumA and sumB tensors
-    # reususe overlap_KAB_x here instead of creating new arrays
-    # I am going to be alliasing overlap_KAB_x to sumA and then further aliasing it to sumB
-    # This seems like bad practice because I'm not allocating new memory but using the same tensor for all operations.
-    # In the future if this code is edited be careful here
-    sumA = overlap_KAB_x
-    sumA.zero_()
-    sumA[..., indices[0], indices[1]] = suma
-    e2a_x.add_(sumA)
-
-    sumB = overlap_KAB_x
-    sumB.zero_()
-    sumB[..., indices[0], indices[1]] = sumb
-    e1b_x.add_(sumB)
-
-    # Core-elecron interaction
-    e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
-    pair_grad.add_((P0[maskd[idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
-                   (P0[maskd[idxi], None, :, :] * e1b_x).sum(dim=(2, 3)))
-    # pair_grad.add_((P0[maskd[idxj],None,:,:]*e2a_x.triu(1)).sum(dim=(2,3)) + (P0[maskd[idxi],None,:,:]*e1b_x.triu(1)).sum(dim=(2,3)))
-
-    grad.index_add_(0, idxi, pair_grad)
-    grad.index_add_(0, idxj, pair_grad, alpha=-1.0)
-
-    # print(f'SCF gradient is:\n{grad.view(nmol,molsize,3)}')
-    grad = grad.reshape(nmol, molsize, 3)
-    return grad
+    return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad,
+                                                mask, maskd, idxi, idxj)
 
 
 # def overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij):

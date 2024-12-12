@@ -72,6 +72,7 @@ esdriver = Electronic_Structure(seqm_parameters).to(device)
 ### Run esdriver on molecules:
 # esdriver(molecules)
 esdriver(molecules,analytical_gradient=[True,'numerical'])
+# esdriver(molecules,analytical_gradient=[True,'analytical'])
 force = molecules.force
 print(f'Force is\n{force}')
 analytic_grad = molecules.ground_analytical_gradient

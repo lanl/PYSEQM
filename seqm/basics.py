@@ -530,7 +530,8 @@ class Energy(torch.nn.Module):
                 # else:
                 #     Kbeta = None
                 if analytical_gradient[1].lower() == 'analytical':
-                    molecule.ground_analytical_gradient =  scf_analytic_grad( P=P, 
+                    molecule.ground_analytical_gradient =  scf_analytic_grad( P0=P, 
+                                                                             molecule=molecule,
                               const=molecule.const,
                               method = self.method,
                               molsize=molecule.molsize,
@@ -568,7 +569,7 @@ class Energy(torch.nn.Module):
                              )
                 elif analytical_gradient[1].lower()=='numerical':
 
-                    molecule.ground_analytical_gradient =  scf_grad( P=P, 
+                    molecule.ground_analytical_gradient =  scf_grad( P0=P, 
                               molecule = molecule,
                               const=molecule.const,
                               method = self.method,
@@ -593,11 +594,11 @@ class Energy(torch.nn.Module):
                               zetap=molecule.parameters['zeta_p'],
                               # uss=parameters['U_ss'],
                               # upp=parameters['U_pp'],
-                              gss=molecule.parameters['g_ss'],
+                              # gss=molecule.parameters['g_ss'],
                               # gsp=parameters['g_sp'],
-                              gpp=molecule.parameters['g_pp'],
-                              gp2=molecule.parameters['g_p2'],
-                              hsp=molecule.parameters['h_sp'],
+                              # gpp=molecule.parameters['g_pp'],
+                              # gp2=molecule.parameters['g_p2'],
+                              # hsp=molecule.parameters['h_sp'],
                               beta=beta,
                               # Kbeta=Kbeta,
                               # sp2=self.sp2,
