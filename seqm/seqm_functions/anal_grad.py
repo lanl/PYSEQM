@@ -29,7 +29,6 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
     Xij = xij * rij.unsqueeze(1) * a0
     dtype = Xij.dtype
     device = Xij.device
-    nmol = molecule.species.shape[0]
     npairs = Xij.shape[0]
     qn_int = const.qn_int  # Principal quantum number of the valence shell
 
@@ -378,8 +377,8 @@ def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2,
         rho_1[isX] = rho1(hsp[isX], dd[isX])
         rho_2[isX] = rho2(hpp[isX], qq[isX])
 
-    der_TETCILF(w_x, const, ni, nj, xij, Xij, rij, dd[idxi], dd[idxj], qq[idxi], qq[idxj], rho_0[idxi], rho_0[idxj],
-                rho_1[idxi], rho_1[idxj], rho_2[idxi], rho_2[idxj], tore, riXH, ri)
+    der_TETCILF(w_x, ni, nj, xij, Xij, rij, dd[idxi], dd[idxj], qq[idxi], qq[idxj], rho_0[idxi], rho_0[idxj],
+                rho_1[idxi], rho_1[idxj], rho_2[idxi], rho_2[idxj], riXH, ri)
 
     # # Why is rij in bohr? It should be in angstrom right? Ans: OpenMopac website seems to suggest using bohr as well
     # # for the 2-e integrals.
@@ -459,8 +458,8 @@ def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, ze
     overlap_KAB_x[..., 1:, 1:] *= (beta[idxi, 1:2, None] + beta[idxj, 1:2, None]).unsqueeze(1)
 
 
-def der_TETCILF(w_x_final, const, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0b, rho1a, rho1b, rho2a, rho2b,
-                tore, riXH, ri):
+def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0b, rho1a, rho1b, rho2a, rho2b,
+                riXH, ri):
 
     dtype = r0.dtype
     device = r0.device
