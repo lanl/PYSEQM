@@ -195,19 +195,21 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
     else:
         ### http://openmopac.net/manual/1c2e.html
         #(s,s)
-        TMP = torch.zeros_like(M)
-        TMP[maskd,0,0] = 0.5*P[maskd,0,0]*gss + Pptot[maskd]*(gsp-0.5*hsp)
+        # TMP = torch.zeros_like(M)
+        TMP = torch.zeros(maskd.shape[0],4,4,device=device,dtype=dtype)
+        TMP[:,0,0] = 0.5*P[maskd,0,0]*gss + Pptot[maskd]*(gsp-0.5*hsp)
         for i in range(1,4):
             #(p,p)
-            TMP[maskd,i,i] = P[maskd,0,0]*(gsp-0.5*hsp) + 0.5*P[maskd,i,i]*gpp \
+            TMP[:,i,i] = P[maskd,0,0]*(gsp-0.5*hsp) + 0.5*P[maskd,i,i]*gpp \
                             + (Pptot[maskd] - P[maskd,i,i]) * (1.25*gp2-0.25*gpp)
             #(s,p) = (p,s) upper triangle
-            TMP[maskd,0,i] = P[maskd,0,i]*(1.5*hsp - 0.5*gsp)
+            TMP[:,0,i] = P[maskd,0,i]*(1.5*hsp - 0.5*gsp)
         #(p,p*)
         for i,j in [(1,2),(1,3),(2,3)]:
-            TMP[maskd,i,j] = P[maskd,i,j]* (0.75*gpp - 1.25*gp2)
+            TMP[:,i,j] = P[maskd,i,j]* (0.75*gpp - 1.25*gp2)
 
-        F.add_(TMP)
+        # F.add_(TMP)
+        F[maskd] += TMP
 
     # sumation over two electron two center integrals over the neighbor atoms
 
