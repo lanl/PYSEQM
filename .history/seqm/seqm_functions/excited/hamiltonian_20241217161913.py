@@ -286,21 +286,7 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
   
 def gen_V(device, mol, N_cis, n_V_start):
     
-    
     # returns V (formerly vexp1) - guess vector for L-xi routine
-    """
-    Returns V (formerly vexp1) - guess vector based on MOs (L-xi) routine
-    
-
-    Parameters:
-    device (torch.device): device to store the tensor
-    mol (seqmols object): molecule object
-    N_cis (int): number of CIS states
-    n_V_start (int): number of vectors to start with
-
-    Returns:
-    V (torch.tensor): guess vector 
-    """
     V = torch.zeros((mol.nmol, N_cis, N_cis), device=device)
 
 
@@ -329,19 +315,6 @@ def gen_V(device, mol, N_cis, n_V_start):
 
 def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
     
-    """
-    Multiplies guess matrix in MO basis by energy gap between MO energies.
-    
-    Parameters:
-    - device (torch.device): device to store the tensor
-    - G_mo (torch.tensor): guess density in MO basis
-    - N_cis (int): number of CIS states
-    - mol (seqmols object): molecule object
-    - V_orig (torch.tensor): initial guess vector
-    
-    Returns:
-    G_mo (torch.tensor): updated V 
-    """
     nmol = mol.nmol # TODO move as ragument
     
     occ_idx = torch.arange(int(mol.nocc))
@@ -360,6 +333,7 @@ def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
     mo_kronecker = torch.zeros((N_cis), dtype=torch.float64)
     mo_kronecker[:N_cis] = (mo_diff * V_orig) 
     
+
     G_mo += mo_kronecker 
     # print('mo_kronecker\n', mo_kronecker)
     # print('G_mo AFTER FAST', G_mo)
@@ -398,11 +372,13 @@ def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
     # mo_kronecker = torch.zeros((N_cis * 2, nmol), dtype=torch.float64)
     # mo_kronecker[:N_cis] = (mo_diff * V_orig.unsqueeze(1).T)
 
-    # G_mo += mo_kronecker
+    G_mo += mo_kronecker
 
-    # return G_mo
+    return G_mo
 
 #===================================================================
+
+
 
 
 
