@@ -14,29 +14,28 @@
 """
 import torch
 from seqm.seqm_functions.excited.orb_transform import mo2ao, ao2mo, decompose_to_sym_antisym
-from seqm.seqm_functions.excited.orb_transform import mo2ao_nexmd, ao2mo_nexmd
 from seqm.seqm_functions.pack import pack, unpack
 
 dtype = torch.float64 # TODO feed as param
 
-def form_cis_nexmd(device, V, mol, N_cis, CIS = True):
-    #MIMICS NEXMD for DEBUGGING
+def form_cis(device, V, mol, N_cis, CIS = True):
     """
     build A matrix for CIS
     splits guess density into symmetric and antisymmetric parts
     unclear why returns A @ b (guess vector)
     
     analogue of NEXMD Lxi_testing routine
-    everything is renamed for consistency with chemical papers, not Liouvuille formalism
+    everything is/will be renamed for consistency with chemical papers, not Liouvuille formalism
     #! RPA is not implemented yet
     # TODO: implement TDHF/RPA
-    Args:
-        vexp1 (tensor): guess vector
-        molecule (PYSEQM object): batch of molecules
-        N_cis (int): dimension of CIS space, nocch*nvirt
-        N_rpa (int): N_cis *2
-        CIS (bool, optional): CIS or TDHF (RPA) Defaults to True.
-
+    Parameters:
+    - V (tensor): guess vector based on MO (0 and 1 only)
+    - molecule (PYSEQM object): batch of molecules
+    - N_cis (int): dimension of CIS space, nocch*nvirt
+    - CIS (bool, optional): CIS or TDHF (RPA) Defaults to True
+    
+    Returns:
+      - G_tot_mo (torch.Tensor): column of CIS Hamiltonian in MO basis 
     """        
     gss = mol.parameters['g_ss']
     gsp = mol.parameters['g_sp']
@@ -55,7 +54,7 @@ def form_cis_nexmd(device, V, mol, N_cis, CIS = True):
     nHydro = mol.nHydro
     
     V_orig = torch.clone(V)
-    V_ao =  mo2ao_nexmd(device, N_cis, V, mol)     # mo to ao basis (mo2site)
+    V_ao =  mo2ao(device, N_cis, V, mol)     # mo to ao basis (mo2site)
     print('V_ao.shape', V_ao.shape)
     print(V_ao)
 
@@ -74,10 +73,10 @@ def form_cis_nexmd(device, V, mol, N_cis, CIS = True):
                            nHeavy,
                            nHydro)
     # G sym is 1c-2e and 2c-2e of symmetric part of guess density
-    G_sym = pack(G_sym, nHeavy, nHydro) # pack 2c-2e part to standard shape of (norb x norb)
+    G_sym_ao = pack(G_sym, nHeavy, nHydro) # pack 2c-2e part to standard shape of (norb x norb)
     
     
-    G_tot = build_G_antisym(device, V_ao, V_ao_asym, G_sym,
+    G_antisym_ao = build_G_antisym(device, V_ao, V_ao_asym, G_sym,
                             gss, gsp, gpp, gp2, hsp,
                             mask, maskd, idxi, idxj, nmol, molsize,
                             w, 
@@ -85,237 +84,17 @@ def form_cis_nexmd(device, V, mol, N_cis, CIS = True):
                             nHeavy,
                             nHydro)
     
-   # print('G_tot.shape', G_tot.shape)
-   # print('G_tot\n', G_tot)                  
-    # build_G_antisym returns both sym and antisym!
-    # TODO: refactor into: 2c-2e antisym, 1c-2e antisym
-    # TODO: vectorize 1c-2e antisym, avoid ugly loops
-    #! remember about making 2c-2e diagonal 0
+    G_tot_ao = G_sym_ao + G_antisym_ao
 
-    # print('G total \n', G_tot)
+    G_tot_mo = ao2mo(device, N_cis, G_tot_ao, mol) # G_tot back to MO basis 
+                                                         # G_tot_mo is a column of Hamiltonian 
+                                                         # similar to L_xi in NEXMD
     
-    # print('============================================')
-    # print('Converting Gao full back into MO basis')
-    G_mo = ao2mo_nexmd(device, N_cis, G_tot, mol) # G in MO basis #! [0] not batched yet
+    G_tot_mo = torch.squeeze(G_tot_mo, 0) #TODO: remove, for MRS23 only
+    G_tot_mo = mult_by_gap(device, G_tot_mo, N_cis, mol, V_orig)
     
-    # print('!!! G_mo.shape AFTER AO to MO', G_mo.shape)
-    # print('!!! G_mo AFTER AO to MO\n', G_mo)
-    
-    # multiply by MO differencies
-    # G_mo = mult_by_gap(G_mo, N_cis, mol, V_orig)
-
-    return G_mo
+    return G_tot_mo
   
-  
-  
-
-def form_cis_nexmd_working_copy(device, V, mol, N_cis, CIS = True):
-    #MIMICS NEXMD for DEBUGGING
-    """
-    build A matrix for CIS
-    splits guess density into symmetric and antisymmetric parts
-    unclear why returns A @ b (guess vector)
-    
-    analogue of NEXMD Lxi_testing routine
-    everything is renamed for consistency with chemical papers, not Liouvuille formalism
-    #! RPA is not implemented yet
-    # TODO: implement TDHF/RPA
-    Args:
-        vexp1 (tensor): guess vector
-        molecule (PYSEQM object): batch of molecules
-        N_cis (int): dimension of CIS space, nocch*nvirt
-        N_rpa (int): N_cis *2
-        CIS (bool, optional): CIS or TDHF (RPA) Defaults to True.
-
-    """        
-    gss = mol.parameters['g_ss']
-    gsp = mol.parameters['g_sp']
-    gpp = mol.parameters['g_pp']
-    gp2 = mol.parameters['g_p2']
-    hsp = mol.parameters['h_sp']  
-    
-    mask  = mol.mask
-    maskd = mol.maskd
-    idxi  = mol.idxi
-    idxj  = mol.idxj
-    nmol  = mol.nmol
-    molsize = mol.molsize
-    w       = mol.w
-    nHeavy = mol.nHeavy
-    nHydro = mol.nHydro
-    
-    V_orig = torch.clone(V)
-    V_ao =  mo2ao_nexmd(device, N_cis, V, mol)     # mo to ao basis (mo2site)
-    print('V_ao.shape', V_ao.shape)
-    print(V_ao)
-
-    V_ao_sym, V_ao_asym = decompose_to_sym_antisym(V_ao) # decompose guess in ao to sym and asym
-    # Vxi - build 2e integrals in AO basis: G(guess density) in F = H_core + G
-    # note density is split into sym and anisym matrices
-    # sym is processed as padded 3d array in PYSEQM, see fock module 
-    # antisym: 2c-2e works with modified PYSEQM routine; should be antisimmterized afterwards
-    # antisym: 1c-2e (diagonal)
-
-    #------------------symmetric (1c-2e + 2c-2e)------------------------------
-    G_sym   =  build_G_sym(device, V_ao_sym,
-                           gss, gsp, gpp, gp2, hsp,
-                           mask, maskd, idxi, idxj, nmol, molsize,
-                           w,
-                           nHeavy,
-                           nHydro)
-    # G sym is 1c-2e and 2c-2e of symmetric part of guess density
-    G_sym = pack(G_sym, nHeavy, nHydro) # pack 2c-2e part to standard shape of (norb x norb)
-    
-    
-    G_tot = build_G_antisym(device, V_ao, V_ao_asym, G_sym,
-                            gss, gsp, gpp, gp2, hsp,
-                            mask, maskd, idxi, idxj, nmol, molsize,
-                            w, 
-                            mol,
-                            nHeavy,
-                            nHydro)
-    
-   # print('G_tot.shape', G_tot.shape)
-   # print('G_tot\n', G_tot)                  
-    # build_G_antisym returns both sym and antisym!
-    # TODO: refactor into: 2c-2e antisym, 1c-2e antisym
-    # TODO: vectorize 1c-2e antisym, avoid ugly loops
-    #! remember about making 2c-2e diagonal 0
-
-    # print('G total \n', G_tot)
-    
-    # print('============================================')
-    # print('Converting Gao full back into MO basis')
-    G_mo = ao2mo_nexmd(device, N_cis, G_tot, mol) # G in MO basis #! [0] not batched yet
-    
-    # print('!!! G_mo.shape AFTER AO to MO', G_mo.shape)
-    # print('!!! G_mo AFTER AO to MO\n', G_mo)
-    
-    # multiply by MO differencies
-    # G_mo = mult_by_gap(G_mo, N_cis, mol, V_orig)
-
-
-
-    return G_mo
-
-def form_cis(device, V, mol, N_cis, N_rpa, CIS = True):
-    """
-    build A matrix for CIS
-    splits guess density into symmetric and antisymmetric parts
-    unclear why returns A @ b (guess vector)
-    
-    analogue of NEXMD Lxi_testing routine
-    everything is renamed for consistency with chemical papers, not Liouvuille formalism
-    #! RPA is not implemented yet
-    # TODO: implement TDHF/RPA
-    Args:
-        
-        V (tensor): guess vector
-        mol (PYSEQM object): batch of molecules
-        N_cis (int): dimension of CIS space, nocch*nvirt
-        N_rpa (int): N_cis *2
-        CIS (bool, optional): CIS or TDHF (RPA) Defaults to True.
-
-    """        
-
-    #m = molecule # DEBUG 
-    #logger 
-    gss = mol.parameters['g_ss']
-    gsp = mol.parameters['g_sp']
-    gpp = mol.parameters['g_pp']
-    gp2 = mol.parameters['g_p2']
-    hsp = mol.parameters['h_sp']  #logger 
-    
-    mask  = mol.mask
-    maskd = mol.maskd
-    idxi  = mol.idxi
-    idxj  = mol.idxj
-    nmol  = mol.nmol
-    molsize = mol.molsize
-    w       = mol.w
-    nHeavy = mol.nHeavy
-    nHydro = mol.nHydro
-
-    V_ao =  mo2ao(device, N_cis, V, mol, full=True)   # mo to ao basis (mo2site)
-    V_ao_sym, V_ao_asym = decompose_to_sym_antisym(V_ao) # decompose guess in ao basis to sym and asym
-
-    # Vxi - build 2e integrals in AO basis: G(guess density) in F = H_core + G
-    # note density is split into sym and anisym matrices
-    # sym is processed as padded 3d array in PYSEQM, see fock module 
-    # antisym: 2c-2e works with modified PYSEQM routine; should be antisimmterized afterwards
-    # antisym: 1c-2e (diagonal) are taken from NEXMD for now - ugly code with loops
-    
-    #------------------symmetric (1c-2e + 2c-2e)------------------------------
-    G_sym   =  build_G_sym(device, V_ao_sym,
-                           gss, gsp, gpp, gp2, hsp,
-                           mask, maskd, idxi, idxj, nmol, molsize,
-                           w,
-                           nHeavy,
-                           nHydro)
-    
-    # G sym is 1c-2e and 2c-2e of symmetric part of guess density
-    # pack 2c-2e part to standard shape of (norb, norb)
-    G_sym = pack(G_sym, nHeavy, nHydro)
-    # G_tot = build_G_antisym(device, V_ao, V_ao_asym, G_sym,
-    #                         gss, gsp, gpp, gp2, hsp,
-    #                         mask, maskd, idxi, idxj, nmol, molsize,
-    #                         w, 
-    #                         mol,
-    #                         nHeavy,
-    #                         nHydro)
-    
-   # print('G_tot.shape', G_tot.shape)
-   # print('G_tot\n', G_tot)                  
-    # build_G_antisym returns both sym and antisym!
-    # TODO: refactor into: 2c-2e antisym, 1c-2e antisym
-    # TODO: vectorize 1c-2e antisym, avoid ugly loops
-    #! remember about making 2c-2e diagonal 0
-
-    # print('G total \n', G_tot)
-    
-    # print('============================================')
-    # print('Converting Gao full back into MO basis')
-    G_mo = ao2mo(device, N_cis, G_sym, mol, full=True) # G in MO basis #! [0] not batched yet
-
-    # print('G_mo.shape', G_mo.shape)
-    # print('G_mo\n', G_mo)
-    
-    # multiply by MO differencies
-    # G_mo = mult_by_gap(G_mo, N_cis, mol, V_orig)
-
-
-    return G_mo
-
-
-def mult_by_gap(G_mo, N_cis, mol, V_orig):
-    
-    # print('eta ORIG FASR', eta_orig)
-    # print('G_mo\n', G_mo)
-
-    nmol = mol.nmol # TODO move as ragument
-    
-    occ_idx = torch.arange(int(mol.nocc))
-    virt_idx = torch.arange(int(mol.nocc), int(mol.norb))
-
-    print('occ_idx\n', occ_idx)
-    print('virt_idx\n', virt_idx)
-    
-    combined_idx = torch.cartesian_prod(occ_idx, virt_idx)  # combinations similar to itertools
-    print('combined_idx\n', combined_idx)
-    print('combined_idx shape', combined_idx.shape)
-    
-    mo_diff = mol.e_mo[combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]  # difference between virtual and occupied
-    # print('mo diff', mo_diff)                                                                         # see how elements of A matrix are defined in any CIS paper
-                                                                             # Aia,jb=δijδab(ϵa−ϵi)+⟨aj||ib⟩
-    mo_kronecker = torch.zeros((N_cis * 2), dtype=torch.float64)
-    mo_kronecker[:N_cis] = (mo_diff * eta_orig) 
-    
-
-    G_mo += mo_kronecker 
-    # print('mo_kronecker\n', mo_kronecker)
-    # print('G_mo AFTER FAST', G_mo)
-    return G_mo
-
 def build_G_sym(device, M_ao,
                 gss, gsp, gpp, gp2, hsp,
                 mask, maskd, idxi, idxj, nmol, molsize,
@@ -421,48 +200,11 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
                     nHydro,
                     nHeavy):
 
-      # TODO; figure how/why constants are defined in fock_skew
-      #!
-      #! CHECK
-      #!
-      # TODO: for batch likely need to figure max norb value and pad by 0s
-      # print('G SYM\n', G_sym)
-      # for (mol.norb*(mol.norb+1)//2) see nth triangular number formula 
-      eta_anti = torch.zeros(mol.nmol, (mol.norb*(mol.norb+1)//2), device=device)
-      print('** eta_anti.shape', eta_anti.shape)
-      indices = torch.zeros((nmol, 2, mol.norb*(mol.norb+1)//2)) 
-      print('** indices', indices.shape)
-      # indices_3d = torch.tril_indices(int(mol.norb), int(mol.norb), offset = 0)
-      print('** eta_ao.shape', eta_ao.shape)
-      for i in range(nmol): # torch.tril for 2d matrices only # TODO:  vectorize
-        indices[i] = torch.tril_indices(int(mol.norb[i]), int(mol.norb[i]), offset = 0) #TODO: likely to use molsize here
-      indices = indices.long()
-      print('** indices', indices.shape)
-      print('** indices[:,0]', indices[:,0])
-      # print('** eta_ao', eta_ao[:, indices[0], indices[1]])
-      eta_anti = 0.5 * (eta_ao[:, indices[:, 0], indices[:, 1]] - eta_ao[:, indices[:, 1], indices[:, 0]])
-      print('** eta_anti 0.5', eta_anti.shape)
-      print('** eta_anti 0.5', eta_anti)
-      
-      eta_anti_2d = torch.zeros((nmol, mol.norb, mol.norb), device='cpu') 
-      eta_anti_2d[:, indices[:, 1], indices[:, 0]] = -eta_anti 
-      eta_anti_2d = eta_anti_2d - eta_anti_2d.transpose(1,2)
-      
-      print('** eta_anti_2d', eta_anti_2d.shape)
-      print('** eta_anti_2d', eta_anti_2d)
-      
-      # ===== VECTORIZED ============
+      # #--------------- diagonal 1c-2e ( baded on original PYSEQM code by G. Zhou)
+      # vectorized to match nexmd 
       F = torch.zeros((nmol*molsize**2,4,4), device=device) # 0 Fock matrix to fill
-      # # TODO: feed params programmatically
-      
-      P0 = unpack(eta_anti_2d, nHydro, nHeavy, (nHeavy+nHydro)*4) # 
-    #   print('P0.shape', P0.shape)
-    #   print('P0\n', P0)
-      
-     # P0 = torch.unsqueeze(P0, 0) # add dimension
-      
-      # print('P0.shape', P0.shape)
-      # print('P0\n', P0)
+      P0 = unpack(eta_ao_asym, nHydro, nHeavy, (nHeavy+nHydro)*4) # 
+
       #---------------fill diagonal 1c-2e -------------------
       P = P0.reshape((nmol,molsize,4,molsize,4)) \
           .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
@@ -471,23 +213,12 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
       
       TMP = torch.zeros_like(F)
       
-      #! MODIFIED BY FNS
+      # modified by FNS
       for i in range(1,4):
-          #(p,p)
-          # ! TWO LINES BELOW COULD BE NEEDED, NOT SURE
-          # TMP[maskd,i,i] = P[maskd,0,0]*(gsp-hsp) + \
-          #                 + (Pptot[maskd] - P[maskd,i,i]) * (0.6*1.25*gp2-0.25*gpp)
-         # (s,p) = (p,s) upper triangle
-          # TMP[maskd,i,i] = 100
           TMP[maskd,0,i] = P[maskd,0,i]*(hsp - gsp)
       #(p,p*)
       for i,j in [(1,2),(1,3),(2,3)]:
           TMP[maskd,i,j] = 2*P[maskd,i,j]* (0.25*gpp - 0.6*1.25*gp2)
-
-    #   print('*** TMP *** \n', TMP)
-     # ! MAYBE SHOULD be ANTISYMMETRIZD TMP = 
-      # TMP = 0.5* ( TMP - TMP.T)
-      # F.add_(TMP)  
           
       TMP = TMP.reshape(nmol,molsize,molsize,4,4) \
              .transpose(2,3) \
@@ -495,27 +226,9 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
              
       TMP = pack(TMP, mol.nHeavy, mol.nHydro)
       TMP =  ( TMP - TMP.transpose(1,2))
-      print('*$$$ G_anti_1c2e\n', TMP)
-      # print('*** TMP *** \n', TMP.shape)
+      #--------------- diagonal 1c-2e -------
       
-      # G_anti_1c2e = torch.zeros(nmol, mol.norb, mol.norb)
-      # print('** G_anti_1c2e.shape', G_anti_1c2e.shape)
-      # print('** G_anti_1c2e\n', G_anti_1c2e)
-
-      
-      # G_anti_1c2e[:, indices[:, 1], indices[:, 0]] = -TMP
-      # G_anti_1c2e = G_anti_1c2e - G_anti_1c2e.transpose(1,2)
-      # # print('TMP.shape', TMP.shape)
-      # print('TMP\n', TMP)
-
-      # build 2c-2e part of antisymmetric G
-      # copied from FOCK
-      # TODO is eta_ao_asym equal to transfomrations above?
-      #P = P[...,1,1]+P[...,2,2]+P[...,3,3] #! MODIFIED
-      #-----------------fill 2c-2e integrals----------------
-      
-      
-      
+      #---------------- 2c-2e integrals----------------
       weight = torch.tensor([1.0,
                         2.0, 1.0,
                         2.0, 2.0, 1.0,
@@ -554,8 +267,6 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
       F0 = F.reshape(nmol,molsize,molsize,4,4) \
              .transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
-    #
-
 
       F0.add_(F0.triu(1).transpose(1,2))     
       
@@ -564,52 +275,29 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
       
       F0[:, rows, cols] *= -1
       F0[:, torch.eye(F0.shape[1]).bool()] *= -1
-      
-      # F0 is still symmetric, probably symmetrized above
-      # here we make it antisymmetric back
-    #   F0 = 2 * F0 
-      
-
-       #! BE WARNED, THIS iS TAKEN FROM OLD NEXMD, PYSEQM produces non-zero diagonal
-    #   F0 = F0
-      # print('G ANTISYM shape', F0.shape)
-      # print('G ANTISYM\n', F0*2)
-    
-    # BEFORE FINAL ASSEMBLY
-     
-      
       F0[0].diagonal().fill_(0)
-
-      print('G ANTISYM shape', F0.shape)
-      print('G ANTISYM\n', F0*2+TMP) 
-      # print('G ANTISYM\n', F0*2+TMP)
-     # G_sym = torch.unsqueeze(G_sym, 0)
-      print(' %%% G ANTISYM 2C = F0\n', F0*2)
-      G_full = G_sym +  F0*2 + TMP# summ of G_sym(sym 1c2e + 2c2e) + F0 (antisym 1c2e + 2c2e) 
-      print('!!! G_full shape', G_full.shape)
-
-      print('!!! G_full\n', G_full)
-
-      return G_full # ! WORKS FOR ONE ONLY
+      F0 = F0*2
+      # TMP = 1c-2e antisym Fock 
+      # F0  = 2c-2e antisym Fock
+      G_antisym =  F0 + TMP
+      
+      return G_antisym 
   
   
-def gen_V(device, mol, N_cis, N_rpa, n_V_start):
+def gen_V(device, mol, N_cis, n_V_start):
     
     # returns V (formerly vexp1) - guess vector for L-xi routine
     V = torch.zeros((mol.nmol, N_cis, N_cis), device=device)
 
-    # print(' NOCC', mol.nocc)
-    # print(' NVIRT', mol.nvirt)
+
     for m in range(mol.nmol):
-      # print('m in gen V', m)
-      # print()
-      
-      rrwork = torch.zeros(N_rpa * 4, device=device)
+
+      rrwork = torch.zeros(N_cis * 4, device=device) # TODO: VECTORIZE
       i = 0
       for ip in range(mol.nocc[m]):
           for ih in range(mol.nvirt[m]):
-            rrwork[i] = mol.e_mo[m][mol.nocc[m] + ih] - mol.e_mo[m][ip] # !Lancos vectors(i) ???
-            i += 1                                                #  TODO: [0] should be replaced by m batch index
+            rrwork[i] = mol.e_mo[m][mol.nocc[m] + ih] - mol.e_mo[m][ip] # 
+
      
       rrwork_sorted, indices = torch.sort(rrwork[:N_cis], descending=False, stable=True) # stable to preserve order of degenerate
       row_idx = torch.arange(0, int(N_cis), device=device)
@@ -623,3 +311,102 @@ def gen_V(device, mol, N_cis, N_rpa, n_V_start):
     return V
 
 # TODO: check whether L_xi should be regenerated during expansion each time or just part of it
+
+
+def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
+    
+    nmol = mol.nmol # TODO move as ragument
+    
+    occ_idx = torch.arange(int(mol.nocc))
+    virt_idx = torch.arange(int(mol.nocc), int(mol.norb))
+
+    print('occ_idx\n', occ_idx)
+    print('virt_idx\n', virt_idx)
+    
+    combined_idx = torch.cartesian_prod(occ_idx, virt_idx)  # combinations similar to itertools
+    print('combined_idx\n', combined_idx)
+    print('combined_idx shape', combined_idx.shape)
+    
+    mo_diff = mol.e_mo[0][combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]  # difference between virtual and occupied
+    # print('mo diff', mo_diff)                                                                         # see how elements of A matrix are defined in any CIS paper
+                                                                             # Aia,jb=δijδab(ϵa−ϵi)+⟨aj||ib⟩
+    mo_kronecker = torch.zeros((N_cis), dtype=torch.float64)
+    mo_kronecker[:N_cis] = (mo_diff * V_orig) 
+    
+
+    G_mo += mo_kronecker 
+    # print('mo_kronecker\n', mo_kronecker)
+    # print('G_mo AFTER FAST', G_mo)
+    return G_mo
+    # nmol = mol.nmol
+    # max_norb = max(mol.norb)
+    # max_nocc = max(mol.nocc)
+    # occ_idx_2d = [torch.arange(max_norb + 1, dtype=torch.float32) for mol.norb in mol.norb.tolist()]
+    # print('occ_idx_2d\n', occ_idx_2d)
+    # mol.nocc = torch.tensor([[3], [5]])
+    # occ_idx_2d = torch.zeros(nmol, int(torch.max(mol.nocc)))
+    # occ_idx_2d[:, :int(mol.nocc)] = torch.arange((int(mol.nocc)))
+    
+
+    
+    # torch.arange(nmol, int(torch.max(mol.nocc)))
+    # virt_idx_2d = torch.arange(nmol, int(torch.max(mol.nocc)), int(torch.max(mol.norb)))
+    
+    # occ_idx = torch.arange(int(torch.max(mol.nocc)))
+    
+    # virt_idx = torch.arange(int(torch.max(mol.nocc)), int(torch.max(mol.norb)))
+    
+    # print('occ_idx\n', occ_idx)
+    # print('occ index shape', occ_idx.shape)
+    # print('virt_idx\n', virt_idx)
+    # print('virt index shape', virt_idx.shape)
+    # print()
+
+    # occ_idx = torch.arange(int(torch.max(mol.nocc))) #.unsqueeze(0)
+    # virt_idx = torch.arange(int(torch.max(mol.nocc)), int(torch.max(mol.norb))) #.unsqueeze(0)
+
+    # combined_idx = torch.cartesian_prod(occ_idx, virt_idx)
+
+    # mo_diff = mol.e_mo[combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]
+
+    # mo_kronecker = torch.zeros((N_cis * 2, nmol), dtype=torch.float64)
+    # mo_kronecker[:N_cis] = (mo_diff * V_orig.unsqueeze(1).T)
+
+    G_mo += mo_kronecker
+
+    return G_mo
+
+#===================================================================
+
+
+
+
+
+def mult_by_gap_copy(device, G_mo, N_cis, mol, V_orig):
+    
+        print('eta ORIG FASR', eta_orig)
+        print('G_mo\n', G_mo)
+
+        nmol = mol.nmol # TODO move as ragument
+        
+        occ_idx = torch.arange(int(mol.nocc))
+        virt_idx = torch.arange(int(mol.nocc), int(mol.norb))
+
+        print('occ_idx\n', occ_idx)
+        print('virt_idx\n', virt_idx)
+        
+        combined_idx = torch.cartesian_prod(occ_idx, virt_idx)  # combinations similar to itertools
+        print('combined_idx\n', combined_idx)
+        print('combined_idx shape', combined_idx.shape)
+        
+        mo_diff = mol.e_mo[combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]  # difference between virtual and occupied
+        # print('mo diff', mo_diff)                                                                         # see how elements of A matrix are defined in any CIS paper
+                                                                                 # Aia,jb=δijδab(ϵa−ϵi)+⟨aj||ib⟩
+        mo_kronecker = torch.zeros((N_cis * 2), dtype=torch.float64)
+        mo_kronecker[:N_cis] = (mo_diff * V_orig) 
+        
+
+        G_mo += mo_kronecker 
+        print('mo_kronecker\n', mo_kronecker)
+        print('G_mo AFTER FAST', G_mo)
+        return G_mo
