@@ -17,6 +17,9 @@ from seqm.seqm_functions.excited.orb_transform import mo2ao, ao2mo, decompose_to
 from seqm.seqm_functions.pack import pack, unpack
 
 dtype = torch.float64 # TODO feed as param
+# TODO: complete overhaul with vectorization, so we do not need loop for 
+# for i in range(V.shape[1]): 
+# L_xi[:,i] = form_cis(device, V[:,i], mol, N_cis, N_rpa)
 
 def form_cis(device, V, mol, N_cis, CIS = True):
     """
@@ -31,12 +34,14 @@ def form_cis(device, V, mol, N_cis, CIS = True):
     Parameters:
     - V (tensor): guess vector based on MO (0 and 1 only)
     - molecule (PYSEQM object): batch of molecules
-    - N_cis (int): dimension of CIS space, nocch*nvirt
+    - N_cis (int): dimension of CIS space, nocc*nvirt
     - CIS (bool, optional): CIS or TDHF (RPA) Defaults to True
     
     Returns:
       - G_tot_mo (torch.Tensor): column of CIS Hamiltonian in MO basis 
     """        
+    # TODO: feed semiempirical parameters programmatically for batch
+    #====================================================================
     gss = mol.parameters['g_ss']
     gsp = mol.parameters['g_sp']
     gpp = mol.parameters['g_pp']
@@ -55,14 +60,14 @@ def form_cis(device, V, mol, N_cis, CIS = True):
     
     V_orig = torch.clone(V)
     V_ao =  mo2ao(device, N_cis, V, mol)     # mo to ao basis (mo2site)
-    print('V_ao.shape', V_ao.shape)
-    print(V_ao)
+   #====================================================================
 
     V_ao_sym, V_ao_asym = decompose_to_sym_antisym(V_ao) # decompose guess in ao to sym and asym
     # Vxi - build 2e integrals in AO basis: G(guess density) in F = H_core + G
     # note density is split into sym and anisym matrices
     # sym is processed as padded 3d array in PYSEQM, see fock module 
     # antisym: 2c-2e works with modified PYSEQM routine; should be antisimmterized afterwards
+    # amtisym have weird undocumented constants in nexmd
     # antisym: 1c-2e (diagonal)
 
     #------------------symmetric (1c-2e + 2c-2e)------------------------------
@@ -90,7 +95,6 @@ def form_cis(device, V, mol, N_cis, CIS = True):
                                                          # G_tot_mo is a column of Hamiltonian 
                                                          # similar to L_xi in NEXMD
     
-    G_tot_mo = torch.squeeze(G_tot_mo, 0) #TODO: remove, for MRS23 only
     G_tot_mo = mult_by_gap(device, G_tot_mo, N_cis, mol, V_orig)
     
     return G_tot_mo
@@ -125,6 +129,8 @@ def build_G_sym(device, M_ao,
       Returns:
       - F0 (torch.Tensor): Fock matrix based on symmetric guess
       """
+      
+      #TODO: find a way to reuse HF routine from basics 
     
       F = torch.zeros((nmol*molsize**2,4,4), device=device) # 0 Fock matrix to fill
       P0 = unpack(M_ao, nHydro, nHeavy, (nHeavy+nHydro)*4) # 
@@ -199,6 +205,8 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
                     mol,
                     nHydro,
                     nHeavy):
+
+      #TODO: find a way to reuse HF routine from basics; note basic PYSEQM cannot do antisym density matrix yet
 
       # #--------------- diagonal 1c-2e ( baded on original PYSEQM code by G. Zhou)
       # vectorized to match nexmd 
@@ -286,12 +294,10 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
   
 def gen_V(device, mol, N_cis, n_V_start):
     
-    
     # returns V (formerly vexp1) - guess vector for L-xi routine
     """
     Returns V (formerly vexp1) - guess vector based on MOs (L-xi) routine
     
-
     Parameters:
     device (torch.device): device to store the tensor
     mol (seqmols object): molecule object
@@ -301,27 +307,23 @@ def gen_V(device, mol, N_cis, n_V_start):
     Returns:
     V (torch.tensor): guess vector 
     """
-    V = torch.zeros((mol.nmol, N_cis, N_cis), device=device)
+    
+    # TODO: VECTORIZE and add batch mode 
+    V = torch.zeros((N_cis, N_cis), device=device) #  V = torch.zeros((mol.mnol, N_cis, N_cis) .. in batch mode
 
-
-    for m in range(mol.nmol):
-
-      rrwork = torch.zeros(N_cis * 4, device=device) # TODO: VECTORIZE
-      i = 0
-      for ip in range(mol.nocc[m]):
-          for ih in range(mol.nvirt[m]):
-            rrwork[i] = mol.e_mo[m][mol.nocc[m] + ih] - mol.e_mo[m][ip] # 
-
+    rrwork = torch.zeros(N_cis * 4, device=device) 
+    i = 0
+    for ip in range(mol.nocc[0]): # all [0] indices should be come moelcule indices in batch mode 
+        for ih in range(mol.nvirt[0]):
+          rrwork[i] = mol.e_mo[0][mol.nocc[0] + ih] - mol.e_mo[0][ip] # 
+          i += 1    
      
-      rrwork_sorted, indices = torch.sort(rrwork[:N_cis], descending=False, stable=True) # stable to preserve order of degenerate
-      row_idx = torch.arange(0, int(N_cis), device=device)
-      col_idx = indices[:N_cis]
-      V[m, row_idx, col_idx] = 1.0    
+    rrwork_sorted, indices = torch.sort(rrwork[:N_cis], descending=False, stable=True) # stable to preserve order of degenerate
+    row_idx = torch.arange(0, int(N_cis), device=device)
+    col_idx = indices[:N_cis]
+    V[row_idx, col_idx] = 1.0    
                               
-    V = V[:, :,  :n_V_start] # TODO: fix to initially generate no more than n_V_start
-    print(" == GEN V ==")
-    print('V shape', V.shape)
-    print('V\n', V)                               
+    V = V[:,  :n_V_start] # TODO: fix to initially generate no more than n_V_start                
     return V
 
 # TODO: check whether L_xi should be regenerated during expansion each time or just part of it
@@ -342,17 +344,20 @@ def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
     Returns:
     G_mo (torch.tensor): updated V 
     """
-    nmol = mol.nmol # TODO move as ragument
+    #TODO: add batch mode for nmol > 1
+    # alredy vectorized, loops were slowing down the code by 95%
+    
+    nmol = mol.nmol 
     
     occ_idx = torch.arange(int(mol.nocc))
     virt_idx = torch.arange(int(mol.nocc), int(mol.norb))
 
-    print('occ_idx\n', occ_idx)
-    print('virt_idx\n', virt_idx)
+    # print('occ_idx\n', occ_idx)
+    # print('virt_idx\n', virt_idx)
     
     combined_idx = torch.cartesian_prod(occ_idx, virt_idx)  # combinations similar to itertools
-    print('combined_idx\n', combined_idx)
-    print('combined_idx shape', combined_idx.shape)
+    # print('combined_idx\n', combined_idx)
+    # print('combined_idx shape', combined_idx.shape)
     
     mo_diff = mol.e_mo[0][combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]  # difference between virtual and occupied
     # print('mo diff', mo_diff)                                                                         # see how elements of A matrix are defined in any CIS paper
@@ -364,73 +369,5 @@ def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
     # print('mo_kronecker\n', mo_kronecker)
     # print('G_mo AFTER FAST', G_mo)
     return G_mo
-    # nmol = mol.nmol
-    # max_norb = max(mol.norb)
-    # max_nocc = max(mol.nocc)
-    # occ_idx_2d = [torch.arange(max_norb + 1, dtype=torch.float32) for mol.norb in mol.norb.tolist()]
-    # print('occ_idx_2d\n', occ_idx_2d)
-    # mol.nocc = torch.tensor([[3], [5]])
-    # occ_idx_2d = torch.zeros(nmol, int(torch.max(mol.nocc)))
-    # occ_idx_2d[:, :int(mol.nocc)] = torch.arange((int(mol.nocc)))
-    
 
-    
-    # torch.arange(nmol, int(torch.max(mol.nocc)))
-    # virt_idx_2d = torch.arange(nmol, int(torch.max(mol.nocc)), int(torch.max(mol.norb)))
-    
-    # occ_idx = torch.arange(int(torch.max(mol.nocc)))
-    
-    # virt_idx = torch.arange(int(torch.max(mol.nocc)), int(torch.max(mol.norb)))
-    
-    # print('occ_idx\n', occ_idx)
-    # print('occ index shape', occ_idx.shape)
-    # print('virt_idx\n', virt_idx)
-    # print('virt index shape', virt_idx.shape)
-    # print()
-
-    # occ_idx = torch.arange(int(torch.max(mol.nocc))) #.unsqueeze(0)
-    # virt_idx = torch.arange(int(torch.max(mol.nocc)), int(torch.max(mol.norb))) #.unsqueeze(0)
-
-    # combined_idx = torch.cartesian_prod(occ_idx, virt_idx)
-
-    # mo_diff = mol.e_mo[combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]
-
-    # mo_kronecker = torch.zeros((N_cis * 2, nmol), dtype=torch.float64)
-    # mo_kronecker[:N_cis] = (mo_diff * V_orig.unsqueeze(1).T)
-
-    # G_mo += mo_kronecker
-
-    # return G_mo
-
-#===================================================================
-
-
-
-def mult_by_gap_copy(device, G_mo, N_cis, mol, V_orig):
-    
-        print('eta ORIG FASR', eta_orig)
-        print('G_mo\n', G_mo)
-
-        nmol = mol.nmol # TODO move as ragument
-        
-        occ_idx = torch.arange(int(mol.nocc))
-        virt_idx = torch.arange(int(mol.nocc), int(mol.norb))
-
-        print('occ_idx\n', occ_idx)
-        print('virt_idx\n', virt_idx)
-        
-        combined_idx = torch.cartesian_prod(occ_idx, virt_idx)  # combinations similar to itertools
-        print('combined_idx\n', combined_idx)
-        print('combined_idx shape', combined_idx.shape)
-        
-        mo_diff = mol.e_mo[combined_idx[:, 1]] - mol.e_mo[0][combined_idx[:, 0]]  # difference between virtual and occupied
-        # print('mo diff', mo_diff)                                                                         # see how elements of A matrix are defined in any CIS paper
-                                                                                 # Aia,jb=δijδab(ϵa−ϵi)+⟨aj||ib⟩
-        mo_kronecker = torch.zeros((N_cis * 2), dtype=torch.float64)
-        mo_kronecker[:N_cis] = (mo_diff * V_orig) 
-        
-
-        G_mo += mo_kronecker 
-        print('mo_kronecker\n', mo_kronecker)
-        print('G_mo AFTER FAST', G_mo)
-        return G_mo
+   
