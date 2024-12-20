@@ -20,10 +20,17 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
     #       valence shell charge for H, tore[6]=4, valence shell charge for C
 
     tore = const.tore
+<<<<<<< HEAD
 #     print('tore',tore)
     
     qn = const.qn
 #     print('qn', qn)
+=======
+    print('tore',tore)
+    
+    qn = const.qn
+    print('qn', qn)
+>>>>>>> 95cfddc (davidson dev)
     
     hpp = 0.5*(gpp-gp2)
     qn0=qn[Z]
