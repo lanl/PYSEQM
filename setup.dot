@@ -1,8 +1,0 @@
-digraph G {
-    graph [rankdir=TB, clusterrank="local"];
-    subgraph cluster_G {
-
-        graph [style="filled,rounded",fillcolor="#80808018", label=""];
-        setup [label="setup", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="0"];
-    }
-    }
