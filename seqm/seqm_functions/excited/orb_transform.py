@@ -16,14 +16,16 @@ def mo2ao(device, N_cis, V_mo, mol):
     Returns:
     - V_ao (torch.Tensor): Guess in AO basis of shape (nmol, norb, norb).
     """
-
-    V_mo = V_mo.view(mol.nmol, -1, mol.nvirt) # reshape V[:, :, i], column, to 2d in batch of mols
-    V_mo_tmp = torch.zeros((mol.nmol, mol.norb, mol.norb), device=device) # temp storage, presumably faster than padding
+    # mol.C_mo = mol.C_mo[0]
+    V_mo = V_mo.view(-1, mol.nvirt) # reshape V[:, :, i], column, to 2d in batch of mols
+    print('V_mo', V_mo.shape)
+    V_mo_tmp = torch.zeros((mol.norb, mol.norb), device=device) # temp storage, presumably faster than padding
+    print('V_mo_tmp', V_mo_tmp.shape)
+    V_ao = V_mo @ mol.C_mo[0][:, mol.nocc:mol.norb].transpose(0,1) # operations on |X|, |Y| from RPA is ignored for now
+    print("V_ao", V_ao.shape)
+    V_mo_tmp[h :mol.nocc] = V_ao
     
-    V_ao = V_mo @ mol.C_mo[:, :, mol.nocc:mol.norb].transpose(1,2) # operations on |X|, |Y| from RPA is ignored for now
-    V_mo_tmp[:, :mol.nocc] = V_ao
-    
-    V_ao = mol.C_mo @ V_mo_tmp
+    V_ao = mol.C_mo[0] @ V_mo_tmp
 
     return V_ao
 
@@ -43,9 +45,9 @@ def ao2mo(device, N_cis, G_ao, mol):
     - G_mo: ERI matrix in MO basis
     """
 
-    dgemm1 = G_ao.transpose(1,2) @ mol.C_mo
-    dgemm2 =  mol.C_mo[:, :, mol.nocc:mol.norb].transpose(1,2) @ dgemm1[:, :, :mol.nocc]
-    G_mo = dgemm2.transpose(1,2).flatten()
+    dgemm1 = G_ao.transpose(0,1) @ mol.C_mo
+    dgemm2 =  mol.C_mo[:, mol.nocc:mol.norb].transpose(0,1) @ dgemm1[:, :mol.nocc]
+    G_mo = dgemm2.transpose(0,1).flatten()
 
     return G_mo
 

@@ -301,24 +301,21 @@ def gen_V(device, mol, N_cis, n_V_start):
     Returns:
     V (torch.tensor): guess vector 
     """
-    V = torch.zeros((mol.nmol, N_cis, N_cis), device=device)
+    V = torch.zeros((N_cis, N_cis), device=device)
 
-
-    for m in range(mol.nmol):
-
-      rrwork = torch.zeros(N_cis * 4, device=device) # TODO: VECTORIZE
-      i = 0
-      for ip in range(mol.nocc[m]):
-          for ih in range(mol.nvirt[m]):
-            rrwork[i] = mol.e_mo[m][mol.nocc[m] + ih] - mol.e_mo[m][ip] # 
-
-     
-      rrwork_sorted, indices = torch.sort(rrwork[:N_cis], descending=False, stable=True) # stable to preserve order of degenerate
-      row_idx = torch.arange(0, int(N_cis), device=device)
-      col_idx = indices[:N_cis]
-      V[m, row_idx, col_idx] = 1.0    
+    rrwork = torch.zeros(N_cis * 4, device=device) # TODO: VECTORIZE
+    i = 0
+    for ip in range(mol.nocc):
+        for ih in range(mol.nvirt):
+          rrwork[i] = mol.e_mo[0][mol.nocc + ih] - mol.e_mo[0][ip] # 
+          i += 1  
+    
+    rrwork_sorted, indices = torch.sort(rrwork[:N_cis], descending=False, stable=True) # stable to preserve order of degenerate
+    row_idx = torch.arange(0, int(N_cis), device=device)
+    col_idx = indices[:N_cis]
+    V[row_idx, col_idx] = 1.0    
                               
-    V = V[:, :,  :n_V_start] # TODO: fix to initially generate no more than n_V_start
+    V = V[:,  :n_V_start] # TODO: fix to initially generate no more than n_V_start
     print(" == GEN V ==")
     print('V shape', V.shape)
     print('V\n', V)                               
@@ -411,7 +408,7 @@ def mult_by_gap_copy(device, G_mo, N_cis, mol, V_orig):
         print('eta ORIG FASR', eta_orig)
         print('G_mo\n', G_mo)
 
-        nmol = mol.nmol # TODO move as ragument
+        nmol = mol.nmol # TODO move as argument
         
         occ_idx = torch.arange(int(mol.nocc))
         virt_idx = torch.arange(int(mol.nocc), int(mol.norb))
