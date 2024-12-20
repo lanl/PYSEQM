@@ -205,7 +205,8 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
                     mol,
                     nHydro,
                     nHeavy):
-
+  
+      # all params are similar to build_G_sym but still needs a good docstring after refactor
       #TODO: find a way to reuse HF routine from basics; note basic PYSEQM cannot do antisym density matrix yet
 
       # #--------------- diagonal 1c-2e ( baded on original PYSEQM code by G. Zhou)
@@ -294,9 +295,9 @@ def build_G_antisym(device, eta_ao, eta_ao_asym, G_sym,
   
 def gen_V(device, mol, N_cis, n_V_start):
     
-    # returns V (formerly vexp1) - guess vector for L-xi routine
     """
     Returns V (formerly vexp1) - guess vector based on MOs (L-xi) routine
+    # try to avoid nexmd variable names - they are very hard to read 
     
     Parameters:
     device (torch.device): device to store the tensor
@@ -344,6 +345,7 @@ def mult_by_gap(device, G_mo, N_cis, mol, V_orig):
     Returns:
     G_mo (torch.tensor): updated V 
     """
+    # works for 1 mol right now, eg mol.e_mo[0]
     #TODO: add batch mode for nmol > 1
     # alredy vectorized, loops were slowing down the code by 95%
     
