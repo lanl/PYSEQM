@@ -16,8 +16,8 @@ else:
 
 ### create molecule object:
 species = torch.as_tensor([[8,6,1,1],
-                           [8,6,1,1],
-                           [8,8,6,0]
+                           # [8,6,1,1],
+                           # [8,8,6,0]
                            ], # zero-padding for batching
                           dtype=torch.int64, device=device)
 
@@ -28,18 +28,18 @@ coordinates = torch.tensor([
                                [1.82,    0.94,    0.00],
                                [1.81,   -0.93,    -0.20]
                               ],
-                              [
-                               [0.00,    0.00,    0.00],
-                               [1.22,    0.00,    0.00],
-                               [1.82,    0.94,    0.00],
-                               [1.82,   -0.94,    0.00]
-                              ],
-                              [
-                               [0.00,    0.00,    0.00],
-                               [1.23,    0.00,    0.00],
-                               [1.82,    0.94,    0.00],
-                               [0.0,0.0,0.0]            # zero-padding for batching
-                              ]
+                              # [
+                              #  [0.00,    0.00,    0.00],
+                              #  [1.22,    0.00,    0.00],
+                              #  [1.82,    0.94,    0.00],
+                              #  [1.82,   -0.94,    0.00]
+                              # ],
+                              # [
+                              #  [0.00,    0.00,    0.00],
+                              #  [1.23,    0.00,    0.00],
+                              #  [1.82,    0.94,    0.00],
+                              #  [0.0,0.0,0.0]            # zero-padding for batching
+                              # ]
                             ], device=device)
 
 const = Constants().to(device)
@@ -62,6 +62,7 @@ seqm_parameters = {
                    'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
+                   'excited_states': [True,3]
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -73,14 +74,14 @@ esdriver = Electronic_Structure(seqm_parameters).to(device)
 # esdriver(molecules)
 esdriver(molecules,analytical_gradient=[True,'numerical'])
 # esdriver(molecules,analytical_gradient=[True,'analytical'])
-force = molecules.force
-print(f'Force is\n{force}')
-analytic_grad = molecules.ground_analytical_gradient
-esdriver(molecules)
-force = molecules.force
-print(f'Force is\n{force}')
-if analytic_grad is not None:
-    print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force+analytic_grad))}')
-
+# force = molecules.force
+# print(f'Force is\n{force}')
+# analytic_grad = molecules.ground_analytical_gradient
+# esdriver(molecules)
+# force = molecules.force
+# print(f'Force is\n{force}')
+# if analytic_grad is not None:
+#     print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force+analytic_grad))}')
+#
 print(' Total Energy (eV):\n', molecules.Etot)
 print('\n Electronic Energy (eV): ', molecules.Eelec)

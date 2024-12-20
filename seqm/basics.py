@@ -6,6 +6,7 @@ from torch.autograd import grad
 from .seqm_functions.constants import ev
 from .seqm_functions.pack import pack
 from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
+from .seqm_functions.rcis import rcis
 
 import os
 import time
@@ -414,6 +415,8 @@ class Energy(torch.nn.Module):
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
+        self.excited_states = seqm_parameters.get('excited_states', [False])
+
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
@@ -451,8 +454,6 @@ class Energy(torch.nn.Module):
         
         F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
-        
-        
         
         
         if self.eig:
@@ -607,6 +608,9 @@ class Energy(torch.nn.Module):
                 if torch.cuda.is_available(): torch.cuda.synchronize()
                 t1 = time.time()
                 molecule.const.timing["Force"].append(t1 - t0)
+
+        if self.excited_states[0]:
+            rcis(molecule,w,e,0)
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
