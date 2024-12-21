@@ -2,6 +2,7 @@ import torch
 def orthogonalize_matrix(U, eps=1e-15):
     
     #TODO: rewrite and vectorize - code taken from github
+    #https://gist.github.com/iizukak/1287876
     """
     Orthogonalizes the matrix U (d x n) using Gram-Schmidt Orthogonalization.
     If the columns of U are linearly dependent with rank(U) = r, the last n-r columns 
