@@ -4,18 +4,19 @@ from seqm.seqm_functions.pack import packone, unpackone
 
 def rcis(mol, w, e_mo, nroots):
     torch.set_printoptions(linewidth=200)
-    """TODO: Docstring for rcis.
+    """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
+       using davidson diagonalization
 
     :param mol: Molecule Orbital Coefficients
     :param w: 2-electron integrals
+    :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
-    :returns: CIS excited state energies and CIS eigenvectors
+    :returns: 
 
     """
 
     device = w.device
     dtype = w.dtype
-    # I'm going to build the full A matrix
 
     # TODO: norb, nvirt should be members of the Molecule class
     # Have to be careful here while batching because I assume norb = norb[0]. So all other molecules should in a batch of molecules
@@ -27,54 +28,107 @@ def rcis(mol, w, e_mo, nroots):
     nocc = mol.nocc[0]
     nvirt = norb - nocc
     nov = nocc * nvirt
-    nroots = nov
+    # nroots = nov
 
     # TODO: need to batch over many molecules at once. 
     # Right now I assume that we have only 1 molecule I'll use this index to get the data for the 1st molecule
     mol0=0
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     ea_ei = e_mo[mol0,nocc:norb].unsqueeze(0)-e_mo[mol0,:nocc].unsqueeze(1)
+    approxH = ea_ei.view(nov)
 
     # Make the davidson guess vectors 
-    _, sortedidx = torch.sort(ea_ei.view(nov), stable=True, descending=False) # stable to preserve order of degenerate
+    sorted_ediff, sortedidx = torch.sort(approxH, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
 
-    # TODO: If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
+    nroots_expand = nroots
+    # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
+    while nroots_expand < len(sorted_ediff) and (sorted_ediff[nroots_expand] - sorted_ediff[nroots_expand-1]) < 1e-5:
+        nroots_expand += 1
+    
+    if nroots_expand>nroots:
+        print(f"More roots will be calculated because of degeneracy in the MOs. NRoots changed from {nroots} to {nroots_expand}")
+        nroots = nroots_expand
 
-    maxSubspacesize = nov # TODO: User-defined/fixed
+    maxSubspacesize = getMaxSubspacesize(dtype,device,nov) # TODO: User-defined
     nStart = nroots # starting subspace size
     V = torch.zeros(maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
     V[torch.arange(nStart),sortedidx[:nStart]] = 1.0
 
-    max_iter = maxSubspacesize//nroots # TODO: User-defined/fixed
-    converged = False
+    max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
+    root_tol = 1e-6 # TODO: User-defined/fixed
     iter = 0
     vstart = 0
     vend = nroots 
 
-    while iter < max_iter and not converged: # Davidson loop
+    while iter < max_iter: # Davidson loop
         
-        if iter > 0: # skip first step, as initial V is orthonormal
-            V = orthogonalize(V,vstart,vend)
+        HV[vstart:vend,:] = matrix_vector_product(mol,V, w, ea_ei, vstart, vend)
+        # Make H by multiplying V.T * HV
+        # Option 1: direct multiplication
+        # H = torch.einsum('nia,ria->nr',V[:vend,:].view(vend,nocc,nvirt),HV[:vend,:].view(vend,nocc,nvirt))
 
-        HV[vstart:vend,:] = matrix_vector_product(mol,V, w, ea_ei, 0, maxSubspacesize)
-        H = torch.einsum('nia,ria->nr',V[:vend,:].view(vend,nocc,nvirt),HV[:vend,:].view(vend,nocc,nvirt))
+        # Option 2: avoid redundant multipication by only forming the new blocks of H coming from the guess vectors V[vstart:vend]
+        H = torch.empty(vend,vend,device=device,dtype=dtype)
+        if vstart == 0:
+            H[0:vend,0:vend] = torch.einsum('nia,ria->nr',V[:vend,:].view(vend,nocc,nvirt),HV[:vend,:].view(vend,nocc,nvirt))
+        else:
+            H[:vstart,:vstart] = Hold
+            H[vstart:vend,vstart:vend] = torch.einsum('nia,ria->nr',V[vstart:vend,:].view(vend-vstart,nocc,nvirt),HV[vstart:vend,:].view(vend-vstart,nocc,nvirt)) 
+            H[vstart:vend,:vstart] = torch.einsum('nia,ria->nr',V[vstart:vend,:].view(vend-vstart,nocc,nvirt),HV[0:vstart,:].view(vstart,nocc,nvirt)) 
+            H[:vstart,vstart:vend] = H[vstart:vend,:vstart].T
+        Hold = H[:vend,:vend]
+
+        # TODO: Check if Option 2 is necessary or go with Option 1 (much more simple and readable) by testing on big molecules 
 
         iter = iter + 1
 
         # Diagonalize the subspace hamiltonian
-        r_eval, r_evec = torch.linalg.eigh(H) # find eigenvalues and eigenvectors
-        # r_eval = r_eval.real
-        # r_evec = r_evec.real
-        r_eval, r_idx = torch.sort(r_eval, descending=False) # sort eigenvalues in ascending order
-        r_evec = r_evec[:, r_idx] # sort eigenvectors accordingly
-        e_val_n = r_eval[:vend] # keep only the lowest keep_n eigenvalues; full are still stored as e_val
-        e_vec_n = r_evec[:, :vend]
+        r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
+        r_eval, r_idx = torch.sort(r_eval, descending=False) # sort the eigenvalues in ascending order
+        e_val_n = r_eval[:nroots] # keep only the lowest nroots eigenvalues; 
+        # sort the eigenvectors accordingly
+        e_vec_n = r_evec[:, r_idx[:nroots]]
 
-        # TODO: better to allocate memory for residual outside the loop instead of making it anew every time in the loop?
-        residual = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:]) - torch.einsum('vr,vo->ro',e_vec_n,V[:vend,:])*e_val_n.unsqueeze(1)
+        amplitudes = torch.einsum('vr,vo->ro',e_vec_n,V[:vend,:])
+        residual = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:]) - amplitudes*e_val_n.unsqueeze(1)
+
         resid_norm = torch.norm(residual,dim=1)
-        print(f"DEBUGPRINT[21]: rcis.py:181: e={e_val_n}")
+        # print(f"DEBUGPRINT[23]: rcis.py:95: resid_norm={resid_norm}")
+
+        roots_not_converged = resid_norm > root_tol
+        n_not_converged = roots_not_converged.sum()
+
+        print(f"Iteration {iter}: Found {nroots-n_not_converged}/{nroots} states, Total Error: {torch.sum(resid_norm):.4e}")
+
+        if n_not_converged == 0:
+            break
+
+        if n_not_converged + vend > maxSubspacesize:
+            #  collapse the subspace
+            print("Maximum subspace size reached, increase the subspace size. Collapsing subspace")
+            V[:nroots,:] = amplitudes
+            # HV[:nroots,:] = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:]) 
+            vstart = 0
+            vend = nroots
+            continue
+
+        newsubspace = residual[roots_not_converged,:]/(e_val_n[roots_not_converged].unsqueeze(1) - approxH.unsqueeze(0))
+
+        vstart = vend
+        vend = orthogonalize_to_current_subspace(V, newsubspace, vend, root_tol)
+
+        if vstart == vend:
+            print('No new vectors to be added to the subspace because the new search directions are zero after orthonormalization')
+            raise Exception("Roots have not convered")
+
+        if iter == max_iter:
+            print("Maximum iterations reached but roots not converged")
+
+    print("")
+    for i, energy in enumerate(e_val_n, start=1):
+        print(f"  State {i}: {energy:.6f} eV")
+
 
 def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     # C: Molecule Orbital Coefficients
@@ -103,37 +157,22 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     norb = norb[0]
     nocc = mol.nocc[0]
     nvirt = norb - nocc
-    nov = nocc,nvirt
 
     # TODO: I'm using my knowledge from implementing CIS in Q-Chem where memory is column major and not row major.
     # In Q-Chem it made sense to have the guess vector V laid out as V_ai instead of V_ia. Check which is
     # better for pytorch.
     # I'll try V_ia now
     nnewRoots = vend-vstart
-    Via = V[vstart:vend+1,:].view(-1, nocc, nvirt)
-    # print(f"DEBUGPRINT[16]: rcis.py:31: V={V}")
-    # P_xi = C[:,:,nocc:] @ Vai @ C[:,:,:nocc].transpose(1,2)
-    # This below line will fail if the molecues in the batch have different norb, nocc etc
-    # CV = torch.einsum('nab,nrbc->nrac', C[:, :, nocc:], Vai)
-    # P_xi = torch.einsum('nrac,ncd->nrad', CV, C[:, :, :nocc].transpose(1, 2))
-    # del CV
-    # VC = torch.einsum('ria,ma->rim',  Via, C[0, :, nocc:])
-    # P_xi = torch.einsum('li,rim->rlm', C[0, :, :nocc],VC)
-    # del VC
+    Via = V[vstart:vend,:].view(-1, nocc, nvirt)
     P_xi = torch.einsum('mi,ria,na->rmn', C[0, :, :nocc],Via, C[0, :, nocc:])
-    print(f"C is {C.shape}")
-    print(f"Pxi is {P_xi.shape}")
-    # print(f"DEBUGPRINT[17]: rcis.py:35: P_xi={P_xi}")
-    # P0 = unpack(P_xi, mol.nHeavy, mol.nHydro, mol.molsize*4) #
+
     P0 = torch.stack([
         unpackone(P_xi[i], 4*nHeavy[i // nnewRoots], nHydro[i // nnewRoots], molsize * 4)
         for i in range(nnewRoots * nmol)
     ]).view(nmol*nnewRoots, molsize * 4, molsize * 4)
-    # print(f"DEBUGPRINT[18]: rcis.py:43: P0={P0}")
 
     # Compute the (ai||jb)X_jb
 
-    print("Debugging: Symmetrizing P0")
     P0_sym = 0.5*(P0 + P0.transpose(1,2))
 
     P = P0_sym.reshape(nnewRoots,molsize,4,molsize,4)\
@@ -208,18 +247,6 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     
     F2e1c = torch.zeros(nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
 
-    # F2e1c[...,0,0] = 0.5*P[:,maskd,0,0]*gss.unsqueeze(0) + Pptot[:,maskd]*(gsp-0.5*hsp).unsqueeze(0)
-    # for i in range(1,4):
-    #     #(p,p)
-    #     F2e1c[...,i,i] = P[:,maskd,0,0]*(gsp-0.5*hsp).unsqueeze(0) + 0.5*P[:,maskd,i,i]*gpp.unsqueeze(0) \
-    #             + (Pptot[:,maskd] - P[:,maskd,i,i]) * (1.25*gp2-0.25*gpp).unsqueeze(0)
-    #     #(s,p) = (p,s) upper triangle
-    #     F2e1c[...,0,i] = P[:,maskd,i,0]*(0.5*hsp).unsqueeze(0) + P[:,maskd,0,i]*(hsp - 0.5*gsp).unsqueeze(0)
-    #     F2e1c[...,i,0] = P[:,maskd,0,i]*(0.5*hsp).unsqueeze(0) + P[:,maskd,i,0]*(hsp - 0.5*gsp).unsqueeze(0)
-    # #(p,p*)
-    # for i,j in [(1,2),(1,3),(2,3),(2,1),(3,1),(3,2)]:
-    #     F2e1c[...,i,j] = P[:,maskd,i,j]* (0.5*gpp - gp2).unsqueeze(0) + P[:,maskd,j,i]* (0.25*gpp - 0.25*gp2).unsqueeze(0)
-
     F2e1c[...,0,0] = 0.5*P[:,maskd,0,0]*gss.unsqueeze(0) + Pptot[:,maskd]*(gsp-0.5*hsp).unsqueeze(0)
     for i in range(1,4):
         #(p,p)
@@ -237,15 +264,6 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
 
     F[:,mask_l] += sumK.transpose(2,3)
     
-    # Gsymao = F.reshape(nroots,molsize,molsize,4,4) \
-    #          .transpose(2,3) \
-    #          .reshape(nroots, 4*molsize, 4*molsize)
-    #
-    # Gsymao = torch.stack([
-    #     packone(Gsymao[i], 4*nHeavy[i // nroots], nHydro[i // nroots], norb)
-    #     for i in range(nroots * nmol)
-    # ])
-
     P0_antisym = 0.5*(P0 - P0.transpose(1,2))
     P_anti = P0_antisym.reshape(nnewRoots,molsize,4,molsize,4)\
               .transpose(2,3).reshape(nnewRoots,molsize*molsize,4,4)
@@ -289,26 +307,71 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     # since I assume that we have only 1 molecule I'll use this index to get the data for the 1st molecule
     mol0 = 0
 
-    # CAao = torch.einsum('ma,rmn->ran', C[mol0, :, nocc:], F0)
-    # A = torch.einsum('ran,ni->rai',CAao,C[mol0,:, :nocc ])
-    # CAao = torch.einsum('mi,rmn->rin', C[mol0, :, :nocc], F0)
-    # A = torch.einsum('rin,na->ria',CAao,C[mol0,:, nocc: ])*2.0
     # TODO: why am I multiplying by 2?
     A = torch.einsum('mi,rmn,na->ria', C[mol0, :, :nocc], F0,C[mol0,:, nocc: ])*2.0
 
-    # Add (ea-ei) to the diagonal of A
-    # ea_ei = e_mo[mol0,nocc:norb].unsqueeze(1)-e_mo[mol0,:nocc].unsqueeze(0)
-    # A += Vai[mol0]*ea_ei.unsqueeze(0)
-    # A = torch.einsum('nai,rai->nr',Vai[mol0],A)
     A += Via*ea_ei.unsqueeze(0)
 
     return A.view(nnewRoots,-1)
     
-def orthogonalize(V,vstart,vend):
-    """TODO: Docstring for orthogonalize.
+def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
+    """Orthogonalizes the vectors in newsubspace against the original subspace in V
+       with Gram-Schmidt orthogonalization. We cannot use Modified-Gram-Schmidt because 
+       we want to keep the original subspace vectors the same
 
-    :arg1: TODO
-    :returns: TODO
+    :V: Original subspace vectors (with pre-allocated memory for new vectors)
+    :newsubspace: vectors that have to be orthonormalized
+    :vend: original subspace size
+    :tol: the tolerance for the norm of new vectors below which the vector will be discarded
+    :returns: vend: size of the subspace after adding in the new vectors 
 
     """
-    return V
+    for i in range(newsubspace.shape[0]):
+        vec = newsubspace[i]
+        projection = V[:vend] @ vec
+        vec -= projection @ V[:vend]
+
+        vecnorm = torch.norm(vec)
+        
+        if vecnorm > tol:
+            vec /= vecnorm
+
+            # reorthogonalize because dividing by the norm can make it numerically non-orthogonal
+            projection = V[:vend] @ vec
+            vec -= projection @ V[:vend]
+            vecnorm = torch.norm(vec)
+            
+            if vecnorm > tol:
+                V[vend] = vec / vecnorm
+                vend = vend + 1
+
+    return vend
+
+import psutil # to get the memory size
+
+def getMaxSubspacesize(dtype,device,nov):
+    """Calculate the maximum size of the subspace dimension 
+    based on available memory. The full subspace size is nov 
+    """
+
+    device = device.type
+    # Get available memory
+    if device == 'cpu':
+        available_memory = psutil.virtual_memory().available
+    elif device == 'cuda':
+        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda'))
+    else:
+        raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
+
+    bytes_per_element = torch.finfo(dtype).bits // 8  # Bytes per element
+    num_matrices = 2  # Number of big matrices that will take up a big chunk of memory: V, HV
+
+    # Define a memory fraction to use (e.g., 50% of available memory)
+    memory_fraction = 0.5
+    usable_memory = available_memory * memory_fraction
+
+    # Calculate maximum n based on memory
+    n_calculated = int(usable_memory // (nov * bytes_per_element * num_matrices))
+
+    # Ensure n does not exceed nmax
+    return min(n_calculated, nov)
