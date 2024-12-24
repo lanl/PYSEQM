@@ -61,6 +61,9 @@ def rcis(mol, w, e_mo, nroots):
     vstart = 0
     vend = nroots 
 
+    # TODO: Test if orthogonal or nonorthogonal version is more efficient
+    nonorthogonal = True # TODO: User-defined/fixed
+
     while iter < max_iter: # Davidson loop
         
         HV[vstart:vend,:] = matrix_vector_product(mol,V, w, ea_ei, vstart, vend)
@@ -84,11 +87,7 @@ def rcis(mol, w, e_mo, nroots):
         iter = iter + 1
 
         # Diagonalize the subspace hamiltonian
-        r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
-        r_eval, r_idx = torch.sort(r_eval, descending=False) # sort the eigenvalues in ascending order
-        e_val_n = r_eval[:nroots] # keep only the lowest nroots eigenvalues; 
-        # sort the eigenvectors accordingly
-        e_vec_n = r_evec[:, r_idx[:nroots]]
+        e_val_n, e_vec_n = get_subspace_eig(H,nroots,V,vend,nonorthogonal)
 
         amplitudes = torch.einsum('vr,vo->ro',e_vec_n,V[:vend,:])
         residual = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:]) - amplitudes*e_val_n.unsqueeze(1)
@@ -116,7 +115,14 @@ def rcis(mol, w, e_mo, nroots):
         newsubspace = residual[roots_not_converged,:]/(e_val_n[roots_not_converged].unsqueeze(1) - approxH.unsqueeze(0))
 
         vstart = vend
-        vend = orthogonalize_to_current_subspace(V, newsubspace, vend, root_tol)
+        if nonorthogonal:
+            newsubspace_norm = torch.norm(newsubspace,dim=1)
+            nonzero_newsubspace = newsubspace_norm > root_tol
+            vend = vstart + nonzero_newsubspace.sum()
+            V[vstart:vend] = newsubspace[nonzero_newsubspace]/newsubspace_norm[nonzero_newsubspace].unsqueeze(1)
+
+        else:
+            vend = orthogonalize_to_current_subspace(V, newsubspace, vend, root_tol)
 
         if vstart == vend:
             print('No new vectors to be added to the subspace because the new search directions are zero after orthonormalization')
@@ -328,8 +334,12 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     """
     for i in range(newsubspace.shape[0]):
         vec = newsubspace[i]
-        projection = V[:vend] @ vec
-        vec -= projection @ V[:vend]
+        # Instead of batch processing like below, it is more numerically stable to do it one by one 
+        # because vec is changed at each step
+        # projection = V[:vend] @ vec
+        # vec -= projection @ V[:vend]
+        for j in range(vend):
+            vec -= torch.dot(V[j], vec) * V[j]
 
         vecnorm = torch.norm(vec)
         
@@ -337,8 +347,10 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
             vec /= vecnorm
 
             # reorthogonalize because dividing by the norm can make it numerically non-orthogonal
-            projection = V[:vend] @ vec
-            vec -= projection @ V[:vend]
+            # projection = V[:vend] @ vec
+            # vec -= projection @ V[:vend]
+            for j in range(vend):
+                vec -= torch.dot(V[j], vec) * V[j]
             vecnorm = torch.norm(vec)
             
             if vecnorm > tol:
@@ -375,3 +387,46 @@ def getMaxSubspacesize(dtype,device,nov):
 
     # Ensure n does not exceed nmax
     return min(n_calculated, nov)
+
+def get_subspace_eig(H,nroots,V,vend,nonorthogonal=False):
+    
+    if nonorthogonal:
+        # Need to solve the generalized eigenvalue problem
+        # Method as described in Appendix A of J. Chem. Phys. 144, 174105 (2016) https://doi.org/10.1063/1.4947245
+
+        S = torch.einsum('ro,no->rn',V[:vend],V[:vend])
+        # S = 0.5*(S+S.T) # symmetrize for numerical stability
+        # Step 1: Calculate D^(-1/2)
+        D = torch.diag(S)  # Extract the diagonal elements of S
+        D_inv_sqrt = torch.diag(1.0 / torch.sqrt(D))
+
+        # Step 2: Compute D^(-1/2) S D^(-1/2) this is done to reduce the condition number of S
+        S_tilde = torch.einsum('ab,bc,cd->ad',D_inv_sqrt,S,D_inv_sqrt) # D_inv_sqrt @ S @ D_inv_sqrt
+
+        # Step 3: Cholesky decomposition of S_tilde
+        L = torch.linalg.cholesky(S_tilde)
+        L_inv_D_inv_sqrt = torch.linalg.solve_triangular(L,D_inv_sqrt,upper=False)
+        D_inv_sqrt_L_inv_T = L_inv_D_inv_sqrt.T
+
+        # Step 4: Compute the modified A matrix
+        A_tilde = torch.einsum('ab,bc,cd->ad',L_inv_D_inv_sqrt,H,D_inv_sqrt_L_inv_T)
+        # A_tilde = torch.linalg.inv(L) @ (D_inv_sqrt @ H @ D_inv_sqrt) @ torch.linalg.inv(L).T
+
+        # Step 5: Solve the standard eigenvalue problem A_tilde X = X λ
+        r_eval, X = torch.linalg.eigh(A_tilde)
+
+        # Step 6: Transform the eigenvectors back to the original problem
+        r_evec = D_inv_sqrt_L_inv_T @ X[:,:nroots]
+
+    else:
+        r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
+        r_evec = r_evec[:,:nroots]
+
+    # No need to sort the eigenvalues because torch.linalg.eigh return eigenvalues in ascending order
+    # r_eval, r_idx = torch.sort(r_eval, descending=False) # sort the eigenvalues in ascending order
+    # e_val_n = r_eval[:nroots] # keep only the lowest nroots eigenvalues; 
+    # sort the eigenvectors accordingly
+    # e_vec_n = r_evec[:, r_idx[:nroots]]
+    
+    r_eval = r_eval[:nroots] # keep only the lowest nroots eigenvalues; 
+    return r_eval, r_evec
