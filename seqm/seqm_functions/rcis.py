@@ -1,5 +1,6 @@
 import torch
 from seqm.seqm_functions.pack import packone, unpackone
+import warnings
 
 
 def rcis(mol, w, e_mo, nroots):
@@ -60,6 +61,7 @@ def rcis(mol, w, e_mo, nroots):
     iter = 0
     vstart = 0
     vend = nroots 
+    e_val_n = torch.empty(0,device=device,dtype=dtype)
 
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = True # TODO: User-defined/fixed
@@ -126,10 +128,10 @@ def rcis(mol, w, e_mo, nroots):
 
         if vstart == vend:
             print('No new vectors to be added to the subspace because the new search directions are zero after orthonormalization')
-            raise Exception("Roots have not convered")
+            warnings.warn("Roots have not convered")
 
         if iter == max_iter:
-            print("Maximum iterations reached but roots not converged")
+            warnings.warn("Maximum iterations reached but roots have not converged")
 
     print("")
     for i, energy in enumerate(e_val_n, start=1):
@@ -198,6 +200,7 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
 
     PA = (Pdiag_symmetrized[:,idxi][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).unsqueeze(-1)
     PB = (Pdiag_symmetrized[:,idxj][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).unsqueeze(-2)
+    del Pdiag_symmetrized
 
     #suma \sum_{mu,nu \in A} P_{mu, nu in A} (mu nu, lamda sigma) = suma_{lambda sigma \in B}
     #suma shape (npairs, 10)
@@ -207,7 +210,6 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     sumb = torch.sum(PB*w.unsqueeze(0),dim=3)
     #reshape back to (npairs 4,4)
     # as will use index add in the following part
-
     sumA = torch.zeros(PA.shape[0],w.shape[0],4,4,dtype=dtype, device=device)
     sumB = torch.zeros_like(sumA)
     sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = suma
@@ -219,6 +221,11 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     F.index_add_(1,maskd[idxi],sumB)
     #\sum_A
     F.index_add_(1,maskd[idxj],sumA)
+
+    del PA
+    del PB
+    del sumA
+    del sumB
 
 
     # off diagonal block part, check KAB in forck2.f
@@ -241,6 +248,8 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
             #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
             sumK[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(0),dim=(2,3))
     F.index_add_(1,mask,sumK)
+    F[:,mask_l] += sumK.transpose(2,3)
+    del Pp
     
     Pptot = P[...,1,1]+P[...,2,2]+P[...,3,3]
 
@@ -268,7 +277,8 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     F2e1c.add_(F2e1c.triu(1).transpose(2,3))
     F[:,maskd] += F2e1c
 
-    F[:,mask_l] += sumK.transpose(2,3)
+    del Pptot
+    del P
     
     P0_antisym = 0.5*(P0 - P0.transpose(1,2))
     P_anti = P0_antisym.reshape(nnewRoots,molsize,4,molsize,4)\
@@ -282,6 +292,8 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
             sumK[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(0),dim=(2,3))
     F.index_add_(1,mask,sumK)
     F[:,mask_l] -= sumK.transpose(2,3)
+    del Pp
+    del sumK
     
     F2e1c.zero_()
     for i in range(1,4):
@@ -293,6 +305,8 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
 
     F2e1c.add_(F2e1c.triu(1).transpose(2,3),alpha=-1.0)
     F[:,maskd] += F2e1c
+    del P_anti
+    del F2e1c
 
     # dummy = torch.zeros_like(F); dummy.index_add_(1,mask,sumK);dummy[:,mask_l]-= sumK.transpose(2,3);dummy[:,maskd] += F2e1c;
     # dummy = dummy.reshape(nroots,molsize,molsize,4,4) \
@@ -392,7 +406,7 @@ def get_subspace_eig(H,nroots,V,vend,nonorthogonal=False):
     
     if nonorthogonal:
         # Need to solve the generalized eigenvalue problem
-        # Method as described in Appendix A of J. Chem. Phys. 144, 174105 (2016) https://doi.org/10.1063/1.4947245
+        # Method as described in Appendix section 1 of J. Chem. Phys. 144, 174105 (2016) https://doi.org/10.1063/1.4947245
 
         S = torch.einsum('ro,no->rn',V[:vend],V[:vend])
         # S = 0.5*(S+S.T) # symmetrize for numerical stability
