@@ -5,7 +5,7 @@ from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
 
 import warnings
-warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore")
 
 torch.set_default_dtype(torch.float64)
 if torch.cuda.is_available():
@@ -62,17 +62,21 @@ seqm_parameters = {
                    'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': [True,3]
+                   'excited_states': [True,5]
                    }
 
+# State 1: 2.288381 eV
+# State 2: 5.535903 eV
+# State 3: 6.237278 eV
+# State 4: 7.630463 eV
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
 
 ### Create electronic structure driver:
 esdriver = Electronic_Structure(seqm_parameters).to(device)
 
 ### Run esdriver on molecules:
-# esdriver(molecules)
-esdriver(molecules,analytical_gradient=[True,'numerical'])
+esdriver(molecules)
+# esdriver(molecules,analytical_gradient=[True,'numerical'])
 # esdriver(molecules,analytical_gradient=[True,'analytical'])
 # force = molecules.force
 # print(f'Force is\n{force}')

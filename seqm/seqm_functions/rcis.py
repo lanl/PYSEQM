@@ -34,6 +34,10 @@ def rcis(mol, w, e_mo, nroots):
     # TODO: need to batch over many molecules at once. 
     # Right now I assume that we have only 1 molecule I'll use this index to get the data for the 1st molecule
     mol0=0
+
+    if nroots > nov:
+        raise Exception(f"Maximum number of roots for this molecule is {nov}. Reduce the requested number of roots")
+
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     ea_ei = e_mo[mol0,nocc:norb].unsqueeze(0)-e_mo[mol0,:nocc].unsqueeze(1)
     approxH = ea_ei.view(nov)
@@ -58,6 +62,7 @@ def rcis(mol, w, e_mo, nroots):
 
     max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
     root_tol = 1e-6 # TODO: User-defined/fixed
+    vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = 0
     vend = nroots 
@@ -66,7 +71,7 @@ def rcis(mol, w, e_mo, nroots):
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = True # TODO: User-defined/fixed
 
-    while iter < max_iter: # Davidson loop
+    while iter <= max_iter: # Davidson loop
         
         HV[vstart:vend,:] = matrix_vector_product(mol,V, w, ea_ei, vstart, vend)
         # Make H by multiplying V.T * HV
@@ -100,11 +105,6 @@ def rcis(mol, w, e_mo, nroots):
         roots_not_converged = resid_norm > root_tol
         n_not_converged = roots_not_converged.sum()
 
-        print(f"Iteration {iter}: Found {nroots-n_not_converged}/{nroots} states, Total Error: {torch.sum(resid_norm):.4e}")
-
-        if n_not_converged == 0:
-            break
-
         if n_not_converged + vend > maxSubspacesize:
             #  collapse the subspace
             print("Maximum subspace size reached, increase the subspace size. Collapsing subspace")
@@ -112,6 +112,8 @@ def rcis(mol, w, e_mo, nroots):
             # HV[:nroots,:] = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:]) 
             vstart = 0
             vend = nroots
+            if iter > max_iter:
+                warnings.warn("Maximum iterations reached but roots have not converged")
             continue
 
         newsubspace = residual[roots_not_converged,:]/(e_val_n[roots_not_converged].unsqueeze(1) - approxH.unsqueeze(0))
@@ -119,18 +121,18 @@ def rcis(mol, w, e_mo, nroots):
         vstart = vend
         if nonorthogonal:
             newsubspace_norm = torch.norm(newsubspace,dim=1)
-            nonzero_newsubspace = newsubspace_norm > root_tol
+            nonzero_newsubspace = newsubspace_norm > vector_tol
             vend = vstart + nonzero_newsubspace.sum()
             V[vstart:vend] = newsubspace[nonzero_newsubspace]/newsubspace_norm[nonzero_newsubspace].unsqueeze(1)
 
         else:
-            vend = orthogonalize_to_current_subspace(V, newsubspace, vend, root_tol)
+            vend = orthogonalize_to_current_subspace(V, newsubspace, vend, vector_tol)
 
-        if vstart == vend:
-            print('No new vectors to be added to the subspace because the new search directions are zero after orthonormalization')
-            warnings.warn("Roots have not convered")
-
-        if iter == max_iter:
+        roots_left = vend-vstart
+        print(f"Iteration {iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm):.4e}")
+        if roots_left==0:
+            break
+        if iter > max_iter:
             warnings.warn("Maximum iterations reached but roots have not converged")
 
     print("")
@@ -335,9 +337,9 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     return A.view(nnewRoots,-1)
     
 def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
-    """Orthogonalizes the vectors in newsubspace against the original subspace in V
+    """Orthogonalizes the vectors in the newsubspace against the original subspace 
        with Gram-Schmidt orthogonalization. We cannot use Modified-Gram-Schmidt because 
-       we want to keep the original subspace vectors the same
+       we want leave the original subspace vectors untouched
 
     :V: Original subspace vectors (with pre-allocated memory for new vectors)
     :newsubspace: vectors that have to be orthonormalized
@@ -348,8 +350,7 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     """
     for i in range(newsubspace.shape[0]):
         vec = newsubspace[i]
-        # Instead of batch processing like below, it is more numerically stable to do it one by one 
-        # because vec is changed at each step
+        # Instead of batch processing like below, it is more numerically stable to do it one by one in a loop
         # projection = V[:vend] @ vec
         # vec -= projection @ V[:vend]
         for j in range(vend):
@@ -402,7 +403,7 @@ def getMaxSubspacesize(dtype,device,nov):
     # Ensure n does not exceed nmax
     return min(n_calculated, nov)
 
-def get_subspace_eig(H,nroots,V,vend,nonorthogonal=False):
+def get_subspace_eig(H,nroots,V,vend,nonorthogonal):
     
     if nonorthogonal:
         # Need to solve the generalized eigenvalue problem
