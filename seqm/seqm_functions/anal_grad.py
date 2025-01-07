@@ -166,7 +166,7 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
 
 
 # @profile
-def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, parnuc, Z, beta, zetas,
+def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, parnuc, Z, beta, gam, zetas,
              zetap):
     """
     Calculate the gradient of the ground state SCF energy
@@ -197,48 +197,98 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
 
     # verify with finite difference
     delta = 1e-5
-    e1b_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    e2a_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    w_x = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
-    pair_grad = torch.zeros(rij.shape[0], 3, device=device, dtype=dtype)
+    # e1b_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
+    # e2a_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
+    # w_x = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
+    # pair_grad = torch.zeros(rij.shape[0], 3, device=device, dtype=dtype)
+    # for coord in range(3):
+    #     # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
+    #     Xij[:, coord] -= delta
+    #     rij_ = torch.norm(Xij, dim=1)
+    #     xij_ = Xij / rij_.unsqueeze(1)
+    #     rij_ = rij_ / a0
+    #     w_plus, e1b_plus, e2a_plus, rho0xi,rho0xj, _, _ = TETCI(const, idxi, idxj, ni, nj, xij_, rij_, Z, \
+    #                                     molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
+    #                                     molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
+    #                                     molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
+    #                                     molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
+    #                                     molecule.alp, molecule.chi, molecule.method)
+    #     gam_ = w_plus[:, 0, 0]
+    #     EnucAB_plus = pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij_, rho0xi, rho0xj, \
+    #                                       molecule.alp, molecule.chi, gam=gam_, method=method, parameters=parnuc)
+    #     Xij[:, coord] += 2.0 * delta
+    #     rij_ = torch.norm(Xij, dim=1)
+    #     xij_ = Xij / rij_.unsqueeze(1)
+    #     rij_ = rij_ / a0
+    #     w_minus, e1b_minus, e2a_minus, rho0xi,rho0xj, _, _ = TETCI(const, idxi, idxj, ni, nj, xij_, rij_, Z,\
+    #                                     molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
+    #                                     molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
+    #                                     molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
+    #                                     molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
+    #                                     molecule.alp, molecule.chi, molecule.method)
+    #     gam_ = w_minus[:, 0, 0]
+    #     EnucAB_minus = pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij_, rho0xi, rho0xj, \
+    #                                        molecule.alp, molecule.chi, gam=gam_, method=method, parameters=parnuc)
+    #     Xij[:, coord] -= delta
+    #
+    #     e1b_x[:, coord, ...] = (e1b_plus - e1b_minus) / (2.0 * delta)
+    #     e2a_x[:, coord, ...] = (e2a_plus - e2a_minus) / (2.0 * delta)
+    #     w_x[:, coord, ...] = (w_plus - w_minus) / (2.0 * delta)
+    #     pair_grad[:, coord] = (EnucAB_plus - EnucAB_minus) / (2.0 * delta)
+
+    # try another way of doing w_x by stacking
+    w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
+    e1b_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
+    e2a_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
         Xij[:, coord] -= delta
-        rij_ = torch.norm(Xij, dim=1)
-        xij_ = Xij / rij_.unsqueeze(1)
-        rij_ = rij_ / a0
-        w_plus, e1b_plus, e2a_plus, rho0xi,rho0xj, _, _ = TETCI(const, idxi, idxj, ni, nj, xij_, rij_, Z, \
-                                        molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
-                                        molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
-                                        molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
-                                        molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
-                                        molecule.alp, molecule.chi, molecule.method)
-        gam_ = w_plus[:, 0, 0]
-        EnucAB_plus = pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij_, rho0xi, rho0xj, \
-                                          molecule.alp, molecule.chi, gam=gam_, method=method, parameters=parnuc)
+        rij_plus = torch.norm(Xij, dim=1)
+        xij_plus = Xij / rij_plus.unsqueeze(1)
+        rij_plus = rij_plus / a0
+
         Xij[:, coord] += 2.0 * delta
-        rij_ = torch.norm(Xij, dim=1)
-        xij_ = Xij / rij_.unsqueeze(1)
-        rij_ = rij_ / a0
-        w_minus, e1b_minus, e2a_minus, rho0xi,rho0xj, _, _ = TETCI(const, idxi, idxj, ni, nj, xij_, rij_, Z,\
-                                        molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
-                                        molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
-                                        molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
-                                        molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
+        rij_minus = torch.norm(Xij, dim=1)
+        xij_minus = Xij / rij_minus.unsqueeze(1)
+        rij_minus = rij_minus / a0
+
+        idxi_double = torch.cat([idxi,idxi])
+        idxj_double = torch.cat([idxj,idxj])
+        rij_ = torch.cat([rij_plus, rij_minus])
+        xij_ = torch.cat([xij_plus, xij_minus])
+        Z_double = torch.cat([Z,Z])
+        ni_double = torch.cat([ni,ni])
+        nj_double = torch.cat([nj,nj])
+
+        w_, e1b_, e2a_, _,_, _, _ = TETCI(const, idxi_double, idxj_double, ni_double, nj_double, xij_, rij_, Z_double, \
+                                        make_double(molecule.parameters['zeta_s']), make_double(molecule.parameters['zeta_p']), make_double(molecule.parameters['zeta_d']),\
+                                        make_double(molecule.parameters['s_orb_exp_tail']),make_double( molecule.parameters['p_orb_exp_tail']),make_double( molecule.parameters['d_orb_exp_tail']),\
+                                        make_double(molecule.parameters['g_ss']), make_double(molecule.parameters['g_pp']), make_double(molecule.parameters['g_p2']), make_double(molecule.parameters['h_sp']),\
+                                        make_double(molecule.parameters['F0SD']), make_double(molecule.parameters['G2SD']), make_double(molecule.parameters['rho_core']),\
                                         molecule.alp, molecule.chi, molecule.method)
-        gam_ = w_minus[:, 0, 0]
-        EnucAB_minus = pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij_, rho0xi, rho0xj, \
-                                           molecule.alp, molecule.chi, gam=gam_, method=method, parameters=parnuc)
         Xij[:, coord] -= delta
 
-        e1b_x[:, coord, ...] = (e1b_plus - e1b_minus) / (2.0 * delta)
-        e2a_x[:, coord, ...] = (e2a_plus - e2a_minus) / (2.0 * delta)
-        w_x[:, coord, ...] = (w_plus - w_minus) / (2.0 * delta)
-        pair_grad[:, coord] = (EnucAB_plus - EnucAB_minus) / (2.0 * delta)
+        w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) / (2.0 * delta)
+        e1b_x_new[:, coord, ...] = (e1b_[:npairs]- e1b_[npairs:]) / (2.0 * delta)
+        e2a_x_new[:, coord, ...] = (e2a_[:npairs]- e2a_[npairs:]) / (2.0 * delta)
 
-    return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad,
+    # if not torch.allclose(w_x, w_x_new):
+    #     max_diff = torch.max(torch.abs(w_x - w_x_new)).item()
+    #     print(f"w_x and w_x_new are not equal. Max difference: {max_diff:.6e}")
+    # else:
+    #     print("w_x and w_x_new are equal.")
+
+
+    alpha = parnuc[0]
+    tore = const.tore  # Charges
+    ZAZB = tore[ni] * tore[nj]
+    pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x_new, method, parameters=parnuc)
+
+    return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x_new, e2a_x_new, w_x_new, pair_grad,
                                                 mask, maskd, idxi, idxj)
 
+def make_double(x):
+    return torch.cat([x,x])
 
 # def overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij):
 #     if torch.any(qn_int[ni]>1):
