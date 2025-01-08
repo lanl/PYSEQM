@@ -239,18 +239,18 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
     w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
     e1b_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
     e2a_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    ni_ = make_double(ni)
-    nj_ = make_double(nj)
-    Z_ = make_double(Z)
-    idxi_ = make_double(idxi)
-    idxj_ = make_double(idxj)
-    zeta_s_ = make_double(molecule.parameters['zeta_s'])
-    zeta_p_ = make_double(molecule.parameters['zeta_p'])
-    g_ss_ = make_double(molecule.parameters['g_ss'])
-    g_pp_ = make_double(molecule.parameters['g_pp'])
-    g_p2_ = make_double(molecule.parameters['g_p2'])
-    h_sp_ = make_double(molecule.parameters['h_sp'])
-    rho_core_ = make_double(molecule.parameters['rho_core'])
+    ni_ = repeat_tensor(ni)
+    nj_ = repeat_tensor(nj)
+    Z_ = repeat_tensor(Z)
+    idxi_ = repeat_tensor(idxi)
+    idxj_ = repeat_tensor(idxj)
+    zeta_s_ = repeat_tensor(molecule.parameters['zeta_s'])
+    zeta_p_ = repeat_tensor(molecule.parameters['zeta_p'])
+    g_ss_ = repeat_tensor(molecule.parameters['g_ss'])
+    g_pp_ = repeat_tensor(molecule.parameters['g_pp'])
+    g_p2_ = repeat_tensor(molecule.parameters['g_p2'])
+    h_sp_ = repeat_tensor(molecule.parameters['h_sp'])
+    rho_core_ = repeat_tensor(molecule.parameters['rho_core'])
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
         Xij[:, coord] -= delta
@@ -267,21 +267,8 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
         xij_ = torch.cat([xij_plus, xij_minus])
 
         # TODO: works for only s,p orbitals
-        w_, e1b_, e2a_, _, _, _, _ = TETCI(const, idxi_, idxj_, ni_,
-                                           nj_, xij_, rij_, Z_,
-                                           zeta_s_,
-                                           zeta_p_,
-                                           molecule.parameters['zeta_d'],
-                                           molecule.parameters['s_orb_exp_tail'],
-                                           molecule.parameters['p_orb_exp_tail'],
-                                           molecule.parameters['d_orb_exp_tail'],
-                                           g_ss_,
-                                           g_pp_,
-                                           g_p2_,
-                                           h_sp_,
-                                           molecule.parameters['F0SD'],
-                                           molecule.parameters['G2SD'],
-                                           rho_core_, molecule.alp, molecule.chi,
+        w_, e1b_, e2a_, _, _, _, _ = TETCI(const, idxi_, idxj_, ni_, nj_, xij_, rij_, Z_, zeta_s_, zeta_p_, None, None,
+                                           None, None, g_ss_, g_pp_, g_p2_, h_sp_, None, None, rho_core_, None, None,
                                            molecule.method)
         Xij[:, coord] -= delta
 
@@ -296,9 +283,7 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
 
     return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x_new, e2a_x_new, w_x_new, pair_grad,
                                                 mask, maskd, idxi, idxj)
-
-def make_double(x):
-    return torch.cat([x,x])
+repeat_tensor = lambda x : torch.cat([x,x])
 
 # def overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij):
 #     if torch.any(qn_int[ni]>1):
@@ -511,15 +496,15 @@ def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, ze
     #     )
     #     Xij[:, coord] -= delta
     #     overlap_KAB_x[:, coord, :, :] = (di_plus - di_minus) / (2.0 * delta)
-    overlap_pairs = make_double(rij) <= overlap_cutoff
+    overlap_pairs = repeat_tensor(rij) <= overlap_cutoff
     di_= torch.zeros(Xij.shape[0]*2, 4, 4, dtype=Xij.dtype, device=Xij.device)
     npairs = Xij.shape[0]
-    ni_ = make_double(ni)
-    nj_ = make_double(nj)
-    qn_int_ = make_double(qn_int)
-    zeta_ = make_double(zeta)
-    idxi_ = make_double(idxi)
-    idxj_ = make_double(idxj)
+    ni_ = repeat_tensor(ni)
+    nj_ = repeat_tensor(nj)
+    qn_int_ = repeat_tensor(qn_int)
+    zeta_ = repeat_tensor(zeta)
+    idxi_ = repeat_tensor(idxi)
+    idxj_ = repeat_tensor(idxj)
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
         Xij[:, coord] -= delta
