@@ -195,7 +195,6 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
     zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int)
 
-    # verify with finite difference
     delta = 1e-5
     # e1b_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
     # e2a_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
@@ -240,6 +239,18 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
     w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
     e1b_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
     e2a_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
+    ni_ = make_double(ni)
+    nj_ = make_double(nj)
+    Z_ = make_double(Z)
+    idxi_ = make_double(idxi)
+    idxj_ = make_double(idxj)
+    zeta_s_ = make_double(molecule.parameters['zeta_s'])
+    zeta_p_ = make_double(molecule.parameters['zeta_p'])
+    g_ss_ = make_double(molecule.parameters['g_ss'])
+    g_pp_ = make_double(molecule.parameters['g_pp'])
+    g_p2_ = make_double(molecule.parameters['g_p2'])
+    h_sp_ = make_double(molecule.parameters['h_sp'])
+    rho_core_ = make_double(molecule.parameters['rho_core'])
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
         Xij[:, coord] -= delta
@@ -252,32 +263,31 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
         xij_minus = Xij / rij_minus.unsqueeze(1)
         rij_minus = rij_minus / a0
 
-        idxi_double = torch.cat([idxi,idxi])
-        idxj_double = torch.cat([idxj,idxj])
         rij_ = torch.cat([rij_plus, rij_minus])
         xij_ = torch.cat([xij_plus, xij_minus])
-        Z_double = torch.cat([Z,Z])
-        ni_double = torch.cat([ni,ni])
-        nj_double = torch.cat([nj,nj])
 
-        w_, e1b_, e2a_, _,_, _, _ = TETCI(const, idxi_double, idxj_double, ni_double, nj_double, xij_, rij_, Z_double, \
-                                        make_double(molecule.parameters['zeta_s']), make_double(molecule.parameters['zeta_p']), make_double(molecule.parameters['zeta_d']),\
-                                        make_double(molecule.parameters['s_orb_exp_tail']),make_double( molecule.parameters['p_orb_exp_tail']),make_double( molecule.parameters['d_orb_exp_tail']),\
-                                        make_double(molecule.parameters['g_ss']), make_double(molecule.parameters['g_pp']), make_double(molecule.parameters['g_p2']), make_double(molecule.parameters['h_sp']),\
-                                        make_double(molecule.parameters['F0SD']), make_double(molecule.parameters['G2SD']), make_double(molecule.parameters['rho_core']),\
-                                        molecule.alp, molecule.chi, molecule.method)
+        # TODO: works for only s,p orbitals
+        w_, e1b_, e2a_, _, _, _, _ = TETCI(const, idxi_, idxj_, ni_,
+                                           nj_, xij_, rij_, Z_,
+                                           zeta_s_,
+                                           zeta_p_,
+                                           molecule.parameters['zeta_d'],
+                                           molecule.parameters['s_orb_exp_tail'],
+                                           molecule.parameters['p_orb_exp_tail'],
+                                           molecule.parameters['d_orb_exp_tail'],
+                                           g_ss_,
+                                           g_pp_,
+                                           g_p2_,
+                                           h_sp_,
+                                           molecule.parameters['F0SD'],
+                                           molecule.parameters['G2SD'],
+                                           rho_core_, molecule.alp, molecule.chi,
+                                           molecule.method)
         Xij[:, coord] -= delta
 
         w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) / (2.0 * delta)
         e1b_x_new[:, coord, ...] = (e1b_[:npairs]- e1b_[npairs:]) / (2.0 * delta)
         e2a_x_new[:, coord, ...] = (e2a_[:npairs]- e2a_[npairs:]) / (2.0 * delta)
-
-    # if not torch.allclose(w_x, w_x_new):
-    #     max_diff = torch.max(torch.abs(w_x - w_x_new)).item()
-    #     print(f"w_x and w_x_new are not equal. Max difference: {max_diff:.6e}")
-    # else:
-    #     print("w_x and w_x_new are equal.")
-
 
     alpha = parnuc[0]
     tore = const.tore  # Charges
@@ -466,41 +476,76 @@ from .constants import overlap_cutoff
 
 
 def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int):
-    overlap_pairs = rij <= overlap_cutoff
     delta = 1e-5  # TODO: Make sure this is a good delta (small enough, but still doesnt cause numerical instabilities)
-    di_plus = torch.zeros(Xij.shape[0], 4, 4, dtype=Xij.dtype, device=Xij.device)
-    di_minus = torch.clone(di_plus)
+    # overlap_pairs = rij <= overlap_cutoff
+    # di_plus = torch.zeros(Xij.shape[0], 4, 4, dtype=Xij.dtype, device=Xij.device)
+    # di_minus = torch.clone(di_plus)
+    # for coord in range(3):
+    #     # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
+    #     Xij[:, coord] -= delta
+    #     rij_ = torch.norm(Xij, dim=1)
+    #     xij_ = Xij / rij_.unsqueeze(1)
+    #     rij_ = rij_ / a0
+    #     di_plus[overlap_pairs] = diatom_overlap_matrix(
+    #         ni[overlap_pairs],
+    #         nj[overlap_pairs],
+    #         xij_[overlap_pairs],
+    #         rij_[overlap_pairs],
+    #         zeta[idxi][overlap_pairs],
+    #         zeta[idxj][overlap_pairs],
+    #         qn_int,
+    #     )
+    #     Xij[:, coord] += 2.0 * delta
+    #     rij_ = torch.norm(Xij, dim=1)
+    #     xij_ = Xij / rij_.unsqueeze(1)
+    #     rij_ = rij_ / a0
+    #
+    #     di_minus[overlap_pairs] = diatom_overlap_matrix(
+    #         ni[overlap_pairs],
+    #         nj[overlap_pairs],
+    #         xij_[overlap_pairs],
+    #         rij_[overlap_pairs],
+    #         zeta[idxi][overlap_pairs],
+    #         zeta[idxj][overlap_pairs],
+    #         qn_int,
+    #     )
+    #     Xij[:, coord] -= delta
+    #     overlap_KAB_x[:, coord, :, :] = (di_plus - di_minus) / (2.0 * delta)
+    overlap_pairs = make_double(rij) <= overlap_cutoff
+    di_= torch.zeros(Xij.shape[0]*2, 4, 4, dtype=Xij.dtype, device=Xij.device)
+    npairs = Xij.shape[0]
+    ni_ = make_double(ni)
+    nj_ = make_double(nj)
+    qn_int_ = make_double(qn_int)
+    zeta_ = make_double(zeta)
+    idxi_ = make_double(idxi)
+    idxj_ = make_double(idxj)
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
         Xij[:, coord] -= delta
-        rij_ = torch.norm(Xij, dim=1)
-        xij_ = Xij / rij_.unsqueeze(1)
-        rij_ = rij_ / a0
-        di_plus[overlap_pairs] = diatom_overlap_matrix(
-            ni[overlap_pairs],
-            nj[overlap_pairs],
-            xij_[overlap_pairs],
-            rij_[overlap_pairs],
-            zeta[idxi][overlap_pairs],
-            zeta[idxj][overlap_pairs],
-            qn_int,
-        )
-        Xij[:, coord] += 2.0 * delta
-        rij_ = torch.norm(Xij, dim=1)
-        xij_ = Xij / rij_.unsqueeze(1)
-        rij_ = rij_ / a0
+        rij_plus = torch.norm(Xij, dim=1)
+        xij_plus = Xij / rij_plus.unsqueeze(1)
+        rij_plus = rij_plus / a0
 
-        di_minus[overlap_pairs] = diatom_overlap_matrix(
-            ni[overlap_pairs],
-            nj[overlap_pairs],
+        Xij[:, coord] += 2.0 * delta
+        rij_minus = torch.norm(Xij, dim=1)
+        xij_minus = Xij / rij_minus.unsqueeze(1)
+        rij_minus = rij_minus / a0
+
+        rij_ = torch.cat([rij_plus, rij_minus])
+        xij_ = torch.cat([xij_plus, xij_minus])
+
+        di_[overlap_pairs] = diatom_overlap_matrix(
+            ni_[overlap_pairs],
+            nj_[overlap_pairs],
             xij_[overlap_pairs],
             rij_[overlap_pairs],
-            zeta[idxi][overlap_pairs],
-            zeta[idxj][overlap_pairs],
-            qn_int,
+            zeta_[idxi_][overlap_pairs],
+            zeta_[idxj_][overlap_pairs],
+            qn_int_,
         )
         Xij[:, coord] -= delta
-        overlap_KAB_x[:, coord, :, :] = (di_plus - di_minus) / (2.0 * delta)
+        overlap_KAB_x[:, coord, :, :] = (di_[:npairs] - di_[npairs:]) / (2.0 * delta)
 
     overlap_KAB_x[..., 0, 0] *= (beta[idxi, 0] + beta[idxj, 0]).unsqueeze(1)
     overlap_KAB_x[..., 0, 1:] *= (beta[idxi, 0:1] + beta[idxj, 1:2]).unsqueeze(1)
