@@ -37,6 +37,7 @@ def rcis(mol, w, e_mo, nroots):
 
     if nroots > nov:
         raise Exception(f"Maximum number of roots for this molecule is {nov}. Reduce the requested number of roots")
+    nstart = nroots+min(3,nov-nroots)
 
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     ea_ei = e_mo[mol0,nocc:norb].unsqueeze(0)-e_mo[mol0,:nocc].unsqueeze(1)
@@ -45,27 +46,28 @@ def rcis(mol, w, e_mo, nroots):
     # Make the davidson guess vectors 
     sorted_ediff, sortedidx = torch.sort(approxH, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
 
-    nroots_expand = nroots
+    nroots_expand = nstart
     # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
     while nroots_expand < len(sorted_ediff) and (sorted_ediff[nroots_expand] - sorted_ediff[nroots_expand-1]) < 1e-5:
         nroots_expand += 1
     
-    if nroots_expand>nroots:
-        print(f"More roots will be calculated because of degeneracy in the MOs. NRoots changed from {nroots} to {nroots_expand}")
-        nroots = nroots_expand
+    if nroots_expand>nstart:
+        # print(f"More roots will be calculated because of degeneracy in the MOs")
+        nstart = nroots_expand
+        # print(f"More roots will be calculated because of degeneracy in the MOs. NRoots changed from {nroots} to {nroots_expand}")
+        # nroots = nroots_expand
 
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov) # TODO: User-defined
-    nStart = nroots # starting subspace size
     V = torch.zeros(maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
-    V[torch.arange(nStart),sortedidx[:nStart]] = 1.0
+    V[torch.arange(nstart),sortedidx[:nstart]] = 1.0
 
     max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
     root_tol = 1e-6 # TODO: User-defined/fixed
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = 0
-    vend = nroots 
+    vend = nstart 
     e_val_n = torch.empty(0,device=device,dtype=dtype)
 
     # TODO: Test if orthogonal or nonorthogonal version is more efficient

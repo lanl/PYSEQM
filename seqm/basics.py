@@ -612,8 +612,8 @@ class Energy(torch.nn.Module):
                 molecule.const.timing["Force"].append(t1 - t0)
 
         if self.excited_states[0]:
-            # rcis(molecule,w,e,self.excited_states[1])
-            rcis_batch(molecule,w,e,self.excited_states[1])
+            rcis(molecule,w,e,self.excited_states[1])
+            # rcis_batch(molecule,w,e,self.excited_states[1])
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
