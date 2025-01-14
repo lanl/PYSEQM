@@ -2,7 +2,6 @@ import torch
 from seqm.seqm_functions.pack import packone, unpackone
 import warnings
 
-
 def rcis(mol, w, e_mo, nroots):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
@@ -66,6 +65,7 @@ def rcis(mol, w, e_mo, nroots):
 
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = True # TODO: User-defined/fixed
+    nonorthogonal = False # TODO: User-defined/fixed
 
     while iter <= max_iter: # Davidson loop
         

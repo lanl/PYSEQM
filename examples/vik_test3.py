@@ -13,50 +13,32 @@ else:
     device = torch.device('cpu')
 
 ### create molecule object:
-species = torch.as_tensor([
-                            # [8,1,1],
-                           [1,1,],
-                           # [1,1,],
-                           # [8,6,],
-                          # [8,6,1,1],
-                          # [8,8,6,0]
-                          ], # zero-padding for batching
+species = torch.as_tensor([[6,     6,     6,     6,     6,     6,     1,     1,     1,     1,     1,     1]] ,                           
                           dtype=torch.int64, device=device)
 
 coordinates = torch.tensor([
-                              [
-                               # [0.82,    0.04,    0.00],
-                               [1.82,    0.94,    0.00],
-                               [1.82,   -0.94,    0.00],
+                             [
+                               [ -35.894866 ,   9.288626 ,  10.054420], 
+                               [ -36.369609 ,   8.136872 ,   9.487425],
+                               [ -34.536331 ,   9.569570 ,   9.955502],
+                               [ -35.492308 ,   7.159723 ,   8.983842],
+                               [ -33.712643 ,   8.697458 ,   9.304412],
+                               [ -34.183340 ,   7.494548 ,   8.762036],
+                               [ -36.585465 ,   9.939934 ,  10.537961],
+                               [ -37.450824 ,   8.064607 ,   9.436016],                            
+                               [ -34.070057 ,  10.502494 ,  10.500065],                            
+                               [ -35.950748 ,   6.201235 ,   8.765212],                            
+                               [ -33.438373 ,   6.826374 ,   8.246956],                            
+                               [ -32.654911 ,   8.872607 ,   9.123019]
                               ],
-                              # [
-                              #  [1.82,    0.0,    0.00],
-                              #  [1.82,   -0.6633,    0.00],
-                              # ],
-                              # [
-                              #  [1.82,    0.94,    0.00],
-                              #  [1.82,   -0.94,    0.00],
-                              # ],
-                            #  [
-                            #   [0.00,    0.00,    0.00],
-                            #   [1.22,    0.00,    0.00],
-                             #  [1.82,    0.94,    0.00],
-                            #   [1.82,   -0.94,    0.00]
-                            #  ],
-                            #  [
-                            #   [0.00,    0.00,    0.00],
-                            #   [1.23,    0.00,    0.00],
-                            #   [1.82,    0.94,    0.00],
-                            #   [0.0,0.0,0.0]            # zero-padding for batching
-                            #  ]
-                            ], device=device)
+                           ], device=device)
 
 const = Constants().to(device)
 
 elements = [0]+sorted(set(species.reshape(-1).tolist()))
 
 seqm_parameters = {
-                   'method' : 'MNDO',  # AM1, MNDO, PM#
+                   'method' : 'AM1',  # AM1, MNDO, PM#
                    'scf_eps' : 1.0e-6,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
                    'scf_converger' : [2,0.0], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
@@ -69,10 +51,9 @@ seqm_parameters = {
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
-                   'uhf' : True,
                    # 'analytical_grad':True
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                  # 'excited_states': [True,1]
+                   'excited_states': [True,3]
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -81,21 +62,16 @@ molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
 esdriver = Electronic_Structure(seqm_parameters).to(device)
 
 ### Run esdriver on molecules:
-for i in range(1):
-    # esdriver(molecules,analytical_gradient=[True,'analytical'])
-    esdriver(molecules,analytical_gradient=[True,'numerical'])
-# analyt_time = molecules.const.timing["Force"]
-# molecules.const.timing["Force"] = []
 # for i in range(1):
-#     esdriver(molecules)
-# backprop_time = molecules.const.timing["Force"]
+#     esdriver(molecules,analytical_gradient=[True,'analytical'])
+esdriver(molecules)
 # import os
 # import numpy as np
 # print(f'{os.path.basename(__file__)} {np.average(backprop_time)} {np.average(analyt_time)})')
 # print(f'Force is\n{molecules.force}')
 
 print(' Total Energy (eV):\n', molecules.Etot)
-# print('\n Electronic Energy (eV): ', molecules.Eelec)
-# print('\n Nuclear Energy (eV):\n', molecules.Enuc)
-# print('\n Heat of Formation (ev):\n', molecules.Hf)
-print('\n Orbital energies (eV):\n', molecules.e_mo)
+print('\n Electronic Energy (eV): ', molecules.Eelec)
+print('\n Nuclear Energy (eV):\n', molecules.Enuc)
+print('\n Heat of Formation (ev):\n', molecules.Hf)
+# print('\n Orbital energies (eV):\n', molecules.e_mo)

@@ -106,13 +106,14 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
     else:
         Pp = P[mask].unsqueeze(1)
         for i in range(4):
+            w_x_i = w_x[..., ind[i], :]
             for j in range(4):
                 # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-                overlap_KAB_x[..., i, j] -= 0.5 * torch.sum(Pp * (w_x[..., ind[i], :][..., :, ind[j]]), dim=(2, 3))
+                overlap_KAB_x[..., i, j] -= 0.5 * torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
         pair_grad.add_((Pp * overlap_KAB_x).sum(dim=(2, 3)))
 
-    # Coulomb integrals
+    # Coulomb integrals -- only on the diagonal
     #F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
     #as only upper triangle part is done, and put in order
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
@@ -133,7 +134,7 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
     # reususe overlap_KAB_x here instead of creating new arrays
     # I am going to be alliasing overlap_KAB_x to sumA and then further aliasing it to sumB
     # This seems like bad practice because I'm not allocating new memory but using the same tensor for all operations.
-    # In the future if this code is edited be careful here
+    # In the future, if this code is to be edited, be careful here
     sumA = overlap_KAB_x
     sumA.zero_()
     sumA[..., indices[0], indices[1]] = suma
@@ -762,7 +763,7 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # will lead to errors.
     if (xij_[:, 0].any() == 0):
         print(
-            "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix"
+            "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
         )
 
     # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability

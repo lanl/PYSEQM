@@ -614,7 +614,7 @@ class Energy(torch.nn.Module):
 
         if self.excited_states[0]:
             excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
-            rcis_grad(molecule,exc_amps[0],w,e)
+            rcis_grad(molecule,exc_amps[0],w,e,riXH,ri)
             # rcis_batch(molecule,w,e,self.excited_states[1])
 
         if all_terms:
