@@ -19,13 +19,7 @@ def rcis(mol, w, e_mo, nroots):
     device = w.device
     dtype = w.dtype
 
-    # TODO: norb, nvirt should be members of the Molecule class
-    # Have to be careful here while batching because I assume norb = norb[0]. So all other molecules should in a batch of molecules
-    # should have the same norb
-    nHeavy = mol.nHeavy
-    nHydro = mol.nHydro
-    norb = nHydro + 4 * nHeavy
-    norb = norb[0]
+    norb = mol.norb[0]
     nocc = mol.nocc[0]
     nvirt = norb - nocc
     nov = nocc * nvirt
@@ -141,22 +135,13 @@ def rcis(mol, w, e_mo, nroots):
     for i, energy in enumerate(e_val_n, start=1):
         print(f"  State {i}: {energy:.6f} eV")
 
+    return e_val_n, amplitudes
+
 
 def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     # C: Molecule Orbital Coefficients
     C = mol.eig_vec
-    device = C.device
-    dtype = C.dtype
-
-    mask  = mol.mask
-    maskd = mol.maskd
-    mask_l = mol.mask_l
-    idxi  = mol.idxi
-    idxj  = mol.idxj
     nmol  = mol.nmol
-    molsize = mol.molsize
-    nHeavy = mol.nHeavy
-    nHydro = mol.nHydro
 
     # From here I assume there is only one molecule. I'll worry about batching later
     if (nmol != 1):
@@ -165,8 +150,7 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     # TODO: norb, nvirt should be members of the Molecule class
     # Have to be careful here while batching because I assume norb = norb[0]. So all other molecules should in a batch of molecules
     # should have the same norb
-    norb = nHydro + 4 * nHeavy
-    norb = norb[0]
+    norb = mol.norb[0]
     nocc = mol.nocc[0]
     nvirt = norb - nocc
 
@@ -174,18 +158,116 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     # In Q-Chem it made sense to have the guess vector V laid out as V_ai instead of V_ia. Check which is
     # better for pytorch.
     # I'll try V_ia now
-    nnewRoots = vend-vstart
     Via = V[vstart:vend,:].view(-1, nocc, nvirt)
     P_xi = torch.einsum('mi,ria,na->rmn', C[0, :, :nocc],Via, C[0, :, nocc:])
+    
+    F0 = makeA_pi(mol,P_xi,w)
 
+    # since I assume that we have only 1 molecule I'll use this index to get the data for the 1st molecule
+    mol0 = 0
+
+    # TODO: why am I multiplying by 2?
+    A = torch.einsum('mi,rmn,na->ria', C[mol0, :, :nocc], F0,C[mol0,:, nocc: ])*2.0
+
+    A += Via*ea_ei.unsqueeze(0)
+
+    nnewRoots = vend-vstart
+    return A.view(nnewRoots,-1)
+
+def makeA_pi(mol,P_xi,w,allSymmetric=False):
+    """
+    Given the amplitudes in the AO basis (i.e. the transition densities)
+    calculates the contraction with two-electron integrals
+    In other words for an amplitued X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
+    """
+    device = P_xi.device
+    dtype = P_xi.dtype
+
+    nmol  = mol.nmol
+    mask  = mol.mask
+    maskd = mol.maskd
+    mask_l = mol.mask_l
+    molsize = mol.molsize
+    nHeavy = mol.nHeavy
+    nHydro = mol.nHydro
+    norb = mol.norb[0]
+    nocc = mol.nocc[0]
+
+    nnewRoots = P_xi.shape[0]
     P0 = torch.stack([
         unpackone(P_xi[i], 4*nHeavy[i // nnewRoots], nHydro[i // nnewRoots], molsize * 4)
         for i in range(nnewRoots * nmol)
     ]).view(nmol*nnewRoots, molsize * 4, molsize * 4)
 
     # Compute the (ai||jb)X_jb
+    F = makeA_pi_symm(mol,P0,w)
+
+    if not allSymmetric:
+
+        P0_antisym = 0.5*(P0 - P0.transpose(1,2))
+        P_anti = P0_antisym.reshape(nnewRoots,molsize,4,molsize,4)\
+                  .transpose(2,3).reshape(nnewRoots,molsize*molsize,4,4)
+        del P0_antisym
+
+        # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
+        #   0,     1         2       3       4         5       6      7         8        9
+        ind = torch.tensor([[0,1,3,6],
+                            [1,2,4,7],
+                            [3,4,5,8],
+                            [6,7,8,9]],dtype=torch.int64, device=device)
+        sumK = torch.empty(nnewRoots,w.shape[0],4,4,dtype=dtype, device=device)
+        Pp = -0.5*P_anti[:,mask]
+        for i in range(4):
+            for j in range(4):
+                #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
+                sumK[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(0),dim=(2,3))
+        F.index_add_(1,mask,sumK)
+        F[:,mask_l] -= sumK.transpose(2,3)
+        del Pp
+        del sumK
+        
+        gsp = mol.parameters['g_sp']
+        gpp = mol.parameters['g_pp']
+        gp2 = mol.parameters['g_p2']
+        hsp = mol.parameters['h_sp']  
+        F2e1c = torch.zeros(nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
+        for i in range(1,4):
+            #(s,p) = (p,s) upper triangle
+            F2e1c[...,0,i] = P_anti[:,maskd,0,i]*(0.5*hsp - 0.5*gsp).unsqueeze(0)
+        #(p,p*)
+        for i,j in [(1,2),(1,3),(2,3)]:
+            F2e1c[...,i,j] = P_anti[:,maskd,i,j]* (0.25*gpp - 0.75*gp2).unsqueeze(0)
+
+        F2e1c.add_(F2e1c.triu(1).transpose(2,3),alpha=-1.0)
+        F[:,maskd] += F2e1c
+        del P_anti
+        del F2e1c
+
+    F0 = F.reshape(nnewRoots,molsize,molsize,4,4) \
+             .transpose(2,3) \
+             .reshape(nnewRoots, 4*molsize, 4*molsize)
+    del F
+
+    F0 = torch.stack([
+        packone(F0[i], 4*nHeavy[i // nnewRoots], nHydro[i // nnewRoots], norb)
+        for i in range(nnewRoots * nmol)
+    ])
+
+    return F0
+
+def makeA_pi_symm(mol,P0,w):
 
     P0_sym = 0.5*(P0 + P0.transpose(1,2))
+
+    molsize = mol.molsize
+    nnewRoots = P0.shape[0]
+    dtype = P0.dtype
+    device = P0.device
+    mask  = mol.mask
+    maskd = mol.maskd
+    mask_l = mol.mask_l
+    idxi  = mol.idxi
+    idxj  = mol.idxj
 
     P = P0_sym.reshape(nnewRoots,molsize,4,molsize,4)\
               .transpose(2,3).reshape(nnewRoots,molsize*molsize,4,4)
@@ -230,7 +312,6 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
     del PB
     del sumA
     del sumB
-
 
     # off diagonal block part, check KAB in forck2.f
     # mu, nu in A
@@ -283,60 +364,9 @@ def matrix_vector_product(mol, V, w, ea_ei, vstart, vend):
 
     del Pptot
     del P
-    
-    P0_antisym = 0.5*(P0 - P0.transpose(1,2))
-    P_anti = P0_antisym.reshape(nnewRoots,molsize,4,molsize,4)\
-              .transpose(2,3).reshape(nnewRoots,molsize*molsize,4,4)
-    del P0_antisym
 
-    Pp = -0.5*P_anti[:,mask]
-    for i in range(4):
-        for j in range(4):
-            #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            sumK[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(0),dim=(2,3))
-    F.index_add_(1,mask,sumK)
-    F[:,mask_l] -= sumK.transpose(2,3)
-    del Pp
-    del sumK
-    
-    F2e1c.zero_()
-    for i in range(1,4):
-        #(s,p) = (p,s) upper triangle
-        F2e1c[...,0,i] = P_anti[:,maskd,0,i]*(0.5*hsp - 0.5*gsp).unsqueeze(0)
-    #(p,p*)
-    for i,j in [(1,2),(1,3),(2,3)]:
-        F2e1c[...,i,j] = P_anti[:,maskd,i,j]* (0.25*gpp - 0.75*gp2).unsqueeze(0)
+    return F
 
-    F2e1c.add_(F2e1c.triu(1).transpose(2,3),alpha=-1.0)
-    F[:,maskd] += F2e1c
-    del P_anti
-    del F2e1c
-
-    # dummy = torch.zeros_like(F); dummy.index_add_(1,mask,sumK);dummy[:,mask_l]-= sumK.transpose(2,3);dummy[:,maskd] += F2e1c;
-    # dummy = dummy.reshape(nroots,molsize,molsize,4,4) \
-    #          .transpose(2,3) \
-    #          .reshape(nroots, 4*molsize, 4*molsize)[6]*2
-    # dummy = packone(dummy,4,2,6)
-    
-    F0 = F.reshape(nnewRoots,molsize,molsize,4,4) \
-             .transpose(2,3) \
-             .reshape(nnewRoots, 4*molsize, 4*molsize)
-    del F
-
-    F0 = torch.stack([
-        packone(F0[i], 4*nHeavy[i // nnewRoots], nHydro[i // nnewRoots], norb)
-        for i in range(nnewRoots * nmol)
-    ])
-
-    # since I assume that we have only 1 molecule I'll use this index to get the data for the 1st molecule
-    mol0 = 0
-
-    # TODO: why am I multiplying by 2?
-    A = torch.einsum('mi,rmn,na->ria', C[mol0, :, :nocc], F0,C[mol0,:, nocc: ])*2.0
-
-    A += Via*ea_ei.unsqueeze(0)
-
-    return A.view(nnewRoots,-1)
     
 def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     """Orthogonalizes the vectors in the newsubspace against the original subspace 

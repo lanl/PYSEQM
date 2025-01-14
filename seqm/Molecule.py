@@ -39,27 +39,13 @@ class Molecule(torch.nn.Module):
         self.mask, self.mask_l, self.pair_molid, \
         self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, self.method, return_mask_l=True, do_large_tensors=do_large_tensors, *args, **kwargs)
 
-        # C = 30
-        # y1 = self.rij.clone()
-        # y2 = 2*self.rij - C/3 - 3*(self.rij**2)/(4*C)
-        # y3 = torch.ones(self.rij.shape)*C
-        # mask_y2 =( self.rij >= 2/3*C) * (self.rij <= 4/3*C)
-        # y1[mask_y2] = y2[mask_y2]
-        # mask_y3 = (self.rij > 4/3*C)
-        # y1[mask_y3] = y3[mask_y3]
-        # self.rij = y1
-
-
-
-
-
         if callable(learned_parameters):
             adict = learned_parameters(self.species, self.coordinates)
             self.parameters, self.alp, self.chi = copy.deepcopy(self.packpar(self.Z, learned_params = adict)  )
         else:
             self.parameters, self.alp, self.chi = copy.deepcopy(self.packpar(self.Z, learned_params = learned_parameters))
 
-
+        self.norb = self.nHydro + 4 * self.nHeavy # number of orbitals
 
         
         if(self.method == 'PM6'): # PM6 not implemented yet. Only PM6_SP
