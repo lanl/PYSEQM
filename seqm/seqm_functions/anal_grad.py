@@ -142,9 +142,7 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
 
     sumB = overlap_KAB_x
     sumB.zero_()
-    # Also aliasing suma to sumb in order to reuse memory. Be careful if changing this code in the future
-    sumb = suma
-    sumb[:, :, :] = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
+    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
     sumB[..., indices[0], indices[1]] = sumb
     e1b_x.add_(sumB)
 

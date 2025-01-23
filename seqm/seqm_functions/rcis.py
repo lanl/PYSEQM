@@ -56,7 +56,7 @@ def rcis(mol, w, e_mo, nroots):
     V[torch.arange(nstart),sortedidx[:nstart]] = 1.0
 
     max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
-    root_tol = 1e-6 # TODO: User-defined/fixed
+    root_tol = 1e-8 # TODO: User-defined/fixed
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = 0
@@ -101,7 +101,7 @@ def rcis(mol, w, e_mo, nroots):
         roots_not_converged = resid_norm > root_tol
         n_not_converged = roots_not_converged.sum()
 
-        if n_not_converged + vend > maxSubspacesize:
+        if n_not_converged > 0 and n_not_converged + vend > maxSubspacesize:
             #  collapse the subspace
             print("Maximum subspace size reached, increase the subspace size. Collapsing subspace")
             V[:nroots,:] = amplitudes
@@ -133,7 +133,7 @@ def rcis(mol, w, e_mo, nroots):
 
     print("")
     for i, energy in enumerate(e_val_n, start=1):
-        print(f"  State {i}: {energy:.6f} eV")
+        print(f"  State {i}: {energy:.15f} eV")
 
     return e_val_n, amplitudes
 

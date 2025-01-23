@@ -64,7 +64,8 @@ def conjugate_gradient(
 
         # Initialize convergence mask (True means not yet converged)
         converged = torch.zeros(k, dtype=torch.bool, device=device)
-
+        not_converged = torch.sqrt(R_norm_sq) >= tol
+        converged = converged | (~not_converged)
         for it in range(max_iter):
             if converged.all():
                 print(f"CG converged in {it} iterations.")

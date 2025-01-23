@@ -16,7 +16,7 @@ else:
 
 ### create molecule object:
 species = torch.as_tensor([[8,6,1,1],
-                           # [8,6,1,1],
+                           [8,6,1,1],
                            # [8,8,6,0]
                            ], # zero-padding for batching
                           dtype=torch.int64, device=device)
@@ -24,16 +24,16 @@ species = torch.as_tensor([[8,6,1,1],
 coordinates = torch.tensor([
                               [
                                [0.00,    0.00,    0.00],
-                               [1.22,    0.00,    0.20],
+                               [1.22,    0.00,    0.00],
                                [1.82,    0.94,    0.00],
-                               [1.81,   -0.93,    -0.20]
+                               [1.82,   -0.94,    0.00]
                               ],
-                              # [
-                              #  [0.00,    0.00,    0.00],
-                              #  [1.22,    0.00,    0.00],
-                              #  [1.82,    0.94,    0.00],
-                              #  [1.82,   -0.94,    0.00]
-                              # ],
+                              [
+                               [0.00,    0.00,    0.00],
+                               [1.22,    0.00,    0.20],
+                               [1.12,    0.54,    0.00],
+                               [1.82,   -0.94,    -0.20]
+                              ],
                               # [
                               #  [0.00,    0.00,    0.00],
                               #  [1.23,    0.00,    0.00],
@@ -48,7 +48,7 @@ elements = [0]+sorted(set(species.reshape(-1).tolist()))
 
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
-                   'scf_eps' : 1.0e-6,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
+                   'scf_eps' : 1.0e-10,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
                    'scf_converger' : [2,0.0], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
@@ -62,7 +62,7 @@ seqm_parameters = {
                    'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   # 'excited_states': [True,3]
+                   'excited_states': [True,3]
                    }
 
 # State 1: 2.288381 eV
@@ -75,18 +75,18 @@ molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
 esdriver = Electronic_Structure(seqm_parameters).to(device)
 
 ### Run esdriver on molecules:
-# esdriver(molecules)
-# esdriver(molecules,analytical_gradient=[True,'numerical'])
-esdriver(molecules,analytical_gradient=[True,'analytical'])
-force_analy = molecules.force
-print(f'Force is\n{force_analy}')
-# analytic_grad = molecules.ground_analytical_gradient
 esdriver(molecules)
-force = molecules.force
-print(f'Force is\n{force}')
-print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force-force_analy))}')
-# if analytic_grad is not None:
-#     print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force+analytic_grad))}')
-#
+# esdriver(molecules,analytical_gradient=[True,'numerical'])
+# esdriver(molecules,analytical_gradient=[True,'analytical'])
+# force_analy = molecules.force
+# print(f'Force is\n{force_analy}')
+# # analytic_grad = molecules.ground_analytical_gradient
+# esdriver(molecules)
+# force = molecules.force
+# print(f'Force is\n{force}')
+# print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force-force_analy))}')
+# # if analytic_grad is not None:
+# #     print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force+analytic_grad))}')
+# #
 print(' Total Energy (eV):\n', molecules.Etot)
 print('\n Electronic Energy (eV): ', molecules.Eelec)
