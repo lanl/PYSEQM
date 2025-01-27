@@ -22,6 +22,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     nocc = mol.nocc
     nmol = mol.nmol
 
+    print(torch.cuda.memory_summary())
     if not torch.all(norb == norb[0]) or not torch.all(nocc == nocc[0]):
         raise ValueError(
             'All molecules in the batch should be of the same type with same number of orbitals and electrons')
@@ -77,6 +78,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     Cvirt = torch.stack([C[b,:,nocc:] for b in range(nmol)],dim=0)
 
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
+    amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
 
     while iter <= max_iter: # Davidson loop
 
@@ -134,13 +136,13 @@ def rcis_batch(mol, w, e_mo, nroots):
             if n_not_converged > 0 and n_not_converged + vend[i] > maxSubspacesize:
                 #  collapse the subspace
                 print(f"Maximum subspace size reached for molecule {i+1}, increase the subspace size. Collapsing subspace")
-                V[i,:] = 0.0
+                V[i,:] = 0
                 V[i,:nroots,:] = amplitudes[i]
                 # HV[:nroots,:] = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:])
                 vstart[i] = 0
                 vend[i] = nroots
                 if iter > max_iter:
-                    warnings.warn("Maximum iterations reached but roots have not converged")
+                    warnings.warn(f"Maximum iterations reached but roots have not converged for molecule {i+1}")
                 continue
 
             newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
@@ -159,6 +161,7 @@ def rcis_batch(mol, w, e_mo, nroots):
             roots_left = vend[i] - vstart[i]
             if roots_left==0:
                 done[i] = True
+                amplitude_store[i] = amplitudes[i]
 
             print(f"Iteration {iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
 
@@ -173,7 +176,7 @@ def rcis_batch(mol, w, e_mo, nroots):
         for i, energy in enumerate(e_val_n[j], start=1):
             print(f"  State {i}: {energy:.15f} eV")
 
-    return e_val_n, amplitudes
+    return e_val_n, amplitude_store
 
 
 def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt):
@@ -497,8 +500,8 @@ def get_subspace_eig_batched(H,nroots,zero_pad,e_val_n,done,nonorthogonal):
     else:
         r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
 
-        e_vec_n = torch.empty(e_val_n.shape[0],H.shape[1],nroots,device=H.device,dtype=H.dtype)
-        for i in range(done.shape[0]):
+        e_vec_n = torch.zeros(e_val_n.shape[0],H.shape[1],nroots,device=H.device,dtype=H.dtype)
+        for i in range(nroots):
             if done[i]:
                 continue
             e_val_n[i] = r_eval[i,zero_pad[i]:zero_pad[i]+nroots]
