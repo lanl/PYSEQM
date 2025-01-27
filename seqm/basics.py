@@ -613,11 +613,12 @@ class Energy(torch.nn.Module):
                 molecule.const.timing["Force"].append(t1 - t0)
 
         if self.excited_states[0]:
-            if molecule.nmol > 1:
-                rcis_batch(molecule,w,e,self.excited_states[1])
-            else:
-                excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
-                rcis_grad(molecule,exc_amps[0],w,e,riXH,ri,P)
+            with torch.no_grad():
+                if molecule.nmol >= 1:
+                    rcis_batch(molecule,w,e,self.excited_states[1])
+                else:
+                    excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
+                    rcis_grad(molecule,exc_amps[0],w,e,riXH,ri,P)
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)

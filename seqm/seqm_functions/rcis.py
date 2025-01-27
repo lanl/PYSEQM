@@ -1,5 +1,6 @@
 import torch
 from seqm.seqm_functions.pack import packone, unpackone
+from seqm.seqm_functions.rcis_batch import print_memory_usage
 import warnings
 
 def rcis(mol, w, e_mo, nroots):
@@ -51,9 +52,11 @@ def rcis(mol, w, e_mo, nroots):
         # nroots = nroots_expand
 
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov) # TODO: User-defined
+    print_memory_usage("Before V,HV allocation")
     V = torch.zeros(maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
     V[torch.arange(nstart),sortedidx[:nstart]] = 1.0
+    print_memory_usage("After V,HV allocation")
 
     max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
     root_tol = 1e-8 # TODO: User-defined/fixed
@@ -426,7 +429,7 @@ def getMaxSubspacesize(dtype,device,nov):
     num_matrices = 2  # Number of big matrices that will take up a big chunk of memory: V, HV
 
     # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.5
+    memory_fraction = 0.1
     usable_memory = available_memory * memory_fraction
 
     # Calculate maximum n based on memory

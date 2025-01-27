@@ -2,6 +2,17 @@ import torch
 from seqm.seqm_functions.pack import packone, unpackone
 import warnings
 
+def print_memory_usage(step_description, device=0):
+    allocated = torch.cuda.memory_allocated(device) / 1024**2  # Convert to MB
+    reserved = torch.cuda.memory_reserved(device) / 1024**2    # Convert to MB
+    max_allocated = torch.cuda.max_memory_allocated(device) / 1024**2
+    max_reserved = torch.cuda.max_memory_reserved(device) / 1024**2
+    print(f"[{step_description}]")
+    print(f"  Allocated Memory: {allocated:.2f} MB")
+    print(f"  Reserved Memory: {reserved:.2f} MB")
+    print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
+    print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
+
 def rcis_batch(mol, w, e_mo, nroots):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
@@ -22,7 +33,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     nocc = mol.nocc
     nmol = mol.nmol
 
-    print(torch.cuda.memory_summary())
+    print_memory_usage("RCIS beginning")
     if not torch.all(norb == norb[0]) or not torch.all(nocc == nocc[0]):
         raise ValueError(
             'All molecules in the batch should be of the same type with same number of orbitals and electrons')
@@ -54,8 +65,10 @@ def rcis_batch(mol, w, e_mo, nroots):
         # nroots = nroots_expand
 
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
-    V = torch.zeros(nmol,nov,maxSubspacesize,device=device,dtype=dtype)
+    print_memory_usage("Before V,HV allocation")
+    V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
+    print_memory_usage("After V,HV allocation")
 
     # z = torch.arange(nstart)
     # for i in range(nmol):
@@ -80,6 +93,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
 
+    print_memory_usage("Before davidson loop start")
     while iter <= max_iter: # Davidson loop
 
         max_v = torch.max(vend-vstart).item()
@@ -224,10 +238,12 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
         unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
         for i in range(nmol) for j in range(nnewRoots)
     ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
+    print_memory_usage("After unpacking P_xi")
 
     w = w_.view(nmol,npairs_per_mol,10,10)
     # Compute the (ai||jb)X_jb
     F = makeA_pi_symm_batch(mol,P0,w)
+    print_memory_usage("After makeA_pi_symm")
 
     if not allSymmetric:
 
@@ -304,6 +320,7 @@ def makeA_pi_symm_batch(mol,P0,w):
               .transpose(3,4).reshape(nmol,nnewRoots,molsize*molsize,4,4)
     del P0_sym
     F = torch.zeros_like(P)
+    print_memory_usage("After P_symm, and Fock_symm")
 
     # Two center-two elecron integrals
     weight = torch.tensor([1.0,
@@ -457,7 +474,7 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1):
     num_matrices = 2  # Number of big matrices that will take up a big chunk of memory: V, HV
 
     # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.5
+    memory_fraction = 0.1
     usable_memory = available_memory * memory_fraction
 
     # Calculate maximum n based on memory
@@ -501,7 +518,7 @@ def get_subspace_eig_batched(H,nroots,zero_pad,e_val_n,done,nonorthogonal):
         r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
 
         e_vec_n = torch.zeros(e_val_n.shape[0],H.shape[1],nroots,device=H.device,dtype=H.dtype)
-        for i in range(nroots):
+        for i in range(H.shape[0]): #nmol
             if done[i]:
                 continue
             e_val_n[i] = r_eval[i,zero_pad[i]:zero_pad[i]+nroots]
