@@ -348,8 +348,8 @@ def makeA_pi_symm_batch(mol,P0,w):
     sumB = torch.zeros_like(sumA)
     sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = suma
     sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = sumb
-    sumA.add_(sumA.triu(1).transpose(3,4))
-    sumB.add_(sumB.triu(1).transpose(3,4))
+    # sumA.add_(sumA.triu(1).transpose(3,4))
+    # sumB.add_(sumB.triu(1).transpose(3,4))
     #F^A_{mu, nu} = Hcore + \sum^A + \sum_{B} \sum_{l, s \in B} P_{l,s \in B} * (mu nu, l s)
     #\sum_B
     F.index_add_(2,maskd[idxi],sumB)
@@ -407,11 +407,12 @@ def makeA_pi_symm_batch(mol,P0,w):
         F2e1c[...,i,j] = P[...,maskd,i,j]* (0.75*gpp - 1.25*gp2).unsqueeze(1)
 
     # F.add_(F2e1c)
+    # F2e1c.add_(F2e1c.triu(1).transpose(3,4))
+    F2e1c += F[:,:,maskd]
     F2e1c.add_(F2e1c.triu(1).transpose(3,4))
-    F[:,:,maskd] += F2e1c
-
-    del Pptot
-    del P
+    F[:,:,maskd] = F2e1c
+    # F[:,:,maskd] += F2e1c
+    # F[:,:,maskd] += F[:,:,maskd].triu(1).transpose(3,4)
 
     return F
 
@@ -466,7 +467,7 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1):
     if device == 'cpu':
         available_memory = psutil.virtual_memory().available
     elif device == 'cuda':
-        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda'))
+        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda:0'))
     else:
         raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
 
