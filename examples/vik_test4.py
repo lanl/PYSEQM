@@ -38,9 +38,9 @@ coordinates = torch.tensor([
                               # ],
                              [
                               [0.00,    0.00,    0.00],
-                              [1.22,    0.00,    0.00],
+                              [1.22,    0.00,    0.20],
                               [1.82,    0.94,    0.00],
-                              [1.82,   -0.94,    0.00]
+                              [1.81,   -0.93,    -0.20]
                              ],
                             #  [
                             #   [0.00,    0.00,    0.00],
@@ -56,7 +56,7 @@ elements = [0]+sorted(set(species.reshape(-1).tolist()))
 
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
-                   'scf_eps' : 1.0e-6,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
+                   'scf_eps' : 1.0e-9,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
                    'scf_converger' : [2,0.0], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
@@ -90,7 +90,7 @@ for i in range(1):
 # import os
 # import numpy as np
 # print(f'{os.path.basename(__file__)} {np.average(backprop_time)} {np.average(analyt_time)})')
-print(f'Force is\n{molecules.force}')
+# print(f'Force is\n{molecules.force}')
 
 print(' Total Energy (eV):\n', molecules.Etot)
 # print('\n Electronic Energy (eV): ', molecules.Eelec)

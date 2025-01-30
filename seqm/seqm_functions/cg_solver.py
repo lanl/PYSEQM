@@ -160,3 +160,85 @@ if __name__ == "__main__":
         # Optionally, compute the relative residual
         relative_residual = residual_norm / torch.norm(B, dim=0)
         print(f"Relative residual norms: {relative_residual.cpu().numpy()}")
+
+def conjugate_gradient_batch(A,b,M_diag,max_iter=50,tol=1e-6):
+    """
+    Fully-batched Preconditioned Conjugate Gradient (PCG).
+    For systems that converge early, we zero out their updates
+    (stop changing x, r, etc.), but we still do a full batch
+    matrix-vector product (A_mv) each iteration.
+
+    Args:
+        A (callable):
+            A function that takes a [batch_size, n] tensor and returns A@v
+            in shape [batch_size, n]. Must handle the entire batch at once.
+        b (torch.Tensor):
+            RHS tensor of shape [batch_size, n].
+        M_diag (torch.Tensor):
+            The diagonal of the preconditioner, shape [batch_size, n].
+        max_iter (int):
+            Maximum number of iterations.
+        tol (float):
+            Residual tolerance for declaring convergence.
+
+    Returns:
+        x (torch.Tensor):
+            The solution batch of shape [batch_size, n].
+    """
+
+    batch_size, n = b.shape
+    device = b.device
+
+    # 1) Initialization
+    x = torch.zeros_like(b)           # [batch_size, n]
+    r = b.clone()                     # [batch_size, n]  (residual)
+    # Preconditioned residual z = M^{-1} r, but M is diagonal => elementwise division
+    z = r / M_diag                    # [batch_size, n]
+    p = z.clone()                     # [batch_size, n]  (search direction)
+    rs_old = torch.sum(r * z, dim=-1) # [batch_size]     (rᵀ z for each system)
+
+    # Track which systems are still active (haven't converged yet)
+    active_mask = torch.ones(batch_size, dtype=torch.bool, device=device)
+    active_mask = active_mask & (torch.sqrt(rs_old) >= tol)
+
+    for it in range(max_iter):
+        if not active_mask.any():
+            # All systems have converged
+            break
+
+        # 2) Compute A@p for the entire batch
+        Ap = A(p)  # shape [batch_size, n]
+
+        # 3) Compute the step size alpha = (rᵀ z) / (pᵀ Ap) for each system
+        denom = torch.sum(p * Ap, dim=-1)   # [batch_size]
+        denom_clamped = torch.clamp(denom, min=1e-30)
+        alpha = rs_old / denom_clamped      # [batch_size]
+        # Zero-out alpha for converged systems
+        alpha = alpha * active_mask.float()
+        alpha_ = alpha.unsqueeze(-1)        # [batch_size, 1]
+
+        # 4) Update x, r (for all, but no change if not active)
+        x = x + alpha_ * p
+        r = r - alpha_ * Ap
+
+        # 5) Check convergence
+        r_norm = r.norm(dim=-1)  # [batch_size]
+        newly_converged = (r_norm < tol)
+        active_mask = active_mask & (~newly_converged)
+
+        # 6) Precondition the new residual: z = r / M_diag
+        z = r / M_diag
+
+        # 7) Update the search direction p
+        rs_new = torch.sum(r * z, dim=-1)    # [batch_size]
+        beta = rs_new / torch.clamp(rs_old, min=1e-30)
+        # Zero-out beta for converged systems
+        beta = beta * active_mask.float()
+
+        p = z + beta.unsqueeze(-1) * p
+        rs_old = rs_new
+
+        if it % 1 == 0 or it == max_iter - 1:
+            print(f"Iteration {it:3}: Residual norms = {r_norm}")
+
+    return x

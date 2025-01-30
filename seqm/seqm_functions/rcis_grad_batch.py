@@ -1,12 +1,15 @@
 import torch
-from torch.nn.modules.conv import F
 from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der
-from seqm.seqm_functions.rcis import makeA_pi
-from seqm.seqm_functions.cg_solver import conjugate_gradient
+from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 from seqm.seqm_functions.pack import unpackone
+from seqm.seqm_functions.rcis_batch import makeA_pi_batched
 from .constants import a0
 
-def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
+def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0):
+    """
+    amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
+         state for which the gradient is required has to be selected and put together into the amp tensor
+    """
     device = amp.device
     dtype = amp.dtype
     norb = mol.norb[0]
@@ -16,51 +19,57 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
 
     # CIS unrelaxed density B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j 
     C = mol.eig_vec 
-    Cocc = C[0,:,:nocc]
-    Cvirt = C[0,:,nocc:norb]
-    amp_ia = amp.view(nocc,nvirt)
+    Cocc = C[:,:,:nocc]
+    Cvirt = C[:,:,nocc:norb]
+    nmol = mol.nmol
+    amp_ia = amp.view(nmol,nocc,nvirt)
 
-    dens_BR = torch.empty(2,norb,norb,device=device,dtype=dtype)
-
-    B_virt  = torch.einsum('ma,ia->mi',Cvirt,amp_ia)
-    B_occ  = torch.einsum('mi,ia->ma',Cocc,amp_ia)
-    dens_BR[0] = torch.einsum('mi,ni->mn',B_virt,B_virt) - torch.einsum('mi,ni->mn',B_occ,B_occ)
+    dens_BR = torch.empty(nmol,2,norb,norb,device=device,dtype=dtype)
+    B_virt  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia)
+    B_occ  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia)
+    dens_BR[:,0] = torch.einsum('Nmi,Nni->Nmn',B_virt,B_virt) - torch.einsum('Nmi,Nni->Nmn',B_occ,B_occ)
 
     # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
-    dens_BR[1] = torch.einsum('mi,ia,na->mn',Cocc,amp_ia,Cvirt)
+    dens_BR[:,1] = torch.einsum('bmi,bia,bna->bmn',Cocc,amp_ia,Cvirt)
 
     # Calculate z-vector
     
     # make RHS of the CPSCF equation:
-    BR_pi = makeA_pi(mol,dens_BR,w)*2.0
-    RHS = -torch.einsum('ma,mn,ni->ai',Cvirt,BR_pi[0],Cocc)
-    RHS -= torch.einsum('ma,mn,ni->ai',Cvirt,BR_pi[1],B_virt)
-    RHS += torch.einsum('ma,mn,ni->ai',B_occ,BR_pi[1],Cocc)
+    BR_pi = makeA_pi_batched(mol,dens_BR,w)*2.0
+    RHS = -torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,BR_pi[:,0],Cocc)
+    RHS -= torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,BR_pi[:,1],B_virt)
+    RHS += torch.einsum('Nma,Nmn,Nni->Nai',B_occ,BR_pi[:,1],Cocc)
     del B_occ, B_virt
 
     # debugging:
-    RHS = RHS.T.reshape(1,nov) # RHS_ia 
-    ea_ei = e_mo[0,nocc:norb].unsqueeze(0)-e_mo[0,:nocc].unsqueeze(1)
+    RHS = RHS.transpose(1,2).reshape(nmol,nov) # RHS_ia 
+    ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
 
     # Ad_inv_b = RHS/ea_ei
     # x1 = make_A_times_zvector(mol,Ad_inv_b,w,e_mo)
 
-    def setup_applyA(mol, w, e_mo):
+    def setup_applyA(mol, w, ea_ei, Cocc, Cvirt):
         def applyA(z):
-            Az = make_A_times_zvector(mol,z,w,e_mo)
+            Az = make_A_times_zvector_batched(mol,z,w,ea_ei, Cocc, Cvirt)
             return Az
 
         return applyA
 
-    A = setup_applyA(mol,w,e_mo)
-    zvec = conjugate_gradient(A,RHS,M=ea_ei.view(nocc*nvirt),tol=1e-8)
+    A = setup_applyA(mol,w,ea_ei,Cocc,Cvirt)
+    zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=1e-8)
 
-    z_ao = torch.einsum('mi,ia,na',Cocc,zvec.view(nocc,nvirt),Cvirt)
-    dens_BR[0] += z_ao + z_ao.T # Now this contains the relaxed density
+    z_ao = torch.einsum('Nmi,Nia,Nna->Nmn',Cocc,zvec.view(nmol,nocc,nvirt),Cvirt)
+    dens_BR[:,0] += z_ao + z_ao.transpose(1,2) # Now this contains the relaxed density
 
     molsize = mol.molsize
-    B0 = unpackone(dens_BR[0], 4*mol.nHeavy[0], mol.nHydro[0], molsize * 4)
-    R0 = unpackone(dens_BR[1], 4*mol.nHeavy[0], mol.nHydro[0], molsize * 4)
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
+    B0 = torch.stack([ unpackone(dens_BR[i,0], 4*nHeavy, nHydro, molsize * 4)
+        for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
+    R0 = torch.stack([ unpackone(dens_BR[i,1], 4*nHeavy, nHydro, molsize * 4)
+        for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
+    
+    del dens_BR
 
     ###############################
     # Calculate the gradient of CIS energies
@@ -75,8 +84,8 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
     e1b_x, e2a_x = w_der(mol.const, mol.Z, mol.const.tore, mol.ni, mol.nj, w_x, mol.rij, mol.xij, Xij, mol.idxi, mol.idxj, \
                          mol.parameters['g_ss'], mol.parameters['g_pp'], mol.parameters['g_p2'], mol.parameters['h_sp'], mol.parameters['zeta_s'], mol.parameters['zeta_p'], riXH, ri)
 
-    B = B0.reshape(1, molsize, 4, molsize, 4).transpose(2, 3).reshape(1 * molsize * molsize, 4, 4)
-    P = P0.reshape(1, molsize, 4, molsize, 4).transpose(2, 3).reshape(1 * molsize * molsize, 4, 4)
+    B = B0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+    P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     
     # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
 
@@ -139,27 +148,17 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
     e1b_x.add_(sumB)
 
     # Core-elecron interaction
-    # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    # e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
-    scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
-                                [0.0, 1.0, 2.0, 2.0],
-                                [0.0, 0.0, 1.0, 2.0],
-                                [0.0, 0.0, 0.0, 1.0] ])
-    e1b_x *= scale_emat
-    e2a_x *= scale_emat   
+    e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
+    e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
     pair_grad.add_((B[mol.maskd[mol.idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
                    (B[mol.maskd[mol.idxi], None, :, :] * e1b_x).sum(dim=(2, 3)))
     del e1b_x
 
     ########################################################### 
     
-    R_symmetrized = 0.5*(R0+R0.transpose(0,1))
-    R_symm = R_symmetrized.reshape(1, molsize, 4, molsize, 4).transpose(2, 3).reshape(1 * molsize * molsize, 4, 4)
+    R_symmetrized = 0.5*(R0+R0.transpose(1,2))
+    R_symm = R_symmetrized.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     del R_symmetrized
-
-    R_antisymmetrized = 0.5*(R0-R0.transpose(0,1))
-    R_antisymm = R_antisymmetrized.reshape(1, molsize, 4, molsize, 4).transpose(2, 3).reshape(1 * molsize * molsize, 4, 4)
-    del R_antisymmetrized
 
     Rdiag_symmetrized = R_symm[mol.maskd]
     PA = (Rdiag_symmetrized[mol.idxi][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).unsqueeze(-1)
@@ -180,11 +179,8 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
     del suma, sumb
 
     # Core-elecron interaction
-    # J_x_1b.add_(J_x_1b.triu(1).transpose(2, 3))
-    # J_x_2a.add_(J_x_2a.triu(1).transpose(2, 3))
-    J_x_1b *= scale_emat
-    J_x_2a *= scale_emat   
-    # R= R0.reshape(1, molsize, 4, molsize, 4).transpose(2, 3).reshape(1 * molsize * molsize, 4, 4)
+    J_x_1b.add_(J_x_1b.triu(1).transpose(2, 3))
+    J_x_2a.add_(J_x_2a.triu(1).transpose(2, 3))
     pair_grad.add_((2.0*R_symm[mol.maskd[mol.idxj], None, :, :] * J_x_2a).sum(dim=(2, 3)) +
                    (2.0*R_symm[mol.maskd[mol.idxi], None, :, :] * J_x_1b).sum(dim=(2, 3))) # I can use R_symm instead of R here
     del J_x_2a
@@ -198,8 +194,11 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
             overlap_KAB_x[..., i, j] = -0.5*torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
     pair_grad.add_((4.0*R_symm[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
-    # pair_grad.add_((2.0*R[mol.mask_l].unsqueeze(1) * overlap_KAB_x.transpose(2,3)).sum(dim=(2, 3)))
+    del R_symm
 
+    R_antisymmetrized = 0.5*(R0-R0.transpose(1,2))
+    R_antisymm = R_antisymmetrized.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+    del R_antisymmetrized
     Pp = R_antisymm[mol.mask].unsqueeze(1)
     for i in range(4):
         w_x_i = w_x[..., ind[i], :]
@@ -208,11 +207,8 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
             overlap_KAB_x[..., i, j] = -0.5*torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
     pair_grad.add_((4.0*R_antisymm[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
-    # pair_grad.add_((2.0*R[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
-    # pair_grad.add_((2.0*R[mol.mask_l].unsqueeze(1) * overlap_KAB_x.transpose(2,3)).sum(dim=(2, 3)),alpha=-1.0)
 
     # Define the gradient tensor
-    nmol = 1
     grad_cis = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
     grad_cis.index_add_(0, mol.idxi, pair_grad)
@@ -223,25 +219,18 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
     grad_cis = grad_cis.view(nmol, molsize, 3)
     return
 
-def make_A_times_zvector(mol, z, w, e_mo):
-    C = mol.eig_vec
+def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
     nmol  = mol.nmol
     norb = mol.norb[0]
     nocc = mol.nocc[0]
     nvirt = norb - nocc
-    ea_ei = e_mo[0,nocc:norb].unsqueeze(0)-e_mo[0,:nocc].unsqueeze(1)
 
-    # From here I assume there is only one molecule. I'll worry about batching later
-    if (nmol != 1):
-        raise Exception("Not yet implemented for more than one molecule")
-
-    Via = z.view(-1,nocc,nvirt) 
-    P_xi = torch.einsum('mi,ria,na->rmn', C[0, :, :nocc],Via, C[0, :, nocc:])
+    Via = z.view(nmol,nocc,nvirt) 
+    P_xi = torch.einsum('Nmi,Nia,Nna->Nmn', Cocc,Via, Cvirt)
     P_xi = P_xi + P_xi.transpose(1,2)
     
-    F0 = makeA_pi(mol,P_xi,w,allSymmetric=True)
-    A = torch.einsum('mi,rmn,na->ria', C[0, :, :nocc], F0,C[0,:, nocc: ])*2.0
-    A += Via*ea_ei.unsqueeze(0)
+    F0 = makeA_pi_batched(mol,P_xi.unsqueeze(1),w,allSymmetric=True)
+    A = torch.einsum('Nmi,Nmn,Nna->Nia', Cocc, F0.squeeze(1),Cvirt)*2.0
+    A += Via*ea_ei
 
-    nnewRoots = z.shape[0]
-    return A.view(nnewRoots,-1)
+    return A.view(nmol,-1)

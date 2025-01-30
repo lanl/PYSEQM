@@ -147,8 +147,14 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
     e1b_x.add_(sumB)
 
     # Core-elecron interaction
-    e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
+    scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
+                                [0.0, 1.0, 2.0, 2.0],
+                                [0.0, 0.0, 1.0, 2.0],
+                                [0.0, 0.0, 0.0, 1.0] ])
+    e1b_x *= scale_emat
+    e2a_x *= scale_emat   
+    # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
+    # e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
     pair_grad.add_((P[maskd[idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
                    (P[maskd[idxi], None, :, :] * e1b_x).sum(dim=(2, 3)))
     # pair_grad.add_((P[maskd[idxj],None,:,:]*e2a_x.triu(1)).sum(dim=(2,3)) + (P[maskd[idxi],None,:,:]*e1b_x.triu(1)).sum(dim=(2,3)))
@@ -160,7 +166,7 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
     grad.index_add_(0, idxj, pair_grad, alpha=-1.0)
 
     # print(f'Analytical SCF gradient is:\n{grad.view(nmol,molsize,3)}')
-    grad = grad.reshape(nmol, molsize, 3)
+    grad = grad.view(nmol, molsize, 3)
     return grad
 
 

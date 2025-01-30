@@ -32,7 +32,7 @@ coordinates = torch.tensor([
                                [0.00,    0.00,    0.00],
                                [1.22,    0.00,    0.20],
                                [1.82,    0.94,    0.00],
-                               [1.82,   -0.94,    -0.20]
+                               [1.81,   -0.93,    -0.20]
                               ],
                               # [
                               #  [0.00,    0.00,    0.00],
@@ -62,7 +62,7 @@ seqm_parameters = {
                    'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': [True,3]
+                   'excited_states': [True,5]
                    }
 
 # State 1: 2.288381 eV
@@ -80,7 +80,7 @@ esdriver(molecules)
 # esdriver(molecules,analytical_gradient=[True,'analytical'])
 # force_analy = molecules.force
 # print(f'Force is\n{force_analy}')
-# # analytic_grad = molecules.ground_analytical_gradient
+# analytic_grad = molecules.ground_analytical_gradient
 # esdriver(molecules)
 # force = molecules.force
 # print(f'Force is\n{force}')

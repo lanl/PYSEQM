@@ -76,7 +76,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
     max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
-    root_tol = 1e-6 # TODO: User-defined/fixed
+    root_tol = 1e-8 # TODO: User-defined/fixed
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = torch.zeros(nmol,dtype=torch.int,device=device)
@@ -87,8 +87,8 @@ def rcis_batch(mol, w, e_mo, nroots):
     nonorthogonal = False # TODO: User-defined/fixed
 
     C = mol.eig_vec
-    Cocc = torch.stack([C[b,:,:nocc] for b in range(nmol)],dim=0)
-    Cvirt = torch.stack([C[b,:,nocc:] for b in range(nmol)],dim=0)
+    Cocc = C[:,:,:nocc]
+    Cvirt = C[:,:,nocc:norb]
 
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)

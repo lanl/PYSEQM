@@ -9,6 +9,7 @@ from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
 from .seqm_functions.rcis import rcis
 from .seqm_functions.rcis_grad import rcis_grad
 from .seqm_functions.rcis_batch import rcis_batch
+from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 
 import os
 import time
@@ -615,7 +616,9 @@ class Energy(torch.nn.Module):
         if self.excited_states[0]:
             with torch.no_grad():
                 if molecule.nmol >= 1:
-                    rcis_batch(molecule,w,e,self.excited_states[1])
+                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states[1])
+                    # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
+                    rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P)
                 else:
                     excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
                     rcis_grad(molecule,exc_amps[0],w,e,riXH,ri,P)
