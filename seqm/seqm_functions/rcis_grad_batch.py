@@ -5,7 +5,7 @@ from seqm.seqm_functions.pack import unpackone
 from seqm.seqm_functions.rcis_batch import makeA_pi_batched
 from .constants import a0
 
-def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0):
+def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     """
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
          state for which the gradient is required has to be selected and put together into the amp tensor
@@ -56,7 +56,7 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0):
         return applyA
 
     A = setup_applyA(mol,w,ea_ei,Cocc,Cvirt)
-    zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=1e-8)
+    zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=zvec_tolerance)
 
     z_ao = torch.einsum('Nmi,Nia,Nna->Nmn',Cocc,zvec.view(nmol,nocc,nvirt),Cvirt)
     dens_BR[:,0] += z_ao + z_ao.transpose(1,2) # Now this contains the relaxed density

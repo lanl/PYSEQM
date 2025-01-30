@@ -13,7 +13,7 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_batch(mol, w, e_mo, nroots):
+def rcis_batch(mol, w, e_mo, nroots, root_tol):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -33,7 +33,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     nocc = mol.nocc
     nmol = mol.nmol
 
-    print_memory_usage("RCIS beginning")
+    # print_memory_usage("RCIS beginning")
     if not torch.all(norb == norb[0]) or not torch.all(nocc == nocc[0]):
         raise ValueError(
             'All molecules in the batch should be of the same type with same number of orbitals and electrons')
@@ -65,10 +65,10 @@ def rcis_batch(mol, w, e_mo, nroots):
         # nroots = nroots_expand
 
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
-    print_memory_usage("Before V,HV allocation")
+    # print_memory_usage("Before V,HV allocation")
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
-    print_memory_usage("After V,HV allocation")
+    # print_memory_usage("After V,HV allocation")
 
     # z = torch.arange(nstart)
     # for i in range(nmol):
@@ -76,7 +76,6 @@ def rcis_batch(mol, w, e_mo, nroots):
     V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
     max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
-    root_tol = 1e-8 # TODO: User-defined/fixed
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = torch.zeros(nmol,dtype=torch.int,device=device)
@@ -93,7 +92,7 @@ def rcis_batch(mol, w, e_mo, nroots):
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
 
-    print_memory_usage("Before davidson loop start")
+    # print_memory_usage("Before davidson loop start")
     while iter <= max_iter: # Davidson loop
 
         max_v = torch.max(vend-vstart).item()
@@ -238,12 +237,12 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
         unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
         for i in range(nmol) for j in range(nnewRoots)
     ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
-    print_memory_usage("After unpacking P_xi")
+    # print_memory_usage("After unpacking P_xi")
 
     w = w_.view(nmol,npairs_per_mol,10,10)
     # Compute the (ai||jb)X_jb
     F = makeA_pi_symm_batch(mol,P0,w)
-    print_memory_usage("After makeA_pi_symm")
+    # print_memory_usage("After makeA_pi_symm")
 
     if not allSymmetric:
 
@@ -320,7 +319,7 @@ def makeA_pi_symm_batch(mol,P0,w):
               .transpose(3,4).reshape(nmol,nnewRoots,molsize*molsize,4,4)
     del P0_sym
     F = torch.zeros_like(P)
-    print_memory_usage("After P_symm, and Fock_symm")
+    # print_memory_usage("After P_symm, and Fock_symm")
 
     # Two center-two elecron integrals
     weight = torch.tensor([1.0,

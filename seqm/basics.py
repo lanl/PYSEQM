@@ -340,6 +340,17 @@ class Hamiltonian(torch.nn.Module):
         Constructor
         """
         super().__init__()
+        
+        # If we are calculating excited states with CIS, then SCF convergence should be at least 1e-2 smaller than
+        # CIS tolerance. Here I check for that
+        if seqm_parameters.get('excited_states', [False])[0]: # If excited_states are requested in the input
+            # Get the cis_tolerance. If cis_tolerance was not in the seqm_parameters, then set it 
+            # to the default value here
+            seqm_parameters['cis_tolerance'] = seqm_parameters.get('cis_tolerance',1e-6)
+            cis_tol = seqm_parameters['cis_tolerance']
+            if seqm_parameters['scf_eps'] > 1e-2*cis_tol:
+                seqm_parameters['scf_eps'] = 1e-2*cis_tol
+
         #put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         #be used to restart jobs
         self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
@@ -419,7 +430,6 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
         self.excited_states = seqm_parameters.get('excited_states', [False])
-
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
@@ -614,12 +624,15 @@ class Energy(torch.nn.Module):
                 molecule.const.timing["Force"].append(t1 - t0)
 
         if self.excited_states[0]:
+            cis_tol = self.seqm_parameters['cis_tolerance']
             with torch.no_grad():
                 if molecule.nmol >= 1:
-                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states[1])
+                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states[1],cis_tol)
+                    cis_gradient = kwargs.get('cis_gradient',[False])
                     # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
-                    rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P)
-                else:
+                    if cis_gradient[0]:
+                        rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P,cis_tol)
+                else: # to be decomissioned
                     excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
                     rcis_grad(molecule,exc_amps[0],w,e,riXH,ri,P)
 
