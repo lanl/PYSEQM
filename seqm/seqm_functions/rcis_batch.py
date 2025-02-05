@@ -75,7 +75,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
     #     V[i,sortedidx[i,:nstart],z] = 1.0
     V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
-    max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
+    max_iter = 80 # 5*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = torch.zeros(nmol,dtype=torch.int,device=device)
@@ -474,7 +474,7 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1):
     num_matrices = 2  # Number of big matrices that will take up a big chunk of memory: V, HV
 
     # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.1
+    memory_fraction = 0.2
     usable_memory = available_memory * memory_fraction
 
     # Calculate maximum n based on memory
