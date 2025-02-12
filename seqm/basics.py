@@ -627,7 +627,15 @@ class Energy(torch.nn.Module):
             cis_tol = self.seqm_parameters['cis_tolerance']
             with torch.no_grad():
                 if molecule.nmol >= 1:
+                    if molecule.const.do_timing: t0 = time.time()
+
                     excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states[1],cis_tol)
+
+                    if molecule.const.do_timing:
+                        if torch.cuda.is_available(): torch.cuda.synchronize()
+                        t1 = time.time()
+                        molecule.const.timing["CIS"].append(t1 - t0)
+
                     cis_gradient = kwargs.get('cis_gradient',[False])
                     # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
                     if cis_gradient[0]:
@@ -669,7 +677,7 @@ class Force(torch.nn.Module):
     def forward(self, molecule, learned_parameters=dict(), P0=None, do_force=True, *args, **kwargs):
 
         analytical_gradient = kwargs.get('analytical_gradient',[False])
-        if not analytical_gradient[0]:
+        if not analytical_gradient[0] and do_force:
             molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
@@ -679,7 +687,7 @@ class Force(torch.nn.Module):
             e_gap = e_gap.detach()
 
         if analytical_gradient[0]:
-            force = -molecule.ground_analytical_gradient
+            force = -molecule.ground_analytical_gradient # if molecule.ground_analytical_gradient is not None else None
             return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
         #L = Etot.sum()
         if do_force:
