@@ -517,7 +517,7 @@ class Energy(torch.nn.Module):
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
         #print(pack(Hcore, molecule.nHeavy, molecule.nHydro))
-        torch.save(F, 'nanostar_hcore_py.pt')
+        #torch.save(F, 'nanostar_hcore_py.pt')
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,

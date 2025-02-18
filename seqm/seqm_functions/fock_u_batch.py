@@ -45,10 +45,9 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
 
     # for the diagonal block, the summation over ortitals on the same atom in Fock matrix
     F_ = M.expand(2,-1,-1,-1).clone()
-
     Pptot = P[...,1,1]+P[...,2,2]+P[...,3,3]
     PAlpha_ptot_ = PAlpha_[...,1,1]+PAlpha_[...,2,2]+PAlpha_[...,3,3]
-
+    
     #  F_mu_mu = Hcore + \sum_nu^A P_nu_nu (g_mu_nu - 0.5 h_mu_nu) + \sum^B
     """
     #(s,s)
@@ -229,6 +228,7 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
         F_.add_(TMP_)
     
     ###############
+    del TMP_, PAlpha_ptot_, Pptot
     
     
 
@@ -264,7 +264,6 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
 
     #take out the upper triangle part in the same order as in W
     #shape (nparis, 10)
-
     if(themethod == 'PM6'):
 
         PA = (P[maskd[idxj]][...,(0,0,1,0,1,2,0,1,2,3,0,1,2,3,4,0,1,2,3,4,5,0,1,2,3,4,5,6,0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,8),(0,1,1,2,2,2,3,3,3,3,4,4,4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8)]*weight).reshape((-1,45,1))
@@ -284,7 +283,7 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
     # as will use index add in the following part
     
     #torch.use_deterministic_algorithms(True)
-    #print(11111)
+    del PA, PB
     
     # $$$ Why in pm6 (0, maskd[idxi], sumA) but in pm3 (0, maskd[idxj], sumA) ??????
     if(themethod == 'PM6'):
@@ -318,8 +317,7 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
         #F_.index_add_(1, maskd[idxi], sumB)
         F_[0].index_add_(0, maskd[idxi], sumB)
         F_[1].index_add_(0, maskd[idxi], sumB)
-
-
+    del suma, sumb, sumA, sumB
     ###################
 
     # off diagonal block part, check KAB in forck2.f
@@ -380,5 +378,4 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
                  .reshape(2, nmol, 4*molsize, 4*molsize).transpose(0,1)
         
     F0_.add_(F0_.triu(1).transpose(2,3))
-
     return F0_

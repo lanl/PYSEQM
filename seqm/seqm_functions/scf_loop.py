@@ -49,7 +49,7 @@ CANON_DM_PRT_ITER = 8
 def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], alpha=0.0, backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[0, 0.5], backward=False):
     """
     alpha : mixing parameters, alpha=0.0, directly take the new density matrix
     backward is for testing purpose, default is False
@@ -60,6 +60,8 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
     w: 2c-2e integrals (s,p)
     W: some integrals in PM6. zero in PM3 and PM6_SP.)
     """
+    alpha=scf_converger[1]
+
     Pnew = torch.zeros_like(P)
     Pold = torch.zeros_like(P)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
@@ -114,14 +116,16 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                                    nHydro[notconverged],
                                                    nOccMO[notconverged])[1]
             else:
-                e, Pnew[notconverged], v = sym_eig_trunc(F[notconverged],
-                                                        nHeavy[notconverged],
-                                                        nHydro[notconverged],
-                                                        nOccMO[notconverged])
+                if 'T_el' in scf_converger:
+                    Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], scf_converger[3], nOccMO[notconverged],
+                    nHeavy[notconverged],
+                    nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
+                else:
+                    e, Pnew[notconverged], v = sym_eig_trunc(F[notconverged],
+                                                            nHeavy[notconverged],
+                                                            nHydro[notconverged],
+                                                            nOccMO[notconverged])
                 #print('GRAD:', Pnew[notconverged].requires_grad)
-                # Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], 3000, nOccMO[notconverged],
-                #         nHeavy[notconverged],
-                #         nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
 
         if backward:
             Pold = P + 0.0  # ???
@@ -139,15 +143,15 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
         max_dm_element_err = torch.max(dm_element_err)
         
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-        err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
+        err[notconverged] = Eelec_new[notconverged]-Eelec[notconverged]
         
         Eelec[notconverged] = Eelec_new[notconverged]
-        notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-        max_err = torch.max(err)
+        notconverged = (abs(err) > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
+        #max_err = torch.max(err)
         Nnot = torch.sum(notconverged).item()
         if debug:
-            print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             
         if not notconverged.any(): break
     return P, notconverged
@@ -212,7 +216,9 @@ def scf_forward0_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 e, P_ab[notconverged], v = sym_eig_trunc(F[notconverged],
                             nHeavy[notconverged], nHydro[notconverged],
                             nOccMO[notconverged])
+
             P_ab[notconverged] = P_ab[notconverged] / 2
+
         if backward:
             P_old = P + 0.0 # ???
             P = alpha * P + (1.0 - alpha) * P_ab
@@ -232,15 +238,16 @@ def scf_forward0_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
 
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-        err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
+        err[notconverged] = Eelec_new[notconverged]-Eelec[notconverged]
         if k == 0:
             err_N_steps_back = err.clone()
         Eelec[notconverged] = Eelec_new[notconverged]
-        notconverged = (err > eps) + (dm_err > eps*5) + (dm_element_err > eps*15)
-        max_err = torch.max(err)
+        notconverged = (abs(err) > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
+        #max_err = torch.max(err)
         Nnot = torch.sum(notconverged).item()
-        if debug: print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+        if debug:
+            print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
         
         # if (k+1)%5 == 0:
@@ -714,12 +721,12 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 10
-    alpha_direct = 0.9
+    nDirect1 = 20
+    alpha_direct = 0.7
 
     nAdapt = 1
     # number of maximal fock matrixes used
-    nFock = 5
+    nFock = 4
 
     """
     *      Emat is matrix with form
@@ -1310,7 +1317,7 @@ class SCF(torch.autograd.Function):
                 P, notconverged =  scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                    nHydro, nHeavy, nSuperHeavy, nOccMO, \
                                    nmol, molsize, \
-                                   maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, alpha=SCF.converger[1])
+                                   maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger)
         elif SCF.converger[0] == 3: # KSA
             P, notconverged =      scf_forward3(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                    nHydro, nHeavy, nSuperHeavy, nOccMO, \
@@ -1566,7 +1573,7 @@ def scf_loop(molecule, \
                 Pconv, notconverged =  scf_forward0  (M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
                          molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                          nmol, molecule.molsize, \
-                         molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, alpha=scf_converger[1], backward=True)
+                         molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, scf_converger=scf_converger, backward=True)
         elif scf_converger[0] == 1:
             if P.dim() == 4:
                 Pconv, notconverged =  scf_forward1_u(  M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \

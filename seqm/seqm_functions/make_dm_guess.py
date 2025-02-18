@@ -297,7 +297,6 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                     t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
 
                 P = unpack(t, nheavyatom, nH, x.shape[-1])
-
                 v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
                 P = P.reshape(x_orig_shape) / 2
                 if assignDM:
