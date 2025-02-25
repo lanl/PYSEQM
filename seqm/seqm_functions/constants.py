@@ -213,7 +213,8 @@ class Constants(torch.nn.Module):
                            "SCF"                   : [],
                            "Force"                 : [],
                            "MD"                    : [],
-                           "D*"                    : []
+                           "D*"                    : [],
+                           "CIS"                   : [],
                           }
 
 

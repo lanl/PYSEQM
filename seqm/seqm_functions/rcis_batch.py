@@ -1,5 +1,5 @@
 import torch
-from seqm.seqm_functions.pack import packone, unpackone
+# from seqm.seqm_functions.pack import packone, unpackone
 import warnings
 
 def print_memory_usage(step_description, device=0):
@@ -44,7 +44,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
 
     if nroots > nov:
         raise Exception(f"Maximum number of roots for this molecule is {nov}. Reduce the requested number of roots")
-    nstart = nroots+min(2,nov-nroots)
 
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
@@ -53,18 +52,21 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
     # Make the davidson guess vectors
     sorted_ediff, sortedidx = torch.sort(approxH, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
 
-    nroots_expand = nstart
+    nroots_expand = nroots
     # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
     while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
         nroots_expand += 1
-
-    if nroots_expand>nstart:
-        # print(f"More roots will be calculated because of degeneracy in the MOs")
-        nstart = nroots_expand
-        # print(f"More roots will be calculated because of degeneracy in the MOs. NRoots changed from {nroots} to {nroots_expand}")
-        # nroots = nroots_expand
+    if nroots_expand > nroots:
+        print("Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
+        nroots = nroots_expand
 
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
+    
+    if maxSubspacesize < 2*nroots:
+        raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
+
+    extra_subspace = min(7,nov-nroots,maxSubspacesize-2*nroots)
+    nstart = nroots+extra_subspace
     # print_memory_usage("Before V,HV allocation")
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
@@ -75,7 +77,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
     #     V[i,sortedidx[i,:nstart],z] = 1.0
     V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
-    max_iter = 3*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
+    max_iter = 100 # 5*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = torch.zeros(nmol,dtype=torch.int,device=device)
@@ -93,6 +95,11 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
 
     # print_memory_usage("Before davidson loop start")
+    # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
+    # print("-" * len(header))
+    # print(header)
+    # print("-" * len(header))
+
     while iter <= max_iter: # Davidson loop
 
         max_v = torch.max(vend-vstart).item()
@@ -148,14 +155,15 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
 
             if n_not_converged > 0 and n_not_converged + vend[i] > maxSubspacesize:
                 #  collapse the subspace
-                print(f"Maximum subspace size reached for molecule {i+1}, increase the subspace size. Collapsing subspace")
+                # print(f"Maximum subspace size reached for molecule {i+1}. Collapsing subspace")
                 V[i,:] = 0
                 V[i,:nroots,:] = amplitudes[i]
                 # HV[:nroots,:] = torch.einsum('vr,vo->ro',e_vec_n, HV[:vend,:])
                 vstart[i] = 0
                 vend[i] = nroots
                 if iter > max_iter:
-                    warnings.warn(f"Maximum iterations reached but roots have not converged for molecule {i+1}")
+                    # warnings.warn(f"Maximum iterations reached but roots have not converged for molecule {i+1}")
+                    raise Exception(f"Maximum iterations reached but roots have not converged for molecule {i+1}")
                 continue
 
             newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
@@ -172,22 +180,29 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
                 vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
 
             roots_left = vend[i] - vstart[i]
+            total_error = torch.sum(resid_norm,dim=1)
             if roots_left==0:
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]
 
-            print(f"Iteration {iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
+            # if iter % 5 == 0:
+                # print(f"Iteration {iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
+                # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
+                # print(f"{iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
 
         if torch.all(done):
             break
         if iter > max_iter:
-            warnings.warn("Maximum iterations reached but roots have not converged")
+            # warnings.warn("Maximum iterations reached but roots have not converged")
+            raise Exception("Maximum iterations reached but roots have not converged")
 
+    # print("-" * len(header))
     print("")
     for j in range(nmol):
         print(f"Molecule {j}\n")
         for i, energy in enumerate(e_val_n[j], start=1):
-            print(f"  State {i}: {energy:.15f} eV")
+            print(f"State {i:3d}: {energy:.15f} eV")
+    print("")
 
     return e_val_n, amplitude_store
 
@@ -233,10 +248,13 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     norb = mol.norb[0]
 
     nnewRoots = P_xi.shape[1]
-    P0 = torch.stack([
-        unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
-        for i in range(nmol) for j in range(nnewRoots)
-    ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
+    # P0 = torch.stack([
+    #     unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
+    #     for i in range(nmol) for j in range(nnewRoots)
+    # ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
+    P0 = unpackone_batch(P_xi.view(nmol*nnewRoots,norb,norb), 4*nHeavy, nHydro, molsize * 4).view(nmol,nnewRoots,4*molsize,4*molsize)
+    del P_xi
+    
     # print_memory_usage("After unpacking P_xi")
 
     w = w_.view(nmol,npairs_per_mol,10,10)
@@ -249,7 +267,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
         P0_antisym = 0.5*(P0 - P0.transpose(2,3))
         P_anti = P0_antisym.reshape(nmol,nnewRoots,molsize,4,molsize,4)\
                   .transpose(3,4).reshape(nmol,nnewRoots,molsize*molsize,4,4)
-        del P0_antisym
+        del P0_antisym, P0
 
         # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
         #   0,     1         2       3       4         5       6      7         8        9
@@ -258,11 +276,11 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
                             [3,4,5,8],
                             [6,7,8,9]],dtype=torch.int64, device=device)
         sumK = torch.empty(nmol,nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
-        Pp = -0.5 * P_anti[:, :, mask]
+        Pp = P_anti[:, :, mask]
         for i in range(4):
             for j in range(4):
                 #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-                sumK[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
+                sumK[...,i,j] = -0.5 * torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
         F.index_add_(2,mask,sumK)
         F[:,:,mask_l] -= sumK.transpose(3,4)
         del Pp
@@ -288,13 +306,14 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
 
     F0 = F.reshape(nmol,nnewRoots,molsize,molsize,4,4) \
              .transpose(3,4) \
-             .reshape(nmol,nnewRoots, 4*molsize, 4*molsize)
+             .reshape(nmol*nnewRoots, 4*molsize, 4*molsize)
     del F
 
-    F0 = torch.stack([
-        packone(F0[i,j], 4*nHeavy, nHydro, norb)
-        for i in range(nmol) for j in range(nnewRoots)
-    ])
+    # F0 = torch.stack([
+    #     packone(F0[i,j], 4*nHeavy, nHydro, norb)
+    #     for i in range(nmol) for j in range(nnewRoots)
+    # ])
+    F0 = packone_batch(F0, 4*nHeavy, nHydro, norb).view(nmol,nnewRoots,norb,norb)
 
     return F0.view(nmol,nnewRoots,norb,norb)
 
@@ -374,11 +393,11 @@ def makeA_pi_symm_batch(mol,P0,w):
                         [3,4,5,8],
                         [6,7,8,9]],dtype=torch.int64, device=device)
     # Pp =P[mask], P_{mu \in A, lambda \in B}
-    Pp = -0.5*P[:,:,mask]
+    Pp = P[:,:,mask]
     for i in range(4):
         for j in range(4):
             #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            sumK[...,i,j] = torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
+            sumK[...,i,j] = -0.5*torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
     F.index_add_(2,mask,sumK)
     F[:,:,mask_l] += sumK.transpose(3,4)
     del Pp
@@ -430,22 +449,21 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     """
     for i in range(newsubspace.shape[0]):
         vec = newsubspace[i]
-        # Instead of batch processing like below, it is more numerically stable to do it one by one in a loop
-        # projection = V[:vend] @ vec
-        # vec -= projection @ V[:vend]
-        for j in range(vend):
-            vec -= torch.dot(V[j], vec) * V[j]
+        c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
+        vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
+        # for j in range(vend):
+        #     vec -= torch.dot(V[j], vec) * V[j]
 
         vecnorm = torch.norm(vec)
 
+        # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
+        # See: https://doi.org/10.1016/j.camwa.2005.08.009
+        # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
         if vecnorm > tol:
-            vec /= vecnorm
-
-            # reorthogonalize because dividing by the norm can make it numerically non-orthogonal
-            # projection = V[:vend] @ vec
-            # vec -= projection @ V[:vend]
-            for j in range(vend):
-                vec -= torch.dot(V[j], vec) * V[j]
+            c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
+            vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
+            # for j in range(vend):
+            #     vec -= torch.dot(V[j], vec) * V[j]
             vecnorm = torch.norm(vec)
 
             if vecnorm > tol:
@@ -474,7 +492,7 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1):
     num_matrices = 2  # Number of big matrices that will take up a big chunk of memory: V, HV
 
     # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.1
+    memory_fraction = 0.3
     usable_memory = available_memory * memory_fraction
 
     # Calculate maximum n based on memory
@@ -526,3 +544,18 @@ def get_subspace_eig_batched(H,nroots,zero_pad,e_val_n,done,nonorthogonal):
 
         return e_vec_n
 
+def unpackone_batch(x0, nho, nHydro, size):
+    x = torch.zeros((x0.shape[0],size, size), dtype=x0.dtype, device=x0.device)
+    x[:,:nho,:nho] = x0[:,:nho,:nho]
+    x[:,:nho,nho:(nho+4*nHydro):4] = x0[:,:nho, nho:(nho+nHydro)]
+    x[:,nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4] = x0[:,nho:(nho+nHydro),nho:(nho+nHydro)]
+    x[:,nho:(nho+4*nHydro):4, :nho] = x0[:,nho:(nho+nHydro), :nho]
+    return x
+
+def packone_batch(x, nho, nHydro, norb):
+    x0 = torch.zeros((x.shape[0],norb,norb), dtype=x.dtype, device=x.device)
+    x0[:,:nho,:nho]=x[:,:nho,:nho]
+    x0[:,:nho, nho:(nho+nHydro)] = x[:,:nho,nho:(nho+4*nHydro):4]
+    x0[:,nho:(nho+nHydro),nho:(nho+nHydro)] = x[:,nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4]
+    x0[:,nho:(nho+nHydro), :nho] = x[:,nho:(nho+4*nHydro):4, :nho]
+    return x0
