@@ -13,7 +13,7 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_batch(mol, w, e_mo, nroots, root_tol):
+def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -48,34 +48,34 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
     approxH = ea_ei.view(-1,nov)
-
-    # Make the davidson guess vectors
-    sorted_ediff, sortedidx = torch.sort(approxH, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
-
-    nroots_expand = nroots
-    # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
-    while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
-        nroots_expand += 1
-    if nroots_expand > nroots:
-        print("Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
-        nroots = nroots_expand
-
-    maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
     
+    maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
     if maxSubspacesize < 2*nroots:
         raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
 
-    extra_subspace = min(7,nov-nroots,maxSubspacesize-2*nroots)
-    nstart = nroots+extra_subspace
     # print_memory_usage("Before V,HV allocation")
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
     # print_memory_usage("After V,HV allocation")
 
-    # z = torch.arange(nstart)
-    # for i in range(nmol):
-    #     V[i,sortedidx[i,:nstart],z] = 1.0
-    V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
+    if init_amplitude_guess is None:
+        # Make the davidson guess vectors
+        sorted_ediff, sortedidx = torch.sort(approxH, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
+
+        nroots_expand = nroots
+        # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
+        while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
+            nroots_expand += 1
+        if nroots_expand > nroots:
+            print("Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
+            nroots = nroots_expand
+        extra_subspace = min(7,nov-nroots,maxSubspacesize-2*nroots)
+        nstart = nroots+extra_subspace
+        V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
+
+    else:
+        nstart = nroots
+        V[:,:nstart,:] = init_amplitude_guess
 
     max_iter = 100 # 5*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
@@ -180,7 +180,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
                 vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
 
             roots_left = vend[i] - vstart[i]
-            total_error = torch.sum(resid_norm,dim=1)
             if roots_left==0:
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]
@@ -197,9 +196,9 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol):
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
-    print("")
+    print("\nCIS excited states:")
     for j in range(nmol):
-        print(f"Molecule {j}\n")
+        print(f"\nMolecule {j}")
         for i, energy in enumerate(e_val_n[j], start=1):
             print(f"State {i:3d}: {energy:.15f} eV")
     print("")

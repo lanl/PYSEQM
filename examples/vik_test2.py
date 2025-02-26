@@ -62,7 +62,8 @@ seqm_parameters = {
                    'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': [True,5]
+                   'excited_states': [True,5],
+                   # 'cis_tolerance' : 1e-8,
                    }
 
 # State 1: 2.288381 eV

@@ -238,7 +238,7 @@ def conjugate_gradient_batch(A,b,M_diag,max_iter=50,tol=1e-6):
         p = z + beta.unsqueeze(-1) * p
         rs_old = rs_new
 
-        if it % 1 == 0 or it == max_iter - 1:
-            print(f"Iteration {it:3}: Residual norms = {r_norm}")
+        # if it % 1 == 0 or it == max_iter - 1:
+        #     print(f"Iteration {it:3}: Residual norms = {r_norm}")
 
     return x

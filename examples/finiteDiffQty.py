@@ -19,7 +19,7 @@ def get_qty_from_output(geometry):
     output_lines = f.getvalue().strip().split('\n')
 
     # Search for the line containing 'Total energy = '
-    searchStr = 'State 1:' # 'Dummy = '
+    searchStr = 'State   1:' # 'Dummy = '
     for line in output_lines:
         if searchStr in line:
             # Extract the energy value from the line
@@ -80,7 +80,8 @@ seqm_parameters = {
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
-                   'excited_states': [True,1]
+                   'excited_states': [True,1],
+                   # 'cis_tolerance' : 1e-8,
                    }
 
 delta = 1e-5

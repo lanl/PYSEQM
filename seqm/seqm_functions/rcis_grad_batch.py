@@ -148,8 +148,14 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     e1b_x.add_(sumB)
 
     # Core-elecron interaction
-    e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
+    scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
+                                [0.0, 1.0, 2.0, 2.0],
+                                [0.0, 0.0, 1.0, 2.0],
+                                [0.0, 0.0, 0.0, 1.0] ])
+    e1b_x *= scale_emat
+    e2a_x *= scale_emat   
+    # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
+    # e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
     pair_grad.add_((B[mol.maskd[mol.idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
                    (B[mol.maskd[mol.idxi], None, :, :] * e1b_x).sum(dim=(2, 3)))
     del e1b_x
@@ -179,8 +185,10 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     del suma, sumb
 
     # Core-elecron interaction
-    J_x_1b.add_(J_x_1b.triu(1).transpose(2, 3))
-    J_x_2a.add_(J_x_2a.triu(1).transpose(2, 3))
+    # J_x_1b.add_(J_x_1b.triu(1).transpose(2, 3))
+    # J_x_2a.add_(J_x_2a.triu(1).transpose(2, 3))
+    J_x_1b *= scale_emat
+    J_x_2a *= scale_emat   
     pair_grad.add_((2.0*R_symm[mol.maskd[mol.idxj], None, :, :] * J_x_2a).sum(dim=(2, 3)) +
                    (2.0*R_symm[mol.maskd[mol.idxi], None, :, :] * J_x_1b).sum(dim=(2, 3))) # I can use R_symm instead of R here
     del J_x_2a
