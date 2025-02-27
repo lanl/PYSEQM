@@ -10,6 +10,7 @@ from .seqm_functions.rcis import rcis
 from .seqm_functions.rcis_grad import rcis_grad
 from .seqm_functions.rcis_batch import rcis_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
+from .seqm_functions.nac import calc_nac
 
 import os
 import time
@@ -640,6 +641,11 @@ class Energy(torch.nn.Module):
                     # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
                     if cis_gradient[0]:
                         rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P,cis_tol)
+
+                    cis_nac = kwargs.get('cis_nac',[False])
+                    if cis_nac[0]:
+                        calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
+
                 else: # to be decomissioned
                     excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
                     rcis_grad(molecule,exc_amps[0],w,e,riXH,ri,P)

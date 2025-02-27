@@ -2,7 +2,7 @@ import torch
 from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 from seqm.seqm_functions.pack import unpackone
-from seqm.seqm_functions.rcis_batch import makeA_pi_batched
+from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch
 from .constants import a0
 
 def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
@@ -64,16 +64,20 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     molsize = mol.molsize
     nHeavy = mol.nHeavy[0]
     nHydro = mol.nHydro[0]
-    B0 = torch.stack([ unpackone(dens_BR[i,0], 4*nHeavy, nHydro, molsize * 4)
-        for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
-    R0 = torch.stack([ unpackone(dens_BR[i,1], 4*nHeavy, nHydro, molsize * 4)
-        for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
+    # B0 = torch.stack([ unpackone(dens_BR[i,0], 4*nHeavy, nHydro, molsize * 4)
+    #     for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
+    B0 = unpackone_batch(dens_BR[:,0],4*nHeavy, nHydro, molsize * 4)
+    # R0 = torch.stack([ unpackone(dens_BR[i,1], 4*nHeavy, nHydro, molsize * 4)
+    #     for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
+    R0 = unpackone_batch(dens_BR[:,1],4*nHeavy, nHydro, molsize * 4)
     
     del dens_BR
 
     ###############################
     # Calculate the gradient of CIS energies
 
+    # TODO: instead of repeating the calculation of gradient of the overlap matrix and the 2-e integral matrix w_x, store it and reuse it, while calculating ground state
+    # gradients. Alternately, combine ground and excited state gradients
     npairs = mol.rij.shape[0]
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
     zeta = torch.cat((mol.parameters['zeta_s'].unsqueeze(1), mol.parameters['zeta_p'].unsqueeze(1)), dim=1)
@@ -222,10 +226,12 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     grad_cis.index_add_(0, mol.idxi, pair_grad)
     grad_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
 
-    torch.set_printoptions(precision=9)
-    print(f'Analytical CIS gradient is:\n{grad_cis.view(nmol,molsize,3)}')
     grad_cis = grad_cis.view(nmol, molsize, 3)
-    return
+
+    torch.set_printoptions(precision=9)
+    print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')
+
+    return grad_cis
 
 def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
     nmol  = mol.nmol

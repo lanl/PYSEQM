@@ -67,7 +67,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
             nroots_expand += 1
         if nroots_expand > nroots:
-            print("Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
+            print(f"Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
             nroots = nroots_expand
         extra_subspace = min(7,nov-nroots,maxSubspacesize-2*nroots)
         nstart = nroots+extra_subspace

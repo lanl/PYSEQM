@@ -87,12 +87,12 @@ esdriver = Electronic_Structure(seqm_parameters).to(device)
 # analyt_time = molecules.const.timing["Force"]
 # molecules.const.timing["Force"] = []
 for i in range(1):
-    esdriver(molecules)
+    esdriver(molecules,cis_nac=[True,1,2])
 # backprop_time = molecules.const.timing["Force"]
 # import os
 # import numpy as np
 # print(f'{os.path.basename(__file__)} {np.average(backprop_time)} {np.average(analyt_time)})')
-print(f'Force is\n{molecules.force}')
+# print(f'Force is\n{molecules.force}')
 
 print(' Total Energy (eV):\n', molecules.Etot)
 # print('\n Electronic Energy (eV): ', molecules.Eelec)
