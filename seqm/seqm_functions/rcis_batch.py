@@ -165,7 +165,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             vend[collapse_mask] = nroots
 
 
-        orthogonalize_mask = (~done) & (~collapse_condition)
+        orthogonalize_mask = (~done) & (~mol_converged) & (~collapse_condition)
         mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
         for i in mols_to_ortho:
             newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
