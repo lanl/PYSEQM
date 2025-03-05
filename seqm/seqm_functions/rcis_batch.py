@@ -1,17 +1,5 @@
 import torch
 # from seqm.seqm_functions.pack import packone, unpackone
-import warnings
-
-def print_memory_usage(step_description, device=0):
-    allocated = torch.cuda.memory_allocated(device) / 1024**2  # Convert to MB
-    reserved = torch.cuda.memory_reserved(device) / 1024**2    # Convert to MB
-    max_allocated = torch.cuda.max_memory_allocated(device) / 1024**2
-    max_reserved = torch.cuda.max_memory_reserved(device) / 1024**2
-    print(f"[{step_description}]")
-    print(f"  Allocated Memory: {allocated:.2f} MB")
-    print(f"  Reserved Memory: {reserved:.2f} MB")
-    print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
-    print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
 def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     torch.set_printoptions(linewidth=200)
@@ -29,22 +17,17 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     device = w.device
     dtype = w.dtype
 
-    norb = mol.norb
-    nocc = mol.nocc
-    nmol = mol.nmol
-
-    # print_memory_usage("RCIS beginning")
-    if not torch.all(norb == norb[0]) or not torch.all(nocc == nocc[0]):
-        raise ValueError(
-            'All molecules in the batch should be of the same type with same number of orbitals and electrons')
-    norb = norb[0]
-    nocc = nocc[0]
+    norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
+    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
+        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    norb, nocc = norb_batch[0], nocc_batch[0]
     nvirt = norb - nocc
     nov = nocc * nvirt
 
     if nroots > nov:
         raise Exception(f"Maximum number of roots for this molecule is {nov}. Reduce the requested number of roots")
 
+    # Precompute energy differences (ea_ei) and form the approximate diagonal of the Hamiltonian (approxH)
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
     approxH = ea_ei.view(-1,nov)
@@ -53,10 +36,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     if maxSubspacesize < 2*nroots:
         raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
 
-    # print_memory_usage("Before V,HV allocation")
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
-    # print_memory_usage("After V,HV allocation")
 
     if init_amplitude_guess is None:
         # Make the davidson guess vectors
@@ -77,7 +58,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         nstart = nroots
         V[:,:nstart,:] = init_amplitude_guess
 
-    max_iter = 100 # 5*maxSubspacesize//nroots # Heuristic: allow one or two subspace collapse. TODO: User-defined
+    max_iter = 100 # TODO: User-defined
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
     iter = 0
     vstart = torch.zeros(nmol,dtype=torch.long,device=device)
@@ -94,7 +75,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
 
-    # print_memory_usage("Before davidson loop start")
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -102,87 +82,64 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     while iter <= max_iter: # Davidson loop
 
-        # max_v = torch.max(vend-vstart).item()
-        # V_batched = torch.zeros(nmol,max_v,nov,dtype=dtype,device=device)
-        # for i in range(nmol):
-        #     if not done[i]:
-        #         V_batched[i,: (vend[i]-vstart[i]),:] = V[i,vstart[i]:vend[i],:]
-        delta = vend - vstart 
-        max_v = delta.max().item()
-        # Relative indices 0,...,max_v-1, broadcasted over molecules.
+        # Determine current subspace dimensions per molecule
+        delta = vend - vstart
+        max_v = int(delta.max().item())
         rel_idx = torch.arange(max_v, device=device).unsqueeze(0)  # (1, max_v)
-        # Compute absolute indices per molecule:
         abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-        # Create a mask for valid positions:
         mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
+        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(-1, max_v)
 
-        # Now gather from V:
-        # First, create a batch index matrix:
-        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(-1, max_v)  # (nmol, max_v)
-
-        # Initialize V_batched:
+        # Gather current subspace vectors into V_batched
         V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
         V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
-        HV_batch = matrix_vector_product_batched(mol,V_batched, w, ea_ei, Cocc, Cvirt)
-
-        # for i in range(nmol):
-        #     if not done[i]:
-        #         HV[i, vstart[i]:vend[i]] = HV_batch[i, :(vend[i]-vstart[i])]
-
+        # Compute the matrix-vector product in the current subspace
+        HV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
         HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
 
         # Make H by multiplying V.T * HV
-        # Option 1: direct multiplication
-        vend_max = torch.max(vend).item()
+        vend_max = int(torch.max(vend).item())
         H = torch.einsum('bnia,bria->bnr',V[:,:vend_max].view(nmol,vend_max,nocc,nvirt),HV[:,:vend_max].view(nmol,vend_max,nocc,nvirt))
 
         iter = iter + 1
 
         # Diagonalize the subspace hamiltonian
-        zero_pad = vend_max - vend
-        e_vec_n =  get_subspace_eig_batched(H,nroots,zero_pad,e_val_n,done,nonorthogonal)
+        zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
+        e_vec_n = get_subspace_eig_batched(H, nroots, zero_pad, e_val_n, done, nonorthogonal)
 
-
+        # Compute CIS amplitudes and the residual
         amplitudes = torch.einsum('bvr,bvo->bro',e_vec_n,V[:,:vend_max,:])
         residual = torch.einsum('bvr,bvo->bro',e_vec_n, HV[:,:vend_max,:]) - amplitudes*e_val_n.unsqueeze(2)
-
         resid_norm = torch.norm(residual,dim=2)
         roots_not_converged = resid_norm > root_tol
 
+        # Mark molecules with all roots converged and store amplitudes
         mol_converged = roots_not_converged.sum(dim=1) == 0
         done_this_loop = (~done) & mol_converged
         done[done_this_loop] = True
         amplitude_store[done_this_loop] = amplitudes[done_this_loop]
 
+        # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
         collapse_condition = ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize))
         collapse_mask = (~done) & (~mol_converged) & collapse_condition 
-        # collapse if any
         if collapse_mask.sum() > 0:
             V[collapse_mask] = 0
             V[collapse_mask,:nroots,:] = amplitudes[collapse_mask]
             vstart[collapse_mask] = 0
             vend[collapse_mask] = nroots
 
-
+        # Orthogonalize the residual vectors for molecules that are not collapsed or converged
         orthogonalize_mask = (~done) & (~mol_converged) & (~collapse_condition)
         mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
         for i in mols_to_ortho:
             newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
 
             vstart[i] = vend[i]
-            # if nonorthogonal:
-            #     raise NotImplementedError("Non-orthogonal davidson not yet implemented")
-            #     newsubspace_norm = torch.norm(newsubspace,dim=1)
-            #     nonzero_newsubspace = newsubspace_norm > vector_tol
-            #     vend = vstart + nonzero_newsubspace.sum()
-            #     V[vstart:vend] = newsubspace[nonzero_newsubspace]/newsubspace_norm[nonzero_newsubspace].unsqueeze(1)
-            #
-            # else:
+            # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function. 
+            # This means changes inside the function will directly modify 'V[i]'
             vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
-
-            roots_left = vend[i] - vstart[i]
-            if roots_left==0:
+            if vend[i] - vstart[i] == 0:
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]
 
@@ -194,7 +151,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if torch.all(done):
             break
         if iter > max_iter:
-            # warnings.warn("Maximum iterations reached but roots have not converged")
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
@@ -452,9 +408,6 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
         vec = newsubspace[i]
         c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
         vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
-        # for j in range(vend):
-        #     vec -= torch.dot(V[j], vec) * V[j]
-
         vecnorm = torch.norm(vec)
 
         # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
@@ -463,8 +416,6 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
         if vecnorm > tol:
             c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
             vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
-            # for j in range(vend):
-            #     vec -= torch.dot(V[j], vec) * V[j]
             vecnorm = torch.norm(vec)
 
             if vecnorm > tol:
@@ -534,15 +485,19 @@ def get_subspace_eig_batched(H,nroots,zero_pad,e_val_n,done,nonorthogonal):
         r_evec = D_inv_sqrt_L_inv_T @ X[:,:nroots]
 
     else:
-        r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
+        r_eval, r_evec = torch.linalg.eigh(H[~done]) # find the eigenvalues and the eigenvectors
 
-        e_vec_n = torch.zeros(e_val_n.shape[0],H.shape[1],nroots,device=H.device,dtype=H.dtype)
-        for i in range(H.shape[0]): #nmol
-            if done[i]:
-                continue
-            e_val_n[i] = r_eval[i,zero_pad[i]:zero_pad[i]+nroots]
-            e_vec_n[i] = r_evec[i,:,zero_pad[i]:zero_pad[i]+nroots]
+        nmol, subspacesize = H.shape[0], H.shape[1]
+        e_vec_n = torch.zeros(nmol,subspacesize,nroots,device=H.device,dtype=H.dtype)
 
+        active_indices = torch.nonzero(~done, as_tuple=False).squeeze(1)
+        
+        # Update eigenvalues and eigenvectors for each active molecule.
+        for j, mol_idx in enumerate(active_indices):
+            start_idx = int(zero_pad[mol_idx].item())
+            end_idx = start_idx + nroots
+            e_val_n[mol_idx] = r_eval[j, start_idx:end_idx]
+            e_vec_n[mol_idx] = r_evec[j, :, start_idx:end_idx]
         return e_vec_n
 
 def unpackone_batch(x0, nho, nHydro, size):
@@ -560,3 +515,14 @@ def packone_batch(x, nho, nHydro, norb):
     x0[:,nho:(nho+nHydro),nho:(nho+nHydro)] = x[:,nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4]
     x0[:,nho:(nho+nHydro), :nho] = x[:,nho:(nho+4*nHydro):4, :nho]
     return x0
+
+def print_memory_usage(step_description, device=0):
+    allocated = torch.cuda.memory_allocated(device) / 1024**2  # Convert to MB
+    reserved = torch.cuda.memory_reserved(device) / 1024**2    # Convert to MB
+    max_allocated = torch.cuda.max_memory_allocated(device) / 1024**2
+    max_reserved = torch.cuda.max_memory_reserved(device) / 1024**2
+    print(f"[{step_description}]")
+    print(f"  Allocated Memory: {allocated:.2f} MB")
+    print(f"  Reserved Memory: {reserved:.2f} MB")
+    print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
+    print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
