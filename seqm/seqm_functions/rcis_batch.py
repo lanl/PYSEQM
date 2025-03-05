@@ -107,7 +107,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         # for i in range(nmol):
         #     if not done[i]:
         #         V_batched[i,: (vend[i]-vstart[i]),:] = V[i,vstart[i]:vend[i],:]
-
         delta = vend - vstart 
         max_v = delta.max().item()
         # Relative indices 0,...,max_v-1, broadcasted over molecules.
@@ -151,56 +150,46 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         resid_norm = torch.norm(residual,dim=2)
         roots_not_converged = resid_norm > root_tol
 
-        collapse_mask = (~done) & ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize))
-        # do collapse if any need to be collapsed
+        mol_converged = roots_not_converged.sum(dim=1) == 0
+        done_this_loop = (~done) & mol_converged
+        done[done_this_loop] = True
+        amplitude_store[done_this_loop] = amplitudes[done_this_loop]
+
+        collapse_condition = ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize))
+        collapse_mask = (~done) & (~mol_converged) & collapse_condition 
+        # collapse if any
         if collapse_mask.sum() > 0:
             V[collapse_mask] = 0
             V[collapse_mask,:nroots,:] = amplitudes[collapse_mask]
             vstart[collapse_mask] = 0
             vend[collapse_mask] = nroots
 
-        orthogonalize_mask = (~done) & (~collapse_mask)
+
+        orthogonalize_mask = (~done) & (~mol_converged) & (~collapse_condition)
         mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
+        for i in mols_to_ortho:
+            newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
 
-        # Count the number of valid (nonzero) residues per molecule.
-        valid_counts = roots_not_converged.sum(dim=1)  # shape (nmol,)
-        max_valid = int(valid_counts.max().item())     # maximum valid entries over all molecules
+            vstart[i] = vend[i]
+            # if nonorthogonal:
+            #     raise NotImplementedError("Non-orthogonal davidson not yet implemented")
+            #     newsubspace_norm = torch.norm(newsubspace,dim=1)
+            #     nonzero_newsubspace = newsubspace_norm > vector_tol
+            #     vend = vstart + nonzero_newsubspace.sum()
+            #     V[vstart:vend] = newsubspace[nonzero_newsubspace]/newsubspace_norm[nonzero_newsubspace].unsqueeze(1)
+            #
+            # else:
+            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
 
-        # Allocate output tensor with shape (nmol, max_valid, nov)
-        newsubspace = torch.zeros(nmol, max_valid, nov, dtype=dtype, device=device)
+            roots_left = vend[i] - vstart[i]
+            if roots_left==0:
+                done[i] = True
+                amplitude_store[i] = amplitudes[i]
 
-        # Create a batch index for each molecule (shape: (nmol, nroots)).
-        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(nmol, nroots)
-
-        # Compute a cumulative sum over the valid entries along each molecule's roots.
-        # This will assign an increasing index (starting from 0) for each valid entry.
-        # For example, if a molecule has roots_not_converged: [False, True, True, False, True],
-        # torch.cumsum gives [0, 1, 2, 2, 3] and subtracting 1 yields [-1, 0, 1, 1, 2].
-        # When we mask with roots_not_converged, the indices become [0, 1, 2].
-        cumsum_idx = torch.cumsum(roots_not_converged.to(torch.int64), dim=1) - 1  # shape (nmol, nroots)
-
-        # Scatter the valid quotient entries into newsubspace_out:
-        # For each valid entry, use its batch index (from batch_idx) and its "local" index (from cumsum_idx)
-        newsubspace[batch_idx[roots_not_converged], cumsum_idx[roots_not_converged], :] = residual[roots_not_converged]/(e_val_n.unsqueeze(2) - approxH.unsqueeze(1))[roots_not_converged]
-
-        done_this_loop  = (~done) & (~collapse_mask) & (~orthogonalize_mask)
-
-        if mols_to_ortho.numel() > 0:
-            vend_subset = vend[mols_to_ortho]  # shape (B,)
-            newsubspace = newsubspace[mols_to_ortho]  # shape (B, k, nov)
-            vstart[mols_to_ortho] = vend[mols_to_ortho]
-
-            # Batched orthogonalization
-            # TODO: directly assign to vend
-            vend_subset = orthogonalize_to_current_subspace_batched(
-                V, newsubspace, vend_subset, vector_tol, mols_to_ortho)
-            done[mols_to_ortho] = (vend[mols_to_ortho] == vend_subset)
-            done_this_loop[mols_to_ortho] = done[mols_to_ortho] 
-            vend[mols_to_ortho] = vend_subset
-
-        del newsubspace
-
-        amplitude_store[done_this_loop] = amplitudes[done_this_loop]
+            # if iter % 5 == 0:
+                # print(f"Iteration {iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
+                # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
+                # print(f"{iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
 
         if torch.all(done):
             break
@@ -445,41 +434,6 @@ def makeA_pi_symm_batch(mol,P0,w):
     # F[:,:,maskd] += F[:,:,maskd].triu(1).transpose(3,4)
 
     return F
-
-def orthogonalize_to_current_subspace_batched(V, newsubspace, vend, tol, mols_to_ortho):
-    _, k, _ = newsubspace.shape
-    for j in range(k):
-        v_max = int(vend.max().item())
-        # Candidate vector for all molecules (B, nov)
-        vec = newsubspace[:, j, :]
-        
-        # Compute projection coefficients for each molecule: dot product of vec with each valid vector
-        coeff = torch.sum(V[mols_to_ortho,:v_max,:] * vec.unsqueeze(1), dim=2)  # shape (B, v_max)
-        # Compute the projection (sum over valid vectors for each molecule)
-        proj = torch.sum(coeff.unsqueeze(2) * V[mols_to_ortho,:v_max,:], dim=1)  # shape (B, nov)
-        
-        # Subtract the projection to obtain the orthogonal component
-        vec -= proj  # shape (B, nov)
-        norms = torch.norm(vec, dim=1)  # shape (B,)
-        
-        # Determine for which molecules the candidate is acceptable (norm above tolerance)
-        keep = norms > tol
-        if keep.any():
-            coeff = torch.sum(V[mols_to_ortho,:v_max,:] * vec.unsqueeze(1), dim=2)  # shape (B, v_max)
-            proj = torch.sum(coeff.unsqueeze(2) * V[mols_to_ortho,:v_max,:], dim=1)  # shape (B, nov)
-            vec -= proj  # shape (B, nov)
-            norms = torch.norm(vec, dim=1)  # shape (B,)
-            # Determine for which molecules the candidate is acceptable (norm above tolerance)
-            keep = norms > tol
-
-            # Normalize the accepted new vectors
-            # For each molecule that accepted this new vector, add it to its subspace.
-            # We use advanced indexing: the subspace for molecule i is updated at row vend[i]
-            indices = torch.nonzero(keep).squeeze(1)
-            V[mols_to_ortho[keep], vend[indices], :] = vec[keep] / (norms[keep].unsqueeze(1))
-            vend[indices] = vend[indices] + 1
-
-    return vend
 
 
 def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
