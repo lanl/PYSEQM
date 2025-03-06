@@ -3,7 +3,7 @@ import torch
 from .cal_par import dd_qq
 from .constants import a0
 
-def dipole_matrix(mol):
+def calc_dipole_matrix(mol):
     """
     Build the block-diagonal dipole tensor for atoms.
     
@@ -39,21 +39,34 @@ def dipole_matrix(mol):
     dd, _ = dd_qq(qn0[isX],zetas[isX], zetap[isX])
     dd *= a0
 
-    molsize = mol.molsize
-    coord = mol.coordinates.view(mol.nmol*molsize,3)
-    diagonal_dipole = torch.zeros((molsize, 4, 4, 3), dtype=dtype, device=device)
+    coord = mol.coordinates.view(mol.nmol*mol.molsize,3)
+    diagonal_dipole = torch.zeros((3, mol.nmol*mol.molsize, 4, 4), dtype=dtype, device=device)
     
-    # For non-hydrogen atoms: all diagonal elements are -coord.
-    diag_idx = torch.arange(4, device=device)
-    # For each non-H atom, assign -coord to all diagonal positions.
-    diagonal_dipole[isX, diag_idx, diag_idx, :] = -coord[isX].unsqueeze(1)
-    # Set off-diagonal s-p interaction elements:
-    # For each Cartesian component i (0: x, 1: y, 2: z), assign at position (0, i+1).
-    cart_idx = torch.arange(3, device=device)
-    diagonal_dipole[isX, 0, cart_idx+1, cart_idx] = -dd.unsqueeze(1)
-    diagonal_dipole[isX, cart_idx+1, 0, cart_idx] = -dd.unsqueeze(1)
+    I = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).unsqueeze(0)  # shape (1,1,4,4)
+    # Get -coord for non-H atoms and rearrange from (n_nonH, 3) to (3, n_nonH, 1, 1).
+    nonH_coord = -coord[isX].T.unsqueeze(-1).unsqueeze(-1)  # shape (3, n_nonH, 1, 1)
+    # Multiply by the identity so that only the diagonal entries are nonzero.
+    diag_block_nonH = nonH_coord * I  # shape (3, n_nonH, 4, 4)
+    diagonal_dipole[:, isX, :, :] = diag_block_nonH
     
-    # For hydrogen atoms: only the (0,0) element is set to -coord.
-    diagonal_dipole[isH, 0, 0, :] = -coord[isH]
+    # Set the off-diagonal s-p interaction elements:
+    # For each Cartesian direction i (0: x, 1: y, 2: z), set
+    for i in range(3):
+      diagonal_dipole[i, isX, 0, i+1] = -dd
+      diagonal_dipole[i, isX, i+1, 0] = -dd
+    # cart_idx = torch.arange(3, device=device)
+    # diagonal_dipole[cart_idx, isX, 0, cart_idx + 1] = -dd
+    # diagonal_dipole[cart_idx, isX, cart_idx + 1, 0] = -dd
     
-    return diagonal_dipole
+    # --- Process hydrogen atoms ---
+    # For hydrogen atoms, only the (0,0) element is set.
+    diagonal_dipole[:, isH, 0, 0] = -coord[isH].T
+
+
+    dipole_mat = torch.zeros(3,mol.nmol*mol.molsize*mol.molsize,4,4)
+    dipole_mat[:,mol.maskd] = diagonal_dipole
+    dipole_mat = dipole_mat.reshape(3,mol.nmol,mol.molsize,mol.molsize,4,4) \
+             .permute(1,0,2,4,3,5) \
+             .reshape(mol.nmol, 3, 4*mol.molsize, 4*mol.molsize)
+    
+    return dipole_mat

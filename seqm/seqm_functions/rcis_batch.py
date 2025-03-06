@@ -1,5 +1,7 @@
 import torch
-from .dipole import dipole_matrix
+from .dipole import calc_dipole_matrix
+from .constants import a0
+import math
 # from seqm.seqm_functions.pack import packone, unpackone
 
 def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
@@ -157,13 +159,13 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print("-" * len(header))
     print("\nCIS excited states:")
     for j in range(nmol):
-        print(f"\nMolecule {j}")
+        if nmol>1: print(f"\nMolecule {j+1}")
         for i, energy in enumerate(e_val_n[j], start=1):
             print(f"State {i:3d}: {energy:.15f} eV")
     print("")
 
     # Post CIS analysis
-    rcis_analysis(mol)
+    rcis_analysis(mol,e_val_n,amplitude_store)
 
     return e_val_n, amplitude_store
 
@@ -531,5 +533,68 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_analysis(mol):
-   dipole_matrix(mol) 
+def rcis_analysis(mol,excitation_energies,amplitues):
+    dipole_mat = calc_dipole_matrix(mol) 
+    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitues,excitation_energies,dipole_mat)
+    print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+
+def calc_transition_dipoles(mol,amplitues,excitation_energies,dipole_mat):
+
+    nocc, norb = mol.nocc[0], mol.norb[0]
+    nvirt = norb - nocc
+    C = mol.eig_vec
+    Cocc = C[:,:,:nocc]
+    Cvirt = C[:,:,nocc:norb]
+
+    nroots = amplitues.shape[1]
+    amp_ia = amplitues.view(mol.nmol,nroots,nocc,nvirt)
+
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
+    norb = mol.norb[0]
+    dipole_mat_packed = packone_batch(dipole_mat.view(3*mol.nmol,4*mol.molsize,4*mol.molsize), 4*nHeavy, nHydro, norb).view(mol.nmol,3,norb,norb)
+
+
+    # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
+    R = torch.einsum('bmi,bria,bna->brmn',Cocc,amp_ia,Cvirt)
+
+    # Transition dipole in AU as calculated in NEXMD
+    transition_dipole = torch.einsum('brmn,bdmn->brd',R,dipole_mat_packed)*math.sqrt(2.0)/a0
+    hartree = 27.2113962 # value used in NEXMD
+    oscillator_strength = 2.0/3.0*excitation_energies/hartree*torch.square(transition_dipole).sum(dim=2)
+    return transition_dipole, oscillator_strength
+
+
+def print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength):
+
+    print(f"Number of excited states: {excitation_energies.shape[1]}\n")
+    print("Excitation energies E (eV), Transition dipoles d (au), and Oscillator strengths f (unitless)")
+    row_format = "{:<10}   {:>10}   {:>10}   {:>10}      {:<10}"
+
+    # Print header
+    print(row_format.format(
+        "E",
+        "d x",
+        "d y",
+        "d z",
+        "f"
+    ))
+    print("-" * 65)
+
+    nmol = excitation_energies.shape[0]
+    # Loop over molecules and states using enumerate and zip
+    for mol_idx, (mol_energy, mol_dipole, mol_strength) in enumerate(zip(excitation_energies, transition_dipole, oscillator_strength), start=1):
+        if nmol>1: print(f"Molecule {mol_idx}:")
+        for energy_val, dipole_vals, strength_val in zip(mol_energy, mol_dipole, mol_strength):
+            # Convert single-value tensors to Python floats
+            e = energy_val.item()
+            dx, dy, dz = dipole_vals.tolist()
+            s = strength_val.item()
+            print(row_format.format(
+                f"{e:.6f}",
+                f"{dx:.6f}",
+                f"{dy:.6f}",
+                f"{dz:.6f}",
+                f"{s:.6f}"
+            ))
+        print("")
