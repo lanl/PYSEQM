@@ -150,7 +150,7 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
     scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
                                 [0.0, 1.0, 2.0, 2.0],
                                 [0.0, 0.0, 1.0, 2.0],
-                                [0.0, 0.0, 0.0, 1.0] ])
+                                [0.0, 0.0, 0.0, 1.0] ], device=device,dtype=dtype)
     e1b_x *= scale_emat
     e2a_x *= scale_emat   
     # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))

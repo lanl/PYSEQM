@@ -1,4 +1,5 @@
 import torch
+from .dipole import dipole_matrix
 # from seqm.seqm_functions.pack import packone, unpackone
 
 def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
@@ -160,6 +161,9 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         for i, energy in enumerate(e_val_n[j], start=1):
             print(f"State {i:3d}: {energy:.15f} eV")
     print("")
+
+    # Post CIS analysis
+    rcis_analysis(mol)
 
     return e_val_n, amplitude_store
 
@@ -526,3 +530,6 @@ def print_memory_usage(step_description, device=0):
     print(f"  Reserved Memory: {reserved:.2f} MB")
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
+
+def rcis_analysis(mol):
+   dipole_matrix(mol) 

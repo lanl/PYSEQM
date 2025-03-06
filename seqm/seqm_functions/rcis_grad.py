@@ -144,7 +144,7 @@ def rcis_grad(mol, amp, w, e_mo, riXH, ri, P0):
     scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
                                 [0.0, 1.0, 2.0, 2.0],
                                 [0.0, 0.0, 1.0, 2.0],
-                                [0.0, 0.0, 0.0, 1.0] ])
+                                [0.0, 0.0, 0.0, 1.0] ], device=device,dtype=dtype)
     e1b_x *= scale_emat
     e2a_x *= scale_emat   
     pair_grad.add_((B[mol.maskd[mol.idxj], None, :, :] * e2a_x).sum(dim=(2, 3)) +
