@@ -63,7 +63,7 @@ def calc_dipole_matrix(mol):
     diagonal_dipole[:, isH, 0, 0] = -coord[isH].T
 
 
-    dipole_mat = torch.zeros(3,mol.nmol*mol.molsize*mol.molsize,4,4)
+    dipole_mat = torch.zeros(3,mol.nmol*mol.molsize*mol.molsize,4,4,dtype=dtype,device=device)
     dipole_mat[:,mol.maskd] = diagonal_dipole
     dipole_mat = dipole_mat.reshape(3,mol.nmol,mol.molsize,mol.molsize,4,4) \
              .permute(1,0,2,4,3,5) \

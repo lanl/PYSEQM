@@ -36,8 +36,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     approxH = ea_ei.view(-1,nov)
     
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
-    if maxSubspacesize < 2*nroots:
-        raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
 
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
@@ -53,7 +51,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if nroots_expand > nroots:
             print(f"Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
             nroots = nroots_expand
-        extra_subspace = min(7,nov-nroots,maxSubspacesize-2*nroots)
+
+        extra_subspace = min(7,nov-nroots)
         nstart = nroots+extra_subspace
         V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
@@ -63,7 +62,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     max_iter = 100 # TODO: User-defined
     vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
-    iter = 0
+    davidson_iter = 0
     vstart = torch.zeros(nmol,dtype=torch.long,device=device)
     vend = torch.full((nmol,),nstart,dtype=torch.long,device=device)
     done = torch.zeros(nmol,dtype=torch.bool,device=device)
@@ -83,7 +82,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print(header)
     # print("-" * len(header))
 
-    while iter <= max_iter: # Davidson loop
+    while davidson_iter <= max_iter: # Davidson loop
 
         # Determine current subspace dimensions per molecule
         delta = vend - vstart
@@ -105,7 +104,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         vend_max = int(torch.max(vend).item())
         H = torch.einsum('bnia,bria->bnr',V[:,:vend_max].view(nmol,vend_max,nocc,nvirt),HV[:,:vend_max].view(nmol,vend_max,nocc,nvirt))
 
-        iter = iter + 1
+        davidson_iter = davidson_iter + 1
 
         # Diagonalize the subspace hamiltonian
         zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
@@ -127,6 +126,9 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         collapse_condition = ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize))
         collapse_mask = (~done) & (~mol_converged) & collapse_condition 
         if collapse_mask.sum() > 0:
+            if davidson_iter == 1:
+                raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
+
             V[collapse_mask] = 0
             V[collapse_mask,:nroots,:] = amplitudes[collapse_mask]
             vstart[collapse_mask] = 0
@@ -146,14 +148,14 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]
 
-            # if iter % 5 == 0:
-                # print(f"Iteration {iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
+            # if davidson_iter % 5 == 0:
+                # print(f"davidson_iteration {davidson_iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
                 # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
-                # print(f"{iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
+                # print(f"{davidson_iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
 
         if torch.all(done):
             break
-        if iter > max_iter:
+        if davidson_iter > max_iter:
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))

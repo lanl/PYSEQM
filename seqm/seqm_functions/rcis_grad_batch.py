@@ -155,7 +155,7 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
                                 [0.0, 1.0, 2.0, 2.0],
                                 [0.0, 0.0, 1.0, 2.0],
-                                [0.0, 0.0, 0.0, 1.0] ])
+                                [0.0, 0.0, 0.0, 1.0] ],dtype=dtype, device=device)
     e1b_x *= scale_emat
     e2a_x *= scale_emat   
     # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
