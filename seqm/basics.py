@@ -634,7 +634,6 @@ class Energy(torch.nn.Module):
                 if molecule.nmol >= 1:
                     cis_gradient = kwargs.get('cis_gradient',[False])
                     if molecule.const.do_timing: t0 = time.time()
-
                     if method == 'cis':
                         excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol)
 
