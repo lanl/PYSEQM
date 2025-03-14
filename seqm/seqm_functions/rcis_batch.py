@@ -412,16 +412,18 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     :returns: vend: size of the subspace after adding in the new vectors 
 
     """
-    newsubspace_perp = newsubspace - (newsubspace @ V[:vend].T) @ V[:vend]
-    newsubspace_perp -= (newsubspace_perp @ V[:vend].T) @ V[:vend]
+    # Remove projection on original subspace V using Gram-Schmidt. Repeated thrice to remove numerical noise
+    newsubspace -= (newsubspace @ V[:vend].T) @ V[:vend]
+    newsubspace -= (newsubspace @ V[:vend].T) @ V[:vend]
+    newsubspace -= (newsubspace @ V[:vend].T) @ V[:vend]
 
-    mask_pre = newsubspace_perp.norm(dim=1) >= tol * 1e-2
+    mask_pre = newsubspace.norm(dim=1) >= tol# * 1e-2
     if not mask_pre.any():
         return vend
 
-    newsubspace_perp = newsubspace_perp[mask_pre]
+    newsubspace = newsubspace[mask_pre]
 
-    Q_t, R = torch.linalg.qr(newsubspace_perp.t(), mode='reduced')
+    Q_t, R = torch.linalg.qr(newsubspace.t(), mode='reduced')
 
     mask_post = torch.diagonal(R).abs_() >= tol
     new_vecs_to_add = mask_post.sum()
@@ -449,8 +451,8 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     #         if vecnorm > tol:
     #             V[vend] = vec / vecnorm
     #             vend = vend + 1
-
-    return vend
+    #
+    # return vend
 
 import psutil # to get the memory size
 
