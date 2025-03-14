@@ -412,23 +412,43 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     :returns: vend: size of the subspace after adding in the new vectors 
 
     """
-    for i in range(newsubspace.shape[0]):
-        vec = newsubspace[i]
-        c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
-        vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
-        vecnorm = torch.norm(vec)
+    newsubspace_perp = newsubspace - (newsubspace @ V[:vend].T) @ V[:vend]
+    newsubspace_perp -= (newsubspace_perp @ V[:vend].T) @ V[:vend]
 
-        # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
-        # See: https://doi.org/10.1016/j.camwa.2005.08.009
-        # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
-        if vecnorm > tol:
-            c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
-            vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
-            vecnorm = torch.norm(vec)
+    mask_pre = newsubspace_perp.norm(dim=1) >= tol * 1e-2
+    if not mask_pre.any():
+        return vend
 
-            if vecnorm > tol:
-                V[vend] = vec / vecnorm
-                vend = vend + 1
+    newsubspace_perp = newsubspace_perp[mask_pre]
+
+    Q_t, R = torch.linalg.qr(newsubspace_perp.t(), mode='reduced')
+
+    mask_post = torch.diagonal(R).abs_() >= tol
+    new_vecs_to_add = mask_post.sum()
+
+    if  new_vecs_to_add == 0:
+        return vend
+
+    V[vend:vend+new_vecs_to_add] = Q_t[:,mask_post].t()
+    return vend+new_vecs_to_add
+
+    # for i in range(newsubspace.shape[0]):
+    #     vec = newsubspace[i]
+    #     c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
+    #     vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
+    #     vecnorm = torch.norm(vec)
+    #
+    #     # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
+    #     # See: https://doi.org/10.1016/j.camwa.2005.08.009
+    #     # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
+    #     if vecnorm > tol:
+    #         c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
+    #         vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
+    #         vecnorm = torch.norm(vec)
+    #
+    #         if vecnorm > tol:
+    #             V[vend] = vec / vecnorm
+    #             vend = vend + 1
 
     return vend
 
