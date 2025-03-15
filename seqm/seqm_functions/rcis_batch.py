@@ -53,6 +53,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             nroots = nroots_expand
 
         extra_subspace = min(7,nov-nroots)
+        # if after the extra_subspace i dont have enough space for subspace expansion then i shouldnt use extra_subspace
+        extra_subspace = extra_subspace if 2*nroots+extra_subspace<maxSubspacesize else max(0,maxSubspacesize-2*nroots)
         nstart = nroots+extra_subspace
         V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
@@ -123,7 +125,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         amplitude_store[done_this_loop] = amplitudes[done_this_loop]
 
         # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
-        collapse_condition = ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize))
+        collapse_condition = ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize)) & (maxSubspacesize != nov)
         collapse_mask = (~done) & (~mol_converged) & collapse_condition 
         if collapse_mask.sum() > 0:
             if davidson_iter == 1:
@@ -131,11 +133,13 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
             V[collapse_mask] = 0
             V[collapse_mask,:nroots,:] = amplitudes[collapse_mask]
+            HV[collapse_mask,:nroots,:] = torch.einsum('bvr,bvo->bro',e_vec_n[collapse_mask], HV[collapse_mask,:vend_max,:]) 
+            HV[collapse_mask,nroots:] = 0
             vstart[collapse_mask] = 0
             vend[collapse_mask] = nroots
 
-        # Orthogonalize the residual vectors for molecules that are not collapsed or converged
-        orthogonalize_mask = (~done) & (~mol_converged) & (~collapse_condition)
+        # Orthogonalize the residual vectors for molecules
+        orthogonalize_mask = (~done) & (~mol_converged) # & (~collapse_condition)
         mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
         for i in mols_to_ortho:
             newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
@@ -420,47 +424,20 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     :returns: vend: size of the subspace after adding in the new vectors 
 
     """
-    # Remove projection on original subspace V using Gram-Schmidt. Repeated thrice to remove numerical noise
-    newsubspace -= (newsubspace @ V[:vend].T) @ V[:vend]
-    newsubspace -= (newsubspace @ V[:vend].T) @ V[:vend]
-    newsubspace -= (newsubspace @ V[:vend].T) @ V[:vend]
+    # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
+    # See: https://doi.org/10.1016/j.camwa.2005.08.009
+    # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
+    for i in range(newsubspace.shape[0]):
+        vec = newsubspace[i]
+        vec -= (vec @ V[:vend].T) @ V[:vend] 
+        vec -= (vec @ V[:vend].T) @ V[:vend] 
+        vecnorm = torch.norm(vec)
 
-    mask_pre = newsubspace.norm(dim=1) >= tol# * 1e-2
-    if not mask_pre.any():
-        return vend
+        if vecnorm > tol:
+            V[vend] = vec / vecnorm
+            vend = vend + 1
 
-    newsubspace = newsubspace[mask_pre]
-
-    Q_t, R = torch.linalg.qr(newsubspace.t(), mode='reduced')
-
-    mask_post = torch.diagonal(R).abs_() >= tol
-    new_vecs_to_add = mask_post.sum()
-
-    if  new_vecs_to_add == 0:
-        return vend
-
-    V[vend:vend+new_vecs_to_add] = Q_t[:,mask_post].t()
-    return vend+new_vecs_to_add
-
-    # for i in range(newsubspace.shape[0]):
-    #     vec = newsubspace[i]
-    #     c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
-    #     vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
-    #     vecnorm = torch.norm(vec)
-    #
-    #     # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
-    #     # See: https://doi.org/10.1016/j.camwa.2005.08.009
-    #     # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
-    #     if vecnorm > tol:
-    #         c = torch.mv(V[:vend],vec) # Dot product of vec with each vector in V
-    #         vec -= torch.mv(V[:vend].t(),c) # Subtract the projection on each vector
-    #         vecnorm = torch.norm(vec)
-    #
-    #         if vecnorm > tol:
-    #             V[vend] = vec / vecnorm
-    #             vend = vend + 1
-    #
-    # return vend
+    return vend
 
 import psutil # to get the memory size
 
