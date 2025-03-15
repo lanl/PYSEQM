@@ -174,24 +174,35 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
 def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt):
     # C: Molecule Orbital Coefficients
-    nmol, nvec, nov = V.shape
+    nmol, nNewRoots, nov = V.shape
 
     norb = mol.norb[0]
     nocc = mol.nocc[0]
     nvirt = norb - nocc
 
+    Via = V.view(nmol,nNewRoots, nocc, nvirt)
 
-    Via = V.view(nmol,nvec, nocc, nvirt)
-    P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via, Cvirt)
+    # I often run out of memory because I calculate \sum_ia (ia||jb)V_ia in makeA_pi_batched for all the roots in V_ia
+    # at once. To avoid this, we first estimate the peak memory usage and then chunk over nNewRoots.
+    # TODO: Also chunk over the nmol dimension
+    need_to_chunk, chunk_size = getMemUse(V.dtype,V.device,mol,nNewRoots)
 
-    F0 = makeA_pi_batched(mol,P_xi,w)
+    if not need_to_chunk:
+        P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via, Cvirt)
+        F0 = makeA_pi_batched(mol,P_xi,w)
+    else:
+        F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
+        for start in range(0, nNewRoots, chunk_size):
+            end = min(start + chunk_size, nNewRoots)
+            P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via[:,start:end], Cvirt)
+            F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
 
-    # TODO: why am I multiplying by 2?
+    # why am I multiplying by 2?
     A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
 
     A += Via*ea_ei.unsqueeze(1)
 
-    return A.view(nmol, nvec, -1)
+    return A.view(nmol, nNewRoots, -1)
 
 def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     """
@@ -219,13 +230,10 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     # ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
     P0 = unpackone_batch(P_xi.view(nmol*nnewRoots,norb,norb), 4*nHeavy, nHydro, molsize * 4).view(nmol,nnewRoots,4*molsize,4*molsize)
     del P_xi
-    
-    # print_memory_usage("After unpacking P_xi")
 
     w = w_.view(nmol,npairs_per_mol,10,10)
     # Compute the (ai||jb)X_jb
     F = makeA_pi_symm_batch(mol,P0,w)
-    # print_memory_usage("After makeA_pi_symm")
 
     if not allSymmetric:
 
@@ -622,3 +630,41 @@ def print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strengt
                 f"{s:.6f}"
             ))
         print("")
+
+def getMemUse(dtype,device,mol,nroots=1):
+    """
+    Estimate the peak memory usage while calculating  \sum_ia (ia||jb)V_ia 
+    (contracting the roots with the two-e integrals) 
+    We approximate the largest intermediate allocations (P, F, PA, PB, suma, sumA etc. in makeA_pi_symm_batch()) 
+    via a factor ~ 200 * nmol * nnewRoots * (molsize^2) * bytes_per_element.
+    If that estimate exceeds available memory, we return need_to_chunk=True
+    and compute a chunk_size to avoid out-of-memory issues.
+
+    Returns:
+        need_to_chunk (bool): Whether we must chunk the computation.
+        chunk_size (int or None): Suggested chunk size if need_to_chunk=True, else None.
+    """
+
+    dev_type = device.type
+    if dev_type == 'cpu':
+        available_memory = psutil.virtual_memory().available
+    elif dev_type == 'cuda':
+        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda:0'))
+    else:
+        raise ValueError("Unsupported device type. Use 'cpu' or 'cuda'.")
+
+    bytes_per_element = torch.finfo(dtype).bits // 8
+    # 200 is an approximate factor from analyzing the shape and count
+    # of all major tensors in makeA_pi_symm_batch. The factor seems to perform well while benchmarking
+    mem_per_root = 200.0 * mol.nmol * (mol.molsize**2) * bytes_per_element
+    total_mem_estimate = mem_per_root * nroots
+
+    # print(f"Available: {available_memory/1073741824} GiB; Max memory used will be {total_mem_estimate/1073741824} GiB, per root: {mem_per_root/1073741824} GiB")
+    need_to_chunk = total_mem_estimate > available_memory
+    chunk_size = nroots
+
+    if need_to_chunk:
+        # Ensure at least 1, up to nroots
+        chunk_size = max(1, min(nroots, int(available_memory // mem_per_root)))
+
+    return need_to_chunk, chunk_size
