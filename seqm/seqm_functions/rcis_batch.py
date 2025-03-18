@@ -41,23 +41,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     HV = torch.empty_like(V)
 
     if init_amplitude_guess is None:
-        # Make the davidson guess vectors
-        sorted_ediff, sortedidx = torch.sort(approxH, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
-
-        nroots_expand = nroots
-        # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
-        while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
-            nroots_expand += 1
-        if nroots_expand > nroots:
-            print(f"Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
-            nroots = nroots_expand
-
-        extra_subspace = min(7,nov-nroots)
-        # if after the extra_subspace i dont have enough space for subspace expansion then i shouldnt use extra_subspace
-        extra_subspace = extra_subspace if 2*nroots+extra_subspace<maxSubspacesize else max(0,maxSubspacesize-2*nroots)
-        nstart = nroots+extra_subspace
-        V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
-
+        nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
     else:
         nstart = nroots
         V[:,:nstart,:] = init_amplitude_guess
@@ -176,7 +160,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     return e_val_n, amplitude_store
 
 
-def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt):
+def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # C: Molecule Orbital Coefficients
     nmol, nNewRoots, nov = V.shape
 
@@ -205,8 +189,15 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt):
     A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
 
     A += Via*ea_ei.unsqueeze(1)
+    A = A.view(nmol, nNewRoots, -1)
 
-    return A.view(nmol, nNewRoots, -1)
+    if makeB:
+        B = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
+        B = B.view(nmol,nNewRoots, -1)
+        return  A, B
+
+    return A
+
 
 def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     """
@@ -427,7 +418,8 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
     # See: https://doi.org/10.1016/j.camwa.2005.08.009
     # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
-    for i in range(newsubspace.shape[0]):
+    n = newsubspace.shape[0]
+    for i in range(n):
         vec = newsubspace[i]
         vec -= (vec @ V[:vend].T) @ V[:vend] 
         vec -= (vec @ V[:vend].T) @ V[:vend] 
@@ -441,7 +433,7 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
 
 import psutil # to get the memory size
 
-def getMaxSubspacesize(dtype,device,nov,nmol=1):
+def getMaxSubspacesize(dtype,device,nov,nmol=1,num_big_matrices=2):
     """Calculate the maximum size of the subspace dimension 
     based on available memory. The full subspace size is nov 
     """
@@ -456,14 +448,13 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1):
         raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
 
     bytes_per_element = torch.finfo(dtype).bits // 8  # Bytes per element
-    num_matrices = 2  # Number of big matrices that will take up a big chunk of memory: V, HV
 
     # Define a memory fraction to use (e.g., 50% of available memory)
     memory_fraction = 0.3
     usable_memory = available_memory * memory_fraction
 
     # Calculate maximum n based on memory
-    n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_matrices))
+    n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_big_matrices))
 
     # Ensure n does not exceed nmax
     return min(n_calculated, nov)
@@ -645,3 +636,24 @@ def getMemUse(dtype,device,mol,nroots=1):
         chunk_size = max(1, min(nroots, int(available_memory // mem_per_root)))
 
     return need_to_chunk, chunk_size
+
+def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
+    # Make the davidson guess vectors
+    sorted_ediff, sortedidx = torch.sort(ea_ei, stable=True, descending=False) # stable to preserve the order of degenerate orbitals
+
+    nroots_expand = nroots
+    # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
+    while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
+        nroots_expand += 1
+    if nroots_expand > nroots:
+        print(f"Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
+        nroots = nroots_expand
+
+    extra_subspace = min(7,nov-nroots)
+    # if after the extra_subspace i dont have enough space for subspace expansion then i shouldnt use extra_subspace
+    extra_subspace = extra_subspace if 2*nroots+extra_subspace<maxSubspacesize else max(0,maxSubspacesize-2*nroots)
+    nstart = nroots+extra_subspace
+    V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
+
+    return nstart, nroots
+
