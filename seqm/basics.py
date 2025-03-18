@@ -11,6 +11,7 @@ from .seqm_functions.rcis_grad import rcis_grad
 from .seqm_functions.rcis_batch import rcis_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.nac import calc_nac
+from .seqm_functions.rpa import rpa
 
 import os
 import time
@@ -344,11 +345,15 @@ class Hamiltonian(torch.nn.Module):
         
         # If we are calculating excited states with CIS, then SCF convergence should be at least 1e-2 smaller than
         # CIS tolerance. Here I check for that
-        if seqm_parameters.get('excited_states', [False])[0]: # If excited_states are requested in the input
+        if seqm_parameters.get('excited_states') is not None: # If excited_states are requested in the input
             # Get the cis_tolerance. If cis_tolerance was not in the seqm_parameters, then set it 
             # to the default value here
-            seqm_parameters['cis_tolerance'] = seqm_parameters.get('cis_tolerance',1e-6)
-            cis_tol = seqm_parameters['cis_tolerance']
+            excited_options = seqm_parameters.get('excited_states')
+            if not isinstance(excited_options,dict):
+                raise Exception("Invalid format for excited_states. Expected input like  'excited_states': {'method': 'rpa', 'n_states': 3, 'tolerance' : 1e-6}")
+            excited_options['tolerance'] = excited_options.get('tolerance',1e-6)
+            excited_options['method'] = excited_options.get('method','cis').lower()
+            cis_tol = excited_options['tolerance']
             if seqm_parameters['scf_eps'] > 1e-2*cis_tol:
                 seqm_parameters['scf_eps'] = 1e-2*cis_tol
 
@@ -430,7 +435,7 @@ class Energy(torch.nn.Module):
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
-        self.excited_states = seqm_parameters.get('excited_states', [False])
+        self.excited_states = seqm_parameters.get('excited_states')
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
@@ -624,31 +629,36 @@ class Energy(torch.nn.Module):
                 t1 = time.time()
                 molecule.const.timing["Force"].append(t1 - t0)
 
-        if self.excited_states[0]:
-            cis_tol = self.seqm_parameters['cis_tolerance']
+        if self.excited_states is not None:
+            cis_tol = self.excited_states['tolerance']
+            method = self.excited_states['method'].lower()
             with torch.no_grad():
                 if molecule.nmol >= 1:
                     if molecule.const.do_timing: t0 = time.time()
 
-                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states[1],cis_tol)
+                    if method == 'cis':
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol)
 
-                    if molecule.const.do_timing:
-                        if torch.cuda.is_available(): torch.cuda.synchronize()
-                        t1 = time.time()
-                        molecule.const.timing["CIS"].append(t1 - t0)
+                        if molecule.const.do_timing:
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                            t1 = time.time()
+                            molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
-                    cis_gradient = kwargs.get('cis_gradient',[False])
-                    # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
-                    if cis_gradient[0]:
-                        rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P,cis_tol)
+                        cis_gradient = kwargs.get('cis_gradient',[False])
+                        # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
+                        if cis_gradient[0]:
+                            rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P,cis_tol)
 
-                    cis_nac = kwargs.get('cis_nac',[False])
-                    if cis_nac[0]:
-                        calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
+                        cis_nac = kwargs.get('cis_nac',[False])
+                        if cis_nac[0]:
+                            calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
 
-                else: # to be decomissioned
-                    excitation_energies, exc_amps = rcis(molecule,w,e,self.excited_states[1])
-                    rcis_grad(molecule,exc_amps[0],w,e,riXH,ri,P)
+                    elif method == 'rpa':
+                        excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol)
+                        if molecule.const.do_timing:
+                            if torch.cuda.is_available(): torch.cuda.synchronize()
+                            t1 = time.time()
+                            molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)

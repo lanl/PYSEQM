@@ -2,7 +2,7 @@ import torch
 from .dipole import calc_dipole_matrix
 from .constants import a0
 import math
-from .rcis_batch import getMaxSubspacesize, make_guess, orthogonalize_to_current_subspace, matrix_vector_product_batched
+from .rcis_batch import getMaxSubspacesize, make_guess, orthogonalize_to_current_subspace, matrix_vector_product_batched, rcis_analysis
 # from seqm.seqm_functions.pack import packone, unpackone
 
 def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
@@ -84,7 +84,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
-        AV_batch, BV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
+        AV_batch, BV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt,makeB=True)
         AV[batch_idx[mask], abs_idx[mask], :] = AV_batch[mask]
         BV[batch_idx[mask], abs_idx[mask], :] = BV_batch[mask]
 
@@ -109,22 +109,28 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         BVX = torch.einsum('bvr,bvo->bro',X, BV[:,:vend_max,:])
         BVY = torch.einsum('bvr,bvo->bro',Y, BV[:,:vend_max,:])
 
-        res1 = AVX + BVY - amplitude_X*e_val_n.unsqueeze(2)
-        res2 = AVY + BVX - amplitude_Y*e_val_n.unsqueeze(2)
+        # TDHF equation:
+        # (A B)(X) = w (1  0)(X)
+        # (B A)(Y)     (0 -1)(Y) 
+        # Which gives, AX + BY = wX and AY + BX = -wY
+        resX = AVX + BVY - amplitude_X*e_val_n.unsqueeze(2)
+        resY = AVY + BVX + amplitude_Y*e_val_n.unsqueeze(2)
 
-        resXmY = res2
-        resXpY = res1 - res2
-        resXmY += res1
+        # We also have
+        # (A+B)(X+Y) = w(X-Y)  => resXmY
+        # (A-B)(X-Y) = w(X+Y)  => resXpY
+        resXmY = resY
+        resXpY = resX - resY
+        resXmY += resX
 
         resR = torch.norm(resXpY,dim=2)
         resL = torch.norm(resXmY,dim=2)
 
         chooseResR = resR > resL
-        resid_norm = torch.empty_like(resR)
+        resid_norm = resL
         resid_norm[chooseResR] = resR[chooseResR]
-        resid_norm[~chooseResR] = resL[~chooseResR]
-        correction_direction = resXpY
-        correction_direction[~chooseResR] = resXmY[~chooseResR]
+        correction_direction = resXmY
+        correction_direction[chooseResR] = resXpY[chooseResR]
         correction_direction /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1))
 
         roots_not_converged = resid_norm > root_tol
@@ -196,7 +202,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     print("")
 
     # Post CIS analysis
-    # rcis_analysis(mol,e_val_n,amplitude_store)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots,rpa=True)
 
     return e_val_n, amplitude_store
 
@@ -204,8 +210,8 @@ def make_sqrt_mat(H,):
     eigenvalues, eigenvectors = torch.linalg.eigh(H)
     # FIXME: Might fail in batch mode when some eigenvalues will be zero, take care of it
     if torch.any(eigenvalues<0.0):
-        raise Exception("Unable to find sqrt of A-B matrix")
-    sqrt_eigenvalues = torch.sqrt(torch.abs(eigenvalues))*torch.sign(eigenvalues)
+        raise Exception("A-B matrix has negative eigenvalues, cannot compute sqrt of A-B matrix")
+    sqrt_eigenvalues = torch.sqrt(eigenvalues)
     sqrtH = eigenvectors @ torch.diag_embed(sqrt_eigenvalues) @ eigenvectors.transpose(1,2)
     return sqrtH, eigenvectors, eigenvalues
 
@@ -236,37 +242,39 @@ def rpa_subspace_eig(ApB,AmB,nroots, zero_pad, e_val_n, done):
 
     r_eval = torch.sqrt(r_eval)
     
-    # r_evec is (A-B)^(-1/2)|X+Y>
-    # |X+Y>  = (A-B)^(1/2) r_evec
-    XpY = AmB_sqrt @ r_evec
-
-    # |X-Y> = w*(A-B)^(-1)|X+Y>
-    AmB_inverse = AmB_evec @ torch.diag_embed(1.0/AmB_eval) @ AmB_evec.transpose(1,2)
-    XmY = (AmB_inverse @ XpY)*r_eval.unsqueeze(1) # @ torch.diag_embed(r_eval) 
-
-    # TODO: Alternately, |X-Y> = (A+B)|X+Y>/w. This might be easier than calculating (A-B)^(-1)
-
-    X = XpY + XmY
-    Y = XpY - XmY
-
-    XYnorm = 1.0/torch.sqrt(X.norm(dim=2)-Y.norm(dim=2))
-    X /= XYnorm.unsqueeze(2)
-    Y /= XYnorm.unsqueeze(2)
-
-    nmol, subspacesize = ApB.shape[0], ApB.shape[1]
-    X_vec= torch.zeros(H.shape[0],subspacesize,nroots,device=H.device,dtype=H.dtype)
-    Y_vec = torch.zeros(H.shape[0],subspacesize,nroots,device=H.device,dtype=H.dtype)
-    
     active_indices = torch.nonzero(~done, as_tuple=False).squeeze(1)
-
+    nmol, subspacesize = H.shape[0], H.shape[1]
+    e_vec_n = torch.zeros(active_indices.shape[0],subspacesize,nroots,device=H.device,dtype=H.dtype)
+    
     # Update eigenvalues and eigenvectors for each active molecule.
     for j, mol_idx in enumerate(active_indices):
         start_idx = int(zero_pad[mol_idx].item())
         end_idx = start_idx + nroots
         e_val_n[mol_idx] = r_eval[j, start_idx:end_idx]
-        X_vec[j] = X[j, :, start_idx:end_idx]
-        Y_vec[j] = Y[j, :, start_idx:end_idx]
+        e_vec_n[j] = r_evec[j, :, start_idx:end_idx]
 
+    # r_evec is (A-B)^(-1/2)|X+Y>
+    # |X+Y>  = (A-B)^(1/2) r_evec
+    XpY = AmB_sqrt @ e_vec_n
+
+    # # |X-Y> = w*(A-B)^(-1)|X+Y>
+    # AmB_inverse = AmB_evec @ torch.diag_embed(1.0/AmB_eval) @ AmB_evec.transpose(1,2)
+    # XmY = (AmB_inverse @ XpY)*e_val_n[~done].unsqueeze(1)
+
+    # Alternately, |X-Y> = (A+B)|X+Y>/w. This might be easier than calculating (A-B)^(-1)
+    XmY = (ApB @ XpY)/e_val_n[~done].unsqueeze(1) 
+
+    X = XpY + XmY
+    Y = XpY - XmY
+
+    XYnorm = torch.sqrt((X**2).sum(dim=1)-(Y**2).sum(dim=1))
+    X /= XYnorm.unsqueeze(1)
+    Y /= XYnorm.unsqueeze(1)
+
+    X_vec= torch.zeros(nmol,subspacesize,nroots,device=H.device,dtype=H.dtype)
+    Y_vec = torch.zeros(nmol,subspacesize,nroots,device=H.device,dtype=H.dtype)
+    X_vec[~done] = X
+    Y_vec[~done] = Y
     return X_vec, Y_vec
 
 

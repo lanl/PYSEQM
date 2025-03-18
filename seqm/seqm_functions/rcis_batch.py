@@ -155,7 +155,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     print("")
 
     # Post CIS analysis
-    rcis_analysis(mol,e_val_n,amplitude_store)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots)
 
     return e_val_n, amplitude_store
 
@@ -533,12 +533,12 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_analysis(mol,excitation_energies,amplitues):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitues,excitation_energies,dipole_mat)
+    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
 
-def calc_transition_dipoles(mol,amplitues,excitation_energies,dipole_mat):
+def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False):
 
     nocc, norb = mol.nocc[0], mol.norb[0]
     nvirt = norb - nocc
@@ -546,8 +546,11 @@ def calc_transition_dipoles(mol,amplitues,excitation_energies,dipole_mat):
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
 
-    nroots = amplitues.shape[1]
-    amp_ia = amplitues.view(mol.nmol,nroots,nocc,nvirt)
+    if rpa:
+        amp_ia_X = amplitudes[0].view(mol.nmol,nroots,nocc,nvirt)
+        amp_ia_Y = amplitudes[1].view(mol.nmol,nroots,nocc,nvirt)
+    else:
+        amp_ia_X = amplitudes.view(mol.nmol,nroots,nocc,nvirt)
 
     nHeavy = mol.nHeavy[0]
     nHydro = mol.nHydro[0]
@@ -556,7 +559,9 @@ def calc_transition_dipoles(mol,amplitues,excitation_energies,dipole_mat):
 
 
     # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
-    R = torch.einsum('bmi,bria,bna->brmn',Cocc,amp_ia,Cvirt)
+    R = torch.einsum('bmi,bria,bna->brmn',Cocc,amp_ia_X,Cvirt)
+    if rpa:
+        R += torch.einsum('bma,bria,bni->brmn',Cvirt,amp_ia_Y,Cocc)
 
     # Transition dipole in AU as calculated in NEXMD
     transition_dipole = torch.einsum('brmn,bdmn->brd',R,dipole_mat_packed)*math.sqrt(2.0)/a0
@@ -646,7 +651,7 @@ def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
     while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
         nroots_expand += 1
     if nroots_expand > nroots:
-        print(f"Inrcreasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
+        print(f"Increasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
         nroots = nroots_expand
 
     extra_subspace = min(7,nov-nroots)
