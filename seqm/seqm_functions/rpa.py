@@ -1,9 +1,5 @@
 import torch
-from .dipole import calc_dipole_matrix
-from .constants import a0
-import math
 from .rcis_batch import getMaxSubspacesize, make_guess, orthogonalize_to_current_subspace, matrix_vector_product_batched, rcis_analysis
-# from seqm.seqm_functions.pack import packone, unpackone
 
 def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     torch.set_printoptions(linewidth=200)
@@ -119,27 +115,24 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         collapse_condition = ((roots_not_converged.sum(dim=1) + vend > maxSubspacesize)) & (maxSubspacesize != nov)
         collapse_mask = (~done) & (~mol_converged) & collapse_condition 
         if collapse_mask.sum() > 0:
-            if davidson_iter == 1:
-                raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
+            # collapsing subspace means that the guess space will be reset to 2*nroots vectors. Following that, the roots that didn't converge this cycle 
+            # will also be added to the guess space. So we have to check if all these vectors will fit in
+            if torch.any(roots_not_converged[collapse_mask].sum(dim=1)+2*nroots > maxSubspacesize):
+                raise Exception("Insufficient memory to perform subspace expansion following collapse")
 
             mols_to_collapse = torch.nonzero(collapse_mask).squeeze(1)
-            # print(f"Collapsing mols {mols_to_collapse+1}")
+            XY_ = torch.cat((X[collapse_condition],Y[collapse_condition]),dim=2)
+            XY_, _ = torch.linalg.qr(XY_, mode='reduced')
             for i in mols_to_collapse:
                 vend_i = vend[i]
-                for j in range(vend_i):
-                    if j>0:
-                        X[i,:,j] -= X[i,:,:j] @ (X[i,:,:j].T @ X[i,:,j])
-                        X[i,:,j] -= X[i,:,:j] @ (X[i,:,:j].T @ X[i,:,j])
-                    X[i,:,j] /= torch.norm(X[i,:,j])
-
-                V[i,:nroots,:] = torch.einsum('vr,vo->ro',X,V[i,:vend_i,:])
-                AV[i,:nroots,:] = torch.einsum('vr,vo->ro',X, AV[i,:vend_i,:]) 
-                BV[i,:nroots,:] = torch.einsum('vr,vo->ro',X, BV[i,:vend_i,:]) 
-            V[collapse_mask,nroots:] = 0
-            AV[collapse_mask,nroots:] = 0
-            BV[collapse_mask,nroots:] = 0
+                V[i,:2*nroots,:] =  torch.einsum('vr,vo->ro',XY_[i],V[i,:vend_i,:])
+                AV[i,:2*nroots,:] = torch.einsum('vr,vo->ro',XY_[i], AV[i,:vend_i,:]) 
+                BV[i,:2*nroots,:] = torch.einsum('vr,vo->ro',XY_[i], BV[i,:vend_i,:]) 
+            V[collapse_mask,2*nroots:] = 0
+            AV[collapse_mask,2*nroots:] = 0
+            BV[collapse_mask,2*nroots:] = 0
             vstart[collapse_mask] = 0
-            vend[collapse_mask] = nroots
+            vend[collapse_mask] = 2*nroots
 
         # Orthogonalize the residual vectors for molecules
         orthogonalize_mask = (~done) & (~mol_converged) # & (~collapse_condition)
