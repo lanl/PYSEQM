@@ -102,36 +102,9 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
         X, Y = rpa_subspace_eig(ApB,AmB,nroots, zero_pad, e_val_n, done)
 
-        amplitude_X = torch.einsum('bvr,bvo->bro',X,V[:,:vend_max,:])
-        amplitude_Y = torch.einsum('bvr,bvo->bro',Y,V[:,:vend_max,:])
-        AVX = torch.einsum('bvr,bvo->bro',X, AV[:,:vend_max,:])
-        AVY = torch.einsum('bvr,bvo->bro',X, AV[:,:vend_max,:])
-        BVX = torch.einsum('bvr,bvo->bro',X, BV[:,:vend_max,:])
-        BVY = torch.einsum('bvr,bvo->bro',Y, BV[:,:vend_max,:])
+        amplitude_X, amplitude_Y, resid_norm, correction_direction = calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n)
 
-        # TDHF equation:
-        # (A B)(X) = w (1  0)(X)
-        # (B A)(Y)     (0 -1)(Y) 
-        # Which gives, AX + BY = wX and AY + BX = -wY
-        resX = AVX + BVY - amplitude_X*e_val_n.unsqueeze(2)
-        resY = AVY + BVX + amplitude_Y*e_val_n.unsqueeze(2)
-
-        # We also have
-        # (A+B)(X+Y) = w(X-Y)  => resXmY
-        # (A-B)(X-Y) = w(X+Y)  => resXpY
-        resXmY = resY
-        resXpY = resX - resY
-        resXmY += resX
-
-        resR = torch.norm(resXpY,dim=2)
-        resL = torch.norm(resXmY,dim=2)
-
-        chooseResR = resR > resL
-        resid_norm = resL
-        resid_norm[chooseResR] = resR[chooseResR]
-        correction_direction = resXmY
-        correction_direction[chooseResR] = resXpY[chooseResR]
-        correction_direction /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1))
+        correction_direction /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1)) # Davidson preconditioning
 
         roots_not_converged = resid_norm > root_tol
 
@@ -150,6 +123,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
                 raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
 
             mols_to_collapse = torch.nonzero(collapse_mask).squeeze(1)
+            # print(f"Collapsing mols {mols_to_collapse+1}")
             for i in mols_to_collapse:
                 vend_i = vend[i]
                 for j in range(vend_i):
@@ -184,9 +158,10 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
                 amplitude_store[1,i] = amplitude_Y[i]
 
             # if davidson_iter % 5 == 0:
-                # print(f"davidson_iteration {davidson_iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
                 # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
                 # print(f"{davidson_iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
+        # for i in range(nmol):
+            # print(f"davidson_iteration {davidson_iter:2}: Found {nroots-roots_not_converged[i].sum().item()}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
 
         if torch.all(done):
             break
@@ -217,40 +192,47 @@ def make_sqrt_mat(H,):
 
 def rpa_subspace_eig(ApB,AmB,nroots, zero_pad, e_val_n, done):
     AmB_sqrt, AmB_evec, AmB_eval = make_sqrt_mat(AmB[~done],)
-    H = AmB_sqrt @ ApB @ AmB_sqrt
+    H = AmB_sqrt @ ApB[~done] @ AmB_sqrt
     r_eval, r_evec = torch.linalg.eigh(H) # find the eigenvalues and the eigenvectors
 
+    active_indices = torch.nonzero(~done, as_tuple=False).squeeze(1)
     negative_eigs = r_eval < 0.0
     bad_mask = negative_eigs.any(dim=1)
     if bad_mask.any():
-        bad_indices = torch.nonzero(bad_mask, as_tuple=False).squeeze()
-        # Ensure bad_indices is iterable.
-        if bad_indices.ndim == 0:
-            bad_indices = [bad_indices.item()]
-        else:
-            bad_indices = bad_indices.tolist()
-        
+        bad_indices = torch.nonzero(bad_mask, as_tuple=False).squeeze(1)
+                
         error_msgs = []
         for idx in bad_indices:
-            ev = r_eval[idx,negative_eigs[idx]]
+            ev_bad = r_eval[idx,negative_eigs[idx]]
             error_msgs.append(
-                f"For molecule {idx} we have imaginary RPA eigenvalues. w^2 = {ev.tolist()}. "
-                "If the negative values are small, consider increasing SCF convergence tolerance; "
+                f"For molecule {active_indices[idx]+1} we have negative eigenvalues w^2 = {ev_bad.tolist()}. "
+                "This leads to imaginary roots. If the negative values are small, consider increasing SCF convergence tolerance; "
                 "if they are large, the SCF solution was likely not a minimum."
             )
         raise ValueError("\n".join(error_msgs))
 
     r_eval = torch.sqrt(r_eval)
     
-    active_indices = torch.nonzero(~done, as_tuple=False).squeeze(1)
-    nmol, subspacesize = H.shape[0], H.shape[1]
-    e_vec_n = torch.zeros(active_indices.shape[0],subspacesize,nroots,device=H.device,dtype=H.dtype)
+    nmol, subspacesize = ApB.shape[0], ApB.shape[1]
+    e_vec_n = torch.zeros(H.shape[0],subspacesize,nroots,device=H.device,dtype=H.dtype)
     
     # Update eigenvalues and eigenvectors for each active molecule.
     for j, mol_idx in enumerate(active_indices):
         start_idx = int(zero_pad[mol_idx].item())
         end_idx = start_idx + nroots
-        e_val_n[mol_idx] = r_eval[j, start_idx:end_idx]
+        eval_current = r_eval[j,start_idx:end_idx]
+    
+        small_eval = (eval_current < 0.1)
+        if torch.any(small_eval):
+            ev_bad = eval_current[small_eval]
+            error_msg = (
+                f"For molecule {mol_idx+1} we have very small eigenvalues w = {ev_bad.tolist()}. "
+                "Consider increasing SCF convergence tolerance; "
+                "The SCF solution might not be a minimum."
+            )
+            raise ValueError(error_msg)
+
+        e_val_n[mol_idx] = eval_current
         e_vec_n[j] = r_evec[j, :, start_idx:end_idx]
 
     # r_evec is (A-B)^(-1/2)|X+Y>
@@ -262,7 +244,7 @@ def rpa_subspace_eig(ApB,AmB,nroots, zero_pad, e_val_n, done):
     # XmY = (AmB_inverse @ XpY)*e_val_n[~done].unsqueeze(1)
 
     # Alternately, |X-Y> = (A+B)|X+Y>/w. This might be easier than calculating (A-B)^(-1)
-    XmY = (ApB @ XpY)/e_val_n[~done].unsqueeze(1) 
+    XmY = (ApB[~done] @ XpY)/e_val_n[~done].unsqueeze(1) 
 
     X = XpY + XmY
     Y = XpY - XmY
@@ -272,11 +254,40 @@ def rpa_subspace_eig(ApB,AmB,nroots, zero_pad, e_val_n, done):
     Y /= XYnorm.unsqueeze(1)
 
     X_vec= torch.zeros(nmol,subspacesize,nroots,device=H.device,dtype=H.dtype)
-    Y_vec = torch.zeros(nmol,subspacesize,nroots,device=H.device,dtype=H.dtype)
+    Y_vec = torch.zeros_like(X_vec)
     X_vec[~done] = X
     Y_vec[~done] = Y
     return X_vec, Y_vec
 
+def calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n):
+    amplitude_X = torch.einsum('bvr,bvo->bro',X,V[:,:vend_max,:])
+    amplitude_Y = torch.einsum('bvr,bvo->bro',Y,V[:,:vend_max,:])
+    AVX = torch.einsum('bvr,bvo->bro',X, AV[:,:vend_max,:])
+    AVY = torch.einsum('bvr,bvo->bro',Y, AV[:,:vend_max,:])
+    BVX = torch.einsum('bvr,bvo->bro',X, BV[:,:vend_max,:])
+    BVY = torch.einsum('bvr,bvo->bro',Y, BV[:,:vend_max,:])
 
-    
+    # TDHF equation:
+    # (A B)(X) = w (1  0)(X)
+    # (B A)(Y)     (0 -1)(Y) 
+    # Which gives, AX + BY = wX and AY + BX = -wY
+    resX = AVX + BVY - amplitude_X*e_val_n.unsqueeze(2)
+    resY = AVY + BVX + amplitude_Y*e_val_n.unsqueeze(2)
 
+    # We also have
+    # (A+B)(X+Y) = w(X-Y)  => resXmY
+    # (A-B)(X-Y) = w(X+Y)  => resXpY
+    resXmY = resY
+    resXpY = resX - resY
+    resXmY += resX
+
+    resR = torch.norm(resXpY,dim=2)
+    resL = torch.norm(resXmY,dim=2)
+
+    chooseResR = resR > resL
+    resid_norm = resL
+    resid_norm[chooseResR] = resR[chooseResR]
+    correction_direction = resXmY
+    correction_direction[chooseResR] = resXpY[chooseResR]
+
+    return amplitude_X, amplitude_Y, resid_norm, correction_direction
