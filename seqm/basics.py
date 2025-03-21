@@ -634,6 +634,7 @@ class Energy(torch.nn.Module):
             method = self.excited_states['method'].lower()
             with torch.no_grad():
                 if molecule.nmol >= 1:
+                    cis_gradient = kwargs.get('cis_gradient',[False])
                     if molecule.const.do_timing: t0 = time.time()
 
                     if method == 'cis':
@@ -644,8 +645,6 @@ class Energy(torch.nn.Module):
                             t1 = time.time()
                             molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
-                        cis_gradient = kwargs.get('cis_gradient',[False])
-                        # if molecule.nmol == 1: rcis_grad(molecule,exc_amps[0,0],w,e,riXH,ri,P)
                         if cis_gradient[0]:
                             rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P,cis_tol)
 
@@ -659,6 +658,9 @@ class Energy(torch.nn.Module):
                             if torch.cuda.is_available(): torch.cuda.synchronize()
                             t1 = time.time()
                             molecule.const.timing["CIS/RPA"].append(t1 - t0)
+
+                        if cis_gradient[0]:
+                            rcis_grad_batch(molecule,exc_amps[:,:,0],w,e,riXH,ri,P,cis_tol,rpa=True)
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)

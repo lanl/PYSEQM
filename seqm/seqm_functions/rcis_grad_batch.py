@@ -1,11 +1,10 @@
 import torch
 from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
-from seqm.seqm_functions.pack import unpackone
 from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch
 from .constants import a0
 
-def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
+def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
     """
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
          state for which the gradient is required has to be selected and put together into the amp tensor
@@ -22,15 +21,28 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
     nmol = mol.nmol
-    amp_ia = amp.view(nmol,nocc,nvirt)
+    if rpa:
+        amp_ia_X = amp[0].view(mol.nmol,nocc,nvirt)
+        amp_ia_Y = amp[1].view(mol.nmol,nocc,nvirt)
+    else:
+        amp_ia_X = amp.view(mol.nmol,nocc,nvirt)
 
     dens_BR = torch.empty(nmol,2,norb,norb,device=device,dtype=dtype)
-    B_virt  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia)
-    B_occ  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia)
+    B_virt  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_X)
+    B_occ  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_X)
+
     dens_BR[:,0] = torch.einsum('Nmi,Nni->Nmn',B_virt,B_virt) - torch.einsum('Nmi,Nni->Nmn',B_occ,B_occ)
 
+    if rpa:
+        B_virt_Y  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_Y)
+        B_occ_Y  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_Y)
+        dens_BR[:,0] += torch.einsum('Nmi,Nni->Nmn',B_virt_Y,B_virt_Y) - torch.einsum('Nmi,Nni->Nmn',B_occ_Y,B_occ_Y)
+
+
     # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
-    dens_BR[:,1] = torch.einsum('bmi,bia,bna->bmn',Cocc,amp_ia,Cvirt)
+    dens_BR[:,1] = torch.einsum('bmi,bia,bna->bmn',Cocc,amp_ia_X,Cvirt)
+    if rpa:
+        dens_BR[:,1] += torch.einsum('bma,bia,bni->bmn',Cvirt,amp_ia_Y,Cocc)
 
     # Calculate z-vector
     
@@ -39,6 +51,10 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance):
     RHS = -torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,BR_pi[:,0],Cocc)
     RHS -= torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,BR_pi[:,1],B_virt)
     RHS += torch.einsum('Nma,Nmn,Nni->Nai',B_occ,BR_pi[:,1],Cocc)
+    if rpa:
+        RHS -= torch.einsum('Nma,Nnm,Nni->Nai',Cvirt,BR_pi[:,1],B_virt_Y)
+        RHS += torch.einsum('Nma,Nnm,Nni->Nai',B_occ_Y,BR_pi[:,1],Cocc)
+
     del B_occ, B_virt
 
     # debugging:
