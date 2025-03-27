@@ -47,7 +47,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         V[:,:nstart,:] = init_amplitude_guess
 
     max_iter = 100 # TODO: User-defined
-    vector_tol = root_tol*0.02 # Vectors whose norm is smaller than this will be discarded
+    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
     davidson_iter = 0
     vstart = torch.zeros(nmol,dtype=torch.long,device=device)
     vend = torch.full((nmol,),nstart,dtype=torch.long,device=device)
@@ -99,7 +99,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         # Compute CIS amplitudes and the residual
         amplitudes = torch.einsum('bvr,bvo->bro',e_vec_n,V[:,:vend_max,:])
         residual = torch.einsum('bvr,bvo->bro',e_vec_n, HV[:,:vend_max,:]) - amplitudes*e_val_n.unsqueeze(2)
-        resid_norm = torch.norm(residual,dim=2)
+        # resid_norm = torch.norm(residual,dim=2)
+        resid_norm = torch.linalg.vector_norm(residual,dim=2,ord=torch.inf)
         roots_not_converged = resid_norm > root_tol
 
         # Mark molecules with all roots converged and store amplitudes

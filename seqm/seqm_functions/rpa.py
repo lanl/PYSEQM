@@ -159,6 +159,8 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if torch.all(done):
             break
         if davidson_iter > max_iter:
+            # for i in range(nmol):
+            #     print(f"Mol {i+1} Iterations: {davidson_iter:2}: Found {nroots-roots_not_converged[i].sum().item()}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
