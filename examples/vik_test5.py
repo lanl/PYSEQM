@@ -88,7 +88,8 @@ esdriver = Electronic_Structure(seqm_parameters).to(device)
 # molecules.const.timing["Force"] = []
 for i in range(1):
     # esdriver(molecules,cis_nac=[True,1,2])
-    esdriver(molecules)
+    esdriver(molecules,cis_gradient=[True])
+    # esdriver(molecules)
 # backprop_time = molecules.const.timing["Force"]
 # import os
 # import numpy as np
