@@ -44,7 +44,7 @@ model.pt
 
 ## Authors:
 
-[Guoqing Zhou](mailto:guoqingz@usc.edu), [Maksim Kulichenko](mailto:maxim@lanl.gov), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
+[Maksim Kulichenko](mailto:maxim@lanl.gov), [Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
 ## Citation:
 1. [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
