@@ -179,15 +179,18 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     if not need_to_chunk:
         P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via, Cvirt)
         F0 = makeA_pi_batched(mol,P_xi,w)
+        # why am I multiplying by A 2?
+        A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
     else:
-        F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
+        # F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
+        A = torch.empty(nmol,nNewRoots,nocc,nvirt,device=V.device,dtype=V.dtype)
         for start in range(0, nNewRoots, chunk_size):
             end = min(start + chunk_size, nNewRoots)
             P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via[:,start:end], Cvirt)
-            F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
-
-    # why am I multiplying by 2?
-    A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
+            # F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
+            P_xi = makeA_pi_batched(mol,P_xi,w)
+            F0 = P_xi
+            A[:,start:end,:] = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
 
     A += Via*ea_ei.unsqueeze(1)
     A = A.view(nmol, nNewRoots, -1)
@@ -253,17 +256,14 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
         F.index_add_(2,mask,sumK)
         F[:,:,mask_l] -= sumK.transpose(3,4)
         del Pp
+        del sumK
 
         gsp = mol.parameters['g_sp'].view(nmol,-1)
         gpp = mol.parameters['g_pp'].view(nmol,-1)
         gp2 = mol.parameters['g_p2'].view(nmol,-1)
         hsp = mol.parameters['h_sp'].view(nmol,-1)
 
-        # reuse sumK memory
-        sumK_flat = sumK.view(nmol*nnewRoots*w.shape[1]*16)
-        sumK_flat = sumK_flat[:nmol*nnewRoots*maskd.shape[0]*16]
-        F2e1c = sumK_flat.view(nmol,nnewRoots,maskd.shape[0],4,4)
-        # F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
+        F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
         for i in range(1,4):
             #(s,p) = (p,s) upper triangle
             F2e1c[...,0,i] = P_anti[...,maskd,0,i]*(0.5*hsp - 0.5*gsp).unsqueeze(1)
@@ -323,6 +323,7 @@ def makeA_pi_symm_batch(mol,P0,w):
     PA = (Pdiag_symmetrized[:,:,idxi][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight)#.unsqueeze(-1)
     sumA = torch.zeros(nmol,nnewRoots,w.shape[1],4,4,dtype=dtype, device=device)
     sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.einsum('nrps,npsS->nrpS',PA,w) # suma = torch.sum(PA*w[:,None,...],dim=3)
+    # sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.sum(PA*w[:,None,...],dim=3)
     del PA
     F.index_add_(2,maskd[idxj],sumA)
 
@@ -331,10 +332,11 @@ def makeA_pi_symm_batch(mol,P0,w):
     PB = (Pdiag_symmetrized[:,:,idxj][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight)#.unsqueeze(-2)
     del Pdiag_symmetrized
     sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.einsum('nrpS,npsS->nrps',PB,w) # torch.sum(PB*w[:,None,...],dim=4)
+    # sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.sum(PB*w[:,None,...],dim=4)
     del PB
     F.index_add_(2,maskd[idxi],sumB)
 
-    # off diagonal block part, check KAB in fock2.f, Exchange
+    # Calculate the Exchange contribution
     # mu, nu in A
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
@@ -367,10 +369,7 @@ def makeA_pi_symm_batch(mol,P0,w):
     gp2 = mol.parameters['g_p2'].view(nmol,-1)
     hsp = mol.parameters['h_sp'].view(nmol,-1)
 
-    sumK_flat = sumK.view(nmol*nnewRoots*w.shape[1]*16)
-    sumK_flat = sumK_flat[:nmol*nnewRoots*maskd.shape[0]*16]
-    F2e1c = sumK_flat.view(nmol,nnewRoots,maskd.shape[0],4,4)
-    # F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
+    F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
 
     F2e1c[...,0,0] = 0.5*P[...,maskd,0,0]*gss.unsqueeze(1) + Pptot[...,maskd]*(gsp-0.5*hsp).unsqueeze(1)
     for i in range(1,4):
