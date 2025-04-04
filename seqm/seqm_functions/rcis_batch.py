@@ -253,14 +253,17 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
         F.index_add_(2,mask,sumK)
         F[:,:,mask_l] -= sumK.transpose(3,4)
         del Pp
-        del sumK
 
         gsp = mol.parameters['g_sp'].view(nmol,-1)
         gpp = mol.parameters['g_pp'].view(nmol,-1)
         gp2 = mol.parameters['g_p2'].view(nmol,-1)
         hsp = mol.parameters['h_sp'].view(nmol,-1)
 
-        F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
+        # reuse sumK memory
+        sumK_flat = sumK.view(nmol*nnewRoots*w.shape[1]*16)
+        sumK_flat = sumK_flat[:nmol*nnewRoots*maskd.shape[0]*16]
+        F2e1c = sumK_flat.view(nmol,nnewRoots,maskd.shape[0],4,4)
+        # F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
         for i in range(1,4):
             #(s,p) = (p,s) upper triangle
             F2e1c[...,0,i] = P_anti[...,maskd,0,i]*(0.5*hsp - 0.5*gsp).unsqueeze(1)
@@ -309,46 +312,29 @@ def makeA_pi_symm_batch(mol,P0,w):
     F = torch.zeros_like(P)
     # print_memory_usage("After P_symm, and Fock_symm")
 
-    # Two center-two elecron integrals
+    # Calculate Coulomb contribution J
     weight = torch.tensor([1.0,
                            2.0, 1.0,
                            2.0, 2.0, 1.0,
                            2.0, 2.0, 2.0, 1.0],dtype=dtype, device=device).reshape((-1,10))
 
-    #0.030472556808550877, Pdiag_symmetrized = P[:,maskd]+P[:,maskd].transpose(2,3)
-    # weight *= 0.5 # dividing by 2 because I didn't do it while making the symmetrized P matrix
     Pdiag_symmetrized = P[:,:,maskd]
 
-    PA = (Pdiag_symmetrized[:,:,idxi][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).unsqueeze(-1)
-    PB = (Pdiag_symmetrized[:,:,idxj][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight).unsqueeze(-2)
-    del Pdiag_symmetrized
-
-    #suma \sum_{mu,nu \in A} P_{mu, nu in A} (mu nu, lamda sigma) = suma_{lambda sigma \in B}
-    #suma shape (npairs, 10)
-    suma = torch.sum(PA*w.unsqueeze(1),dim=3)
-    #sumb \sum_{l,s \in B} P_{l, s inB} (mu nu, l s) = sumb_{mu nu \in A}
-    #sumb shape (npairs, 10)
-    sumb = torch.sum(PB*w.unsqueeze(1),dim=4)
-    #reshape back to (npairs 4,4)
-    # as will use index add in the following part
+    PA = (Pdiag_symmetrized[:,:,idxi][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight)#.unsqueeze(-1)
     sumA = torch.zeros(nmol,nnewRoots,w.shape[1],4,4,dtype=dtype, device=device)
-    sumB = torch.zeros_like(sumA)
-    sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = suma
-    sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = sumb
-    # sumA.add_(sumA.triu(1).transpose(3,4))
-    # sumB.add_(sumB.triu(1).transpose(3,4))
-    #F^A_{mu, nu} = Hcore + \sum^A + \sum_{B} \sum_{l, s \in B} P_{l,s \in B} * (mu nu, l s)
-    #\sum_B
-    F.index_add_(2,maskd[idxi],sumB)
-    #\sum_A
+    sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.einsum('nrps,npsS->nrpS',PA,w) # suma = torch.sum(PA*w[:,None,...],dim=3)
+    del PA
     F.index_add_(2,maskd[idxj],sumA)
 
-    del PA
+    sumB = sumA
+    sumB.zero_()
+    PB = (Pdiag_symmetrized[:,:,idxj][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight)#.unsqueeze(-2)
+    del Pdiag_symmetrized
+    sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.einsum('nrpS,npsS->nrps',PB,w) # torch.sum(PB*w[:,None,...],dim=4)
     del PB
-    del sumA
-    # del sumB
+    F.index_add_(2,maskd[idxi],sumB)
 
-    # off diagonal block part, check KAB in forck2.f
+    # off diagonal block part, check KAB in fock2.f, Exchange
     # mu, nu in A
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
@@ -362,11 +348,12 @@ def makeA_pi_symm_batch(mol,P0,w):
                         [3,4,5,8],
                         [6,7,8,9]],dtype=torch.int64, device=device)
     # Pp =P[mask], P_{mu \in A, lambda \in B}
-    Pp = P[:,:,mask]
+    Pp = P[:,:,mask] # nmol, nroots, npairs, 4, 4
     for i in range(4):
         for j in range(4):
             #\sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            sumK[...,i,j] = -0.5*torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
+            # sumK[...,i,j] = -0.5*torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
+            sumK[...,i,j] = -0.5*torch.einsum('nrpsS,npsS->nrp',Pp,w[...,ind[i],:][...,:,ind[j]])
     F.index_add_(2,mask,sumK)
     F[:,:,mask_l] += sumK.transpose(3,4)
     del Pp
@@ -380,7 +367,10 @@ def makeA_pi_symm_batch(mol,P0,w):
     gp2 = mol.parameters['g_p2'].view(nmol,-1)
     hsp = mol.parameters['h_sp'].view(nmol,-1)
 
-    F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
+    sumK_flat = sumK.view(nmol*nnewRoots*w.shape[1]*16)
+    sumK_flat = sumK_flat[:nmol*nnewRoots*maskd.shape[0]*16]
+    F2e1c = sumK_flat.view(nmol,nnewRoots,maskd.shape[0],4,4)
+    # F2e1c = torch.zeros(nmol,nnewRoots,maskd.shape[0],4,4,device=device,dtype=dtype)
 
     F2e1c[...,0,0] = 0.5*P[...,maskd,0,0]*gss.unsqueeze(1) + Pptot[...,maskd]*(gsp-0.5*hsp).unsqueeze(1)
     for i in range(1,4):
