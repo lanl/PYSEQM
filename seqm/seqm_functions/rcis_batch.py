@@ -63,6 +63,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
 
+    n_collapses = torch.zeros_like(vstart)
+    n_iters = torch.zeros_like(vstart)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -107,6 +109,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         mol_converged = roots_not_converged.sum(dim=1) == 0
         done_this_loop = (~done) & mol_converged
         done[done_this_loop] = True
+        n_iters[done_this_loop] = davidson_iter
         amplitude_store[done_this_loop] = amplitudes[done_this_loop]
 
         # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
@@ -122,6 +125,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             HV[collapse_mask,nroots:] = 0
             vstart[collapse_mask] = 0
             vend[collapse_mask] = nroots
+            n_collapses[collapse_mask] += 1
 
         # Orthogonalize the residual vectors for molecules
         orthogonalize_mask = (~done) & (~mol_converged) # & (~collapse_condition)
@@ -136,6 +140,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             if vend[i] - vstart[i] == 0:
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]
+                n_iters[i] = davidson_iter
 
             # if davidson_iter % 5 == 0:
                 # print(f"davidson_iteration {davidson_iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
@@ -151,6 +156,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     print("\nCIS excited states:")
     for j in range(nmol):
         if nmol>1: print(f"\nMolecule {j+1}")
+        print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
         for i, energy in enumerate(e_val_n[j], start=1):
             print(f"State {i:3d}: {energy:.15f} eV")
     print("")

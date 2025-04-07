@@ -276,8 +276,8 @@ def calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n):
     resXpY = resX - resY
     resXmY += resX
 
-    resR = torch.norm(resXpY,dim=2)
-    resL = torch.norm(resXmY,dim=2)
+    resR = torch.linalg.norm(resXpY,dim=2,ord=torch.inf)
+    resL = torch.linalg.norm(resXmY,dim=2,ord=torch.inf)
 
     chooseResR = resR > resL
     resid_norm = resL

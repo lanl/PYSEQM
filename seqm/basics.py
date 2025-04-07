@@ -6,8 +6,6 @@ from torch.autograd import grad
 from .seqm_functions.constants import ev
 from .seqm_functions.pack import pack
 from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
-from .seqm_functions.rcis import rcis
-from .seqm_functions.rcis_grad import rcis_grad
 from .seqm_functions.rcis_batch import rcis_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.nac import calc_nac
