@@ -60,6 +60,8 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(2,nmol,nroots,nov,dtype=dtype,device=device)
 
+    n_collapses = torch.zeros_like(vstart)
+    n_iters = torch.zeros_like(vstart)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -86,8 +88,8 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
         # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
-        A = torch.einsum('bnia,bria->bnr',V[:,:vend_max].view(nmol,vend_max,nocc,nvirt),AV[:,:vend_max].view(nmol,vend_max,nocc,nvirt))
-        B = torch.einsum('bnia,bria->bnr',V[:,:vend_max].view(nmol,vend_max,nocc,nvirt),BV[:,:vend_max].view(nmol,vend_max,nocc,nvirt))
+        A = torch.einsum('bno,bro->bnr',V[:,:vend_max],AV[:,:vend_max])
+        B = torch.einsum('bno,bro->bnr',V[:,:vend_max],BV[:,:vend_max])
         ApB = A
         AmB = A - B
         ApB += B # Make A+B
@@ -98,9 +100,12 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
         X, Y = rpa_subspace_eig(ApB,AmB,nroots, zero_pad, e_val_n, done)
 
-        amplitude_X, amplitude_Y, resid_norm, correction_direction = calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n)
+        amplitude_X, amplitude_Y, resid_norm, correction_directionR, correction_directionL = calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n)
+        # amplitude_X, amplitude_Y, resid_norm, correction_direction = calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n)
 
-        correction_direction /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1)) # Davidson preconditioning
+        # correction_direction /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1)) # Davidson preconditioning
+        correction_directionR /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1)) # Davidson preconditioning
+        correction_directionL /= (e_val_n.unsqueeze(2) - approxH.unsqueeze(1)) # Davidson preconditioning
 
         roots_not_converged = resid_norm > root_tol
 
@@ -108,6 +113,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         mol_converged = roots_not_converged.sum(dim=1) == 0
         done_this_loop = (~done) & mol_converged
         done[done_this_loop] = True
+        n_iters[done_this_loop] = davidson_iter
         amplitude_store[0,done_this_loop] = amplitude_X[done_this_loop]
         amplitude_store[1,done_this_loop] = amplitude_Y[done_this_loop]
 
@@ -133,22 +139,27 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             BV[collapse_mask,2*nroots:] = 0
             vstart[collapse_mask] = 0
             vend[collapse_mask] = 2*nroots
+            n_collapses[collapse_mask] += 1
 
         # Orthogonalize the residual vectors for molecules
         orthogonalize_mask = (~done) & (~mol_converged) # & (~collapse_condition)
         mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
         for i in mols_to_ortho:
-            # newsubspace = residual[i,roots_not_converged[i],:]/(e_val_n[i,roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0))
-            newsubspace = correction_direction[i,roots_not_converged[i],:]
+            # newsubspace = correction_direction[i,roots_not_converged[i],:]
+            # newsubspace = torch.cat((correction_directionR[i,roots_not_converged[i],:],correction_directionL[i,roots_not_converged[i],:]),dim=0)
 
             vstart[i] = vend[i]
             # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function. 
             # This means changes inside the function will directly modify 'V[i]'
+            newsubspace = correction_directionR[i,roots_not_converged[i],:]
+            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
+            newsubspace = correction_directionL[i,roots_not_converged[i],:]
             vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
             if vend[i] - vstart[i] == 0:
                 done[i] = True
                 amplitude_store[0,i] = amplitude_X[i]
                 amplitude_store[1,i] = amplitude_Y[i]
+                n_iters[i] = davidson_iter
 
             # if davidson_iter % 5 == 0:
                 # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
@@ -161,12 +172,15 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if davidson_iter > max_iter:
             # for i in range(nmol):
             #     print(f"Mol {i+1} Iterations: {davidson_iter:2}: Found {nroots-roots_not_converged[i].sum().item()}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
+            for j in range(nmol):
+                print(f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
     print("\nRPA excited states:")
     for j in range(nmol):
         if nmol>1: print(f"\nMolecule {j+1}")
+        print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
         for i, energy in enumerate(e_val_n[j], start=1):
             print(f"State {i:3d}: {energy:.15f} eV")
     print("")
@@ -282,7 +296,7 @@ def calc_rpa_residue(AV,BV,X,Y,V,vend_max,e_val_n):
     chooseResR = resR > resL
     resid_norm = resL
     resid_norm[chooseResR] = resR[chooseResR]
-    correction_direction = resXmY
-    correction_direction[chooseResR] = resXpY[chooseResR]
-
-    return amplitude_X, amplitude_Y, resid_norm, correction_direction
+    # correction_direction = resXmY
+    # correction_direction[chooseResR] = resXpY[chooseResR]
+    # return amplitude_X, amplitude_Y, resid_norm, correction_direction
+    return amplitude_X, amplitude_Y, resid_norm, resXpY, resXmY

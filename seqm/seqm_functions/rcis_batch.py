@@ -90,7 +90,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
         # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
-        H = torch.einsum('bnia,bria->bnr',V[:,:vend_max].view(nmol,vend_max,nocc,nvirt),HV[:,:vend_max].view(nmol,vend_max,nocc,nvirt))
+        H = torch.einsum('bno,bro->bnr',V[:,:vend_max],HV[:,:vend_max])
 
         davidson_iter = davidson_iter + 1
 
@@ -150,6 +150,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if torch.all(done):
             break
         if davidson_iter > max_iter:
+            for j in range(nmol):
+                print(f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
@@ -187,9 +189,13 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
         F0 = makeA_pi_batched(mol,P_xi,w)
         # why am I multiplying by A 2?
         A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
+        if makeB:
+            B = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
     else:
         # F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
         A = torch.empty(nmol,nNewRoots,nocc,nvirt,device=V.device,dtype=V.dtype)
+        if makeB:
+            B = torch.empty_like(A)
         for start in range(0, nNewRoots, chunk_size):
             end = min(start + chunk_size, nNewRoots)
             P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via[:,start:end], Cvirt)
@@ -197,12 +203,13 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
             P_xi = makeA_pi_batched(mol,P_xi,w)
             F0 = P_xi
             A[:,start:end,:] = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
+            if makeB:
+                B[:,start:end,:] = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
 
     A += Via*ea_ei.unsqueeze(1)
     A = A.view(nmol, nNewRoots, -1)
 
     if makeB:
-        B = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
         B = B.view(nmol,nNewRoots, -1)
         return  A, B
 
