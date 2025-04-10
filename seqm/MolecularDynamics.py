@@ -657,6 +657,18 @@ class KSA_XL_BOMD(XL_BOMD):
             molecule.const.timing["MD"].append(t1-t0)
         return P, Pt
 
+class ESMD(Molecular_Dynamics_Basic):
+    def __init__(self, *args, **kwargs):
+        """
+        unit for timestep is femtosecond
+        """
+        super().__init__(*args, **kwargs)
+
+    def run(self, molecule, steps, active_state, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], *args, **kwargs):
+        molecule.active_state = active_state
+        super().run(molecule=molecule,steps=steps,learned_parameters=learned_parameters, reuse_P=reuse_P, remove_com=remove_com, *args, **kwargs)
+
+
 class XL_ESMD(XL_BOMD):
     def __init__(self, *args, **kwargs):
         """

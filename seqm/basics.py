@@ -434,6 +434,7 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
         self.excited_states = seqm_parameters.get('excited_states')
+        self.analytical_gradient = seqm_parameters.get('analytical_gradient',[False])
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
@@ -536,8 +537,7 @@ class Energy(torch.nn.Module):
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
         
-        analytical_gradient = kwargs.get('analytical_gradient',[False])
-        if analytical_gradient[0]:
+        if self.analytical_gradient[0] and molecule.active_state==0:
             # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so 
             # we can save on memory since the compuational graph doesn't have to be stored.
             beta = molecule.parameters['beta']
@@ -547,81 +547,56 @@ class Energy(torch.nn.Module):
                 #     Kbeta = parameters["Kbeta"]
                 # else:
                 #     Kbeta = None
-                if analytical_gradient[1].lower() == 'analytical':
-                    molecule.ground_analytical_gradient =  scf_analytic_grad( P0=P, 
-                                                                             molecule=molecule,
+                if len(self.analytical_gradient) > 1 and self.analytical_gradient[1].lower() == 'numerical':
+                    molecule.analytical_gradient =  scf_grad( P0=P, 
+                                                  molecule = molecule,
+                                                  const=molecule.const,
+                                                  method = self.method,
+                                                  molsize=molecule.molsize,
+                                                  maskd=molecule.maskd,
+                                                  mask=molecule.mask,
+                                                  idxi=molecule.idxi,
+                                                  idxj=molecule.idxj,
+                                                  ni=molecule.ni,
+                                                  nj=molecule.nj,
+                                                  xij=molecule.xij,
+                                                  gam=gam,
+                                                  rij=molecule.rij,
+                                                  Z=molecule.Z,
+                                                  parnuc = parnuc,
+                                                  zetas=molecule.parameters['zeta_s'],
+                                                  zetap=molecule.parameters['zeta_p'],
+                                                  beta=beta,
+                                                 )
+                # elif analytical_gradient[1].lower()=='numerical':
+                else:
+                    molecule.analytical_gradient =  scf_analytic_grad( P0=P, 
+                              molecule=molecule,
                               const=molecule.const,
                               method = self.method,
                               molsize=molecule.molsize,
-                              # nHeavy=nHeavy,
-                              # nHydro=nHydro,
-                              # nOccMO=nocc,
                               maskd=molecule.maskd,
                               mask=molecule.mask,
-                              # atom_molid=atom_molid,
-                              # pair_molid=pair_molid,
                               idxi=molecule.idxi,
                               idxj=molecule.idxj,
                               ni=molecule.ni,
                               nj=molecule.nj,
                               xij=molecule.xij,
-                              # Xij = Xij,
                               rij=molecule.rij,
                               Z=molecule.Z,
                               gam=gam,
                               parnuc = parnuc,
                               zetas=molecule.parameters['zeta_s'],
                               zetap=molecule.parameters['zeta_p'],
-                              # uss=parameters['U_ss'],
-                              # upp=parameters['U_pp'],
                               gss=molecule.parameters['g_ss'],
-                              # gsp=parameters['g_sp'],
                               gpp=molecule.parameters['g_pp'],
                               gp2=molecule.parameters['g_p2'],
                               hsp=molecule.parameters['h_sp'],
                               beta=beta,
                               ri=ri,
                               riXH=riXH,
-                              # Kbeta=Kbeta,
-                              # sp2=self.sp2,
                              )
-                elif analytical_gradient[1].lower()=='numerical':
-
-                    molecule.ground_analytical_gradient =  scf_grad( P0=P, 
-                              molecule = molecule,
-                              const=molecule.const,
-                              method = self.method,
-                              molsize=molecule.molsize,
-                              # nHeavy=nHeavy,
-                              # nHydro=nHydro,
-                              # nOccMO=nocc,
-                              maskd=molecule.maskd,
-                              mask=molecule.mask,
-                              # atom_molid=atom_molid,
-                              # pair_molid=pair_molid,
-                              idxi=molecule.idxi,
-                              idxj=molecule.idxj,
-                              ni=molecule.ni,
-                              nj=molecule.nj,
-                              xij=molecule.xij,
-                              gam=gam,
-                              # Xij = Xij,
-                              rij=molecule.rij,
-                              Z=molecule.Z,
-                              parnuc = parnuc,
-                              zetas=molecule.parameters['zeta_s'],
-                              zetap=molecule.parameters['zeta_p'],
-                              # uss=parameters['U_ss'],
-                              # upp=parameters['U_pp'],
-                              # gss=molecule.parameters['g_ss'],
-                              # gsp=parameters['g_sp'],
-                              # gpp=molecule.parameters['g_pp'],
-                              # gp2=molecule.parameters['g_p2'],
-                              # hsp=molecule.parameters['h_sp'],
-                              beta=beta,
-                              # Kbeta=Kbeta,
-                              # sp2=self.sp2,
-                             )
+                    
             if molecule.const.do_timing:
                 if torch.cuda.is_available(): torch.cuda.synchronize()
                 t1 = time.time()
@@ -631,33 +606,28 @@ class Energy(torch.nn.Module):
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
             with torch.no_grad():
-                if molecule.nmol >= 1:
-                    cis_gradient = kwargs.get('cis_gradient',[False])
-                    if molecule.const.do_timing: t0 = time.time()
-                    if method == 'cis':
-                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol)
+                if molecule.const.do_timing: t0 = time.time()
+                if method == 'cis':
+                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol)
+                elif method == 'rpa':
+                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol)
+                else:
+                    raise Exception("Excited state method has to be CIS or RPA")
 
-                        if molecule.const.do_timing:
-                            if torch.cuda.is_available(): torch.cuda.synchronize()
-                            t1 = time.time()
-                            molecule.const.timing["CIS/RPA"].append(t1 - t0)
+                if molecule.const.do_timing:
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    t1 = time.time()
+                    molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
-                        if cis_gradient[0]:
-                            rcis_grad_batch(molecule,exc_amps[:,0],w,e,riXH,ri,P,cis_tol)
 
-                        cis_nac = kwargs.get('cis_nac',[False])
-                        if cis_nac[0]:
-                            calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
+                cis_nac = kwargs.get('cis_nac',[False])
+                if cis_nac[0]:
+                    calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
 
-                    elif method == 'rpa':
-                        excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol)
-                        if molecule.const.do_timing:
-                            if torch.cuda.is_available(): torch.cuda.synchronize()
-                            t1 = time.time()
-                            molecule.const.timing["CIS/RPA"].append(t1 - t0)
-
-                        if cis_gradient[0]:
-                            rcis_grad_batch(molecule,exc_amps[:,:,0],w,e,riXH,ri,P,cis_tol,rpa=True)
+            if molecule.active_state>0:
+                Eelec += excitation_energies[:,molecule.active_state]
+            if self.analytical_gradient[0] and (molecule.active_state>0):
+                molecule.analytical_gradient = rcis_grad_batch(molecule,exc_amps[:,molecule.active_state-1],w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
@@ -688,21 +658,27 @@ class Force(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
         self.seqm_parameters = seqm_parameters
+        self.analytical_gradient = seqm_parameters.get('analytical_gradient',[False])
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, do_force=True, *args, **kwargs):
+        
+        # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
+        # For excited states we dont have backprop forces
+        if molecule.active_state > 0 and do_force:
+            self.seqm_parameters['analytical_gradient'] = [True]
 
-        analytical_gradient = kwargs.get('analytical_gradient',[False])
-        if not analytical_gradient[0] and do_force:
+        if not self.analytical_gradient[0] and do_force:
             molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
+        print(f"Heat of formation: {Hf}, Etot: {Etot}")
         
         if self.eig:
             e = e.detach()
             e_gap = e_gap.detach()
 
-        if analytical_gradient[0]:
-            force = -molecule.ground_analytical_gradient # if molecule.ground_analytical_gradient is not None else None
+        if self.analytical_gradient[0]:
+            force = -molecule.analytical_gradient
             return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
         #L = Etot.sum()
         if do_force:

@@ -55,7 +55,8 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
 
     # Derivative of pair-nuclear Energy or E_core-core
     # pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
-    pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters=parnuc)
+    # pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters=parnuc)
+    pair_grad = core_core_der(molecule, gam, w_x, method, parnuc)
     return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad,
                                                 mask, maskd, idxi, idxj)
 
@@ -187,7 +188,6 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
     Xij = xij * rij.unsqueeze(1) * a0
     dtype = Xij.dtype
     device = Xij.device
-    nmol = molecule.species.shape[0]
     npairs = Xij.shape[0]
     qn_int = const.qn_int  # Principal quantum number of the valence shell
 
@@ -281,10 +281,11 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
         e1b_x_new[:, coord, ...] = (e1b_[:npairs]- e1b_[npairs:]) / (2.0 * delta)
         e2a_x_new[:, coord, ...] = (e2a_[:npairs]- e2a_[npairs:]) / (2.0 * delta)
 
-    alpha = parnuc[0]
-    tore = const.tore  # Charges
-    ZAZB = tore[ni] * tore[nj]
-    pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x_new, method, parameters=parnuc)
+    # alpha = parnuc[0]
+    # tore = const.tore  # Charges
+    # ZAZB = tore[ni] * tore[nj]
+    # pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x_new, method, parameters=parnuc)
+    pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
 
     return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x_new, e2a_x_new, w_x_new, pair_grad,
                                                 mask, maskd, idxi, idxj)
@@ -349,8 +350,19 @@ repeat_tensor = lambda x : torch.cat([x,x])
 #     print(f'overlap_x from gaussians is \n{overlap_KAB_x}')
 
 
-def core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters):
+def core_core_der(mol, gam, w_x, method, parameters):
+    ni = mol.ni
+    nj = mol.nj
+    idxi = mol.idxi
+    idxj = mol.idxj
+    xij= mol.xij
+    rij=mol.rij
     rija = rij * a0
+    Xij = xij * rij.unsqueeze(1) * a0
+    alpha = parameters[0]
+    const=mol.const
+    tore = const.tore  # Charges
+    ZAZB = tore[ni] * tore[nj]
     # special case for N-H and O-H
     XH = ((ni == 7) | (ni == 8)) & (nj == 1)
     t2 = torch.zeros_like(rij)
