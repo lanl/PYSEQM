@@ -155,13 +155,13 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
-    print("\nCIS excited states:")
-    for j in range(nmol):
-        if nmol>1: print(f"\nMolecule {j+1}")
-        print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
-        for i, energy in enumerate(e_val_n[j], start=1):
-            print(f"State {i:3d}: {energy:.15f} eV")
-    print("")
+    # print("\nCIS excited states:")
+    # for j in range(nmol):
+    #     if nmol>1: print(f"\nMolecule {j+1}")
+    #     print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
+    #     for i, energy in enumerate(e_val_n[j], start=1):
+    #         print(f"State {i:3d}: {energy:.15f} eV")
+    # print("")
 
     # Post CIS analysis
     rcis_analysis(mol,e_val_n,amplitude_store,nroots)

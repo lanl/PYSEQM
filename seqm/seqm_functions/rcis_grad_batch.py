@@ -258,8 +258,8 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,p
 
     grad_cis = grad_cis.view(nmol, molsize, 3)
 
-    torch.set_printoptions(precision=9)
-    print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')
+    # torch.set_printoptions(precision=9)
+    # print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')
 
     return grad_cis
 

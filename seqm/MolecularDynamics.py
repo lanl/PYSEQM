@@ -724,8 +724,9 @@ class XL_ESMD(XL_BOMD):
             molecule.const.timing["MD"].append(t1-t0)
         return P, Pt
 
-    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, xi_t=None, remove_com=[False,1000], *args, **kwargs):
+    def run(self, molecule, steps, active_state,learned_parameters=dict(), Pt=None, amp_t=None, xi_t=None, remove_com=[False,1000], *args, **kwargs):
         
+        molecule.active_state = active_state
         self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
@@ -733,6 +734,11 @@ class XL_ESMD(XL_BOMD):
                 if 'max_rank' in self.xl_bomd_params:
                     molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
             P = molecule.dm.clone()
+            # if not torch.is_tensor(amp_t):
+            #     amp_t = molecule.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
+            #     if 'max_rank' in self.xl_bomd_params:
+            #         molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
+            # P = molecule.dm.clone()
 
         E0 = None
 
