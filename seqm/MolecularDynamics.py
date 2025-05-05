@@ -112,8 +112,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         MASS[0] = 1.0
         mass = MASS[molecule.species].unsqueeze(2)
         scale = torch.sqrt(self.Temp/mass)*self.vel_scale
-        print("WARNING! I've set the seed for the random number generator to 42. Delete this line if you don't want this behavior")
-        torch.manual_seed(42)
         molecule.velocities = torch.randn(molecule.coordinates.shape, dtype=dtype, device=device)*scale
         molecule.velocities[molecule.species==0,:] = 0.0
         if vel_com:
@@ -258,7 +256,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         with torch.no_grad():
             molecule.velocities.add_(0.5*molecule.acc*dt)
             molecule.coordinates.add_(molecule.velocities*dt)
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', cis_amp=molecule.cis_amplitudes, *args, **kwargs)
 
         with torch.no_grad():
             molecule.acc = molecule.force/molecule.mass*self.acc_scale
@@ -285,6 +283,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 
                 if not reuse_P:
                     molecule.dm = None
+                    molecule.cis_amplitudes = None
                 if remove_com[0]:
                     if i%remove_com[1]==0:
                         self.zero_com(molecule)
@@ -676,7 +675,7 @@ class XL_ESMD(XL_BOMD):
         """
         super().__init__(*args, **kwargs)
 
-    def one_step(self, molecule, step, P, Pt, xi, xi_t, learned_parameters=dict(), *args, **kwargs):
+    def one_step(self, molecule, step, P, Pt, amp, amp_t, ground_state_SCF=True, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
         dt = self.timestep
         if molecule.const.do_timing:
@@ -699,11 +698,14 @@ class XL_ESMD(XL_BOMD):
             #### Scaling delta function. Use eq with c if stability problems occur.
             c = 0.9
             P = self.coeff_D*c*molecule.dm + self.coeff_D*(1-c)*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            amp = self.coeff_D*c*molecule.cis_amplitudes + self.coeff_D*(1-c)*amp + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*amp_t, dim=0)
             
             #P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
             Pt[(self.m-1-cindx)] = P
+            amp_t[(self.m-1-cindx)] = amp
     
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, dm_prop='SCF', *args, **kwargs)
+        calc_type = 'SCF' if ground_state_SCF else 'XL-BOMD'
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop=calc_type, cis_amp=amp, *args, **kwargs)
         molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
 
         if self.damp:
@@ -722,9 +724,9 @@ class XL_ESMD(XL_BOMD):
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt
+        return P, Pt, amp, amp_t
 
-    def run(self, molecule, steps, active_state,learned_parameters=dict(), Pt=None, amp_t=None, xi_t=None, remove_com=[False,1000], *args, **kwargs):
+    def run(self, molecule, steps, active_state, ground_state_SCF = True, learned_parameters=dict(), Pt=None, amp_t=None, xi_t=None, remove_com=[False,1000], *args, **kwargs):
         
         molecule.active_state = active_state
         self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
@@ -734,18 +736,16 @@ class XL_ESMD(XL_BOMD):
                 if 'max_rank' in self.xl_bomd_params:
                     molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
             P = molecule.dm.clone()
-            # if not torch.is_tensor(amp_t):
-            #     amp_t = molecule.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
-            #     if 'max_rank' in self.xl_bomd_params:
-            #         molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
-            # P = molecule.dm.clone()
+            if not torch.is_tensor(amp_t):
+                amp_t = molecule.cis_amplitudes.unsqueeze(0).expand((self.m,)+molecule.cis_amplitudes.shape).clone()
+            amp = molecule.cis_amplitudes.clone()
 
         E0 = None
 
         for i in range(steps):
             start_time = time.time()
 
-            P, Pt = self.one_step(molecule, i, P, Pt, None, None, learned_parameters=learned_parameters, *args, **kwargs)
+            P, Pt, amp, amp_t = self.one_step(molecule, i, P, Pt, amp, amp_t, learned_parameters=learned_parameters, ground_state_SCF=ground_state_SCF, *args, **kwargs)
 
             with torch.no_grad():
                 if torch.is_tensor(molecule.coordinates.grad):
@@ -809,6 +809,61 @@ class XL_ESMD(XL_BOMD):
                 print(time.time() - start_time)
 
         return molecule.coordinates, molecule.velocities, molecule.acc
+
+class KSA_XL_ESMD(XL_ESMD):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def one_step(self, molecule, step, P, Pt, amp, amp_t, learned_parameters=dict(), *args, **kwargs):
+        #cindx: show in Pt, which is the latest P 
+        dt = self.timestep
+        if molecule.const.do_timing:
+            t0 = time.time()
+
+        with torch.no_grad():
+            # leapfrog velocity Verlet
+            molecule.velocities.add_(0.5*molecule.acc*dt)
+            molecule.coordinates.add_(molecule.velocities*dt)                
+
+            #cindx = step%self.m
+            #e.g k=5, m=6
+            #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
+            #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
+            #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
+            #Pt (2,3,4,5,0,1), step=6n+2
+            cindx = step%self.m
+            # eq. 22 in https://doi.org/10.1063/1.3148075
+            
+            #### Scaling delta function. Use eq with c if stability problems occur.
+            c = 0.9
+            P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            amp = self.coeff_D*c*molecule.cis_amplitudes + self.coeff_D*(1-c)*amp + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*amp_t, dim=0)
+            
+            #P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+            Pt[(self.m-1-cindx)] = P
+            amp_t[(self.m-1-cindx)] = amp
+    
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop='XL-BOMD', cis_amp=amp, *args, **kwargs)
+        molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
+
+        if self.damp:
+            #print('DAMPING')
+            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
+            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
+                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
+            molecule.force += Ff+Fr
+            molecule.force[molecule.species==0,:] = 0.0
+        
+        with torch.no_grad():
+            molecule.acc = molecule.force/molecule.mass*self.acc_scale
+            molecule.velocities.add_(0.5*molecule.acc*dt)
+        if molecule.const.do_timing:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            t1 = time.time()
+            molecule.const.timing["MD"].append(t1-t0)
+        return P, Pt, amp, amp_t
+
 """
 1 eV = 1.602176565e-19 J
 1 Angstrom = 1.0e-10 m

@@ -52,7 +52,7 @@ class Electronic_Structure(torch.nn.Module):
         elif dm_prop=='XL-BOMD':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, \
             molecule.Electronic_entropy, molecule.dP2dt2, molecule.Krylov_Error,  molecule.Fermi_occ = \
-                        self.conservative_force_xl(molecule, P0, learned_parameters, xl_bomd_params=xl_bomd_params, *args, **kwargs)
+                        self.conservative_force_xl(molecule, P0, learned_parameters=learned_parameters, xl_bomd_params=xl_bomd_params, *args, **kwargs)
 
         with torch.no_grad():
             # $$$

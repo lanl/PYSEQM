@@ -44,7 +44,17 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
     else:
         nstart = nroots
-        V[:,:nstart,:] = init_amplitude_guess
+        if nroots>1:
+            print("WARNING: Orthogonalizing inital guess")
+            init_amplitude_guess, _ = torch.linalg.qr(init_amplitude_guess.transpose(1,2), mode='reduced')
+            V[:,:nstart,:] = init_amplitude_guess.transpose(1,2)
+        else:
+            V[:,:nstart,:] = init_amplitude_guess
+            V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
+        # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
+        # This fails when orbitals are degenerate and switch order
+        mol.eig_vec *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.eig_vec,mol.old_mos))).unsqueeze(1)
+
 
     max_iter = 100 # TODO: User-defined
     vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
@@ -164,6 +174,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print("")
 
     # Post CIS analysis
+    print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
     rcis_analysis(mol,e_val_n,amplitude_store,nroots)
 
     return e_val_n, amplitude_store

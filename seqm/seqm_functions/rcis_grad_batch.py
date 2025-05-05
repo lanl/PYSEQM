@@ -4,11 +4,12 @@ from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch
 from .constants import a0
 
-def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc,rpa=False,include_ground_state=False):
+def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc,rpa=False,include_ground_state=False):
     """
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
          state for which the gradient is required has to be selected and put together into the amp tensor
     """
+    amp = mol.cis_amplitudes[...,mol.active_state-1,:]
     device = amp.device
     dtype = amp.dtype
     norb = mol.norb[0]

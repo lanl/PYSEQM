@@ -40,6 +40,9 @@ from .seqm_functions.pack import *
 from .basics import Force
 from torch.autograd import grad
 import time
+from .seqm_functions.rcis_batch import rcis_batch
+from .seqm_functions.rcis_grad_batch import rcis_grad_batch
+from .seqm_functions.rpa import rpa
 
 from .tools import attach_profile_range
 
@@ -58,12 +61,13 @@ class EnergyXL(torch.nn.Module):
         self.method = seqm_parameters['method']
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
+        self.excited_states = seqm_parameters.get('excited_states')
         self.Hf_flag = True
         if "Hf_flag" in seqm_parameters:
             self.Hf_flag = seqm_parameters["Hf_flag"] # True: Heat of formation, False: Etot-Eiso
 
          
-    def forward(self, molecule, P, learned_parameters=dict(), xl_bomd_params=dict(), all_terms=False, *args, **kwargs):
+    def forward(self, molecule, P, cis_amp, learned_parameters=dict(), xl_bomd_params=dict(), all_terms=False, *args, **kwargs):
         """
         get the energy terms
         D: Density Matrix, F=>D  (SP2)
@@ -104,7 +108,7 @@ class EnergyXL(torch.nn.Module):
         if molecule.const.do_timing:
             t0 = time.time()
 
-        M, w, rho0xi, rho0xj, _, _ = hcore(molecule)
+        M, w, rho0xi, rho0xj, riXH, ri = hcore(molecule)
 
         if molecule.const.do_timing:
             if torch.cuda.is_available():
@@ -158,6 +162,19 @@ class EnergyXL(torch.nn.Module):
             kB = 8.61739e-5 # eV/K, kB = 6.33366256e-6 Ry/K, kB = 3.166811429e-6 Ha/K, #kB = 3.166811429e-6 #Ha/K
             with torch.no_grad():
                 D,S_Ent,QQ,e,Fe_occ,mu0, Occ_mask = Fermi_Q(F, Temp, molecule.nocc, molecule.nHeavy, molecule.nHydro, kB, scf_backward = self.scf_backward) # Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent
+                if self.excited_states is not None: # we are doing excited states MD, can't have fractional occupation
+                    # Occ_mask: (nmols, norbs), nocc: (nmols,) integer tensor with 0 ≤ nocc[i] ≤ norbs
+                    nmols, norbs = Occ_mask.shape
+
+                    # build a mask of shape (nmols, norb): mask[i,j] = True iff j < nocc[i]
+                    mask = (torch.arange(norbs, device=Occ_mask.device)[None, :]   # shape (1, norbs)
+                            < molecule.nocc[:, None])
+
+                    # now check that every X[i,j] where mask[i,j] is True equals 1.0
+                    if not Occ_mask[mask].eq(1.0).all().item():
+                        raise ValueError(f"Expected first nocc[i] elements of each row of Occ_mask to be 1.0, "
+                                         f"but found mismatches in Occ_mask[mask].")
+                    molecule.eig_vec = QQ.clone() # save molecular orbitals
 
                 EEnt = -2.*Temp*S_Ent
                 lumo = molecule.nocc.unsqueeze(0).T
@@ -245,7 +262,8 @@ class EnergyXL(torch.nn.Module):
                     e_gap = torch.zeros(molecule.species.shape[0],1)
                     e = torch.zeros(molecule.species.shape[0], molecule.molecule.nocc)
                 else:
-                    e, D = sym_eig_trunc(F,molecule.nHeavy, molecule.nHydro, molecule.nocc)[0:2]
+                    e, D, v = sym_eig_trunc(F,molecule.nHeavy, molecule.nHydro, molecule.nocc)#[0:2]
+                    molecule.eig_vec = v
                     lumo = molecule.nocc.unsqueeze(0).T
                     e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
                     #print('adfdfa',F, '\nfg', sym_eig_trunc(F,nHeavy, nHydro, nocc))
@@ -260,8 +278,6 @@ class EnergyXL(torch.nn.Module):
                 t1 = time.time()
                 molecule.const.timing["D*"].append(t1-t0)
 
-            
-            
 
         #nuclear energy
         alpha = molecule.parameters['alpha']
@@ -308,6 +324,31 @@ class EnergyXL(torch.nn.Module):
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy_xl(D,P,F,Hcore)
+
+        if self.excited_states is not None:
+            if molecule.active_state<1:
+                raise Exception("You have asked for excited states XL-MD, but you haven't specified the active state")
+            cis_tol = self.excited_states['tolerance']
+            method = self.excited_states['method'].lower()
+            with torch.no_grad():
+                if molecule.const.do_timing: t0 = time.time()
+                if method == 'cis':
+                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                elif method == 'rpa':
+                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                else:
+                    raise Exception("Excited state method has to be CIS or RPA")
+
+                molecule.cis_amplitudes = exc_amps
+
+                if molecule.const.do_timing:
+                    if torch.cuda.is_available(): torch.cuda.synchronize()
+                    t1 = time.time()
+                    molecule.const.timing["CIS/RPA"].append(t1 - t0)
+
+                Eelec += excitation_energies[:,molecule.active_state-1]
+                molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=False)
+
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
@@ -336,11 +377,11 @@ class ForceXL(torch.nn.Module):
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, molecule, P, learned_parameters=dict(), xl_bomd_params=dict(), *args, **kwargs):
-
+    def forward(self, molecule, P, cis_amp=None, learned_parameters=dict(), xl_bomd_params=dict(), *args, **kwargs):
+        
         molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, EEnt, Enuc, Eiso, EnucAB, D, dP2dt2, Error, e_gap, e, Fe_occ = \
-            self.energy(molecule, P, learned_parameters, xl_bomd_params=xl_bomd_params, all_terms=True, *args, **kwargs)
+            self.energy(molecule, P, cis_amp, learned_parameters, xl_bomd_params=xl_bomd_params, all_terms=True, *args, **kwargs)
         L = Hf.sum()
         if molecule.const.do_timing:
             t0 = time.time()
@@ -358,4 +399,7 @@ class ForceXL(torch.nn.Module):
             molecule.coordinates.grad.zero_()
         #return force, Etot, D.detach()
         del EnucAB, L
+        if molecule.active_state > 0:
+            force += -molecule.analytical_gradient
+
         return force.detach(), D.detach(), Hf, Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, EEnt, dP2dt2, Error, Fe_occ

@@ -95,9 +95,9 @@ class Molecule(torch.nn.Module):
         self.Krylov_Error = None
 
         self.analytical_gradient = None
-        self.cis_amplitudes = None
         self.active_state = 0
-        self.active_cis_amplitude = 0
+        self.cis_amplitudes = None
+        self.old_mos = None
         
                 
         def get_coordinates(self):

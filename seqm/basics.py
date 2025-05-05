@@ -352,8 +352,8 @@ class Hamiltonian(torch.nn.Module):
             excited_options['tolerance'] = excited_options.get('tolerance',1e-6)
             excited_options['method'] = excited_options.get('method','cis').lower()
             cis_tol = excited_options['tolerance']
-            if seqm_parameters['scf_eps'] > 1e-2*cis_tol:
-                seqm_parameters['scf_eps'] = 1e-2*cis_tol
+            if seqm_parameters['scf_eps'] > 1e-1*cis_tol:
+                seqm_parameters['scf_eps'] = 1e-1*cis_tol
 
         #put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         #be used to restart jobs
@@ -435,7 +435,7 @@ class Energy(torch.nn.Module):
         self.eig = seqm_parameters.get('eig', False)
         self.excited_states = seqm_parameters.get('excited_states')
 
-    def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
+    def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
         """
         get the energy terms
         """
@@ -572,11 +572,13 @@ class Energy(torch.nn.Module):
             with torch.no_grad():
                 if molecule.const.do_timing: t0 = time.time()
                 if method == 'cis':
-                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol)
+                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                 elif method == 'rpa':
-                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol)
+                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                 else:
                     raise Exception("Excited state method has to be CIS or RPA")
+
+                molecule.cis_amplitudes = exc_amps
 
                 if molecule.const.do_timing:
                     if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -592,9 +594,10 @@ class Energy(torch.nn.Module):
                     Eelec += excitation_energies[:,molecule.active_state-1]
 
                     if do_analytical_gradient[0]:
-                        current_amplitude = exc_amps[...,molecule.active_state-1,:]
-                        molecule.analytical_gradient = rcis_grad_batch(molecule,current_amplitude,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                        # current_amplitude = exc_amps[...,molecule.active_state-1,:]
+                        molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
 
+        molecule.old_mos = molecule.eig_vec.clone()
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
@@ -625,7 +628,7 @@ class Force(torch.nn.Module):
         self.eig = seqm_parameters.get('eig', False)
         self.seqm_parameters = seqm_parameters
 
-    def forward(self, molecule, learned_parameters=dict(), P0=None, do_force=True, *args, **kwargs):
+    def forward(self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs):
         
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
         # For excited states we dont have backprop forces
@@ -637,7 +640,7 @@ class Force(torch.nn.Module):
         if not do_analytical_gradient[0] and do_force:
             molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = \
-            self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
+            self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, cis_amp=cis_amp, *args, **kwargs)
         
         if self.eig:
             e = e.detach()
