@@ -22,6 +22,8 @@ jobs:
         run: |
           pip install -U pip
           pip install sphinx sphinx-copybutton
+          pip install sphinx sphinx-copybutton pydata-sphinx-theme
+
 
       - name: Build docs
         run: |
