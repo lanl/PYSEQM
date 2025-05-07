@@ -1,0 +1,16 @@
+# Ignore Python bytecode and cache
+__pycache__/
+*.py[cod]
+*.so
+
+# Ignore virtual environments
+.venv/
+env/
+venv/
+
+# Ignore Sphinx build directory
+docs/build/
+
+# Ignore OS junk
+.DS_Store
+Thumbs.db
