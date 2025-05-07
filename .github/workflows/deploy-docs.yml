@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -U pip
-          pip install sphinx
+          pip install sphinx sphinx-copybutton
 
       - name: Build docs
         run: |
@@ -33,4 +33,3 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: docs/build/html
-
