@@ -21,9 +21,5 @@ def Spherical_Pot_Force(molecule, radius, k=1, center=[0.0,0.0,0.0]):
     force = -k*dxdydz
     
     E = 0.5*k*torch.sum(torch.square(dxdydz), dim=(1,2))
-
-    #print(dxdydz)
-    #print(E)
-    
     
     return E, force

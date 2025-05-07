@@ -37,15 +37,15 @@ class Geometry_Optimization_SD(torch.nn.Module):
         self.max_evl = max_evl
         self.force = Force(seqm_parameters)
 
-    def onestep(self, molecule, learned_parameters=dict(), *args, **kwargs):
+    def onestep(self, molecule, learned_parameters=dict()):
 
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF', *args, **kwargs)
+        self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop='SCF')
         force = molecule.force
         with torch.no_grad():
             molecule.coordinates.add_(self.alpha*force)
         return force, molecule.Hf
 
-    def run(self, molecule, learned_parameters=dict(), log=True, *args, **kwargs):
+    def run(self, molecule, learned_parameters=dict(), log=True):
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
         nmol = molecule.coordinates.shape[0]
@@ -53,7 +53,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         print("Step,  Max_Force,      Etot(eV),     dE(eV)")
         for i in range(self.max_evl):
-            force, Lnew = self.onestep(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+            force, Lnew = self.onestep(molecule, learned_parameters=learned_parameters)
             if torch.is_tensor(molecule.coordinates.grad):
                 with torch.no_grad():
                     molecule.coordinates.grad.zero_()
@@ -455,9 +455,9 @@ class XL_BOMD(Molecular_Dynamics_Basic):
     def initialize(self, molecule, learned_parameters=dict(), *args, **kwargs):
         #t=0, just use normal way
 
-        if not torch.is_tensor(molecule.dm):
+        if not torch.is_tensor(molecule.force):
             print('Doing initialization')
-            self.esdriver(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+            self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, *args, **kwargs)
             if self.damp:
                 Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
                 Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
@@ -638,10 +638,10 @@ class KSA_XL_BOMD(XL_BOMD):
             molecule.force += Ff+Fr
             molecule.force[molecule.species==0,:] = 0.0
         
-        spherical_pot = False ########################################################################################==========
+        spherical_pot = True ########################################################################################==========
         if spherical_pot:
             with torch.no_grad():
-                spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 5.9, k=1.1)
+                spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 14.85, k=0.1)
                 molecule.Hf += spherical_pot_E
                 molecule.force = molecule.force + spherical_pot_force
 
