@@ -23,6 +23,7 @@ jobs:
           pip install -U pip
           pip install sphinx sphinx-copybutton
           pip install sphinx sphinx-copybutton pydata-sphinx-theme
+          pip install -r docs/requirements.txt
 
 
       - name: Build docs
