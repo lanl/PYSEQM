@@ -39,6 +39,7 @@ model.pt
 1. MNDO
 2. AM1
 3. PM3
+4. PM6
 
 <hr/>
 
