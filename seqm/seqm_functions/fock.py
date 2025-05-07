@@ -32,7 +32,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2
     else:
         P = P0.reshape((nmol,molsize,4,molsize,4)) \
               .transpose(2,3).reshape(nmol*molsize*molsize,4,4)
-
+        
     #at this moment,  P has the same shape as M, as it is more convenient
     # to use here
     # while for diagonalization, may have to reshape
