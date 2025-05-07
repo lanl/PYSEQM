@@ -48,7 +48,7 @@ from .tools import attach_profile_range
 
 
 # number of iterations in canon_dm_prt.py (m)
-CANON_DM_PRT_ITER = 8
+CANON_DM_PRT_ITER = 10
 
 
 class EnergyXL(torch.nn.Module):
@@ -376,6 +376,7 @@ class ForceXL(torch.nn.Module):
         super().__init__()
         self.energy = EnergyXL(seqm_parameters)
         self.seqm_parameters = seqm_parameters
+        self.create_graph = seqm_parameters.get('2nd_grad', False)
 
     def forward(self, molecule, P, cis_amp=None, learned_parameters=dict(), xl_bomd_params=dict(), *args, **kwargs):
         
@@ -385,19 +386,18 @@ class ForceXL(torch.nn.Module):
         L = Hf.sum()
         if molecule.const.do_timing:
             t0 = time.time()
-        gv = [molecule.coordinates]
-        gradients  = grad(L, gv)
-        molecule.coordinates.grad = gradients[0]
-        #"""
+        L.backward(create_graph=self.create_graph)
         if molecule.const.do_timing:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["Force"].append(t1-t0)
-        with torch.no_grad():
+        if self.create_graph:
             force = -molecule.coordinates.grad.clone()
+            with torch.no_grad(): molecule.coordinates.grad.zero_()
+        else:
+            force = -molecule.coordinates.grad.detach()
             molecule.coordinates.grad.zero_()
-        #return force, Etot, D.detach()
         del EnucAB, L
         if molecule.active_state > 0:
             force += -molecule.analytical_gradient

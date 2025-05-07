@@ -1,6 +1,7 @@
 build/
 dist/
 Tests/
+examples/hipnn_train_reactive/combined_datasets/15_cut/
 Tests_A100/
 .ipynb_checkpoints/
 seqm/seqm_functions/__pycache__/

@@ -46,7 +46,6 @@ def Fermi_Q(H0,T, Nocc, nHeavy, nHydro, kB, scf_backward, OccErrThrs = 1e-9):
         if True in OccErr_mask:
             mu0[indices_of_high_errors] += ((Nocc-Occ)/dOcc).unsqueeze(0).T[indices_of_high_errors]
 
-    print('mu:', mu0)
     X = QQ@torch.diag_embed(Fe_vec)
     D0 = X@QQ.transpose(1,2)
     D0 = 2*unpack(D0, nHeavy, nHydro, H0.shape[-1]) # bring to block form
@@ -58,5 +57,6 @@ def Fermi_Q(H0,T, Nocc, nHeavy, nHydro, kB, scf_backward, OccErrThrs = 1e-9):
     # $$$
     for i,j in zip(range(0,len(S)), mask_S):
         S[i] = S_temp[i, j].sum()
+    print('mu:', mu0, 'S_elec:', S_temp)
 
     return D0, S, QQ, e, Fe_vec, mu0, Occ_mask
