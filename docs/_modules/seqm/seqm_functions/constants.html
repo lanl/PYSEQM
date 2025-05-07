@@ -1,0 +1,640 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>seqm.seqm_functions.constants &#8212; PYSEQM 1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=8f2a1f02" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../../../_static/documentation_options.js?v=29a6c3e3"></script>
+    <script src="../../../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/seqm/seqm_functions/constants';</script>
+    <link rel="author" title="About these documents" href="../../../about.html" />
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../../../_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1 documentation - Home"/>
+    <img src="../../../_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1 documentation - Home"/>
+  
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../../quick_start.html">
+    Quick Start
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../../about.html">
+    About
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../../user_guide.html">
+    User Guide
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../../quick_start.html">
+    Quick Start
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../../about.html">
+    About
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../../user_guide.html">
+    User Guide
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../../../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="../../index.html" class="nav-link">Module code</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">seqm.seqm_functions.constants</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for seqm.seqm_functions.constants</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="n">ev</span> <span class="o">=</span> <span class="mf">27.21</span> <span class="c1">#used in mopac7</span>
+<span class="c1">#1 hatree = 27.211386 eV</span>
+<span class="c1">#ev =  27.211386</span>
+
+<span class="c1"># a0=0.529167  #used in mopac7</span>
+<span class="n">a0</span> <span class="o">=</span> <span class="mf">0.529167</span> <span class="c1"># used in amber and nexmd</span>
+<span class="c1">#a0=0.5291772109</span>
+<span class="n">ev_kcalpmol</span> <span class="o">=</span> <span class="mf">23.061</span>  <span class="c1"># 1 eV = 23.061 kcal/mol</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">in mopac the cutoff for overlap is 10 Angstrom</span>
+<span class="sd">Atomic units is used here</span>
+<span class="sd">set cutoff = 20.0 Angstrom and 20/0.529167 = 37.8</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="n">overlap_cutoff</span> <span class="o">=</span> <span class="mf">40.0</span>
+
+<div class="viewcode-block" id="Constants">
+<a class="viewcode-back" href="../../../seqm.seqm_functions.html#seqm.seqm_functions.constants.Constants">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Constants</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Constants used in seqm</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">length_conversion_factor</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span><span class="o">/</span><span class="n">a0</span><span class="p">),</span> <span class="n">energy_conversion_factor</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Constructor</span>
+<span class="sd">        length_conversion_factor : atomic unit is used for length inside seqm</span>
+<span class="sd">            convert the length by  oldlength*length_conversion_factor  to atomic units</span>
+<span class="sd">            default value assume Angstrom used outside, and times 1.0/bohr_radius</span>
+<span class="sd">        energy_conversion_factor : eV usedfor energy inside sqem</span>
+<span class="sd">            convert by multiply energy_conversion_factor</span>
+<span class="sd">            default value assumes eV used outside</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+
+        <span class="c1"># atomic unit for length is used in seqm</span>
+        <span class="c1"># 1.8897261246364832 = 1.0/0.5291772109  1.0/bohr radius</span>
+        <span class="c1"># factor convert length to atomic unit (default is from Angstrom to atomic unit)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">length_conversion_factor</span> <span class="o">=</span> <span class="n">length_conversion_factor</span>
+        <span class="c1">#self.a0 = 0.529167  #used in mopac7</span>
+        <span class="c1">#self.a0=0.5291772109</span>
+
+        <span class="c1"># factor converting energy to eV (default is eV)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">energy_conversion_factor</span> <span class="o">=</span> <span class="n">energy_conversion_factor</span>
+        <span class="c1">#self.ev = 27.21 #used in mopac7</span>
+        <span class="c1">#1 hatree = 27.211386 eV</span>
+        <span class="c1">#self.ev =  27.211386</span>
+        <span class="c1">#</span>
+        <span class="c1"># valence shell charge for each atom type</span>
+        <span class="c1">#tore[1]=1, Hydrogen has 1.0 charge on valence shell</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">label</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;0&#39;</span><span class="p">,</span>
+               <span class="s1">&#39;H&#39;</span><span class="p">,</span>                                                                                            <span class="s1">&#39;He&#39;</span><span class="p">,</span>
+               <span class="s1">&#39;Li&#39;</span><span class="p">,</span><span class="s1">&#39;Be&#39;</span><span class="p">,</span>                                                            <span class="s1">&#39;B&#39;</span><span class="p">,</span> <span class="s1">&#39;C&#39;</span><span class="p">,</span>  <span class="s1">&#39;N&#39;</span><span class="p">,</span> <span class="s1">&#39;O&#39;</span><span class="p">,</span> <span class="s1">&#39;F&#39;</span><span class="p">,</span> <span class="s1">&#39;Ne&#39;</span><span class="p">,</span>
+               <span class="s1">&#39;Na&#39;</span><span class="p">,</span><span class="s1">&#39;Mg&#39;</span><span class="p">,</span>                                                            <span class="s1">&#39;Al&#39;</span><span class="p">,</span><span class="s1">&#39;Si&#39;</span><span class="p">,</span><span class="s1">&#39; P&#39;</span><span class="p">,</span><span class="s1">&#39; S&#39;</span><span class="p">,</span> <span class="s1">&#39;Cl&#39;</span><span class="p">,</span><span class="s1">&#39;Ar&#39;</span><span class="p">,</span>
+               <span class="s1">&#39;K&#39;</span><span class="p">,</span> <span class="s1">&#39;Ca&#39;</span><span class="p">,</span><span class="s1">&#39;Sc&#39;</span><span class="p">,</span> <span class="s1">&#39;Ti&#39;</span><span class="p">,</span> <span class="s1">&#39;V &#39;</span><span class="p">,</span> <span class="s1">&#39;Cr&#39;</span><span class="p">,</span> <span class="s1">&#39;Mn&#39;</span><span class="p">,</span> <span class="s1">&#39;Fe&#39;</span><span class="p">,</span> <span class="s1">&#39;Co&#39;</span><span class="p">,</span> <span class="s1">&#39;Ni&#39;</span><span class="p">,</span> <span class="s1">&#39;Cu&#39;</span><span class="p">,</span> <span class="s1">&#39;Zn&#39;</span><span class="p">,</span> <span class="s1">&#39;Ga&#39;</span><span class="p">,</span><span class="s1">&#39;Ge&#39;</span><span class="p">,</span><span class="s1">&#39; As&#39;</span><span class="p">,</span><span class="s1">&#39;Se&#39;</span><span class="p">,</span><span class="s1">&#39;Br&#39;</span><span class="p">,</span><span class="s1">&#39;Kr&#39;</span><span class="p">,</span>
+               <span class="s1">&#39;Rb&#39;</span><span class="p">,</span><span class="s1">&#39;Sr&#39;</span><span class="p">,</span><span class="s1">&#39;Y &#39;</span><span class="p">,</span> <span class="s1">&#39;Zr&#39;</span><span class="p">,</span> <span class="s1">&#39;Nb&#39;</span><span class="p">,</span> <span class="s1">&#39;Mo&#39;</span><span class="p">,</span> <span class="s1">&#39;Tc&#39;</span><span class="p">,</span> <span class="s1">&#39;Ru&#39;</span><span class="p">,</span> <span class="s1">&#39;Rh&#39;</span><span class="p">,</span> <span class="s1">&#39;Pd&#39;</span><span class="p">,</span> <span class="s1">&#39;Ag&#39;</span><span class="p">,</span> <span class="s1">&#39;Cd&#39;</span><span class="p">,</span> <span class="s1">&#39;In&#39;</span><span class="p">,</span><span class="s1">&#39;Sn&#39;</span><span class="p">,</span><span class="s1">&#39; Sb&#39;</span><span class="p">,</span><span class="s1">&#39;Te&#39;</span><span class="p">,</span><span class="s1">&#39;I&#39;</span><span class="p">,</span><span class="s1">&#39;Kr&#39;</span><span class="p">,</span>
+               <span class="s1">&#39;Cs&#39;</span><span class="p">,</span><span class="s1">&#39;Ba&#39;</span><span class="p">,</span><span class="s1">&#39;La&#39;</span><span class="p">,</span> <span class="s1">&#39;Hf&#39;</span><span class="p">,</span> <span class="s1">&#39;Ta&#39;</span><span class="p">,</span> <span class="s1">&#39;W &#39;</span><span class="p">,</span> <span class="s1">&#39;Re&#39;</span><span class="p">,</span> <span class="s1">&#39;Os&#39;</span><span class="p">,</span> <span class="s1">&#39;Ir&#39;</span><span class="p">,</span> <span class="s1">&#39;Pt&#39;</span><span class="p">,</span> <span class="s1">&#39;Au&#39;</span><span class="p">,</span> <span class="s1">&#39;Hg&#39;</span><span class="p">,</span> <span class="s1">&#39;Tl&#39;</span><span class="p">,</span><span class="s1">&#39;Pb&#39;</span><span class="p">,</span><span class="s1">&#39; Bi&#39;</span><span class="p">,</span><span class="s1">&#39;Po&#39;</span><span class="p">,</span><span class="s1">&#39;At&#39;</span><span class="p">,</span><span class="s1">&#39;Rn&#39;</span><span class="p">]</span>
+
+        <span class="n">atomic_num</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span>                                                                                                   <span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span>                                                                  <span class="mf">5.0</span><span class="p">,</span>  <span class="mf">6.0</span><span class="p">,</span>  <span class="mf">7.0</span><span class="p">,</span>  <span class="mf">8.0</span><span class="p">,</span>  <span class="mf">9.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">11.0</span><span class="p">,</span><span class="mf">12.0</span><span class="p">,</span>                                                               <span class="mf">13.0</span><span class="p">,</span> <span class="mf">14.0</span><span class="p">,</span> <span class="mf">15.0</span><span class="p">,</span> <span class="mf">16.0</span><span class="p">,</span> <span class="mf">17.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">19.0</span><span class="p">,</span><span class="mf">20.0</span><span class="p">,</span>   <span class="mf">21.0</span><span class="p">,</span> <span class="mf">22.0</span><span class="p">,</span> <span class="mf">23.0</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">,</span> <span class="mf">25.0</span><span class="p">,</span> <span class="mf">26.0</span><span class="p">,</span> <span class="mf">27.0</span><span class="p">,</span> <span class="mf">28.0</span><span class="p">,</span> <span class="mf">29.0</span><span class="p">,</span> <span class="mf">30.0</span><span class="p">,</span> <span class="mf">31.0</span><span class="p">,</span> <span class="mf">32.0</span><span class="p">,</span> <span class="mf">33.0</span><span class="p">,</span> <span class="mf">34.0</span><span class="p">,</span> <span class="mf">35.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">,</span> <span class="mf">9.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">11.0</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">,</span> <span class="mf">9.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">11.0</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">]</span> <span class="p">)</span>
+        
+        
+        <span class="n">tore</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span>                                                                             <span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span>                                                     <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span>                                                     <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">,</span> <span class="mf">9.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">11.0</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">,</span> <span class="mf">9.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">11.0</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">,</span> <span class="mf">9.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">11.0</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">7.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">]</span> <span class="p">)</span>
+
+
+        <span class="c1">#</span>
+        <span class="c1">#principal quantum number for valence shell</span>
+        <span class="c1"># qn[1] = 1, principal quantum number for the valence shell of Hydrogen is 1</span>
+        <span class="n">qn</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">1.0</span><span class="p">,</span>                                                                          <span class="mf">1.0</span><span class="p">,</span>
+               <span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span>                                                  <span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span>
+               <span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span>                                                  <span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span>
+               <span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span>
+               <span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span>
+               <span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">])</span>
+
+
+
+        <span class="n">qnd</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">0.0</span><span class="p">,</span>                                                                          <span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                                  <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                                  <span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+               <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+
+        <span class="c1">#</span>
+        <span class="n">qn_int</span> <span class="o">=</span> <span class="n">qn</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">qnD_int</span> <span class="o">=</span> <span class="n">qnd</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="c1">#number of s electrons for each element</span>
+
+        <span class="n">iso</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">34.000</span><span class="p">,</span><span class="o">-</span><span class="mf">63.460</span><span class="p">,</span><span class="o">-</span><span class="mf">100.614</span><span class="p">,</span><span class="o">-</span><span class="mf">185.725</span><span class="p">,</span><span class="o">-</span><span class="mf">195.802</span><span class="p">,</span><span class="o">-</span><span class="mf">426.835</span><span class="p">,</span><span class="o">-</span><span class="mf">167.657</span><span class="p">,</span><span class="o">-</span><span class="mf">485.166</span><span class="p">,</span><span class="o">-</span><span class="mf">656.595</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+
+
+        <span class="n">ussc</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">1.0</span><span class="p">,</span>                                                                <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span>                                        <span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span>                                        <span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="c1">#number of p electrons for each element</span>
+        <span class="n">uppc</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">3.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="c1">#</span>
+        <span class="n">gssc</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span>                                        <span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span>                                        <span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">1.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="c1">#</span>
+        <span class="n">gspc</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                 <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">2.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">8.0</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">2.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">8.0</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">8.0</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">8.0</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">2.0</span><span class="p">,</span><span class="mf">4.0</span><span class="p">,</span><span class="mf">6.0</span><span class="p">,</span><span class="mf">8.0</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="n">hspc</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                     <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span><span class="o">-</span><span class="mf">3.0</span><span class="p">,</span><span class="o">-</span><span class="mf">4.0</span><span class="p">,</span><span class="o">-</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span><span class="o">-</span><span class="mf">3.0</span><span class="p">,</span><span class="o">-</span><span class="mf">4.0</span><span class="p">,</span><span class="o">-</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span><span class="o">-</span><span class="mf">3.0</span><span class="p">,</span><span class="o">-</span><span class="mf">4.0</span><span class="p">,</span><span class="o">-</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span><span class="o">-</span><span class="mf">3.0</span><span class="p">,</span><span class="o">-</span><span class="mf">4.0</span><span class="p">,</span><span class="o">-</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span><span class="o">-</span><span class="mf">3.0</span><span class="p">,</span><span class="o">-</span><span class="mf">4.0</span><span class="p">,</span><span class="o">-</span><span class="mf">5.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="n">gp2c</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                 <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.5</span><span class="p">,</span><span class="mf">4.5</span><span class="p">,</span><span class="mf">6.5</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">0.0</span><span class="p">,</span><span class="mf">1.5</span><span class="p">,</span><span class="mf">4.5</span><span class="p">,</span><span class="mf">6.5</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.5</span><span class="p">,</span><span class="mf">4.5</span><span class="p">,</span><span class="mf">6.5</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.5</span><span class="p">,</span><span class="mf">4.5</span><span class="p">,</span><span class="mf">6.5</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">1.5</span><span class="p">,</span><span class="mf">4.5</span><span class="p">,</span><span class="mf">6.5</span><span class="p">,</span><span class="mf">10.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="n">gppc</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span>                                                                   <span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="o">-</span><span class="mf">1.5</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>                                        <span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="o">-</span><span class="mf">1.5</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="o">-</span><span class="mf">1.5</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="o">-</span><span class="mf">1.5</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span>
+                              <span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="o">-</span><span class="mf">1.5</span><span class="p">,</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">])</span>
+
+        <span class="c1">#</span>
+        <span class="c1">#heat of formation for each individual atom</span>
+        <span class="c1">#experimental value, taken from block.f</span>
+        <span class="c1">#unit kcal/mol</span>
+        <span class="n">eheat</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span> <span class="mf">0.000</span><span class="p">,</span>
+                               <span class="mf">52.102</span><span class="p">,</span>                                                                                                                                     <span class="mf">0.0</span><span class="p">,</span>
+                               <span class="mf">38.410</span><span class="p">,</span> <span class="mf">76.960</span><span class="p">,</span>                                                                                  <span class="mf">135.700</span><span class="p">,</span> <span class="mf">170.890</span><span class="p">,</span> <span class="mf">113.000</span><span class="p">,</span> <span class="mf">59.559</span><span class="p">,</span> <span class="mf">18.890</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>
+                               <span class="mf">25.850</span><span class="p">,</span> <span class="mf">35.000</span><span class="p">,</span>                                                                                   <span class="mf">79.490</span><span class="p">,</span> <span class="mf">108.390</span><span class="p">,</span>  <span class="mf">75.570</span><span class="p">,</span> <span class="mf">66.400</span><span class="p">,</span> <span class="mf">28.990</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>
+                               <span class="mf">21.420</span><span class="p">,</span> <span class="mf">42.600</span><span class="p">,</span> <span class="mf">90.300</span><span class="p">,</span> <span class="mf">112.300</span><span class="p">,</span> <span class="mf">122.300</span><span class="p">,</span> <span class="mf">95.000</span><span class="p">,</span> <span class="mf">67.700</span><span class="p">,</span> <span class="mf">99.300</span><span class="p">,</span> <span class="mf">102.400</span><span class="p">,</span> <span class="mf">102.800</span><span class="p">,</span> <span class="mf">80.700</span><span class="p">,</span> <span class="mf">31.170</span><span class="p">,</span> <span class="mf">65.400</span><span class="p">,</span> <span class="mf">89.500</span><span class="p">,</span> <span class="mf">72.300</span><span class="p">,</span> <span class="mf">54.300</span><span class="p">,</span> <span class="mf">26.740</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">,</span>
+                               <span class="mf">19.600</span><span class="p">,</span> <span class="mf">39.100</span><span class="p">,</span> <span class="mf">101.500</span><span class="p">,</span> <span class="mf">145.500</span><span class="p">,</span> <span class="mf">172.400</span><span class="p">,</span> <span class="mf">157.300</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">,</span> <span class="mf">155.500</span><span class="p">,</span> <span class="mf">133.000</span><span class="p">,</span> <span class="mf">90.000</span><span class="p">,</span> <span class="mf">68.100</span><span class="p">,</span> <span class="mf">26.720</span><span class="p">,</span> <span class="mf">58.000</span><span class="p">,</span> <span class="mf">72.200</span><span class="p">,</span> <span class="mf">63.200</span><span class="p">,</span> <span class="mf">47.000</span><span class="p">,</span> <span class="mf">25.517</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">,</span>
+                               <span class="mf">18.700</span><span class="p">,</span> <span class="mf">42.500</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">,</span> <span class="mf">148.000</span><span class="p">,</span> <span class="mf">186.900</span><span class="p">,</span> <span class="mf">203.100</span><span class="p">,</span> <span class="mf">185.000</span><span class="p">,</span> <span class="mf">188.000</span><span class="p">,</span> <span class="mf">160.000</span><span class="p">,</span> <span class="mf">135.200</span><span class="p">,</span> <span class="mf">88.000</span><span class="p">,</span> <span class="mf">14.690</span><span class="p">,</span> <span class="mf">43.550</span><span class="p">,</span> <span class="mf">46.620</span><span class="p">,</span> <span class="mf">50.100</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">,</span> <span class="mf">0.000</span><span class="p">])</span>
+        <span class="c1">#</span>
+        <span class="c1">#mass of atom</span>
+        <span class="n">mass</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span> <span class="mf">0.00000</span><span class="p">,</span>
+                               <span class="mf">1.00790</span><span class="p">,</span>                                                                                                                                                                                   <span class="mf">4.00260</span><span class="p">,</span>
+                               <span class="mf">6.94000</span><span class="p">,</span>   <span class="mf">9.01218</span><span class="p">,</span>                                                                                                                <span class="mf">10.81000</span><span class="p">,</span>  <span class="mf">12.01100</span><span class="p">,</span>  <span class="mf">14.00670</span><span class="p">,</span>  <span class="mf">15.99940</span><span class="p">,</span>  <span class="mf">18.99840</span><span class="p">,</span>  <span class="mf">20.17900</span><span class="p">,</span>
+                              <span class="mf">22.98977</span><span class="p">,</span>  <span class="mf">24.30500</span><span class="p">,</span>                                                                                                                <span class="mf">26.98154</span><span class="p">,</span>  <span class="mf">28.08550</span><span class="p">,</span>  <span class="mf">30.97376</span><span class="p">,</span>  <span class="mf">32.06000</span><span class="p">,</span>  <span class="mf">35.45300</span><span class="p">,</span>  <span class="mf">39.94800</span><span class="p">,</span>
+                              <span class="mf">39.09800</span><span class="p">,</span>  <span class="mf">40.07800</span><span class="p">,</span>  <span class="mf">44.95600</span><span class="p">,</span>  <span class="mf">47.86700</span><span class="p">,</span>  <span class="mf">50.94200</span><span class="p">,</span>  <span class="mf">51.99600</span><span class="p">,</span>  <span class="mf">54.93800</span><span class="p">,</span>  <span class="mf">55.84500</span><span class="p">,</span>  <span class="mf">58.93300</span><span class="p">,</span>  <span class="mf">58.69300</span><span class="p">,</span>  <span class="mf">63.54600</span><span class="p">,</span>  <span class="mf">65.38000</span><span class="p">,</span>  <span class="mf">69.72300</span><span class="p">,</span>  <span class="mf">72.63000</span><span class="p">,</span>  <span class="mf">74.92200</span><span class="p">,</span>  <span class="mf">78.97100</span><span class="p">,</span>  <span class="mf">79.90400</span><span class="p">,</span>  <span class="mf">83.79800</span><span class="p">,</span>
+                              <span class="mf">85.46800</span><span class="p">,</span>  <span class="mf">87.62000</span><span class="p">,</span>  <span class="mf">88.90600</span><span class="p">,</span>  <span class="mf">91.22400</span><span class="p">,</span>  <span class="mf">92.90600</span><span class="p">,</span>  <span class="mf">95.95000</span><span class="p">,</span>  <span class="mf">97.00000</span><span class="p">,</span> <span class="mf">101.07000</span><span class="p">,</span> <span class="mf">102.91000</span><span class="p">,</span> <span class="mf">106.42000</span><span class="p">,</span> <span class="mf">107.87000</span><span class="p">,</span> <span class="mf">112.41000</span><span class="p">,</span> <span class="mf">114.82000</span><span class="p">,</span> <span class="mf">118.71000</span><span class="p">,</span> <span class="mf">121.76000</span><span class="p">,</span> <span class="mf">127.60000</span><span class="p">,</span> <span class="mf">126.90000</span><span class="p">,</span> <span class="mf">131.29000</span><span class="p">,</span>
+                             <span class="mf">132.91000</span><span class="p">,</span> <span class="mf">137.33000</span><span class="p">,</span> <span class="mf">174.97000</span><span class="p">,</span> <span class="mf">178.49000</span><span class="p">,</span> <span class="mf">180.95000</span><span class="p">,</span> <span class="mf">183.84000</span><span class="p">,</span> <span class="mf">186.21000</span><span class="p">,</span> <span class="mf">190.23000</span><span class="p">,</span> <span class="mf">192.22000</span><span class="p">,</span> <span class="mf">195.08000</span><span class="p">,</span> <span class="mf">196.97000</span><span class="p">,</span> <span class="mf">200.59000</span><span class="p">,</span> <span class="mf">204.38000</span><span class="p">,</span> <span class="mf">207.20000</span><span class="p">,</span> <span class="mf">208.98000</span><span class="p">,</span> <span class="mf">209.00000</span><span class="p">,</span> <span class="mf">210.00000</span><span class="p">,</span> <span class="mf">222.00000</span> <span class="p">])</span>
+
+
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">atomic_num</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">atomic_num</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tore</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">tore</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">iso</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">iso</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">qn</span>     <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">qn</span><span class="p">,</span>     <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">qn_int</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">qn_int</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">qnD_int</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">qnD_int</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ussc</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">ussc</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uppc</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">uppc</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gssc</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">gssc</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gspc</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">gspc</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hspc</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">hspc</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gp2c</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">gp2c</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gppc</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">gppc</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eheat</span>  <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">eheat</span><span class="o">/</span><span class="n">ev_kcalpmol</span><span class="p">,</span>  <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mass</span>   <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">mass</span><span class="p">,</span>   <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">do_timing</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">do_timing</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">timing</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;Hcore + STO Integrals&quot;</span> <span class="p">:</span> <span class="p">[],</span>
+                           <span class="s2">&quot;SCF&quot;</span>                   <span class="p">:</span> <span class="p">[],</span>
+                           <span class="s2">&quot;Force&quot;</span>                 <span class="p">:</span> <span class="p">[],</span>
+                           <span class="s2">&quot;MD&quot;</span>                    <span class="p">:</span> <span class="p">[],</span>
+                           <span class="s2">&quot;D*&quot;</span>                    <span class="p">:</span> <span class="p">[]</span>
+                          <span class="p">}</span>
+
+
+<div class="viewcode-block" id="Constants.forward">
+<a class="viewcode-back" href="../../../seqm.seqm_functions.html#seqm.seqm_functions.constants.Constants.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        return self.length_conversion_factor, \</span>
+<span class="sd">               self.energy_conversion_factor, \</span>
+<span class="sd">               self.tore, \</span>
+<span class="sd">               self.qn, \</span>
+<span class="sd">               self.qn_int</span>
+<span class="sd">        &quot;&quot;&quot;</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+              
+              
+              
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2025, Los Alamos National Laboratory.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.4.7.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.16.1.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
