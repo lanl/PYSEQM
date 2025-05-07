@@ -378,4 +378,6 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
                  .reshape(2, nmol, 4*molsize, 4*molsize).transpose(0,1)
         
     F0_.add_(F0_.triu(1).transpose(2,3))
+
     return F0_
+

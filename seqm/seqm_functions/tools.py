@@ -14,7 +14,7 @@ def get_hcore(molecule):
     
     nmol = nHeavy.shape[0]
     
-    M, w,rho0xi,rho0xj = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, \
+    M, w,rho0xi,rho0xj, _, _ = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, \
                      zetas,zetap, zetad, zs, zp, zd,  uss, upp , udd, gss, gpp, gp2, hsp,F0SD, G2SD, rho_core, alpha, chi, themethod,  beta, Kbeta=Kbeta)
     
 

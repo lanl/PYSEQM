@@ -5,7 +5,7 @@ from .cal_par import *
 from .constants import ev
 import sys
 import numpy
-import scipy.special
+# import scipy.special
 from .parameters import  PWCCT
 import math
 

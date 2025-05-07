@@ -153,7 +153,10 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
             print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             
-        if not notconverged.any(): break
+        if not notconverged.any(): 
+            print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            break
     return P, notconverged
 
 
@@ -473,6 +476,8 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
+            print("scf direct+adaptive steps  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
 
 def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
@@ -1501,7 +1506,7 @@ def scf_loop(molecule, \
     nmol = molecule.nHeavy.shape[0]
     tore = molecule.const.tore
     if molecule.const.do_timing: t0 = time.time()
-    M, w,rho0xi,rho0xj = hcore(molecule)
+    M, w,rho0xi,rho0xj, riXH, ri = hcore(molecule)
 
     if molecule.const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -1668,6 +1673,6 @@ def scf_loop(molecule, \
         else:
             charge = None
         
-        return F, e,    Pconv, Hcore, w, charge, rho0xi, rho0xj, notconverged, v
+        return F, e,    Pconv, Hcore, w, charge, rho0xi, rho0xj, riXH, ri, notconverged, v
     else:
-        return F, None, Pconv, Hcore, w, None,   rho0xi, rho0xj, notconverged, None
+        return F, None, Pconv, Hcore, w, None,   rho0xi, rho0xj, riXH, ri, notconverged, None
