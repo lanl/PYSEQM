@@ -39,17 +39,18 @@ model.pt
 1. MNDO
 2. AM1
 3. PM3
+4. PM6
 
 <hr/>
 
 ## Authors:
 
-[Maksim Kulichenko](mailto:maxim@lanl.gov), [Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
+[Maksim Kulichenko](mailto:maxim@lanl.gov), [Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), [Vishikh Athavale](mailto:vishikh@lanl.gov), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
 ## Citation:
 1. [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
-2. [Zhou, Guoqing, et al. "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics." *Proceedings of the National Academy of Sciences* 119.27 (2022): e2120333119.](https://www.pnas.org/doi/10.1073/pnas.2120333119)
-3. [Kulichenko, Maksim, et al. "Semi-Empirical Shadow Molecular Dynamics: A PyTorch implementation." *arXiv:2303.00689* (2023).](https://arxiv.org/abs/2303.00689)
+2. [Kulichenko, Maksim, et al. "Semi-Empirical Shadow Molecular Dynamics: A PyTorch implementation." *Journal of Chemical Theory and Computation* 19.11 (2023): 3209–3222.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.3c00234)
+3. [Zhou, Guoqing, et al. "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics." *Proceedings of the National Academy of Sciences* 119.27 (2022): e2120333119.](https://www.pnas.org/doi/10.1073/pnas.2120333119)
 
 ## Acknowledgments:
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T-1
