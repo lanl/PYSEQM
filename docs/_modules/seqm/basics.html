@@ -1,0 +1,1132 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>seqm.basics &#8212; PYSEQM 1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../../_static/documentation_options.js?v=29a6c3e3"></script>
+    <script src="../../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/seqm/basics';</script>
+    <link rel="author" title="About these documents" href="../../about.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../../_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1 documentation - Home"/>
+    <img src="../../_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1 documentation - Home"/>
+  
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../quick_start.html">
+    Quick Start
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../about.html">
+    About
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../user_guide.html">
+    User Guide
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../quick_start.html">
+    Quick Start
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../about.html">
+    About
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../user_guide.html">
+    User Guide
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="../index.html" class="nav-link">Module code</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">seqm.basics</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for seqm.basics</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.scf_loop</span><span class="w"> </span><span class="kn">import</span> <span class="n">scf_loop</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.energy</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">params</span><span class="p">,</span> <span class="n">PWCCT</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.autograd</span><span class="w"> </span><span class="kn">import</span> <span class="n">grad</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">ev</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.pack</span><span class="w"> </span><span class="kn">import</span> <span class="n">pack</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.anal_grad</span><span class="w"> </span><span class="kn">import</span> <span class="n">scf_analytic_grad</span><span class="p">,</span> <span class="n">scf_grad</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.rcis</span><span class="w"> </span><span class="kn">import</span> <span class="n">rcis</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.seqm_functions.rcis_grad</span><span class="w"> </span><span class="kn">import</span> <span class="n">rcis_grad</span>
+<span class="c1">#from .seqm_functions.rcis_batch import rcis_batch</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">copy</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="n">parameterlist</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;AM1&#39;</span><span class="p">:[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;U_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_p&#39;</span><span class="p">,</span><span class="s1">&#39;beta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;beta_p&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;g_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;g_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_p2&#39;</span><span class="p">,</span> <span class="s1">&#39;h_sp&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;alpha&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_K&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_K&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_L&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_L&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_M&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_M&#39;</span>
+                     <span class="p">],</span>
+                <span class="s1">&#39;MNDO&#39;</span><span class="p">:[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;U_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_p&#39;</span><span class="p">,</span><span class="s1">&#39;beta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;beta_p&#39;</span><span class="p">,</span>
+                        <span class="s1">&#39;g_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;g_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_p2&#39;</span><span class="p">,</span> <span class="s1">&#39;h_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;alpha&#39;</span><span class="p">],</span>
+                <span class="s1">&#39;PM3&#39;</span><span class="p">:[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;U_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_p&#39;</span><span class="p">,</span><span class="s1">&#39;beta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;beta_p&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;g_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;g_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_p2&#39;</span><span class="p">,</span> <span class="s1">&#39;h_sp&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;alpha&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_M&#39;</span>
+                      <span class="p">],</span>
+
+                <span class="s1">&#39;PM6&#39;</span><span class="p">:[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;U_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;U_dd&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_p&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_d&#39;</span><span class="p">,</span>  <span class="s1">&#39;beta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;beta_p&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;beta_d&#39;</span><span class="p">,</span> <span class="s1">&#39;s_orb_exp_tail&#39;</span><span class="p">,</span> <span class="s1">&#39;p_orb_exp_tail&#39;</span><span class="p">,</span> <span class="s1">&#39;d_orb_exp_tail&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;g_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;g_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_p2&#39;</span><span class="p">,</span> <span class="s1">&#39;h_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;F0SD&#39;</span><span class="p">,</span> <span class="s1">&#39;G2SD&#39;</span><span class="p">,</span><span class="s1">&#39;rho_core&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;alpha&#39;</span><span class="p">,</span> <span class="s1">&#39;EISOL&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_K&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_K&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_L&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_L&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_M&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_M&#39;</span>
+                      <span class="p">],</span>
+               
+                <span class="s1">&#39;PM6_SP&#39;</span><span class="p">:[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;U_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_p&#39;</span><span class="p">,</span>  <span class="s1">&#39;beta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;beta_p&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;s_orb_exp_tail&#39;</span><span class="p">,</span> <span class="s1">&#39;p_orb_exp_tail&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;g_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;g_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_p2&#39;</span><span class="p">,</span> <span class="s1">&#39;h_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;F0SD&#39;</span><span class="p">,</span> <span class="s1">&#39;G2SD&#39;</span><span class="p">,</span><span class="s1">&#39;rho_core&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;alpha&#39;</span><span class="p">,</span> <span class="s1">&#39;EISOL&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_K&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_K&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_L&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_L&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_M&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_M&#39;</span>
+                      <span class="p">],</span>
+                      
+                <span class="s1">&#39;PM6_SP_STAR&#39;</span><span class="p">:[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;U_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;zeta_p&#39;</span><span class="p">,</span>  <span class="s1">&#39;beta_s&#39;</span><span class="p">,</span> <span class="s1">&#39;beta_p&#39;</span><span class="p">,</span>
+                          <span class="s1">&#39;s_orb_exp_tail&#39;</span><span class="p">,</span> <span class="s1">&#39;p_orb_exp_tail&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;g_ss&#39;</span><span class="p">,</span> <span class="s1">&#39;g_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_pp&#39;</span><span class="p">,</span> <span class="s1">&#39;g_p2&#39;</span><span class="p">,</span> <span class="s1">&#39;h_sp&#39;</span><span class="p">,</span> <span class="s1">&#39;F0SD&#39;</span><span class="p">,</span> <span class="s1">&#39;G2SD&#39;</span><span class="p">,</span><span class="s1">&#39;rho_core&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;alpha&#39;</span><span class="p">,</span> <span class="s1">&#39;EISOL&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_K&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_K&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_L&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_L&#39;</span><span class="p">,</span>
+                       <span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian2_M&#39;</span><span class="p">,</span> <span class="s1">&#39;Gaussian3_M&#39;</span><span class="p">,</span><span class="s1">&#39;Gaussian4_M&#39;</span>
+                      <span class="p">],</span>
+              <span class="p">}</span>
+
+<div class="viewcode-block" id="Parser">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Parser">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Parser</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    parsing inputs from coordinates and types</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Constructor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">outercutoff</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">elements</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;elements&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uhf</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;UHF&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hipnn_automatic_doublet</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;HIPNN_automatic_doublet&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Parser.forward">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Parser.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">molecule</span><span class="p">,</span> <span class="n">themethod</span><span class="p">,</span> <span class="n">return_mask_l</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">do_large_tensors</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        constants : instance of Class Constants</span>
+<span class="sd">        species : atom types for atom in each molecules,</span>
+<span class="sd">                  shape (nmol, molsize),  dtype: torch.int64</span>
+<span class="sd">        coordinates : atom position, shape (nmol, molsize, 3)</span>
+<span class="sd">        charges: total charge for each molecule, shape (nmol,), 0 if None</span>
+<span class="sd">        do_large_tensors: option to skip computation of idxi, idxj, ni, nj, rij, xij. For SEDACS only.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">device</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">dtype</span>
+
+        <span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">nonblank</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="o">&gt;</span><span class="mi">0</span>
+        <span class="n">n_real_atoms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">nonblank</span><span class="p">)</span>
+
+        <span class="n">atom_index</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nmol</span><span class="o">*</span><span class="n">molsize</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">real_atoms</span> <span class="o">=</span> <span class="n">atom_index</span><span class="p">[</span><span class="n">nonblank</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">Z</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">real_atoms</span><span class="p">]</span>
+
+        <span class="k">if</span><span class="p">(</span><span class="n">themethod</span> <span class="o">==</span> <span class="s1">&#39;PM6&#39;</span><span class="p">):</span> <span class="c1"># PM6 is not implemented yet</span>
+            <span class="n">nHeavy</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="o">&gt;</span><span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span> <span class="mi">12</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;=</span> <span class="mi">18</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span><span class="mi">20</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;=</span> <span class="mi">30</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span> <span class="mi">32</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;=</span> <span class="mi">36</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span> <span class="mi">38</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;=</span> <span class="mi">48</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span> <span class="mi">50</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;=</span> <span class="mi">54</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span> <span class="mi">56</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;=</span> <span class="mi">80</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;=</span> <span class="mi">83</span><span class="p">)))),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">nHeavy</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="o">&gt;</span><span class="mi">1</span><span class="p">,</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">nSuperHeavy</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">((((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;</span> <span class="mi">12</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;</span><span class="mi">18</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;</span><span class="mi">30</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;</span> <span class="mi">32</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;</span><span class="mi">36</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;</span> <span class="mi">38</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;</span><span class="mi">48</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;</span><span class="mi">54</span><span class="p">))</span> <span class="o">|</span> <span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&gt;</span> <span class="mi">70</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">&lt;</span><span class="mi">80</span><span class="p">))</span> <span class="o">|</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span> <span class="o">==</span><span class="mi">57</span><span class="p">)),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">nHydro</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="o">==</span><span class="mi">1</span><span class="p">,</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">tore</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">tore</span>
+        <span class="n">n_charge</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">tore</span><span class="p">[</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="p">],</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="c1"># number of valence electrons, N*|e|</span>
+        <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_tensor</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">tot_charge</span><span class="p">):</span>
+            <span class="n">n_charge</span> <span class="o">-=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">tot_charge</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">uhf</span><span class="p">:</span>
+            <span class="n">nocc_alpha</span> <span class="o">=</span> <span class="n">n_charge</span><span class="o">/</span><span class="mf">2.</span> <span class="o">+</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">mult</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mf">2.</span>
+            <span class="n">nocc_beta</span> <span class="o">=</span> <span class="n">n_charge</span><span class="o">/</span><span class="mf">2.</span> <span class="o">-</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">mult</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mf">2.</span>
+            <span class="k">if</span> <span class="p">((</span><span class="n">nocc_alpha</span><span class="o">%</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()</span> <span class="ow">or</span> <span class="p">(</span><span class="n">nocc_beta</span><span class="o">%</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()):</span>
+                <span class="c1">### if self.hipnn_automatic_doublet = True, the block below assumes no multiplicity was provided (i.e. all provided as default singlets)</span>
+                <span class="c1">### and converts molecules with odd number of electrons to doublets.</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">hipnn_automatic_doublet</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Invalid charge/multiplicity combination!&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1">#print(&#39;alpha beta&#39;,nocc_alpha, nocc_beta)</span>
+                    <span class="n">nocc_alpha</span><span class="p">[</span><span class="n">nocc_alpha</span><span class="o">%</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="mf">0.5</span>
+                    <span class="n">nocc_beta</span><span class="p">[</span><span class="n">nocc_beta</span><span class="o">%</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">]</span> <span class="o">-=</span> <span class="mf">0.5</span>
+                    <span class="c1">#print(&#39;hipnn_automatic_doublet flag is True. Molecules with odd number of electrons are treated as doublets.\n&#39;)</span>
+                    
+                    <span class="c1">#print(&#39;alpha beta&#39;,nocc_alpha, &#39;\n&#39;, nocc_beta, &#39;\n&#39;)</span>
+            <span class="n">nocc</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">nocc_alpha</span><span class="p">,</span><span class="n">nocc_beta</span><span class="p">),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">nocc</span> <span class="o">=</span> <span class="n">nocc</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">nocc</span> <span class="o">=</span> <span class="n">n_charge</span><span class="o">//</span><span class="mi">2</span>
+            <span class="k">if</span> <span class="p">((</span><span class="n">n_charge</span><span class="o">%</span><span class="mi">2</span><span class="p">)</span><span class="o">==</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;RHF setting requires closed shell systems (even number of electrons)&quot;</span><span class="p">)</span>
+        
+        
+        
+        <span class="n">t1</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">molsize</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">molsize</span><span class="o">+</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">t2</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span><span class="o">*</span><span class="n">molsize</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">maskd</span> <span class="o">=</span> <span class="p">(</span><span class="n">t1</span><span class="o">+</span><span class="n">t2</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">real_atoms</span><span class="p">]</span>
+
+        
+
+        <span class="k">if</span> <span class="n">do_large_tensors</span><span class="p">:</span>
+            <span class="n">atom_molid</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="n">molsize</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">nonblank</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">]</span>
+
+            <span class="n">nonblank_pairs</span> <span class="o">=</span> <span class="p">(</span><span class="n">nonblank</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">nonblank</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">pair_first</span> <span class="o">=</span> <span class="n">atom_index</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">)</span> \
+                                <span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> \
+                                <span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span><span class="n">molsize</span><span class="p">,</span><span class="n">molsize</span><span class="p">)</span> \
+                                <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">pair_second</span> <span class="o">=</span> <span class="n">atom_index</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">)</span> \
+                                    <span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> \
+                                    <span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span><span class="n">molsize</span><span class="p">,</span><span class="n">molsize</span><span class="p">)</span> \
+                                    <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">paircoord_raw</span> <span class="o">=</span> <span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">-</span><span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">3</span><span class="p">)</span>
+            <span class="n">pairdist_sq</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">paircoord_raw</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">close_pairs</span> <span class="o">=</span> <span class="n">pairdist_sq</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">outercutoff</span><span class="o">**</span><span class="mi">2</span>
+            
+            <span class="n">pairs</span> <span class="o">=</span> <span class="p">(</span><span class="n">pair_first</span> <span class="o">&lt;</span> <span class="n">pair_second</span><span class="p">)</span> <span class="o">*</span> <span class="n">nonblank_pairs</span> <span class="o">*</span> <span class="n">close_pairs</span>
+            
+            <span class="n">paircoord</span> <span class="o">=</span> <span class="n">paircoord_raw</span><span class="p">[</span><span class="n">pairs</span><span class="p">]</span>
+            <span class="n">pairdist</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">pairdist_sq</span><span class="p">[</span><span class="n">pairs</span><span class="p">])</span>
+            <span class="n">rij</span> <span class="o">=</span> <span class="n">pairdist</span> <span class="o">*</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">length_conversion_factor</span>
+
+            <span class="n">inv_real_atoms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">nmol</span><span class="o">*</span><span class="n">molsize</span><span class="p">,),</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+            <span class="n">inv_real_atoms</span><span class="p">[</span><span class="n">real_atoms</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_real_atoms</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+
+            <span class="n">idxi</span> <span class="o">=</span> <span class="n">inv_real_atoms</span><span class="p">[</span><span class="n">pair_first</span><span class="p">[</span><span class="n">pairs</span><span class="p">]]</span>
+            <span class="n">idxj</span> <span class="o">=</span> <span class="n">inv_real_atoms</span><span class="p">[</span><span class="n">pair_second</span><span class="p">[</span><span class="n">pairs</span><span class="p">]]</span>
+            <span class="n">ni</span> <span class="o">=</span> <span class="n">Z</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span>
+            <span class="n">nj</span> <span class="o">=</span> <span class="n">Z</span><span class="p">[</span><span class="n">idxj</span><span class="p">]</span>
+            <span class="n">xij</span> <span class="o">=</span> <span class="n">paircoord</span> <span class="o">/</span> <span class="n">pairdist</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">real_atoms</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span> <span class="o">*</span> <span class="n">molsize</span> <span class="o">+</span> <span class="n">real_atoms</span><span class="p">[</span><span class="n">idxj</span><span class="p">]</span><span class="o">%</span><span class="n">molsize</span>
+            <span class="n">mask_l</span> <span class="o">=</span> <span class="n">real_atoms</span><span class="p">[</span><span class="n">idxj</span><span class="p">]</span> <span class="o">*</span> <span class="n">molsize</span> <span class="o">+</span> <span class="n">real_atoms</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span><span class="o">%</span><span class="n">molsize</span>
+            <span class="c1">#mask_l = torch.sort(mask_l)[0]</span>
+            <span class="n">pair_molid</span> <span class="o">=</span> <span class="n">atom_molid</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span> <span class="c1"># doesn&#39;t matter atom_molid[idxj]</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">atom_molid</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">idxi</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">idxj</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">ni</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">nj</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">rij</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">xij</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">mask_l</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">pair_molid</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># nmol, molsize : scalar</span>
+        <span class="c1"># nHeavy, nHydro, nocc : (nmol,)</span>
+        <span class="c1"># Z, maskd, atom_molid: (natoms, )</span>
+        <span class="c1"># mask, pair_molid, ni, nj, idxi, idxj, xij, rij ; (npairs, )</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">return_mask_l</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">,</span> \
+                <span class="n">nSuperHeavy</span><span class="p">,</span> <span class="n">nHeavy</span><span class="p">,</span> <span class="n">nHydro</span><span class="p">,</span> <span class="n">nocc</span><span class="p">,</span> \
+                <span class="n">Z</span><span class="p">,</span> <span class="n">maskd</span><span class="p">,</span> <span class="n">atom_molid</span><span class="p">,</span> \
+                <span class="n">mask</span><span class="p">,</span> <span class="n">pair_molid</span><span class="p">,</span> <span class="n">ni</span><span class="p">,</span> <span class="n">nj</span><span class="p">,</span> <span class="n">idxi</span><span class="p">,</span> <span class="n">idxj</span><span class="p">,</span> <span class="n">xij</span><span class="p">,</span> <span class="n">rij</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">,</span> \
+                <span class="n">nSuperHeavy</span><span class="p">,</span> <span class="n">nHeavy</span><span class="p">,</span> <span class="n">nHydro</span><span class="p">,</span> <span class="n">nocc</span><span class="p">,</span> \
+                <span class="n">Z</span><span class="p">,</span> <span class="n">maskd</span><span class="p">,</span> <span class="n">atom_molid</span><span class="p">,</span> \
+                <span class="n">mask</span><span class="p">,</span> <span class="n">mask_l</span><span class="p">,</span> <span class="n">pair_molid</span><span class="p">,</span> <span class="n">ni</span><span class="p">,</span> <span class="n">nj</span><span class="p">,</span> <span class="n">idxi</span><span class="p">,</span> <span class="n">idxj</span><span class="p">,</span> <span class="n">xij</span><span class="p">,</span> <span class="n">rij</span></div>
+</div>
+
+
+<div class="viewcode-block" id="Parser_For_Ovr">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Parser_For_Ovr">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Parser_For_Ovr</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    parsing inputs from coordinates and types</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Constructor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">outercutoff</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">elements</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;elements&#39;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="Parser_For_Ovr.forward">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Parser_For_Ovr.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">constants</span><span class="p">,</span> <span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        constants : instance of Class Constants</span>
+<span class="sd">        species : atom types for atom in each molecules,</span>
+<span class="sd">                  shape (nmol, molsize),  dtype: torch.int64</span>
+<span class="sd">        coordinates : atom position, shape (nmol, molsize, 3)</span>
+<span class="sd">        charges: total charge for each molecule, shape (nmol,), 0 if None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="n">coordinates</span><span class="o">.</span><span class="n">device</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">coordinates</span><span class="o">.</span><span class="n">dtype</span>
+        
+        <span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span> <span class="o">=</span> <span class="n">species</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">nonblank</span> <span class="o">=</span> <span class="n">species</span><span class="o">&gt;</span><span class="mi">0</span>
+        <span class="n">n_real_atoms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">nonblank</span><span class="p">)</span>
+        
+        <span class="n">atom_index</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nmol</span><span class="o">*</span><span class="n">molsize</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">real_atoms</span> <span class="o">=</span> <span class="n">atom_index</span><span class="p">[</span><span class="n">nonblank</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">]</span>
+        
+        <span class="n">inv_real_atoms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">nmol</span><span class="o">*</span><span class="n">molsize</span><span class="p">,),</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">inv_real_atoms</span><span class="p">[</span><span class="n">real_atoms</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_real_atoms</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        
+        <span class="n">Z</span> <span class="o">=</span> <span class="n">species</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">real_atoms</span><span class="p">]</span>
+        <span class="n">nHeavy</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">species</span><span class="o">&gt;</span><span class="mi">1</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">nHydro</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">species</span><span class="o">==</span><span class="mi">1</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">tore</span> <span class="o">=</span> <span class="n">constansts</span><span class="o">.</span><span class="n">tore</span>
+        <span class="n">n_charge</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">tore</span><span class="p">[</span><span class="n">species</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;charges&#39;</span> <span class="ow">in</span> <span class="n">kwargs</span> <span class="ow">and</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_tensor</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;charges&#39;</span><span class="p">]):</span>
+            <span class="n">n_charge</span> <span class="o">+=</span> <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;charges&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">type</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">nocc</span> <span class="o">=</span> <span class="n">n_charge</span><span class="o">//</span><span class="mi">2</span>
+        
+        <span class="k">if</span> <span class="p">((</span><span class="n">n_charge</span><span class="o">%</span><span class="mi">2</span><span class="p">)</span><span class="o">==</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Only closed shell system (with even number of electrons) are supported&quot;</span><span class="p">)</span>
+        <span class="n">t1</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">molsize</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">molsize</span><span class="o">+</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">t2</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span><span class="o">*</span><span class="n">molsize</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">maskd</span> <span class="o">=</span> <span class="p">(</span><span class="n">t1</span><span class="o">+</span><span class="n">t2</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">real_atoms</span><span class="p">]</span>
+        <span class="n">atom_molid</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="n">molsize</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">nonblank</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">nonblank_pairs</span> <span class="o">=</span> <span class="p">(</span><span class="n">nonblank</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">nonblank</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">pair_first</span> <span class="o">=</span> <span class="n">atom_index</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">)</span> \
+                               <span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> \
+                               <span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span><span class="n">molsize</span><span class="p">,</span><span class="n">molsize</span><span class="p">)</span> \
+                               <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1">#</span>
+        <span class="n">pair_second</span> <span class="o">=</span> <span class="n">atom_index</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">)</span> \
+                                <span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> \
+                                <span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">nmol</span><span class="p">,</span><span class="n">molsize</span><span class="p">,</span><span class="n">molsize</span><span class="p">)</span> \
+                                <span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1">#</span>
+        <span class="n">paircoord_raw</span> <span class="o">=</span> <span class="p">(</span><span class="n">coordinates</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">-</span><span class="n">coordinates</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">3</span><span class="p">)</span>
+        <span class="n">pairdist_sq</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">paircoord_raw</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">close_pairs</span> <span class="o">=</span> <span class="n">pairdist_sq</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">outercutoff</span><span class="o">**</span><span class="mi">2</span>
+        
+        <span class="n">pairs</span> <span class="o">=</span> <span class="p">(</span><span class="n">pair_first</span> <span class="o">&lt;=</span> <span class="n">pair_second</span><span class="p">)</span> <span class="o">*</span> <span class="n">nonblank_pairs</span> <span class="o">*</span> <span class="n">close_pairs</span>
+        
+        <span class="n">paircoord</span> <span class="o">=</span> <span class="n">paircoord_raw</span><span class="p">[</span><span class="n">pairs</span><span class="p">]</span>
+        <span class="n">pairdist</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">pairdist_sq</span><span class="p">[</span><span class="n">pairs</span><span class="p">])</span>
+        <span class="n">rij</span> <span class="o">=</span> <span class="n">pairdist</span> <span class="o">*</span> <span class="n">constansts</span><span class="o">.</span><span class="n">length_conversion_factor</span>
+        
+        <span class="n">idxi</span> <span class="o">=</span> <span class="n">inv_real_atoms</span><span class="p">[</span><span class="n">pair_first</span><span class="p">[</span><span class="n">pairs</span><span class="p">]]</span>
+        <span class="n">idxj</span> <span class="o">=</span> <span class="n">inv_real_atoms</span><span class="p">[</span><span class="n">pair_second</span><span class="p">[</span><span class="n">pairs</span><span class="p">]]</span>
+        <span class="n">ni</span> <span class="o">=</span> <span class="n">Z</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span>
+        <span class="n">nj</span> <span class="o">=</span> <span class="n">Z</span><span class="p">[</span><span class="n">idxj</span><span class="p">]</span>
+        <span class="n">xij</span> <span class="o">=</span> <span class="n">paircoord</span> <span class="o">/</span> <span class="n">pairdist</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="n">real_atoms</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span> <span class="o">*</span> <span class="n">molsize</span> <span class="o">+</span> <span class="n">real_atoms</span><span class="p">[</span><span class="n">idxj</span><span class="p">]</span><span class="o">%</span><span class="n">molsize</span>
+        <span class="n">pair_molid</span> <span class="o">=</span> <span class="n">atom_molid</span><span class="p">[</span><span class="n">idxi</span><span class="p">]</span> <span class="c1"># doesn&#39;t matter atom_molid[idxj]</span>
+        <span class="c1"># nmol, molsize : scalar</span>
+        <span class="c1"># nHeavy, nHydro, nocc : (nmol,)</span>
+        <span class="c1"># Z, maskd, atom_molid: (natoms, )</span>
+        <span class="c1"># mask, pair_molid, ni, nj, idxi, idxj, xij, rij ; (npairs, )</span>
+        <span class="k">return</span> <span class="n">nmol</span><span class="p">,</span> <span class="n">molsize</span><span class="p">,</span> \
+               <span class="n">nHeavy</span><span class="p">,</span> <span class="n">nHydro</span><span class="p">,</span> <span class="n">nocc</span><span class="p">,</span> \
+               <span class="n">Z</span><span class="p">,</span> <span class="n">maskd</span><span class="p">,</span> <span class="n">atom_molid</span><span class="p">,</span> \
+               <span class="n">mask</span><span class="p">,</span> <span class="n">pair_molid</span><span class="p">,</span> <span class="n">ni</span><span class="p">,</span> <span class="n">nj</span><span class="p">,</span> <span class="n">idxi</span><span class="p">,</span> <span class="n">idxj</span><span class="p">,</span> <span class="n">xij</span><span class="p">,</span> <span class="n">rij</span></div>
+</div>
+
+
+<div class="viewcode-block" id="Pack_Parameters">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Pack_Parameters">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Pack_Parameters</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    pack the parameters, combine the learned parameters and the ones from mopac</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        elements : elements will be used</span>
+<span class="sd">        device : cpu, cuda etc</span>
+<span class="sd">        method : seqm method</span>
+<span class="sd">        learned : list for parameters will be provided and require grad, e.g. learned = [&#39;U_ss&#39;]</span>
+<span class="sd">        filedir : mopac parameter files directory</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">elements</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;elements&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learned_list</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;learned&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">method</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filedir</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;parameter_file_dir&#39;</span><span class="p">]</span> \
+            <span class="k">if</span> <span class="s1">&#39;parameter_file_dir&#39;</span> <span class="ow">in</span> <span class="n">seqm_parameters</span> \
+            <span class="k">else</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">))</span><span class="o">+</span><span class="s1">&#39;/params/&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span> <span class="o">=</span> <span class="n">parameterlist</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">required_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">learned_list</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">required_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">nrp</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">required_list</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">p</span> <span class="o">=</span> <span class="n">params</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="n">elements</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">,</span><span class="n">root_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">filedir</span><span class="p">,</span>
+                 <span class="n">parameters</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">required_list</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">alpha</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">chi</span> <span class="o">=</span> <span class="n">PWCCT</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="n">elements</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">elements</span><span class="p">,</span><span class="n">root_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">filedir</span><span class="p">,</span>
+                 <span class="n">parameters</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">required_list</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Pack_Parameters.forward">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Pack_Parameters.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">Z</span><span class="p">,</span> <span class="n">learned_params</span><span class="o">=</span><span class="nb">dict</span><span class="p">()):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        combine the learned_parames with other required parameters</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nrp</span><span class="p">):</span>
+            <span class="n">learned_params</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">required_list</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">p</span><span class="p">[</span><span class="n">Z</span><span class="p">,</span><span class="n">i</span><span class="p">]</span> <span class="c1">#.contiguous()</span>
+        <span class="k">return</span> <span class="n">learned_params</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">alpha</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">chi</span></div>
+</div>
+
+
+<div class="viewcode-block" id="Hamiltonian">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Hamiltonian">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Hamiltonian</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    build the Hamiltonian</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Constructor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="c1">#put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can</span>
+        <span class="c1">#be used to restart jobs</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;scf_eps&#39;</span><span class="p">]),</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sp2</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;sp2&#39;</span><span class="p">,</span> <span class="p">[</span><span class="kc">False</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scf_converger</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;scf_converger&#39;</span><span class="p">]</span>
+        <span class="c1"># whether return eigenvalues, eigenvectors, and gap. Otherwise they are None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eig</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;eig&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scf_backward</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;scf_backward&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">scf_back_eps</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;scf_backward_eps&#39;</span><span class="p">,</span> <span class="mf">1e-2</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scf_backward_eps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">scf_back_eps</span><span class="p">),</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="c1"># 0: ignore gradient on density matrix from Hellmann Feymann Theorem,</span>
+        <span class="c1"># 1: use recursive formula go back through SCF loop</span>
+        <span class="c1"># 2: direct backprop through SCF loop</span>
+
+<div class="viewcode-block" id="Hamiltonian.forward">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Hamiltonian.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">molecule</span><span class="p">,</span> <span class="n">themethod</span><span class="p">,</span> <span class="n">P0</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        SCF loop</span>
+<span class="sd">        const : Constants instance</span>
+<span class="sd">        molsize : maximal number of atoms in each molecule</span>
+<span class="sd">        nHeavy : number of heavy atoms in each molecule, shape (nmol,) nmol: number of molecules in this batch</span>
+<span class="sd">        nHydro : number of hydrogen in each molecule, shape (nmol,)</span>
+<span class="sd">        nocc : number of occupied molecular orbitals, shape (nmol,)</span>
+<span class="sd">        maskd : diagonal block postions, shape (n_atoms,)</span>
+<span class="sd">        mask: off diagonal block positions, shape (n_pairs,)</span>
+<span class="sd">        idxi/idxj : atom indexes for first/second atom in each pair, shape (n_pairs,)</span>
+<span class="sd">        ni/nj : atom number for first/second atom in each pair, shape (n_pairs,)</span>
+<span class="sd">        xij : unit vector for each pair, from i to j, (Rj-Ri)/|Rj-Ri|</span>
+<span class="sd">        rij : distance for each pair, in atomic unit, shape (n_pairs,)</span>
+<span class="sd">        Z: atom number, shape (n_atoms,)</span>
+<span class="sd">        zetas/zetap : Zeta for s/p orbital for each atom, shape (n_atoms, )</span>
+<span class="sd">        uss, upp, gss, gsp, gpp, gp2, hsp: parameters for AM1/PM3/MNDO, shape (n_atoms,)</span>
+<span class="sd">        #</span>
+<span class="sd">        return F, e, P, Hcore</span>
+<span class="sd">        F : fock matrix, i.e. the Hamiltonian for the system, shape (nmol, molsize*4, molsize*4)</span>
+<span class="sd">        e : orbital energies, shape (nmol, molsize*4), 0 padding is used</span>
+<span class="sd">        P : Density matrix for closed shell system, shape (nmol, molsize*4, molsize*4)</span>
+<span class="sd">        Hcore : Hcore matrix, same shape as F</span>
+<span class="sd">        w : two electron two center integrals</span>
+<span class="sd">        v : eigenvectors of F</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        
+        <span class="k">if</span><span class="p">(</span><span class="n">themethod</span> <span class="o">==</span> <span class="s1">&#39;PM6&#39;</span><span class="p">):</span> <span class="c1"># not implemented yet</span>
+            <span class="n">F</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">Hcore</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span><span class="n">rho0xi</span><span class="p">,</span><span class="n">rho0xj</span><span class="p">,</span> <span class="n">riXH</span><span class="p">,</span> <span class="n">ri</span><span class="p">,</span> <span class="n">notconverged</span><span class="p">,</span> <span class="n">eig_vec</span> <span class="o">=</span> <span class="n">scf_loop</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span>
+                                  <span class="n">eps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">,</span>
+                                  <span class="n">P</span><span class="o">=</span><span class="n">P0</span><span class="p">,</span>
+                                  <span class="n">sp2</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">sp2</span><span class="p">,</span>
+                                  <span class="n">scf_converger</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scf_converger</span><span class="p">,</span>
+                                  <span class="n">eig</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">eig</span><span class="p">,</span>
+                                  <span class="n">scf_backward</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scf_backward</span><span class="p">,</span>
+                                  <span class="n">scf_backward_eps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scf_backward_eps</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">F</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">Hcore</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">rho0xi</span><span class="p">,</span><span class="n">rho0xj</span><span class="p">,</span> <span class="n">riXH</span><span class="p">,</span> <span class="n">ri</span><span class="p">,</span> <span class="n">notconverged</span><span class="p">,</span> <span class="n">eig_vec</span> <span class="o">=</span> <span class="n">scf_loop</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span>
+                              <span class="n">eps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">,</span>
+                              <span class="n">P</span><span class="o">=</span><span class="n">P0</span><span class="p">,</span>
+                              <span class="n">sp2</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">sp2</span><span class="p">,</span>
+                              <span class="n">scf_converger</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scf_converger</span><span class="p">,</span>
+                              <span class="n">eig</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">eig</span><span class="p">,</span>
+                              <span class="n">scf_backward</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scf_backward</span><span class="p">,</span>
+                              <span class="n">scf_backward_eps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scf_backward_eps</span><span class="p">)</span>
+        <span class="c1">#</span>
+        <span class="k">return</span> <span class="n">F</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">Hcore</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span><span class="n">rho0xi</span><span class="p">,</span><span class="n">rho0xj</span><span class="p">,</span> <span class="n">riXH</span><span class="p">,</span> <span class="n">ri</span><span class="p">,</span> <span class="n">notconverged</span><span class="p">,</span> <span class="n">eig_vec</span></div>
+</div>
+
+
+<div class="viewcode-block" id="Energy">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Energy">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Energy</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Constructor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">seqm_parameters</span> <span class="o">=</span> <span class="n">seqm_parameters</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">method</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">parser</span> <span class="o">=</span> <span class="n">Parser</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">packpar</span> <span class="o">=</span> <span class="n">Pack_Parameters</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hamiltonian</span> <span class="o">=</span> <span class="n">Hamiltonian</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">Hf_flag</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;Hf_flag&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uhf</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;UHF&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eig</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;eig&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">excited_states</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;excited_states&#39;</span><span class="p">,</span> <span class="p">[</span><span class="kc">False</span><span class="p">])</span>
+
+
+<div class="viewcode-block" id="Energy.forward">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Energy.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">molecule</span><span class="p">,</span> <span class="n">learned_parameters</span><span class="o">=</span><span class="nb">dict</span><span class="p">(),</span> <span class="n">all_terms</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">P0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        get the energy terms</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">molecule</span><span class="o">.</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">molsize</span><span class="p">,</span> \
+        <span class="n">molecule</span><span class="o">.</span><span class="n">nSuperHeavy</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nHeavy</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nHydro</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nocc</span><span class="p">,</span> \
+        <span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">maskd</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">atom_molid</span><span class="p">,</span> \
+        <span class="n">molecule</span><span class="o">.</span><span class="n">mask</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">pair_molid</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">ni</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nj</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">idxi</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">idxj</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">xij</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">rij</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">parser</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="nb">callable</span><span class="p">(</span><span class="n">learned_parameters</span><span class="p">):</span>
+            <span class="n">adict</span> <span class="o">=</span> <span class="n">learned_parameters</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">species</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="p">)</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">alp</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">chi</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">packpar</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span> <span class="n">learned_params</span> <span class="o">=</span> <span class="n">adict</span><span class="p">)</span>   <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">alp</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">chi</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">packpar</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span> <span class="n">learned_params</span> <span class="o">=</span> <span class="n">learned_parameters</span><span class="p">))</span>
+
+
+        <span class="k">if</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">method</span> <span class="o">==</span> <span class="s1">&#39;PM6&#39;</span><span class="p">):</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta_s&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta_p&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta_d&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta_s&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta_p&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>        
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_d&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_s&#39;</span><span class="p">])</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;s_orb_exp_tail&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_s&#39;</span><span class="p">])</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;p_orb_exp_tail&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_s&#39;</span><span class="p">])</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;d_orb_exp_tail&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_s&#39;</span><span class="p">])</span>
+
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_dd&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">])</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;F0SD&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">])</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;G2SD&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">])</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;rho_core&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">])</span>
+
+        
+        <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Kbeta&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;Kbeta&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        
+        <span class="n">F</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">Hcore</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">rho0xi</span><span class="p">,</span><span class="n">rho0xj</span><span class="p">,</span> <span class="n">riXH</span><span class="p">,</span> <span class="n">ri</span><span class="p">,</span> <span class="n">notconverged</span><span class="p">,</span> <span class="n">eig_vec</span> <span class="o">=</span>  <span class="bp">self</span><span class="o">.</span><span class="n">hamiltonian</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> \
+                                                 <span class="n">P0</span><span class="o">=</span><span class="n">P0</span><span class="p">)</span>
+        
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">eig</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">uhf</span><span class="p">:</span>
+                <span class="k">if</span> <span class="mi">0</span> <span class="ow">in</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nocc</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Zero occupied alpha or beta orbitals found (e.g. triplet H2). HOMO-LUMO gaps are not available.&#39;</span><span class="p">)</span>
+                    <span class="n">e_gap</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([])</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">lumo_a</span><span class="p">,</span> <span class="n">lumo_b</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nocc</span><span class="p">[:,</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nocc</span><span class="p">[:,</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+                    <span class="n">e_gap_a</span> <span class="o">=</span> <span class="n">e</span><span class="p">[:,</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">lumo_a</span><span class="p">)</span> <span class="o">-</span> <span class="n">e</span><span class="p">[:,</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">lumo_a</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+                    <span class="n">e_gap_b</span> <span class="o">=</span> <span class="n">e</span><span class="p">[:,</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">lumo_b</span><span class="p">)</span> <span class="o">-</span> <span class="n">e</span><span class="p">[:,</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">lumo_b</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+                    <span class="n">e_gap</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">e_gap_a</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">e_gap_b</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">lumo</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nocc</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+                <span class="n">e_gap</span> <span class="o">=</span> <span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">lumo</span><span class="p">)</span> <span class="o">-</span> <span class="n">e</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">lumo</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">e_gap</span> <span class="o">=</span> <span class="kc">None</span>
+        
+        <span class="n">molecule</span><span class="o">.</span><span class="n">eig_vec</span> <span class="o">=</span> <span class="n">eig_vec</span>
+        
+        <span class="c1">#nuclear energy</span>
+        <span class="n">alpha</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;alpha&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">==</span><span class="s1">&#39;MNDO&#39;</span><span class="p">:</span>
+            <span class="n">parnuc</span> <span class="o">=</span> <span class="p">(</span><span class="n">alpha</span><span class="p">,)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">==</span><span class="s1">&#39;AM1&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">==</span><span class="s1">&#39;PM6&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">==</span><span class="s1">&#39;PM6_SP&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">==</span><span class="s1">&#39;PM6_SP_STAR&#39;</span><span class="p">:</span>
+            <span class="n">K</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian3_K&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian4_K&#39;</span><span class="p">]),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">L</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian3_L&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian4_L&#39;</span><span class="p">]),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#molecule.</span>
+            <span class="n">M</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian2_M&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian3_M&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian4_M&#39;</span><span class="p">]),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">parnuc</span> <span class="o">=</span> <span class="p">(</span><span class="n">alpha</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">L</span><span class="p">,</span> <span class="n">M</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="o">==</span><span class="s1">&#39;PM3&#39;</span><span class="p">:</span>
+            <span class="n">K</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian1_K&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian2_K&#39;</span><span class="p">]),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">L</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian1_L&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian2_L&#39;</span><span class="p">]),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">M</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">((</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian1_M&#39;</span><span class="p">],</span>
+                             <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;Gaussian2_M&#39;</span><span class="p">]),</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1">#</span>
+            <span class="n">parnuc</span> <span class="o">=</span> <span class="p">(</span><span class="n">alpha</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">L</span><span class="p">,</span> <span class="n">M</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="s1">&#39;g_ss_nuc&#39;</span> <span class="ow">in</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">:</span>
+            <span class="n">g</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_ss_nuc&#39;</span><span class="p">]</span>
+            <span class="n">rho0a</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">ev</span> <span class="o">/</span> <span class="n">g</span><span class="p">[</span><span class="n">molecule</span><span class="o">.</span><span class="n">idxi</span><span class="p">]</span>
+            <span class="n">rho0b</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">ev</span> <span class="o">/</span> <span class="n">g</span><span class="p">[</span><span class="n">molecule</span><span class="o">.</span><span class="n">idxj</span><span class="p">]</span>
+            <span class="n">gam</span> <span class="o">=</span> <span class="n">ev</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">rij</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">rho0a</span> <span class="o">+</span> <span class="n">rho0b</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">gam</span> <span class="o">=</span> <span class="n">w</span><span class="p">[</span><span class="o">...</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">]</span>
+        
+        <span class="n">EnucAB</span> <span class="o">=</span> <span class="n">pair_nuclear_energy</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">ni</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nj</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">idxi</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">idxj</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">rij</span><span class="p">,</span> \
+                                     <span class="n">rho0xi</span><span class="p">,</span><span class="n">rho0xj</span><span class="p">,</span><span class="n">molecule</span><span class="o">.</span><span class="n">alp</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">chi</span><span class="p">,</span> <span class="n">gam</span><span class="o">=</span><span class="n">gam</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="n">parameters</span><span class="o">=</span><span class="n">parnuc</span><span class="p">)</span>
+        <span class="n">Eelec</span> <span class="o">=</span> <span class="n">elec_energy</span><span class="p">(</span><span class="n">P</span><span class="p">,</span> <span class="n">F</span><span class="p">,</span> <span class="n">Hcore</span><span class="p">)</span>
+        
+        <span class="n">analytical_gradient</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;analytical_gradient&#39;</span><span class="p">,[</span><span class="kc">False</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">analytical_gradient</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="c1"># None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so </span>
+            <span class="c1"># we can save on memory since the compuational graph doesn&#39;t have to be stored.</span>
+            <span class="n">beta</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;beta&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">do_timing</span><span class="p">:</span> <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+            <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+                <span class="c1"># if &quot;Kbeta&quot; in parameters:</span>
+                <span class="c1">#     Kbeta = parameters[&quot;Kbeta&quot;]</span>
+                <span class="c1"># else:</span>
+                <span class="c1">#     Kbeta = None</span>
+                <span class="k">if</span> <span class="n">analytical_gradient</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;analytical&#39;</span><span class="p">:</span>
+                    <span class="n">molecule</span><span class="o">.</span><span class="n">ground_analytical_gradient</span> <span class="o">=</span>  <span class="n">scf_analytic_grad</span><span class="p">(</span> <span class="n">P0</span><span class="o">=</span><span class="n">P</span><span class="p">,</span> 
+                                                                             <span class="n">molecule</span><span class="o">=</span><span class="n">molecule</span><span class="p">,</span>
+                              <span class="n">const</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="p">,</span>
+                              <span class="n">method</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span>
+                              <span class="n">molsize</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">molsize</span><span class="p">,</span>
+                              <span class="c1"># nHeavy=nHeavy,</span>
+                              <span class="c1"># nHydro=nHydro,</span>
+                              <span class="c1"># nOccMO=nocc,</span>
+                              <span class="n">maskd</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">maskd</span><span class="p">,</span>
+                              <span class="n">mask</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">mask</span><span class="p">,</span>
+                              <span class="c1"># atom_molid=atom_molid,</span>
+                              <span class="c1"># pair_molid=pair_molid,</span>
+                              <span class="n">idxi</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">idxi</span><span class="p">,</span>
+                              <span class="n">idxj</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">idxj</span><span class="p">,</span>
+                              <span class="n">ni</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">ni</span><span class="p">,</span>
+                              <span class="n">nj</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">nj</span><span class="p">,</span>
+                              <span class="n">xij</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">xij</span><span class="p">,</span>
+                              <span class="c1"># Xij = Xij,</span>
+                              <span class="n">rij</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">rij</span><span class="p">,</span>
+                              <span class="n">Z</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span>
+                              <span class="n">gam</span><span class="o">=</span><span class="n">gam</span><span class="p">,</span>
+                              <span class="n">parnuc</span> <span class="o">=</span> <span class="n">parnuc</span><span class="p">,</span>
+                              <span class="n">zetas</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_s&#39;</span><span class="p">],</span>
+                              <span class="n">zetap</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_p&#39;</span><span class="p">],</span>
+                              <span class="c1"># uss=parameters[&#39;U_ss&#39;],</span>
+                              <span class="c1"># upp=parameters[&#39;U_pp&#39;],</span>
+                              <span class="n">gss</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_ss&#39;</span><span class="p">],</span>
+                              <span class="c1"># gsp=parameters[&#39;g_sp&#39;],</span>
+                              <span class="n">gpp</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_pp&#39;</span><span class="p">],</span>
+                              <span class="n">gp2</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_p2&#39;</span><span class="p">],</span>
+                              <span class="n">hsp</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;h_sp&#39;</span><span class="p">],</span>
+                              <span class="n">beta</span><span class="o">=</span><span class="n">beta</span><span class="p">,</span>
+                              <span class="n">ri</span><span class="o">=</span><span class="n">ri</span><span class="p">,</span>
+                              <span class="n">riXH</span><span class="o">=</span><span class="n">riXH</span><span class="p">,</span>
+                              <span class="c1"># Kbeta=Kbeta,</span>
+                              <span class="c1"># sp2=self.sp2,</span>
+                             <span class="p">)</span>
+                <span class="k">elif</span> <span class="n">analytical_gradient</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">==</span><span class="s1">&#39;numerical&#39;</span><span class="p">:</span>
+
+                    <span class="n">molecule</span><span class="o">.</span><span class="n">ground_analytical_gradient</span> <span class="o">=</span>  <span class="n">scf_grad</span><span class="p">(</span> <span class="n">P0</span><span class="o">=</span><span class="n">P</span><span class="p">,</span> 
+                              <span class="n">molecule</span> <span class="o">=</span> <span class="n">molecule</span><span class="p">,</span>
+                              <span class="n">const</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="p">,</span>
+                              <span class="n">method</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span>
+                              <span class="n">molsize</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">molsize</span><span class="p">,</span>
+                              <span class="c1"># nHeavy=nHeavy,</span>
+                              <span class="c1"># nHydro=nHydro,</span>
+                              <span class="c1"># nOccMO=nocc,</span>
+                              <span class="n">maskd</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">maskd</span><span class="p">,</span>
+                              <span class="n">mask</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">mask</span><span class="p">,</span>
+                              <span class="c1"># atom_molid=atom_molid,</span>
+                              <span class="c1"># pair_molid=pair_molid,</span>
+                              <span class="n">idxi</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">idxi</span><span class="p">,</span>
+                              <span class="n">idxj</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">idxj</span><span class="p">,</span>
+                              <span class="n">ni</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">ni</span><span class="p">,</span>
+                              <span class="n">nj</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">nj</span><span class="p">,</span>
+                              <span class="n">xij</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">xij</span><span class="p">,</span>
+                              <span class="n">gam</span><span class="o">=</span><span class="n">gam</span><span class="p">,</span>
+                              <span class="c1"># Xij = Xij,</span>
+                              <span class="n">rij</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">rij</span><span class="p">,</span>
+                              <span class="n">Z</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span>
+                              <span class="n">parnuc</span> <span class="o">=</span> <span class="n">parnuc</span><span class="p">,</span>
+                              <span class="n">zetas</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_s&#39;</span><span class="p">],</span>
+                              <span class="n">zetap</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;zeta_p&#39;</span><span class="p">],</span>
+                              <span class="c1"># uss=parameters[&#39;U_ss&#39;],</span>
+                              <span class="c1"># upp=parameters[&#39;U_pp&#39;],</span>
+                              <span class="c1"># gss=molecule.parameters[&#39;g_ss&#39;],</span>
+                              <span class="c1"># gsp=parameters[&#39;g_sp&#39;],</span>
+                              <span class="c1"># gpp=molecule.parameters[&#39;g_pp&#39;],</span>
+                              <span class="c1"># gp2=molecule.parameters[&#39;g_p2&#39;],</span>
+                              <span class="c1"># hsp=molecule.parameters[&#39;h_sp&#39;],</span>
+                              <span class="n">beta</span><span class="o">=</span><span class="n">beta</span><span class="p">,</span>
+                              <span class="c1"># Kbeta=Kbeta,</span>
+                              <span class="c1"># sp2=self.sp2,</span>
+                             <span class="p">)</span>
+            <span class="k">if</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">do_timing</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">synchronize</span><span class="p">()</span>
+                <span class="n">t1</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+                <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">timing</span><span class="p">[</span><span class="s2">&quot;Force&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">excited_states</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">excitation_energies</span><span class="p">,</span> <span class="n">exc_amps</span> <span class="o">=</span> <span class="n">rcis</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span><span class="n">w</span><span class="p">,</span><span class="n">e</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">excited_states</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">rcis_grad</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span><span class="n">exc_amps</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="n">w</span><span class="p">,</span><span class="n">e</span><span class="p">,</span><span class="n">riXH</span><span class="p">,</span><span class="n">ri</span><span class="p">)</span>
+            <span class="c1"># rcis_batch(molecule,w,e,self.excited_states[1])</span>
+
+        <span class="k">if</span> <span class="n">all_terms</span><span class="p">:</span>
+            <span class="n">Etot</span><span class="p">,</span> <span class="n">Enuc</span> <span class="o">=</span> <span class="n">total_energy</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">pair_molid</span><span class="p">,</span><span class="n">EnucAB</span><span class="p">,</span> <span class="n">Eelec</span><span class="p">)</span>
+            <span class="n">Eiso</span> <span class="o">=</span> <span class="n">elec_energy_isolated_atom</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span>
+                                         <span class="n">uss</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_ss&#39;</span><span class="p">],</span>
+                                         <span class="n">upp</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;U_pp&#39;</span><span class="p">],</span>
+                                         <span class="n">gss</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_ss&#39;</span><span class="p">],</span>
+                                         <span class="n">gpp</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_pp&#39;</span><span class="p">],</span>
+                                         <span class="n">gsp</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_sp&#39;</span><span class="p">],</span>
+                                         <span class="n">gp2</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;g_p2&#39;</span><span class="p">],</span>
+                                         <span class="n">hsp</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">parameters</span><span class="p">[</span><span class="s1">&#39;h_sp&#39;</span><span class="p">])</span>
+            <span class="n">Hf</span><span class="p">,</span> <span class="n">Eiso_sum</span> <span class="o">=</span> <span class="n">heat_formation</span><span class="p">(</span><span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">nmol</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">atom_molid</span><span class="p">,</span> <span class="n">molecule</span><span class="o">.</span><span class="n">Z</span><span class="p">,</span> <span class="n">Etot</span><span class="p">,</span> <span class="n">Eiso</span><span class="p">,</span> <span class="n">flag</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Hf_flag</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">Hf</span><span class="p">,</span> <span class="n">Etot</span><span class="p">,</span> <span class="n">Eelec</span><span class="p">,</span> <span class="n">Enuc</span><span class="p">,</span> <span class="n">Eiso_sum</span><span class="p">,</span> <span class="n">EnucAB</span><span class="p">,</span> <span class="n">e_gap</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">notconverged</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1">#for computing force, Eelec.sum()+EnucAB.sum() and backward is enough</span>
+            <span class="c1">#index_add is used in total_energy and heat_formation function</span>
+            <span class="c1"># P can be used as the initialization</span>
+            <span class="k">return</span> <span class="n">Eelec</span><span class="p">,</span> <span class="n">EnucAB</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">notconverged</span></div>
+</div>
+
+
+<div class="viewcode-block" id="Force">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Force">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Force</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    get force</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">energy</span> <span class="o">=</span> <span class="n">Energy</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_graph</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;2nd_grad&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uhf</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;UHF&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eig</span> <span class="o">=</span> <span class="n">seqm_parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;eig&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">seqm_parameters</span> <span class="o">=</span> <span class="n">seqm_parameters</span>
+
+<div class="viewcode-block" id="Force.forward">
+<a class="viewcode-back" href="../../seqm.html#seqm.basics.Force.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">molecule</span><span class="p">,</span> <span class="n">learned_parameters</span><span class="o">=</span><span class="nb">dict</span><span class="p">(),</span> <span class="n">P0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">do_force</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+
+        <span class="n">analytical_gradient</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;analytical_gradient&#39;</span><span class="p">,[</span><span class="kc">False</span><span class="p">])</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">analytical_gradient</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">Hf</span><span class="p">,</span> <span class="n">Etot</span><span class="p">,</span> <span class="n">Eelec</span><span class="p">,</span> <span class="n">Enuc</span><span class="p">,</span> <span class="n">Eiso</span><span class="p">,</span> <span class="n">EnucAB</span><span class="p">,</span> <span class="n">e_gap</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">D</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">notconverged</span> <span class="o">=</span> \
+            <span class="bp">self</span><span class="o">.</span><span class="n">energy</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span> <span class="n">learned_parameters</span><span class="o">=</span><span class="n">learned_parameters</span><span class="p">,</span> <span class="n">all_terms</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">P0</span><span class="o">=</span><span class="n">P0</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">eig</span><span class="p">:</span>
+            <span class="n">e</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+            <span class="n">e_gap</span> <span class="o">=</span> <span class="n">e_gap</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">analytical_gradient</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">force</span> <span class="o">=</span> <span class="o">-</span><span class="n">molecule</span><span class="o">.</span><span class="n">ground_analytical_gradient</span>
+            <span class="k">return</span> <span class="n">force</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">D</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Hf</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Etot</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Eelec</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Enuc</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Eiso</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">e</span><span class="p">,</span> <span class="n">e_gap</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">notconverged</span>
+        <span class="c1">#L = Etot.sum()</span>
+        <span class="k">if</span> <span class="n">do_force</span><span class="p">:</span>
+            <span class="n">L</span> <span class="o">=</span> <span class="n">Hf</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">do_timing</span><span class="p">:</span> <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+            <span class="c1">#gv = [coordinates]</span>
+            <span class="c1">#gradients  = grad(L, gv,create_graph=self.create_graph)</span>
+            <span class="c1">#torch.save(D.detach(), &#39;gs_1_P_py.pt&#39;)</span>
+            <span class="n">L</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">create_graph</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">create_graph</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">do_timing</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">synchronize</span><span class="p">()</span>
+                <span class="n">t1</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+                <span class="n">molecule</span><span class="o">.</span><span class="n">const</span><span class="o">.</span><span class="n">timing</span><span class="p">[</span><span class="s2">&quot;Force&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span>
+            <span class="c1">#force = -gradients[0] </span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_graph</span><span class="p">:</span>
+                <span class="n">force</span> <span class="o">=</span> <span class="o">-</span><span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+                <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span> <span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">force</span> <span class="o">=</span> <span class="o">-</span><span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+                <span class="n">molecule</span><span class="o">.</span><span class="n">coordinates</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">force</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([])</span>
+            <span class="k">return</span> <span class="n">force</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">D</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Hf</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Etot</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Eelec</span><span class="p">,</span> <span class="n">Enuc</span><span class="p">,</span> <span class="n">Eiso</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">e</span><span class="p">,</span> <span class="n">e_gap</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">notconverged</span>
+
+
+        <span class="k">return</span> <span class="n">force</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">D</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Hf</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Etot</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Eelec</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Enuc</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">Eiso</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">e</span><span class="p">,</span> <span class="n">e_gap</span><span class="p">,</span> <span class="n">charge</span><span class="p">,</span> <span class="n">notconverged</span></div>
+</div>
+
+</pre></div>
+
+                </article>
+              
+              
+              
+              
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2025, Los Alamos National Laboratory.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.4.7.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.16.1.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
