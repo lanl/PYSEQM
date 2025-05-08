@@ -5,15 +5,15 @@ Developers & Contributors
 -------------------------------
 
 
-
+- Maksim Kulichenko, LANL
+- Guoqing Zhou, LANL
 - Vishikh Athavale, LANL
 - Nikita Fedik, LANL
-- Maksim Kulichenko, LANL
-- Sergei Tretiak, LANL
-- Anders M. N. Niklasson, LANL
 - William Colglazier, LANL
-- Guoqing Zhou, LANL
 - Martin Stöhr, LANL
+- Anders M. N. Niklasson, LANL
+- Benjamin Nebgen, LANL
+- Sergei Tretiak, LANL
 
 **Collaborating Institutions**
 
