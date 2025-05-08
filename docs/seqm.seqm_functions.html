@@ -1,0 +1,1205 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>seqm.seqm_functions package &#8212; PYSEQM 1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=29a6c3e3"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'seqm.seqm_functions';</script>
+    <link rel="author" title="About these documents" href="about.html" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1 documentation - Home"/>
+    <img src="_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1 documentation - Home"/>
+  
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="quick_start.html">
+    Quick Start
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="about.html">
+    About
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="user_guide.html">
+    User Guide
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="quick_start.html">
+    Quick Start
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="about.html">
+    About
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="user_guide.html">
+    User Guide
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"></div>
+</nav></div>
+        <div class="sidebar-primary-item">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">seqm.seqm_functions package</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="seqm-seqm-functions-package">
+<h1>seqm.seqm_functions package<a class="headerlink" href="#seqm-seqm-functions-package" title="Link to this heading">#</a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading">#</a></h2>
+</section>
+<section id="module-seqm.seqm_functions.SP2">
+<span id="seqm-seqm-functions-sp2-module"></span><h2>seqm.seqm_functions.SP2 module<a class="headerlink" href="#module-seqm.seqm_functions.SP2" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.SP2.SP2">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.SP2.</span></span><span class="sig-name descname"><span class="pre">SP2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nocc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0001</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">factor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/SP2.html#SP2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.SP2.SP2" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.cal_par">
+<span id="seqm-seqm-functions-cal-par-module"></span><h2>seqm.seqm_functions.cal_par module<a class="headerlink" href="#module-seqm.seqm_functions.cal_par" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.AIJL">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.cal_par.</span></span><span class="sig-name descname"><span class="pre">AIJL</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">Z1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">N1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">N2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">L</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#AIJL"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.AIJL" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.POIJ">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.cal_par.</span></span><span class="sig-name descname"><span class="pre">POIJ</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">L</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">D</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">FG</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#POIJ"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.POIJ" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.additive_term_rho1">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.cal_par.</span></span><span class="sig-name descname"><span class="pre">additive_term_rho1</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#additive_term_rho1"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.additive_term_rho1" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Function</span></code></p>
+<p>additive term rho1, rho1 = 1.0/(2*ad) : ad or add(,2) or d in mopac calpar.f</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.additive_term_rho1.backward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">backward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_output</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#additive_term_rho1.backward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.additive_term_rho1.backward" title="Link to this definition">#</a></dt>
+<dd><p>hsp = e^2 ( d/2 - 1/2/sqrt( 4 * D1^2 + 1/d^2))
+hsp = e^2 * (1/4) * (1/rho1 - 1/sqrt( D1^2 + rho1^2 ))
+# Atomic unit
+dhsp = (1/4) * ( rho1 / (D1^2+rho1^2)^(3/2) - 1/rho1^2 ) * drho1</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>(1/4) * D1/(D1^2+rho1^2)^(3/2) * dD1</p></li>
+</ul>
+</div></blockquote>
+<p>dhsp/drho1 = (1/4) * ( rho1 / (D1^2+rho1^2)^(3/2) - 1/rho1^2 )
+dD1/drho1 = (D1^2+rho1^2)^(3/2)/rho1^2/D - rho1/D1</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.additive_term_rho1.forward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp_ev</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">D1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#additive_term_rho1.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.additive_term_rho1.forward" title="Link to this definition">#</a></dt>
+<dd><p>hsp_ev : hsp in unit eV
+hsp_A = (s_A p_alpha_A, s_A p_alpha_A) = [mu_alpha_A, mu_alpha_A]
+hsp = [mu_pi, mu_pi]
+rho1 =  1/(2d)
+hsp = e^2 ( d/2 - 1/2/sqrt( 4 * D1^2 + 1/d^2))</p>
+<p>D1 : dipole charge separation, ( dd in mopac )
+D1: in atomic unit
+hsp in atomic units</p>
+<p>hsp_ev : shape (n_atoms,)
+D1 : shape (n_atoms,)</p>
+<p>return rho1 : additive term rho1</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.additive_term_rho2">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.cal_par.</span></span><span class="sig-name descname"><span class="pre">additive_term_rho2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#additive_term_rho2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.additive_term_rho2" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Function</span></code></p>
+<p>additive term rho2, rho2 = 1.0/(2*aq) : aq or add(,3) or q in mopac calpar.f</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.additive_term_rho2.backward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">backward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_output</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#additive_term_rho2.backward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.additive_term_rho2.backward" title="Link to this definition">#</a></dt>
+<dd><p>hpp = e^2 ( q/4 - 1/2/sqrt( 4 * D2^2 + 1/q^2) + 1/4/sqrt(8D2^2 + 1/q^2) )
+# AU
+hpp = 1/8/rho2 - 1/4/sqrt(D2^2+rho2^2) + 1/8/sqrt(2*D2^2+rho2^2)
+dhpp =  -1/8/rho2^2 drho2 + 1/4/(D2^2+rho2^2)^(3/2) * (D2*dD2 + rho2*drho2)</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>1/8/(2*D2^2+rho2^2)^(3/2) * (2*D2*DD2 + rho2 * drho2)</p></li>
+</ul>
+</div></blockquote>
+<p>dhpp/drho2 = -1/8/rho2^2 + rho2/4/(D2^2+rho2^2)^(3/2) -rho2/8/(2*D2^2+rho2^2)^(3/2)
+dD2/drho2 = - (dhpp/drho2)/(dhpp/dD2)
+dhpp/dD2 = D2/4/(D2^2+rho2^2)^(3/2) - D2/4/(2*D2^2+rho2^2)^(3/2)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.additive_term_rho2.forward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hpp_ev</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">D2</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#additive_term_rho2.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.additive_term_rho2.forward" title="Link to this definition">#</a></dt>
+<dd><p>hpp_ev : hpp in unit eV
+hpp_A = (p_alpha_A p_beta_A, p_alpha_A p_beta_A) = [Q_alpha__beta_A, Q_alpha__beta_A]
+hpp = [Q_xy, Q_xy]
+rho2 =  1/(2q)
+hpp = e^2 ( q/4 - 1/2/sqrt( 4 * D2^2 + 1/q^2) + 1/4/sqrt(8D2^2 + 1/q^2) )
+D2 : dipole charge separation, ( qq in mopac )
+D2: in atomic unit
+hspp in atomic units</p>
+<p>hpp_ev : shape (n_atoms,)
+D2 : shape (n_atoms,)</p>
+<p>return rho2 : additive term rho2</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.dd_qq">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.cal_par.</span></span><span class="sig-name descname"><span class="pre">dd_qq</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">qn</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#dd_qq"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.dd_qq" title="Link to this definition">#</a></dt>
+<dd><p>qn: pricipal quantum number for valence shell, shape (n_atoms,)
+zs : zeta_s, shape (n_atoms,)
+zp : zeta_p, shape (n_atoms,)
+return dd, qq</p>
+<blockquote>
+<div><p>dd: dipole charge separation
+qq: qutrupole charge separation</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.cal_par.dd_qqdorbitals">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.cal_par.</span></span><span class="sig-name descname"><span class="pre">dd_qqdorbitals</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">qn</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zd</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/cal_par.html#dd_qqdorbitals"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.cal_par.dd_qqdorbitals" title="Link to this definition">#</a></dt>
+<dd><p>qn: pricipal quantum number for valence shell, shape (n_atoms,)
+zs : zeta_s, shape (n_atoms,)
+zp : zeta_p, shape (n_atoms,)
+return dd, qq</p>
+<blockquote>
+<div><p>dd: dipole charge separation
+qq: qutrupole charge separation</p>
+</div></blockquote>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.check">
+<span id="seqm-seqm-functions-check-module"></span><h2>seqm.seqm_functions.check module<a class="headerlink" href="#module-seqm.seqm_functions.check" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.check.check">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.check.</span></span><span class="sig-name descname"><span class="pre">check</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'tag'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/check.html#check"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.check.check" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.check.check_dist">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.check.</span></span><span class="sig-name descname"><span class="pre">check_dist</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'name'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/check.html#check_dist"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.check.check_dist" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.check.check_gradient">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.check.</span></span><span class="sig-name descname"><span class="pre">check_gradient</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'tag'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/check.html#check_gradient"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.check.check_gradient" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.check.save">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.check.</span></span><span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'name'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/check.html#save"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.check.save" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.constants">
+<span id="seqm-seqm-functions-constants-module"></span><h2>seqm.seqm_functions.constants module<a class="headerlink" href="#module-seqm.seqm_functions.constants" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="seqm.seqm_functions.constants.Constants">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.constants.</span></span><span class="sig-name descname"><span class="pre">Constants</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">length_conversion_factor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.889762589125928</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">energy_conversion_factor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/constants.html#Constants"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.constants.Constants" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Module</span></code></p>
+<p>Constants used in seqm</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.constants.Constants.forward">
+<span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/constants.html#Constants.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.constants.Constants.forward" title="Link to this definition">#</a></dt>
+<dd><p>Define the computation performed at every call.</p>
+<p>Should be overridden by all subclasses.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Although the recipe for forward pass needs to be defined within
+this function, one should call the <code class="xref py py-class docutils literal notranslate"><span class="pre">Module</span></code> instance afterwards
+instead of this since the former takes care of running the
+registered hooks while the latter silently ignores them.</p>
+</div>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="seqm.seqm_functions.constants.ev_kcalpmol">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.constants.</span></span><span class="sig-name descname"><span class="pre">ev_kcalpmol</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">23.061</span></em><a class="headerlink" href="#seqm.seqm_functions.constants.ev_kcalpmol" title="Link to this definition">#</a></dt>
+<dd><p>in mopac the cutoff for overlap is 10 Angstrom
+Atomic units is used here
+set cutoff = 20.0 Angstrom and 20/0.529167 = 37.8</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.diag">
+<span id="seqm-seqm-functions-diag-module"></span><h2>seqm.seqm_functions.diag module<a class="headerlink" href="#module-seqm.seqm_functions.diag" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.construct_P">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diag.</span></span><span class="sig-name descname"><span class="pre">construct_P</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">e</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">v</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nocc</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#construct_P"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.construct_P" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.degen_symeig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diag.</span></span><span class="sig-name descname"><span class="pre">degen_symeig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#degen_symeig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.degen_symeig" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Function</span></code></p>
+<p>Eigensolver with custom backward for degenerate eigenvectors
+!!! ONLY APPLICABLE IF FINAL RESULT DOESN’T EXPLICITLY DEPEND</p>
+<blockquote>
+<div><p>ON DEGENERATE EIGENVECTORS !!!</p>
+</div></blockquote>
+<p>!!! BEWARE: REMOVED SANITY CHECKS FOR PERFORMANCE REASONS !!!
+Based on idea in M.F. Kasim, arXiv:2011.04366 (2020)</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.degen_symeig.backward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">backward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_eival</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_eivec</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#degen_symeig.backward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.degen_symeig.backward" title="Link to this definition">#</a></dt>
+<dd><p>Define a formula for differentiating the operation with backward mode automatic differentiation.</p>
+<p>This function is to be overridden by all subclasses.
+(Defining this function is equivalent to defining the <code class="docutils literal notranslate"><span class="pre">vjp</span></code> function.)</p>
+<p>It must accept a context <code class="xref py py-attr docutils literal notranslate"><span class="pre">ctx</span></code> as the first argument, followed by
+as many outputs as the <a class="reference internal" href="#seqm.seqm_functions.diag.degen_symeig.forward" title="seqm.seqm_functions.diag.degen_symeig.forward"><code class="xref py py-func docutils literal notranslate"><span class="pre">forward()</span></code></a> returned (None will be passed in
+for non tensor outputs of the forward function),
+and it should return as many tensors, as there were inputs to
+<a class="reference internal" href="#seqm.seqm_functions.diag.degen_symeig.forward" title="seqm.seqm_functions.diag.degen_symeig.forward"><code class="xref py py-func docutils literal notranslate"><span class="pre">forward()</span></code></a>. Each argument is the gradient w.r.t the given output,
+and each returned value should be the gradient w.r.t. the
+corresponding input. If an input is not a Tensor or is a Tensor not
+requiring grads, you can just pass None as a gradient for that input.</p>
+<p>The context can be used to retrieve tensors saved during the forward
+pass. It also has an attribute <code class="xref py py-attr docutils literal notranslate"><span class="pre">ctx.needs_input_grad</span></code> as a tuple
+of booleans representing whether each input needs gradient. E.g.,
+<a class="reference internal" href="#seqm.seqm_functions.diag.degen_symeig.backward" title="seqm.seqm_functions.diag.degen_symeig.backward"><code class="xref py py-func docutils literal notranslate"><span class="pre">backward()</span></code></a> will have <code class="docutils literal notranslate"><span class="pre">ctx.needs_input_grad[0]</span> <span class="pre">=</span> <span class="pre">True</span></code> if the
+first input to <a class="reference internal" href="#seqm.seqm_functions.diag.degen_symeig.forward" title="seqm.seqm_functions.diag.degen_symeig.forward"><code class="xref py py-func docutils literal notranslate"><span class="pre">forward()</span></code></a> needs gradient computed w.r.t. the
+output.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.degen_symeig.forward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">A</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#degen_symeig.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.degen_symeig.forward" title="Link to this definition">#</a></dt>
+<dd><p>Define the forward of the custom autograd Function.</p>
+<p>This function is to be overridden by all subclasses.
+There are two ways to define forward:</p>
+<p>Usage 1 (Combined forward and ctx):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>It must accept a context ctx as the first argument, followed by any
+number of arguments (tensors or other types).</p></li>
+<li><p>See <span class="xref std std-ref">combining-forward-context</span> for more details</p></li>
+</ul>
+<p>Usage 2 (Separate forward and ctx):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">pass</span>
+
+<span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">setup_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">inputs</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">output</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>The forward no longer accepts a ctx argument.</p></li>
+<li><p>Instead, you must also override the <code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.autograd.Function.setup_context()</span></code>
+staticmethod to handle setting up the <code class="docutils literal notranslate"><span class="pre">ctx</span></code> object.
+<code class="docutils literal notranslate"><span class="pre">output</span></code> is the output of the forward, <code class="docutils literal notranslate"><span class="pre">inputs</span></code> are a Tuple of inputs
+to the forward.</p></li>
+<li><p>See <span class="xref std std-ref">extending-autograd</span> for more details</p></li>
+</ul>
+<p>The context can be used to store arbitrary data that can be then
+retrieved during the backward pass. Tensors should not be stored
+directly on <cite>ctx</cite> (though this is not currently enforced for
+backward compatibility). Instead, tensors should be saved either with
+<code class="xref py py-func docutils literal notranslate"><span class="pre">ctx.save_for_backward()</span></code> if they are intended to be used in
+<code class="docutils literal notranslate"><span class="pre">backward</span></code> (equivalently, <code class="docutils literal notranslate"><span class="pre">vjp</span></code>) or <code class="xref py py-func docutils literal notranslate"><span class="pre">ctx.save_for_forward()</span></code>
+if they are intended to be used for in <code class="docutils literal notranslate"><span class="pre">jvp</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.pseudo_diag">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diag.</span></span><span class="sig-name descname"><span class="pre">pseudo_diag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">C</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">E</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nheavyatom</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nH</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nocc</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#pseudo_diag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.pseudo_diag" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.pytorch_symeig">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diag.</span></span><span class="sig-name descname"><span class="pre">pytorch_symeig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">A</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#pytorch_symeig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.pytorch_symeig" title="Link to this definition">#</a></dt>
+<dd><p>Effectively only a wrapper around pytorch’s standard eigh
+(for testing, sanity checks, and comparison)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.sym_eig_trunc">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diag.</span></span><span class="sig-name descname"><span class="pre">sym_eig_trunc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nheavyatom</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nH</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nocc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eig_only</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#sym_eig_trunc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.sym_eig_trunc" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diag.sym_eig_trunc1">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diag.</span></span><span class="sig-name descname"><span class="pre">sym_eig_trunc1</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nheavyatom</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nH</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nocc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eig_only</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diag.html#sym_eig_trunc1"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diag.sym_eig_trunc1" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.diat_overlap">
+<span id="seqm-seqm-functions-diat-overlap-module"></span><h2>seqm.seqm_functions.diat_overlap module<a class="headerlink" href="#module-seqm.seqm_functions.diat_overlap" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diat_overlap.SET">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diat_overlap.</span></span><span class="sig-name descname"><span class="pre">SET</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jcall</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">z1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">z2</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diat_overlap.html#SET"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diat_overlap.SET" title="Link to this definition">#</a></dt>
+<dd><p>get the A integrals and B integrals for diatom_overlap_matrix</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diat_overlap.aintgs">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diat_overlap.</span></span><span class="sig-name descname"><span class="pre">aintgs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jcall</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diat_overlap.html#aintgs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diat_overlap.aintgs" title="Link to this definition">#</a></dt>
+<dd><p>A integrals for diatom_overlap_matrix</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diat_overlap.bintgs">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diat_overlap.</span></span><span class="sig-name descname"><span class="pre">bintgs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jcall</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diat_overlap.html#bintgs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diat_overlap.bintgs" title="Link to this definition">#</a></dt>
+<dd><p>B integrals for diatom_overlap_matrix</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.diat_overlap.diatom_overlap_matrix">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.diat_overlap.</span></span><span class="sig-name descname"><span class="pre">diatom_overlap_matrix</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ni</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zeta_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zeta_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qn_int</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/diat_overlap.html#diatom_overlap_matrix"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.diat_overlap.diatom_overlap_matrix" title="Link to this definition">#</a></dt>
+<dd><p>compute the overlap matrix for each pair</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.energy">
+<span id="seqm-seqm-functions-energy-module"></span><h2>seqm.seqm_functions.energy module<a class="headerlink" href="#module-seqm.seqm_functions.energy" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.energy.elec_energy">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.energy.</span></span><span class="sig-name descname"><span class="pre">elec_energy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Hcore</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">doTriu</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/energy.html#elec_energy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.energy.elec_energy" title="Link to this definition">#</a></dt>
+<dd><p>Get the electronic energy
+P: density matrix, shape (nmol, molsize*4, molsize*4)
+F: fock matrix, shape same as P
+Hcore: Hcore matrix, shape (nmol, 4*molsize, 4*molsize)
+return Eelec : electronic energy, shape (nmol,)
+P, F: full, has upper and lower triangle
+Hcore : only have upper triangle as constructed from hcore.py</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.energy.elec_energy_isolated_atom">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.energy.</span></span><span class="sig-name descname"><span class="pre">elec_energy_isolated_atom</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">const</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">upp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/energy.html#elec_energy_isolated_atom"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.energy.elec_energy_isolated_atom" title="Link to this definition">#</a></dt>
+<dd><p>electrionc energy for a single atom
+#eisol in block.f or in calpar.f
+return Eiso, shape (natoms,)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.energy.elec_energy_xl">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.energy.</span></span><span class="sig-name descname"><span class="pre">elec_energy_xl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">D</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Hcore</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/energy.html#elec_energy_xl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.energy.elec_energy_xl" title="Link to this definition">#</a></dt>
+<dd><p>XL_BOMD
+electrionic energy is defined as:
+E(D,P) = (2*tr(Hcore*D) + tr((2D-P)*G(P)))/2.0</p>
+<blockquote>
+<div><p>= tr(D*F)-0.5*Tr((F-Hcore)*P)</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.energy.heat_formation">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.energy.</span></span><span class="sig-name descname"><span class="pre">heat_formation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">const</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atom_molid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Etot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Eiso</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flag</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/energy.html#heat_formation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.energy.heat_formation" title="Link to this definition">#</a></dt>
+<dd><p>get the heat of formation for each molecule
+return Hf : shape (nmol,)
+#heat of formation : delta H_f^mol
+#electronic energies of isolated atom: E_el^A
+#experimental heat of formation of isolatied atom : delta_H_f^A
+# delta H_f^mol = E_tot^mol - sum_A E_el^A + sum_A delta_H_f^A
+#flag: True, return Hf = Etot - Eiso_sum + eheat_sum</p>
+<blockquote>
+<div><p>False, return Etot - Eiso_sum</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.energy.pair_nuclear_energy">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.energy.</span></span><span class="sig-name descname"><span class="pre">pair_nuclear_energy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">const</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ni</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho0xi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho0xj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">alp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gam</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">method</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'AM1'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameters</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/energy.html#pair_nuclear_energy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.energy.pair_nuclear_energy" title="Link to this definition">#</a></dt>
+<dd><p>Compute Nuclear Energy
+method=’MNDO’, ‘AM1’, ‘PM3’
+nmol : number of molecules
+pair_molid : molecule id for each pair, shape (npairs,)
+ni, nj: atomic number, shape (npairs,)
+rij: pair distance in atomic units, shape (npairs,)
+gam : (s^A s^A, s^B, s^B) = w[…,0,0], shape(npairs,): w ==&gt; second return vaule of hcore
+parameters : tuple, (alpha,) or (alpha, K, L, M)
+alpha : shape (natoms,)
+K,L,M : guassian terms in PM3 or AM1, shape (natoms, 2 or 4)
+return nuclear interaction energy for each molecule, (nmol, )</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.energy.total_energy">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.energy.</span></span><span class="sig-name descname"><span class="pre">total_energy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pair_molid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">EnucAB</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Eelec</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/energy.html#total_energy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.energy.total_energy" title="Link to this definition">#</a></dt>
+<dd><p>total energy for each molecule
+total energy E_tot^mol= Eelec + sum{pair A,B,A&lt;B} E_nuc^AB
+#nuclear energy between pair of atom A and B: E_nuc^AB</p>
+<p>as index_add is expensive, there is no need to do this during training
+EnucAB :computed from pair_nuclear_energy, shape (npairs,)
+pair_molid : molecule id for each pair
+Eelec : electronic energy for each molecule, computed from elec_energy, shape (nmol)</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.fock">
+<span id="seqm-seqm-functions-fock-module"></span><h2>seqm.seqm_functions.fock module<a class="headerlink" href="#module-seqm.seqm_functions.fock" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.fock.fock">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.fock.</span></span><span class="sig-name descname"><span class="pre">fock</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/fock.html#fock"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.fock.fock" title="Link to this definition">#</a></dt>
+<dd><p>construct fock matrix</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.hcore">
+<span id="seqm-seqm-functions-hcore-module"></span><h2>seqm.seqm_functions.hcore module<a class="headerlink" href="#module-seqm.seqm_functions.hcore" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.hcore.hcore">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.hcore.</span></span><span class="sig-name descname"><span class="pre">hcore</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">molecule</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">doTETCI</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/hcore.html#hcore"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.hcore.hcore" title="Link to this definition">#</a></dt>
+<dd><p>Get Hcore and two electron and two center integrals</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.pack">
+<span id="seqm-seqm-functions-pack-module"></span><h2>seqm.seqm_functions.pack module<a class="headerlink" href="#module-seqm.seqm_functions.pack" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.pack.pack">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.pack.</span></span><span class="sig-name descname"><span class="pre">pack</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/pack.html#pack"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.pack.pack" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.pack.packone">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.pack.</span></span><span class="sig-name descname"><span class="pre">packone</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nho</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">norb</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/pack.html#packone"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.pack.packone" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.pack.unpack">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.pack.</span></span><span class="sig-name descname"><span class="pre">unpack</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">size</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/pack.html#unpack"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.pack.unpack" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.pack.unpackone">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.pack.</span></span><span class="sig-name descname"><span class="pre">unpackone</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nho</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">size</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/pack.html#unpackone"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.pack.unpackone" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.parameters">
+<span id="seqm-seqm-functions-parameters-module"></span><h2>seqm.seqm_functions.parameters module<a class="headerlink" href="#module-seqm.seqm_functions.parameters" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.parameters.PWCCT">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.parameters.</span></span><span class="sig-name descname"><span class="pre">PWCCT</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">method</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'MNDO'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">elements</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[1,</span> <span class="pre">6,</span> <span class="pre">7,</span> <span class="pre">8]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameters</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">['U_ss',</span> <span class="pre">'U_pp',</span> <span class="pre">'zeta_s',</span> <span class="pre">'zeta_p',</span> <span class="pre">'beta_s',</span> <span class="pre">'beta_p',</span> <span class="pre">'g_ss',</span> <span class="pre">'g_sp',</span> <span class="pre">'g_pp',</span> <span class="pre">'g_p2',</span> <span class="pre">'h_sp',</span> <span class="pre">'alpha']</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">root_dir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'./params/MOPAC/'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/parameters.html#PWCCT"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.parameters.PWCCT" title="Link to this definition">#</a></dt>
+<dd><p>loads the diatomic core-core paramters for PM6
+returns them in q</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.parameters.params">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.parameters.</span></span><span class="sig-name descname"><span class="pre">params</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">method</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'MNDO'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">elements</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[1,</span> <span class="pre">6,</span> <span class="pre">7,</span> <span class="pre">8]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameters</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">['U_ss',</span> <span class="pre">'U_pp',</span> <span class="pre">'zeta_s',</span> <span class="pre">'zeta_p',</span> <span class="pre">'beta_s',</span> <span class="pre">'beta_p',</span> <span class="pre">'g_ss',</span> <span class="pre">'g_sp',</span> <span class="pre">'g_pp',</span> <span class="pre">'g_p2',</span> <span class="pre">'h_sp',</span> <span class="pre">'alpha']</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">root_dir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'./params/MOPAC/'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/parameters.html#params"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.parameters.params" title="Link to this definition">#</a></dt>
+<dd><p>load parameters from AM1 PM3 MNDO</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.scf_loop">
+<span id="seqm-seqm-functions-scf-loop-module"></span><h2>seqm.seqm_functions.scf_loop module<a class="headerlink" href="#module-seqm.seqm_functions.scf_loop" title="Link to this heading">#</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.SCF">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">SCF</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">scf_converger</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[2]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_backward_eps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.01</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#SCF"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.SCF" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Function</span></code></p>
+<p>scf loop
+forward and backward
+check function scf_loop for details</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.SCF.backward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">backward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#SCF.backward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.SCF.backward" title="Link to this definition">#</a></dt>
+<dd><p>custom backward of SCF loop</p>
+<p>CURRENTLY DOES NOT SUPPORT DOUBLE-BACKWARD!
+(irrelevant for dE^2/dx^2 or dy/dparam, if y is no derivative itself like forces)
+FOR CORRECT SECOND DERIVATIVES OF DENSITY MATRIX, USE DIRECT BACKPROP.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.SCF.forward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">forward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atom_molid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pair_molid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#SCF.forward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.SCF.forward" title="Link to this definition">#</a></dt>
+<dd><p>Define the forward of the custom autograd Function.</p>
+<p>This function is to be overridden by all subclasses.
+There are two ways to define forward:</p>
+<p>Usage 1 (Combined forward and ctx):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>It must accept a context ctx as the first argument, followed by any
+number of arguments (tensors or other types).</p></li>
+<li><p>See <span class="xref std std-ref">combining-forward-context</span> for more details</p></li>
+</ul>
+<p>Usage 2 (Separate forward and ctx):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">pass</span>
+
+<span class="nd">@staticmethod</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">setup_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">inputs</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">output</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>The forward no longer accepts a ctx argument.</p></li>
+<li><p>Instead, you must also override the <code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.autograd.Function.setup_context()</span></code>
+staticmethod to handle setting up the <code class="docutils literal notranslate"><span class="pre">ctx</span></code> object.
+<code class="docutils literal notranslate"><span class="pre">output</span></code> is the output of the forward, <code class="docutils literal notranslate"><span class="pre">inputs</span></code> are a Tuple of inputs
+to the forward.</p></li>
+<li><p>See <span class="xref std std-ref">extending-autograd</span> for more details</p></li>
+</ul>
+<p>The context can be used to store arbitrary data that can be then
+retrieved during the backward pass. Tensors should not be stored
+directly on <cite>ctx</cite> (though this is not currently enforced for
+backward compatibility). Instead, tensors should be saved either with
+<code class="xref py py-func docutils literal notranslate"><span class="pre">ctx.save_for_backward()</span></code> if they are intended to be used in
+<code class="docutils literal notranslate"><span class="pre">backward</span></code> (equivalently, <code class="docutils literal notranslate"><span class="pre">vjp</span></code>) or <code class="xref py py-func docutils literal notranslate"><span class="pre">ctx.save_for_forward()</span></code>
+if they are intended to be used for in <code class="docutils literal notranslate"><span class="pre">jvp</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.SCF0">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">SCF0</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">scf_converger</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[2]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_backward_eps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.01</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#SCF0"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.SCF0" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#seqm.seqm_functions.scf_loop.SCF" title="seqm.seqm_functions.scf_loop.SCF"><code class="xref py py-class docutils literal notranslate"><span class="pre">SCF</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.SCF0.backward">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">backward</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grad1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#SCF0.backward"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.SCF0.backward" title="Link to this definition">#</a></dt>
+<dd><p>custom backward of SCF loop</p>
+<p>CURRENTLY DOES NOT SUPPORT DOUBLE-BACKWARD!
+(irrelevant for dE^2/dx^2 or dy/dparam, if y is no derivative itself like forces)
+FOR CORRECT SECOND DERIVATIVES OF DENSITY MATRIX, USE DIRECT BACKPROP.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.fixed_point_anderson">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">fixed_point_anderson</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fp_fun</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">u0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lam</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0001</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">beta</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#fixed_point_anderson"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.fixed_point_anderson" title="Link to this definition">#</a></dt>
+<dd><p>Anderson acceleration for fixed point solver adapted from
+<a class="reference external" href="http://implicit-layers-tutorial.org/deep_equilibrium_models">http://implicit-layers-tutorial.org/deep_equilibrium_models</a></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>fp_fun</strong> (<em>callable</em>) – function defining fixed point solution, i.e., <code class="docutils literal notranslate"><span class="pre">fp_fun(u)</span> <span class="pre">=</span> <span class="pre">u</span></code></p></li>
+<li><p><strong>u0</strong> (<em>array-/Tensor-like</em>) – initial guess for fixed point</p></li>
+<li><p><strong>lam</strong> (<em>float</em>) – regularization for solving linear system</p></li>
+<li><p><strong>beta</strong> (<em>float</em>) – mixing parameter</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>u_conv</strong> – fixed point solution satisfying <code class="docutils literal notranslate"><span class="pre">fp_fun(u_conv)</span> <span class="pre">=</span> <span class="pre">u_conv</span></code></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>array-/Tensor-like</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_forward0">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_forward0</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">alpha</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_forward0"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_forward0" title="Link to this definition">#</a></dt>
+<dd><p>alpha : mixing parameters, alpha=0.0, directly take the new density matrix
+backward is for testing purpose, default is False
+if want to test scf backward directly through the loop in this function, turn backward to be True</p>
+<p>INPUT:
+M: core part of Fock matrix
+w: 2c-2e integrals (s,p)
+W: some integrals in PM6. zero in PM3 and PM6_SP.)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_forward0_u">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_forward0_u</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">alpha</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_forward0_u"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_forward0_u" title="Link to this definition">#</a></dt>
+<dd><p>alpha : mixing parameters, alpha=0.0, directly take the new density matrix
+backward is for testing purpose, default is False
+if want to test scf backward directly through the loop in this function, turn backward to be True</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_forward1">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_forward1</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_converger</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[1,</span> <span class="pre">0.0,</span> <span class="pre">0.0,</span> <span class="pre">1]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_forward1"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_forward1" title="Link to this definition">#</a></dt>
+<dd><p>adaptive mixing algorithm, see cnvg.f</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_forward1_u">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_forward1_u</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_converger</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[1,</span> <span class="pre">0.0,</span> <span class="pre">0.0,</span> <span class="pre">1]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_forward1_u"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_forward1_u" title="Link to this definition">#</a></dt>
+<dd><p>adaptive mixing algorithm, see cnvg.f</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_forward2">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_forward2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_forward2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_forward2" title="Link to this definition">#</a></dt>
+<dd><p>adaptive mixing algorithm, see cnvg.f
+combine with pulay converger
+#check mopac for which P is stored: P constructed from fock subroutine, or P from pulay algorithm</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_forward3">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_forward3</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">M</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">W_pm6</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHydro</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nSuperHeavy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nOccMO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nmol</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molsize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maskd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xl_bomd_params</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_forward3"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_forward3" title="Link to this definition">#</a></dt>
+<dd><p>DM scf optimization using KSA
+$$$ probably, not properly optimized for batches.
+backward is for testing purpose, default is False
+if want to test scf backward directly through the loop in this function, turn backward to be True</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.scf_loop.scf_loop">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.scf_loop.</span></span><span class="sig-name descname"><span class="pre">scf_loop</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">molecule</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0001</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">P</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp2</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_converger</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[1]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eig</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_backward</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scf_backward_eps</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.01</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/scf_loop.html#scf_loop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.scf_loop.scf_loop" title="Link to this definition">#</a></dt>
+<dd><p>SCF loop
+# check hcore.py for the details of arguments
+eps : convergence criteria for density matrix on density matrix
+P : if provided, will be used as initial density matrix in scf loop
+return : F, e, P, Hcore, w, v</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.two_elec_two_center_int">
+<span id="seqm-seqm-functions-two-elec-two-center-int-module"></span><h2>seqm.seqm_functions.two_elec_two_center_int module<a class="headerlink" href="#module-seqm.seqm_functions.two_elec_two_center_int" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.two_elec_two_center_int.GetSlaterCondonParameter">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.two_elec_two_center_int.</span></span><span class="sig-name descname"><span class="pre">GetSlaterCondonParameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">K</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">NA</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">EA</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">NB</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">EB</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">NC</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">EC</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ND</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ED</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/two_elec_two_center_int.html#GetSlaterCondonParameter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.two_elec_two_center_int.GetSlaterCondonParameter" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.two_elec_two_center_int.binom">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.two_elec_two_center_int.</span></span><span class="sig-name descname"><span class="pre">binom</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">b</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/two_elec_two_center_int.html#binom"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.two_elec_two_center_int.binom" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.two_elec_two_center_int.rotate">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.two_elec_two_center_int.</span></span><span class="sig-name descname"><span class="pre">rotate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ni</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tore</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">da</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qa</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dpa</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dpb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dsa</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dsb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dda</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ddb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho0a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho0b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho1a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho1b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho2a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho2b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho3a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho3b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho4a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho4b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho5a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho5b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho6a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho6b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">diadia</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho2ad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho2bd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho_corea</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho_coreb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cutoff</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10000000000.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/two_elec_two_center_int.html#rotate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.two_elec_two_center_int.rotate" title="Link to this definition">#</a></dt>
+<dd><p>rotate the two elecron two center integrals from local frame to molecule frame</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.two_elec_two_center_int.two_elec_two_center_int">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.two_elec_two_center_int.</span></span><span class="sig-name descname"><span class="pre">two_elec_two_center_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">const</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idxj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ni</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rij</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Z</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zetad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gss</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gp2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hsp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">F0SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">G2SD</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho_core</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">alpha</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chi</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/two_elec_two_center_int.html#two_elec_two_center_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.two_elec_two_center_int.two_elec_two_center_int" title="Link to this definition">#</a></dt>
+<dd><p>two electron two center integrals in molecule frame</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions.two_elec_two_center_int_local_frame">
+<span id="seqm-seqm-functions-two-elec-two-center-int-local-frame-module"></span><h2>seqm.seqm_functions.two_elec_two_center_int_local_frame module<a class="headerlink" href="#module-seqm.seqm_functions.two_elec_two_center_int_local_frame" title="Link to this heading">#</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="seqm.seqm_functions.two_elec_two_center_int_local_frame.two_elec_two_center_int_local_frame">
+<span class="sig-prename descclassname"><span class="pre">seqm.seqm_functions.two_elec_two_center_int_local_frame.</span></span><span class="sig-name descname"><span class="pre">two_elec_two_center_int_local_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ni</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">r0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tore</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">da0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">db0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qa0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qb0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho0a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho0b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho1a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho1b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho2a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rho2b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">themethod</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/seqm/seqm_functions/two_elec_two_center_int_local_frame.html#two_elec_two_center_int_local_frame"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#seqm.seqm_functions.two_elec_two_center_int_local_frame.two_elec_two_center_int_local_frame" title="Link to this definition">#</a></dt>
+<dd><p>two electron two center integrals in local frame for each pair</p>
+</dd></dl>
+
+</section>
+<section id="module-seqm.seqm_functions">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-seqm.seqm_functions" title="Link to this heading">#</a></h2>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#submodules">Submodules</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.SP2">seqm.seqm_functions.SP2 module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.SP2.SP2"><code class="docutils literal notranslate"><span class="pre">SP2()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.cal_par">seqm.seqm_functions.cal_par module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.AIJL"><code class="docutils literal notranslate"><span class="pre">AIJL()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.POIJ"><code class="docutils literal notranslate"><span class="pre">POIJ()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.additive_term_rho1"><code class="docutils literal notranslate"><span class="pre">additive_term_rho1</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.additive_term_rho1.backward"><code class="docutils literal notranslate"><span class="pre">additive_term_rho1.backward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.additive_term_rho1.forward"><code class="docutils literal notranslate"><span class="pre">additive_term_rho1.forward()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.additive_term_rho2"><code class="docutils literal notranslate"><span class="pre">additive_term_rho2</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.additive_term_rho2.backward"><code class="docutils literal notranslate"><span class="pre">additive_term_rho2.backward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.additive_term_rho2.forward"><code class="docutils literal notranslate"><span class="pre">additive_term_rho2.forward()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.dd_qq"><code class="docutils literal notranslate"><span class="pre">dd_qq()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.cal_par.dd_qqdorbitals"><code class="docutils literal notranslate"><span class="pre">dd_qqdorbitals()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.check">seqm.seqm_functions.check module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.check.check"><code class="docutils literal notranslate"><span class="pre">check()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.check.check_dist"><code class="docutils literal notranslate"><span class="pre">check_dist()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.check.check_gradient"><code class="docutils literal notranslate"><span class="pre">check_gradient()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.check.save"><code class="docutils literal notranslate"><span class="pre">save()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.constants">seqm.seqm_functions.constants module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.constants.Constants"><code class="docutils literal notranslate"><span class="pre">Constants</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.constants.Constants.forward"><code class="docutils literal notranslate"><span class="pre">Constants.forward()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.constants.ev_kcalpmol"><code class="docutils literal notranslate"><span class="pre">ev_kcalpmol</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.diag">seqm.seqm_functions.diag module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.construct_P"><code class="docutils literal notranslate"><span class="pre">construct_P()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.degen_symeig"><code class="docutils literal notranslate"><span class="pre">degen_symeig</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.degen_symeig.backward"><code class="docutils literal notranslate"><span class="pre">degen_symeig.backward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.degen_symeig.forward"><code class="docutils literal notranslate"><span class="pre">degen_symeig.forward()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.pseudo_diag"><code class="docutils literal notranslate"><span class="pre">pseudo_diag()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.pytorch_symeig"><code class="docutils literal notranslate"><span class="pre">pytorch_symeig()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.sym_eig_trunc"><code class="docutils literal notranslate"><span class="pre">sym_eig_trunc()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diag.sym_eig_trunc1"><code class="docutils literal notranslate"><span class="pre">sym_eig_trunc1()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.diat_overlap">seqm.seqm_functions.diat_overlap module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diat_overlap.SET"><code class="docutils literal notranslate"><span class="pre">SET()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diat_overlap.aintgs"><code class="docutils literal notranslate"><span class="pre">aintgs()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diat_overlap.bintgs"><code class="docutils literal notranslate"><span class="pre">bintgs()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.diat_overlap.diatom_overlap_matrix"><code class="docutils literal notranslate"><span class="pre">diatom_overlap_matrix()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.energy">seqm.seqm_functions.energy module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.energy.elec_energy"><code class="docutils literal notranslate"><span class="pre">elec_energy()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.energy.elec_energy_isolated_atom"><code class="docutils literal notranslate"><span class="pre">elec_energy_isolated_atom()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.energy.elec_energy_xl"><code class="docutils literal notranslate"><span class="pre">elec_energy_xl()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.energy.heat_formation"><code class="docutils literal notranslate"><span class="pre">heat_formation()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.energy.pair_nuclear_energy"><code class="docutils literal notranslate"><span class="pre">pair_nuclear_energy()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.energy.total_energy"><code class="docutils literal notranslate"><span class="pre">total_energy()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.fock">seqm.seqm_functions.fock module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.fock.fock"><code class="docutils literal notranslate"><span class="pre">fock()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.hcore">seqm.seqm_functions.hcore module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.hcore.hcore"><code class="docutils literal notranslate"><span class="pre">hcore()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.pack">seqm.seqm_functions.pack module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.pack.pack"><code class="docutils literal notranslate"><span class="pre">pack()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.pack.packone"><code class="docutils literal notranslate"><span class="pre">packone()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.pack.unpack"><code class="docutils literal notranslate"><span class="pre">unpack()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.pack.unpackone"><code class="docutils literal notranslate"><span class="pre">unpackone()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.parameters">seqm.seqm_functions.parameters module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.parameters.PWCCT"><code class="docutils literal notranslate"><span class="pre">PWCCT()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.parameters.params"><code class="docutils literal notranslate"><span class="pre">params()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.scf_loop">seqm.seqm_functions.scf_loop module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.SCF"><code class="docutils literal notranslate"><span class="pre">SCF</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.SCF.backward"><code class="docutils literal notranslate"><span class="pre">SCF.backward()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.SCF.forward"><code class="docutils literal notranslate"><span class="pre">SCF.forward()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.SCF0"><code class="docutils literal notranslate"><span class="pre">SCF0</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.SCF0.backward"><code class="docutils literal notranslate"><span class="pre">SCF0.backward()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.fixed_point_anderson"><code class="docutils literal notranslate"><span class="pre">fixed_point_anderson()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_forward0"><code class="docutils literal notranslate"><span class="pre">scf_forward0()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_forward0_u"><code class="docutils literal notranslate"><span class="pre">scf_forward0_u()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_forward1"><code class="docutils literal notranslate"><span class="pre">scf_forward1()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_forward1_u"><code class="docutils literal notranslate"><span class="pre">scf_forward1_u()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_forward2"><code class="docutils literal notranslate"><span class="pre">scf_forward2()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_forward3"><code class="docutils literal notranslate"><span class="pre">scf_forward3()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.scf_loop.scf_loop"><code class="docutils literal notranslate"><span class="pre">scf_loop()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.two_elec_two_center_int">seqm.seqm_functions.two_elec_two_center_int module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.two_elec_two_center_int.GetSlaterCondonParameter"><code class="docutils literal notranslate"><span class="pre">GetSlaterCondonParameter()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.two_elec_two_center_int.binom"><code class="docutils literal notranslate"><span class="pre">binom()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.two_elec_two_center_int.rotate"><code class="docutils literal notranslate"><span class="pre">rotate()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.two_elec_two_center_int.two_elec_two_center_int"><code class="docutils literal notranslate"><span class="pre">two_elec_two_center_int()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions.two_elec_two_center_int_local_frame">seqm.seqm_functions.two_elec_two_center_int_local_frame module</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#seqm.seqm_functions.two_elec_two_center_int_local_frame.two_elec_two_center_int_local_frame"><code class="docutils literal notranslate"><span class="pre">two_elec_two_center_int_local_frame()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-seqm.seqm_functions">Module contents</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2025, Los Alamos National Laboratory.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.4.7.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.16.1.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
