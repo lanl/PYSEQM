@@ -3,7 +3,10 @@ name: Deploy Sphinx Docs
 on:
   push:
     branches:
-      - colglazier
+      - master
+    paths:
+      - 'docs/**'       # only trigger when docs/ changes
+      - '.github/workflows/deploy-docs.yml'
 
 jobs:
   build:

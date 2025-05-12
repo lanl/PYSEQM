@@ -2,7 +2,10 @@ name: Deploy Sphinx Docs to GitHub Pages
 
 on:
   push:
-    branches: ["colglazier"]
+    branches: ["master"]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/jekyll-gh-pages.yml'
 
   workflow_dispatch:
 
