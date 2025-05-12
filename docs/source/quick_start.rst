@@ -7,7 +7,7 @@ Quickstart
 
 
 
-This quickstart is a high-level introduction on how to get started using PySEQM. 
+This quickstart is a high-level introduction on how to get started with using PySEQM. 
 
 For full examples, please check out our `GitHub repository <https://github.com/lanl/pyseqm>`_ and the `examples directory <https://github.com/lanl/pyseqm/tree/main/examples>`_.
 
@@ -15,23 +15,20 @@ For full examples, please check out our `GitHub repository <https://github.com/l
 
 
 
-Excited States Calculation
+SCF and Excited State Calculations
 ------------------------------
 
-Once initialized, a SCF calculation can be run directly to compute total energy:
+Once initialized, an SCF calculation can be run directly to compute total energy:
 
 .. code-block:: python
 
 
 
    import torch
-   from seqm.seqm_functions import anal_grad
    from seqm.seqm_functions.constants import Constants
    from seqm.Molecule import Molecule
    from seqm.ElectronicStructure import Electronic_Structure
    from seqm.seqm_functions.read_xyz import read_xyz
-   import time
-   import warnings
 
 
    torch.set_default_dtype(torch.float64)
@@ -48,7 +45,7 @@ Set the floating point precision to 64 bit and set device to GPU.
 
 
 
-   species, coordinates = read_xyz(['../../data.xyz'])
+   species, coordinates = read_xyz(['./data.xyz'])
 
    species = torch.as_tensor(species, dtype=torch.int64, device=device)[:]
    coordinates = torch.tensor(coordinates, device=device)[:]
@@ -78,11 +75,11 @@ User-defined parameters for calculations are set using the seqm_parameters dicti
 
 **method:** Austin Model 1
 
-**scf_eps:** If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.
+**scf_eps:** If the energy change between two SCF steps is smaller than this value, then SCF is converged.
 
-**scf_converger:** Converger used for scf loop.
+**scf_converger:** Converger used for SCF.
 
-**sp2:** Planarity correction on/off, threshold.
+**sp2:** 
 
 **elements:** Atomic numbers in the data from species.
 
@@ -113,27 +110,26 @@ Sends all information collected so far to the GPU and runs the calculation.
 Molecular Dynamics
 ----------------------
 
-You can run molecular dynamics using Born-Oppenheimer or Extended-Lagrangian BOMD:
+You can run molecular dynamics using Born-Oppenheimer Molecular Dynamics (BOMD) or Extended-Lagrangian BOMD:
 
 .. code-block:: python
 
    import torch
    from seqm.seqm_functions.constants import Constants
    from seqm.Molecule import Molecule
-   from seqm.MolecularDynamics import Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
+   from seqm.MolecularDynamics import Molecular_Dynamics_Basic
    from seqm.seqm_functions.read_xyz import read_xyz
-   import warnings
 
    torch.set_default_dtype(torch.float64)
    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-Add import import statements for PyTorch, PySEQM and its seqm modules.
-Set the float size to 64 for more memory and set device to GPU.
+Add import statements for PyTorch, and the relevant seqm modules.
+Set the datatype to float64 for calculations in double precision and set device to GPU.
 
 .. code-block:: python
 
-   species, coordinates = read_xyz(['../../data.xyz'])
+   species, coordinates = read_xyz(['./data.xyz'])
 
    species = torch.as_tensor(species, dtype=torch.int64, device=device)[:]
    coordinates = torch.tensor(coordinates, device=device)[:]
@@ -153,27 +149,10 @@ Load data in xyz form collecting species and coordinates and move both of them t
       'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
-      'eig': True
    }
 
 
 User-defined parameters for calculations are set using the seqm_parameters dictionary.
-
-**method:** Austin Model 1
-
-**scf_eps:** If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.
-
-**scf_converger:** Converger used for scf loop.
-
-**sp2:** Planarity correction on/off, threshold.
-
-**elements:** Atomic numbers in the data from species.
-
-**learned:** Learned parameters name list.
-
-**pair_outer_cutoff:** The value for how far apart two atoms can be before their interaction is ignored.
-
-**eig:** Whether or not to diagonalize the Fock matrix.
 
 .. code-block:: python
 
@@ -183,11 +162,10 @@ User-defined parameters for calculations are set using the seqm_parameters dicti
    'molid': [0], 
    'thermo': 1, 
    'dump': 1, 
-   'prefix': 
-   '../../Outputs_location'
+   'prefix': '../../Outputs_location'
    }
 
-Set the molecule ID to allow simulation of multiple molecules by passing different IDs.
+The 'molid' key takes a list as the value. This list should contain the indices of the molecules on which MD has to be run, if multiple molecules have been given as input.
 
 xxx
 
