@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Features &#8212; PYSEQM 1 documentation</title>
+    <title>Features &#8212; PYSEQM 1.0 documentation</title>
   
   
   
@@ -39,7 +39,7 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="_static/documentation_options.js?v=29a6c3e3"></script>
+    <script src="_static/documentation_options.js?v=f2a433a1"></script>
     <script src="_static/doctools.js?v=9bcbadda"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
@@ -118,8 +118,8 @@
       
     
     
-    <img src="_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1 documentation - Home"/>
-    <img src="_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1 documentation - Home"/>
+    <img src="_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
   
   
 </a></div>
@@ -358,8 +358,11 @@
                   
   <section id="features">
 <h1>Features<a class="headerlink" href="#features" title="Link to this heading">#</a></h1>
-<p>PySEQM can do take in data in eithere a .xyz file or in vector formate.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([</span><span class="s1">&#39;../../data.xyz&#39;</span><span class="p">])</span>
+<p>PySEQM can take in data in either a .xyz file or in vector format.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([</span><span class="s1">&#39;../../data_one.xyz&#39;</span><span class="p">,</span> <span class="s1">&#39;../../data_two.xyz&#39;</span><span class="p">,</span> <span class="s1">&#39;../../data_three.xyz&#39;</span><span class="p">])</span>
+
+
+<span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([[</span><span class="s1">&#39;../../data_one.xyz&#39;</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;../../data_two.xyz&#39;</span><span class="p">],</span> <span class="p">[</span><span class="s1">&#39;../../data_three.xyz&#39;</span><span class="p">]])</span>
 </pre></div>
 </div>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span>
@@ -383,23 +386,21 @@
                 <span class="p">],</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>In PySEQM 0 padding can be used when working with batched molecules that have a differnet number of atoms</p>
+<p>In PySEQM, 0 padding must be used when working with batched molecules that have a different number of atoms.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">[</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">,</span><span class="mf">0.0</span><span class="p">]</span>
 </pre></div>
 </div>
-<p>You can get set the torch data type with either bit 64 and 32 based on the levle of accuracy you want for your values you are working with PySEQM is set to float 64 but can be change by</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span>
-
-<span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span>
-</pre></div>
-</div>
-<p>PySEQM uses PyTorch which gives you to run callcation on GPU.</p>
-<p>We set device to either GPU or CPU.</p>
-<p>Then we can</p>
+<p>PySEQM requires 64-bit precision for accurate and stable calculations.
+.. code-block:: python</p>
+<blockquote>
+<div><p>dtype=torch.int64</p>
+</div></blockquote>
+<p>PySEQM uses PyTorch, which allows you to run calculations on the GPU.</p>
+<p>We set the device to either GPU or CPU.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>Then we can set device=device so that calculations are ran on the correct hardware.</p>
+<p>Then we can set device=device so that calculations are run on the correct hardware.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">([],</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 </pre></div>
 </div>

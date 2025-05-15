@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Examples &#8212; PYSEQM 1.0 documentation</title>
+    <title>Excited States Calculation &#8212; PYSEQM 1.0 documentation</title>
   
   
   
@@ -44,11 +44,10 @@
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="_static/copybutton.js?v=f281be69"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'Examples';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'quick_start.pt2';</script>
     <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="prev" title="Features" href="features.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -210,6 +209,8 @@
       
       
       
+        
+      
       <dialog id="pst-primary-sidebar-modal"></dialog>
       <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
         
@@ -270,23 +271,6 @@
   
     <div class="sidebar-primary-items__start sidebar-primary__section">
         <div class="sidebar-primary-item">
-<nav class="bd-docs-nav bd-links"
-     aria-label="Section Navigation">
-  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
-  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="quick_start.html">Quick Start</a></li>
-<li class="toctree-l1"><a class="reference internal" href="about.html">Developers &amp; Contributors</a></li>
-
-<li class="toctree-l1 current active has-children"><a class="reference internal" href="user_guide.html">User Guide</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
-<li class="toctree-l2"><a class="reference internal" href="installation.html">Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l2 current active"><a class="current reference internal" href="#">Examples</a></li>
-</ul>
-</details></li>
-</ul>
-</div>
-</nav></div>
-        <div class="sidebar-primary-item">
 <form class="bd-search d-flex align-items-center"
       action="search.html"
       method="get">
@@ -339,10 +323,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    
-    <li class="breadcrumb-item"><a href="user_guide.html" class="nav-link">User Guide</a></li>
-    
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Examples</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Excited States Calculation</span></li>
   </ul>
 </nav>
 </div>
@@ -359,10 +340,8 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="examples">
-<h1>Examples<a class="headerlink" href="#examples" title="Link to this heading">#</a></h1>
-<section id="excited-states-rpa-cis">
-<h2>Excited States RPA/CIS<a class="headerlink" href="#excited-states-rpa-cis" title="Link to this heading">#</a></h2>
+  <section id="excited-states-calculation">
+<h1>Excited States Calculation<a class="headerlink" href="#excited-states-calculation" title="Link to this heading">#</a></h1>
 <p>Once initialized, a SCF calculation can be run directly to compute total energy:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions</span><span class="w"> </span><span class="kn">import</span> <span class="n">anal_grad</span>
@@ -399,33 +378,20 @@ Set the floating point precision to 64 bit and set device to GPU.</p>
    <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
    <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e8</span><span class="p">,</span>
    <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-   <span class="s1">&#39;excited_states&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;n_states&#39;</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span> <span class="s1">&#39;method&#39;</span><span class="p">:</span><span class="s1">&#39;rpa&#39;</span> <span class="c1">#set either rpa/cis},</span>
+   <span class="s1">&#39;excited_states&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;n_states&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">},</span>
 <span class="p">}</span>
 </pre></div>
 </div>
 <p>User-defined parameters for calculations are set using the seqm_parameters dictionary.</p>
 <p><strong>method:</strong> Austin Model 1</p>
 <p><strong>scf_eps:</strong> If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.</p>
-<p><strong>scf_converger:</strong> Converger tolerance for SCF.</p>
+<p><strong>scf_converger:</strong> Converger used for scf loop.</p>
 <p><strong>sp2:</strong> Planarity correction on/off, threshold.</p>
 <p><strong>elements:</strong> Atomic numbers in the data from species.</p>
 <p><strong>learned:</strong> Learned parameters name list.</p>
 <p><strong>pair_outer_cutoff:</strong> The value for how far apart two atoms can be before their interaction is ignored.</p>
-<p><strong>eig:</strong> Whether or not to calcuate final eigenvalues.</p>
-<dl>
-<dt><strong>excited_states:</strong></dt><dd><p><strong>number of states:</strong>  The number of excited states to calcuate.</p>
-<p><strong>method:</strong> Set to run either rpa or cis.</p>
-</dd>
-</dl>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-<span class="n">esdriver</span> <span class="o">=</span> <span class="n">Electronic_Structure</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-<span class="n">esdriver</span><span class="p">(</span><span class="n">molecules</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>Sends all information collected so far to the GPU and runs the calculation.</p>
-</section>
-<section id="bomd">
-<h2>BOMD<a class="headerlink" href="#bomd" title="Link to this heading">#</a></h2>
+<p><strong>eig:</strong> Whether or not to diagonalize the Fock matrix.</p>
+<p><strong>excited_states:</strong> The number of excited states to calcuate.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 <span class="n">esdriver</span> <span class="o">=</span> <span class="n">Electronic_Structure</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 <span class="n">esdriver</span><span class="p">(</span><span class="n">molecules</span><span class="p">)</span>
@@ -434,7 +400,7 @@ Set the floating point precision to 64 bit and set device to GPU.</p>
 <p>Sends all information collected so far to the GPU and runs the calculation.</p>
 </section>
 <section id="molecular-dynamics">
-<h2>Molecular Dynamics<a class="headerlink" href="#molecular-dynamics" title="Link to this heading">#</a></h2>
+<h1>Molecular Dynamics<a class="headerlink" href="#molecular-dynamics" title="Link to this heading">#</a></h1>
 <p>You can run molecular dynamics using Born-Oppenheimer or Extended-Lagrangian BOMD:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
@@ -474,12 +440,12 @@ Set the float size to 64 for more memory and set device to GPU.</p>
 <p>User-defined parameters for calculations are set using the seqm_parameters dictionary.</p>
 <p><strong>method:</strong> Austin Model 1</p>
 <p><strong>scf_eps:</strong> If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.</p>
-<p><strong>scf_converger:</strong> Converger tolerance for SCF.</p>
+<p><strong>scf_converger:</strong> Converger used for scf loop.</p>
 <p><strong>sp2:</strong> Planarity correction on/off, threshold.</p>
 <p><strong>elements:</strong> Atomic numbers in the data from species.</p>
 <p><strong>learned:</strong> Learned parameters name list.</p>
 <p><strong>pair_outer_cutoff:</strong> The value for how far apart two atoms can be before their interaction is ignored.</p>
-<p><strong>eig:</strong> Whether or not to calcuate final eigenvalues.</p>
+<p><strong>eig:</strong> Whether or not to diagonalize the Fock matrix.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">output</span> <span class="o">=</span> <span class="p">{</span>
 <span class="s1">&#39;molid&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">],</span>
 <span class="s1">&#39;thermo&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
@@ -509,7 +475,6 @@ Set the float size to 64 for more memory and set device to GPU.</p>
 <p>Info_log determines whether to save additional information.</p>
 <p>Then runs the calculation.</p>
 </section>
-</section>
 
 
                 </article>
@@ -534,10 +499,10 @@ Set the float size to 64 for more memory and set device to GPU.</p>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#excited-states-rpa-cis">Excited States RPA/CIS</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#bomd">BOMD</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics">Molecular Dynamics</a></li>
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#">Excited States Calculation</a></li>
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics">Molecular Dynamics</a></li>
 </ul>
+
   </nav></div>
 
 </div></div>

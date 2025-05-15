@@ -11,12 +11,6 @@ Developers & Contributors
 - Benjamin Nebgen, LANL  
 - Sergei Tretiak, LANL
 
-**Collaborating Institutions**
-
-- Los Alamos National Laboratory (LANL)  
-- Center for Nonlinear Studies (CNLS)  
-- T-1, Theoretical Division, LANL  
-- U.S. Department of Energy (DOE)
 
 
 How to Cite
@@ -24,20 +18,6 @@ How to Cite
 
 If you use PYSEQM in your research, please cite the following works:
 
-1. **GPU-Accelerated Semiempirical BOMD**  
-   *Guoqing Zhou, et al.*  
-   _Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch._  
-   *J. Chem. Theory Comput.* **16** (2020): 4951–4962.  
-   https://doi.org/10.1021/acs.jctc.0c00379
-
-2. **Machine-Learned Hamiltonians via Semi-Empirical QM**  
-   *Guoqing Zhou, et al.*  
-   _Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics._  
-   *Proceedings of the National Academy of Sciences* **119.27** (2022): e2120333119.  
-   https://doi.org/10.1073/pnas.2120333119
-
-3. **GPU-Accelerated Linear-Scaling DFTB for Large Systems**  
-   *Guoqing Zhou, William Colglazier, et al.*  
-   _GPU-accelerated linear-scaling density functional tight binding for modeling large molecules and materials._  
-   *J. Chem. Theory Comput.* **19** (2023): 4450–4461.  
-   https://doi.org/10.1021/acs.jctc.3c00179
+1. Zhou, G., Lubbers, N., Barros, K., Tretiak, S., & Nebgen, B. (2022). Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics. Proceedings of the National Academy of Sciences, 119(27), e2120333119. https://doi.org/10.1073/pnas.2120333119
+2. Kulichenko, M., Barros, K., Lubbers, N., Fedik, N., Zhou, G., Tretiak, S., Nebgen, B., & Niklasson, A. M. N. (2023). Semi-empirical shadow molecular dynamics: A PyTorch implementation. Journal of Chemical Theory and Computation, 19(11), 3209–3222. https://doi.org/10.1021/acs.jctc.3c00234
+3. Zhou, G., Nebgen, B., Lubbers, N., Malone, W., Niklasson, A. M. N., & Tretiak, S. (2020). Graphics processing unit-accelerated semiempirical Born–Oppenheimer molecular dynamics using PyTorch. Journal of Chemical Theory and Computation, 16(8), 4951–4962. https://doi.org/10.1021/acs.jctc.0c00243

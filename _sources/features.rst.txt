@@ -1,12 +1,16 @@
 Features
 ========
 
-PySEQM can do take in data in eithere a .xyz file or in vector formate.
+PySEQM can take in data in either a .xyz file or in vector format.
 
 
 .. code-block:: python
 
-        species, coordinates = read_xyz(['../../data.xyz'])
+        species, coordinates = read_xyz(['../../data_one.xyz', '../../data_two.xyz', '../../data_three.xyz'])
+
+
+        species, coordinates = read_xyz([['../../data_one.xyz'], ['../../data_two.xyz'], ['../../data_three.xyz']])
+
 
 
 .. code-block:: python
@@ -32,33 +36,30 @@ PySEQM can do take in data in eithere a .xyz file or in vector formate.
                         ],device=device)
 
 
-In PySEQM 0 padding can be used when working with batched molecules that have a differnet number of atoms 
+In PySEQM, 0 padding must be used when working with batched molecules that have a different number of atoms.
+
 
 .. code-block:: python
 
     [0.0,0.0,0.0]           
 
-You can get set the torch data type with either bit 64 and 32 based on the levle of accuracy you want for your values you are working with PySEQM is set to float 64 but can be change by
- 
+PySEQM requires 64-bit precision for accurate and stable calculations.
 .. code-block:: python
-
-    dtype=torch.int32
 
     dtype=torch.int64
 
 
-PySEQM uses PyTorch which gives you to run callcation on GPU.
+PySEQM uses PyTorch, which allows you to run calculations on the GPU.
 
-We set device to either GPU or CPU.
 
-Then we can 
+We set the device to either GPU or CPU.
 
 .. code-block:: python
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-Then we can set device=device so that calculations are ran on the correct hardware.
+Then we can set device=device so that calculations are run on the correct hardware.
 
 .. code-block:: python
 
