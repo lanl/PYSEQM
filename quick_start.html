@@ -359,14 +359,10 @@
                   
   <section id="quickstart">
 <h1>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">#</a></h1>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-This quickstart is a high-level introduction on how to get started with using PySEQM.
-=======
-This quickstart is a high level introduction on how to get started using PySEQM.</p>
+<p>This quickstart is a high-level introduction on how to get started with using PySEQM.</p>
 <p>For full examples, please check out our <a class="reference external" href="https://github.com/lanl/pyseqm">GitHub repository</a> and the <a class="reference external" href="https://github.com/lanl/PYSEQM/tree/master/examples">examples directory</a>.</p>
 <section id="single-point-scf">
 <h2>Single Point SCF<a class="headerlink" href="#single-point-scf" title="Link to this heading">#</a></h2>
-<p>Computes the electronic structure of a molecule by iteratively solving for the electron density or wavefunction until convergence, enabling calculation of total energy and related properties.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
@@ -421,26 +417,17 @@ This quickstart is a high level introduction on how to get started using PySEQM.
 <span class="n">esdriver</span><span class="p">(</span><span class="n">molecules</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>&gt;&gt;&gt;&gt;&gt;&gt;&gt; b817174 (update)</p>
 </section>
-<section id="scf-and-excited-state-calculations">
-<h2>SCF and Excited State Calculations<a class="headerlink" href="#scf-and-excited-state-calculations" title="Link to this heading">#</a></h2>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-Once initialized, an SCF calculation can be run directly to compute total energy:
-=======
-Estimates the energies of electronically excited states by solving for higher energy eigenvalues of the electronic Hamiltonian, extending SCF results beyond the ground state.
-&gt;&gt;&gt;&gt;&gt;&gt;&gt; b817174 (update)</p>
+<section id="molecular-dynamics-nve">
+<h2>Molecular Dynamics(NVE)<a class="headerlink" href="#molecular-dynamics-nve" title="Link to this heading">#</a></h2>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.ElectronicStructure</span><span class="w"> </span><span class="kn">import</span> <span class="n">Electronic_Structure</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.MolecularDynamics</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecular_Dynamics_Basic</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.read_xyz</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_xyz</span>
-
 
 <span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
 <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
-
-
 
 <span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
                            <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
@@ -467,149 +454,31 @@ Estimates the energies of electronically excited states by solving for higher en
                               <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span>     <span class="mf">0.0</span><span class="p">,</span>     <span class="mf">0.0</span><span class="p">]</span>
                               <span class="p">]</span>
                            <span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-.. code-block:: python</p>
-<blockquote>
-<div><p>species, coordinates = read_xyz([‘./data.xyz’])</p>
-</div></blockquote>
-<blockquote>
-<div><p>species = torch.as_tensor(species, dtype=torch.int64, device=device)[:]
-coordinates = torch.tensor(coordinates, device=device)[:]
-const = Constants().to(device)</p>
-<p>elements = [0] + sorted(set(species.reshape(-1).tolist()))</p>
-<dl class="simple">
-<dt>seqm_parameters = {</dt><dd><p>‘method’: ‘AM1’,
-‘scf_eps’: 1.0e-8,
-‘scf_converger’: [2, 0.0],
-‘sp2’: [False, 1.0e-5],
-‘elements’: elements,
-‘learned’: [],
-‘pair_outer_cutoff’: 1.0e8,
-‘eig’: True,
-‘excited_states’: {‘n_states’: 10},</p>
-</dd>
-</dl>
-<p>}</p>
-</div></blockquote>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-User-defined parameters for calculations are set using the seqm_parameters dictionary.</p>
-<p><strong>method:</strong> Austin Model 1</p>
-<p><strong>scf_eps:</strong> If the energy change between two SCF steps is smaller than this value, then SCF is converged.</p>
-<p><strong>scf_converger:</strong> Converger used for SCF.</p>
-<p><strong>sp2:</strong></p>
-<p><strong>elements:</strong> Atomic numbers in the data from species.</p>
-<p><strong>learned:</strong> Learned parameters name list.</p>
-<p><strong>pair_outer_cutoff:</strong> The value for how far apart two atoms can be before their interaction is ignored.</p>
-<p><strong>eig:</strong> Whether or not to diagonalize the Fock matrix.</p>
-<p><strong>excited_states:</strong> The number of excited states to calcuate.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>
-</pre></div>
-</div>
-<blockquote>
-<div><p>esdriver = Electronic_Structure(seqm_parameters).to(device)
-esdriver(molecules)</p>
-</div></blockquote>
-</section>
-<section id="molecular-dynamics-nve">
-<h2>Molecular Dynamics(NVE)<a class="headerlink" href="#molecular-dynamics-nve" title="Link to this heading">#</a></h2>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-You can run molecular dynamics using Born-Oppenheimer Molecular Dynamics (BOMD) or Extended-Lagrangian BOMD:
-=======
-Tracks the natural evolution of a system of atoms under Newton’s laws in an isolated environment—no energy exchange with surroundings. Energy is conserved, and atomic motion arises solely from interatomic forces.</p>
-<p>&gt;&gt;&gt;&gt;&gt;&gt;&gt; b817174 (update)</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.MolecularDynamics</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecular_Dynamics_Basic</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.read_xyz</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_xyz</span>
 
-<span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
-<span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
+<span class="n">const</span> <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
+   <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
+   <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-6</span><span class="p">,</span>
+   <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+   <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
+   <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
+   <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e10</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">output</span> <span class="o">=</span> <span class="p">{</span>
+<span class="s1">&#39;molid&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+<span class="s1">&#39;thermo&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+<span class="s1">&#39;dump&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+<span class="s1">&#39;prefix&#39;</span><span class="p">:</span> <span class="s1">&#39;../../Outputs_location&#39;</span>
+<span class="p">}</span>
+
+<span class="n">molecule</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">md</span> <span class="o">=</span> <span class="n">Molecular_Dynamics_Basic</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="o">=</span><span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">Temp</span><span class="o">=</span><span class="mf">300.0</span><span class="p">,</span> <span class="n">timestep</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="n">output</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">md</span><span class="o">.</span><span class="n">initialize_velocity</span><span class="p">(</span><span class="n">molecule</span><span class="p">)</span>
+<span class="n">_</span> <span class="o">=</span> <span class="n">md</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="n">remove_com</span><span class="o">=</span><span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">Info_log</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-Add import statements for PyTorch, and the relevant seqm modules.
-Set the datatype to float64 for calculations in double precision and set device to GPU.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([</span><span class="s1">&#39;./data.xyz&#39;</span><span class="p">])</span>
-</pre></div>
-</div>
-<blockquote>
-<div><blockquote>
-<div><blockquote>
-<div><p>[8,8,6,0]],</p>
-</div></blockquote>
-<p>dtype=torch.int64, device=device)</p>
-</div></blockquote>
-<dl>
-<dt>coordinates = torch.tensor([</dt><dd><blockquote>
-<div><p>[
-[0.00,    0.00,    0.00],
-[1.22,    0.00,    0.00],
-[1.82,    0.94,    0.00],
-[1.82,   -0.94,    0.00]
-],
-[
-[0.00,    0.00,    0.00],
-[1.22,    0.00,    0.00],
-[1.82,    0.94,    0.00],
-[1.82,   -0.94,    0.00]
-],
-[
-[0.00,    0.00,    0.00],
-[1.23,    0.00,    0.00],
-[1.82,    0.94,    0.00],
-[0.0,     0.0,     0.0]
-]</p>
-</div></blockquote>
-<p>], device=device)</p>
-</dd>
-</dl>
-</div></blockquote>
-<p>&gt;&gt;&gt;&gt;&gt;&gt;&gt; b817174 (update)</p>
-<blockquote>
-<div><p>species = torch.as_tensor(species, dtype=torch.int64, device=device)[:]
-coordinates = torch.tensor(coordinates, device=device)[:]
-const = Constants().to(device)</p>
-<p>elements = [0] + sorted(set(species.reshape(-1).tolist()))</p>
-<dl class="simple">
-<dt>seqm_parameters = {</dt><dd><p>‘method’: ‘AM1’,
-‘scf_eps’: 1.0e-6,
-‘scf_converger’: [2, 0.0],
-‘sp2’: [False, 1.0e-5],
-‘elements’: elements,
-‘learned’: [],
-‘pair_outer_cutoff’: 1.0e10,</p>
-</dd>
-</dl>
-<p>}</p>
-</div></blockquote>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-User-defined parameters for calculations are set using the seqm_parameters dictionary.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>
-</pre></div>
-</div>
-<blockquote>
-<div><p>‘molid’: [0],
-‘thermo’: 1,
-‘dump’: 1,
-‘prefix’: ‘../../Outputs_location’
-}</p>
-</div></blockquote>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
-The ‘molid’ key takes a list as the value. This list should contain the indices of the molecules on which MD has to be run, if multiple molecules have been given as input.</p>
-<p>xxx</p>
-<p>xxx</p>
-<p>Set the output file path.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>
-</pre></div>
-</div>
-<blockquote>
-<div><p>md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=300.0, timestep=0.4, output=output).to(device)
-md.initialize_velocity(molecule)
-_ = md.run(molecule, 10, remove_com=[True, 1], Info_log=True)</p>
-</div></blockquote>
 </section>
 <section id="molecular-dynamics-langevin-thermostat">
 <h2>Molecular Dynamics(Langevin Thermostat)<a class="headerlink" href="#molecular-dynamics-langevin-thermostat" title="Link to this heading">#</a></h2>
@@ -710,7 +579,6 @@ _ = md.run(molecule, 10, remove_com=[True, 1], Info_log=True)</p>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#single-point-scf">Single Point SCF</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#scf-and-excited-state-calculations">SCF and Excited State Calculations</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics-nve">Molecular Dynamics(NVE)</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics-langevin-thermostat">Molecular Dynamics(Langevin Thermostat)</a></li>
 </ul>
