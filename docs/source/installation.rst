@@ -1,14 +1,14 @@
 Installation
 ============
 
-Install with pip
+Clone PySEQM
 ------------------------------
 
 This is the recommended way to install PySEQM
 
 .. code-block:: bash
 
-   pip install git+https://github.com/lanl/pyseqm.git
+      git clone https://github.com/lanl/PYSEQM.git
 
 
 .. note::
@@ -18,14 +18,14 @@ This is the recommended way to install PySEQM
 
 
 
-Upgrade PySEQM
---------------
+.. Upgrade PySEQM
+.. --------------
 
-If you already have PySEQM installed, you can upgrade it using:
+.. If you already have PySEQM installed, you can upgrade it using:
 
-.. code-block:: bash
+.. .. code-block:: bash
 
-   pip install --upgrade git+https://github.com/lanl/pyseqm.git
+..    pip install --upgrade git+https://github.com/lanl/pyseqm.git
 
 
 Test the Installation
