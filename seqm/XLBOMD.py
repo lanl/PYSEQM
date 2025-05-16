@@ -27,7 +27,7 @@ here Tr(D) = 2*Nocc
 import torch
 from .seqm_functions.energy import total_energy, pair_nuclear_energy, elec_energy_isolated_atom, heat_formation, elec_energy_xl
 from .seqm_functions.SP2 import SP2
-from .basics import Parser, Parser_For_Ovr, Pack_Parameters
+from .basics import Parser, Pack_Parameters
 from .seqm_functions.fock import fock
 from .seqm_functions.G_XL_LR import G
 from .seqm_functions.fermi_q import Fermi_Q

@@ -15,7 +15,6 @@ class Molecule(torch.nn.Module):
         """
         super().__init__(*args, **kwargs)
         self.const = const
-        self.seqm_parameters = seqm_parameters
         #self.coordinates = coordinates
         self.coordinates = torch.nn.Parameter(coordinates)
         self.coordinates.requires_grad_(do_large_tensors)
@@ -27,6 +26,11 @@ class Molecule(torch.nn.Module):
             mult = mult * torch.ones(coordinates.size()[0], device=coordinates.device)
         self.mult = mult
         
+        # Previously 'elements' was a user input list of unique elements in the input molecules.
+        # However, it didnt make sense for the user to input this list since this list can be easily calculated,
+        # thus reducing the number of things a user has to input
+        if seqm_parameters.get('elements') is None:
+            seqm_parameters['elements'] = [0]+sorted(set(species.reshape(-1).tolist()))
         self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
         

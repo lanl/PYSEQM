@@ -39,8 +39,6 @@ coordinates = torch.tensor([
 
 const = Constants().to(device)
 
-elements = [0]+sorted(set(species.reshape(-1).tolist()))
-
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
                    'scf_eps' : 1.0e-6,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
@@ -50,7 +48,6 @@ seqm_parameters = {
                                          # [2], adaptive mixing, then pulay
                    'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
                                             #[True, eps] or [False], eps for SP2 conve criteria
-                   'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
