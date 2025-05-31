@@ -128,7 +128,7 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 #print('GRAD:', Pnew[notconverged].requires_grad)
 
         if backward:
-            Pold = P + 0.0  # ???
+            Pold = P + 0.0  # Create a shallow copy of P to preserve its current value; avoids reference aliasing while still keeping autograd tracking.
             P = alpha * P + (1.0 - alpha) * Pnew
         else:
             Pold[notconverged] = P[notconverged]
@@ -1294,9 +1294,78 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
 
 class SCF(torch.autograd.Function):
     """
-    scf loop
-    forward and backward
-    check function scf_loop for details
+    A custom autograd Function that wraps scf loop
+    
+    Because density matrix P* is solved for self-consistently in SCF, P* satisfies:
+        P* = g(P*; θ)
+    where θ = (M, w, gss, gpp, gsp, gp2, hsp,...) are the semiempirical parameters.
+
+    Forward:
+      - Runs an SCF loop to convergence:
+          P_{new} = g(P_old; θ)
+      - Takes inputs θ 
+      - Returns the converged density P* and a mask indicating any molecules that failed.
+
+    Backward:
+      We receive `grad_P = ∂L/∂P*` from upstream.  We must produce `∂L/∂θ` for each
+      parameter tensors θ = M, w, W, gss, gpp, gsp, gp2, hsp, etc.
+
+      By the chain rule,
+          ∂L/∂θ = (∂L/∂P*) · (∂P*/∂θ).
+
+      We first need (∂P*/∂θ). Implicit differentiation of P* = g(P*;θ) gives
+          (I − ∂g/∂P) · (∂P*/∂θ) = ∂g/∂θ,
+      so formally
+          ∂P*/∂θ = [I − ∂g/∂P]⁻¹ · ∂g/∂θ.
+
+      We never invert the full Jacobian, i.e. we dont explicitly calculate [I − A]⁻¹; Instead: 
+      1. if SCF_IMPLICIT_BACKWARD is False, we expand the inverse via the
+      Neumann series (valid when spectral radius(∂g/∂P)<1):
+          [I − A]⁻¹ = I + A + A² + ⋯ ,  A = ∂g/∂P.
+
+      Concretely, we unroll:
+          G₀ = ∂L/∂P*,
+          G_{k+1} = (∂g/∂P)ᵀ · G_k,
+      and accumulate
+          ∂L/∂θ = Σ_k G_kᵀ · (∂g/∂θ).
+
+      2. if SCF_IMPLICIT_BACKWARD is True, we do Implicit‐adjoint solve via Anderson acceleration (no double‐backward support).
+      We have 
+          ∂L/∂θ = (∂L/∂P*) · (∂P*/∂θ) = (∂L/∂P*) · [I − ∂g/∂P]⁻¹ · ∂g/∂θ.
+
+      Defining the “adjoint” vector
+        u = (∂L/∂P*) · (I − J)⁻¹,     where J = ∂g/∂P  evaluated at P*.
+
+      we have the linear equation
+          u = g_P + Jᵀ u,
+      with g_P ≡ ∂L/∂P*.  Once u is known,
+          ∂L/∂θ = u · (∂g/∂θ).
+
+      Instead of unrolling a Neumann series for (I−J)⁻¹,
+      we solve u = g_P + Jᵀ u directly via Anderson acceleration:
+
+        1. Initialize u⁽⁰⁾ = 0.
+        2. For k = 0,1,2,… until convergence:
+           a) f(u⁽ᵏ⁾) = g_P + Jᵀ · u⁽ᵏ⁾    # vector‐Jacobian product via autograd
+           b) r⁽ᵏ⁾ = f(u⁽ᵏ⁾) − u⁽ᵏ⁾        # residual
+           c) Keep the last m pairs {(u⁽ᵏ⁻ʲ⁾, r⁽ᵏ⁻ʲ⁾)} for j=0…m−1
+           d) Solve the small least‐squares problem
+                 min_{α_j, ∑α_j=1} ‖∑_j α_j r⁽ᵏ⁻ʲ⁾‖
+           e) Update
+                 u⁽ᵏ⁺¹⁾ = ∑_j α_j f(u⁽ᵏ⁻ʲ⁾)
+        3. Stop when ‖u⁽ᵏ⁺¹⁾ − u⁽ᵏ⁾‖ < tol.
+
+      Once converged, the final u approximates (I − Jᵀ)⁻¹ g_P.
+      We then compute all parameter gradients in one shot:
+          grads = torch.autograd.grad(Pout, gv, grad_outputs=u)
+      so that each grads[i] = u · (∂g/∂θ_i) = ∂L/∂θ_i.
+
+      Notes:
+        - We wrap the Anderson solve in torch.no_grad(), so this path does not
+          support double‐backward (second derivatives).
+        - Anderson acceleration often converges in far fewer iterations than
+          a simple fixed‐point or Neumann‐series unrolling, especially when
+          the spectral radius of J is close to 1.
     """
     def __init__(self, scf_converger=[2], use_sp2=[False], scf_backward_eps=1.0e-2):
         SCF.sp2 = use_sp2
@@ -1358,7 +1427,9 @@ class SCF(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_P, grad1):
         """
-        custom backward of SCF loop
+        Compute ∂L/∂θ given grad_P = ∂L/∂P*.
+        We must return one tensor ∂L/∂θ (or None) for each of the forward inputs θ 
+
         
         CURRENTLY DOES NOT SUPPORT DOUBLE-BACKWARD!
         (irrelevant for dE^2/dx^2 or dy/dparam, if y is no derivative itself like forces)
@@ -1378,6 +1449,7 @@ class SCF(torch.autograd.Function):
             molsize = Pin.shape[-1]//4
         grads, gvind = {}, []
         gv = [] if SCF_IMPLICIT_BACKWARD else [Pin]
+        # Build the list gv = [Pin, θ₁=M, θ₂=w, θ₃=W, θ₄=gss, …]
         for i, st in enumerate([M, w, gss, gpp, gsp, gp2, hsp]):
             if st.requires_grad:
                 gv.append(st)
@@ -1406,6 +1478,7 @@ class SCF(torch.autograd.Function):
         converged = ~notconverged.detach() # scf forward converged
         diverged = None # scf backward diverged
         
+         # Depending on flag, choose implicit vs Neumann‐series backward
         if SCF_IMPLICIT_BACKWARD:
             ## THIS DOES NOT SUPPORT DOUBLE BACKWARD. MAY AS WELL STOP AUTOGRAD TAPE
             ## TODO: INCLUDING THIS PART IN GRAPH CAUSES MEMORY LEAK.
@@ -1417,6 +1490,7 @@ class SCF(torch.autograd.Function):
                 gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
                 for t, i in enumerate(gvind): grads[i] = gradients[t]
         else:
+            # — Neumann‐series unrolling —
             gradients = [(grad_P,)]
             for k in range(SCF_BACKWARD_MAX_ITER+1):
                 grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
@@ -1437,6 +1511,7 @@ class SCF(torch.autograd.Function):
                           (diverged.sum().item(), MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE))
                     break
             ln = len(gradients)
+            # Accumulate ∂L/∂θ = Σ_k G_kᵀ · (∂g/∂θ)
             for t, i in enumerate(gvind):
                 grads[i] = torch.sum(torch.stack([gradients[l][t+1] for l in range(1, ln)]), dim=0)
         

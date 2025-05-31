@@ -107,16 +107,18 @@ def construct_P(e, v, nocc):
 
 
 def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
+    """
+    Perform eigendecomposition of symmetric Fock matrices
+    with padding-aware handling.
+    """
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype =  x.dtype
     device = x.device
-    if x.dim()==2:
-
-        #print('diag: DOING 2')
+    if x.dim()==2: # Simple case: single (N, N) matrix without batch
         e0, v = sym_eigh(pack(x, nheavyatom, nH))
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH)] = e0
-    elif x.dim()==4:
+    elif x.dim()==4: # Batched case for unrestricted calculations: shape (B, 2, N, N)
         nheavyatom = nheavyatom.repeat_interleave(2)
         nH = nH.repeat_interleave(2)
         nocc = nocc.flatten()
@@ -149,7 +151,10 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         e[...,:size] = e0
         for i in range(nmol):
             if cond[i]: e[i,norb[i]:size] = 0.0
-    else:#need to add large diagonal values to replace 0 padding
+    else:    # Batched, restricted: (B, N, N), similar to above but without spin channels
+        # Add large diagonal shifts to padded orbital blocks to prevent them
+        # from interfering with physical eigenvalues during eigendecomposition.
+
         #Gershgorin circle theorem estimate upper bounds of eigenvalues            
         x0 = pack(x, nheavyatom, nH)
         nmol, size, _ = x0.shape
@@ -304,6 +309,23 @@ class degen_symeig(torch.autograd.Function):
     !!! ONLY APPLICABLE IF FINAL RESULT DOESN'T EXPLICITLY DEPEND
                    ON DEGENERATE EIGENVECTORS !!!
     !!! BEWARE: REMOVED SANITY CHECKS FOR PERFORMANCE REASONS !!!
+
+    
+    This Function computes the symmetric eigendecomposition
+    A = V Λ Vᵀ in the forward pass, and in the backward pass returns
+    ∂L/∂A from given (∂L/∂Λ, ∂L/∂V) while dropping any ill-posed
+    gradient components arising from nearly-equal eigenvalues.
+    
+    Notes
+    -----
+    If Δᵢⱼ = λᵢ – λⱼ and |Δᵢⱼ| ≤ ε (the global DEGEN_THRESHOLD), then
+    1/Δᵢⱼ is set to zero so that gradients through those degenerate
+    eigenspaces are dropped. Concretely:
+
+    ∂L =  V diag(∂L/∂Λ) Vᵀ + V (Δ⁻¹ ∘ (Vᵀ ∂L/∂V)) Vᵀ
+
+    where “∘” is elementwise, Δ⁻¹_{ii}=0, and Δ⁻¹_{ij}=1/(λᵢ−λⱼ).
+
     Based on idea in M.F. Kasim, arXiv:2011.04366 (2020)
     """
     @staticmethod

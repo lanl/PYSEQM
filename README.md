@@ -1,5 +1,9 @@
-# [PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics](https://github.com/lanl/PYSEQM)
-[PYSEQM](https://github.com/lanl/PYSEQM) is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics, geometric optimization and  several thermostats. 
+# [PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics]
+[![License: BSD-3](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)  
+[Website & User Manual](https://lanl.github.io/PYSEQM/)
+[PYSEQM](https://lanl.github.io/PYSEQM/) is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics, geometric optimization and  several thermostats. 
+
+Please visit the [PYSEQM website](https://lanl.github.io/PYSEQM/) for a user guide of PYSEQM.
 
 <hr/>
 
@@ -9,19 +13,20 @@
 * GPU-supported Molecular Dynamics Engine
 * Stable and Efficient Extended Lagrangian Born Oppenheimer Molecular Dynamics ([XL-BOMD](https://aip.scitation.org/doi/full/10.1063/1.3148075))
   * Includes Krylov Subspace Approximation (KSA-XL-BOMD) for more accurate density matrix propagation and handling small HOMO-LUMO gaps
-* Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for generating density matrix
+* Excited states with Configuration Interaction Singles (CIS) and Time-Dependent Hartree-Fock (TDHF)
+* Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for faster calculation of the density matrix
 
 
 ## Installation:
 
 ```bash
-git clone https://github.com/kulichenko-LANL/PYSEQM_dev.git
+git clone https://github.com/lanl/PYSEQM.git
 cd PYSEQM
-python setup.py install
+pip install .
 ```
 or
 ```bash
-pip install git+https://github.com/kulichenko-LANL/PYSEQM_dev.git
+pip install git+https://github.com/lanl/PYSEQM.git
 ```
 
 To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch website](https://pytorch.org/)
@@ -30,7 +35,7 @@ To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch webs
 * PyTorch>=1.9
 
 ## Usage:
-see [```./doc/documentation.md```](./doc/documentation.md)
+see [PYSEQM website](https://lanl.github.io/PYSEQM/)
 
 ## trained model file
 model.pt

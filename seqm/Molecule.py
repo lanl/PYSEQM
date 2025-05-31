@@ -15,10 +15,13 @@ class Molecule(torch.nn.Module):
         """
         super().__init__(*args, **kwargs)
         self.const = const
+
+        check_input(species)
+        self.species = species
+
         #self.coordinates = coordinates
         self.coordinates = torch.nn.Parameter(coordinates)
         self.coordinates.requires_grad_(do_large_tensors)
-        self.species = species
         if not torch.is_tensor(charges):
             charges = charges * torch.ones(coordinates.size()[0], device=coordinates.device)
         self.tot_charge = charges
@@ -108,3 +111,25 @@ class Molecule(torch.nn.Module):
             return self.species
 
 
+def check_input(species):
+    """
+    Does input checking
+    The species (atomic numbers of molecules) tensor should have non-increasing rows so that elements are sorted from biggest to smallest
+    """
+        
+    ok = species[:, :-1] >= species[:, 1:]       # compares each element in a row to the one to its right
+    # now see which rows are *all* True
+    row_ok = ok.all(dim=1)
+
+    if not row_ok.all():
+        # gather the indices of the offending rows
+        bad = (~row_ok).nonzero(as_tuple=False).squeeze(1).tolist()
+        rows = ", ".join(map(str, bad))
+        # pick correct plural forms
+        row_word = "row" if len(bad) == 1 else "rows"
+        verb     = "is"  if len(bad) == 1 else "are"
+        msg = (
+            f"species must be non-increasing along each row, "
+            f"but {row_word} {rows} {verb} not sorted."
+        )
+        raise ValueError(msg)
