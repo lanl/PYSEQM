@@ -20,4 +20,6 @@ User Guide
 
    features
    Examples
+   Initialization
+   
 

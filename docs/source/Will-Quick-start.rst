@@ -80,7 +80,7 @@ Computes the electronic structure of a molecule by iteratively solving for the e
 
 
 
-CIS Excited State Calculations
+SCF and Excited State Calculations
 ------------------------------
 
 Estimates the energies of electronically excited states by solving for higher energy eigenvalues of the electronic Hamiltonian, extending SCF results beyond the ground state.

@@ -26,17 +26,28 @@ html_static_path = ['_static']
 # Only set theme-level logo, not `html_logo`
 html_theme_options = {
     "logo": {
-        "image_light": "LANL_logo.png",     # Just the filename; it will look in _static/
-        "image_dark": "LANL_logo.png",      # Same here, or use a dark-mode version
-        # "text": "PYSEQM",              # Optional — removes the full doc title
+        # "image_light": "LANL-Light.png",     
+        # "image_dark": "LANL-Dark.png",     
+
+        "image_light": "PySEQM-Light.png",
+        "image_dark": "PySEQM-Light.png",
     },
     "navbar_start": ["navbar-logo"],
     "navbar_center": ["navbar-nav"],
-    "navbar_end": ["theme-switcher"],
+    "navbar_end": ["theme-switcher"],  # Removed 'github-link' for compatibility
     "navigation_with_keys": False,
     "show_prev_next": False,
     "secondary_sidebar_items": ["page-toc"],
+    "github_url": "https://github.com/lanl/pyseqm",
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/lanl/pyseqm",
+            "icon": "fa-brands fa-github",
+        },
+    ],
 }
+
 
 # Important: Do NOT set html_logo here — it overrides the theme's logo
 # html_logo = "_static/logo.png"  <-- REMOVE or comment this out
