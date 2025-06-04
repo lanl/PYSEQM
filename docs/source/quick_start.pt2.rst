@@ -1,8 +1,7 @@
-Examples 
-============
 
 
-Excited States RPA/CIS
+
+Excited States Calculation
 ------------------------------
 
 Once initialized, a SCF calculation can be run directly to compute total energy:
@@ -57,7 +56,7 @@ Load data in xyz form collecting species and coordinates and move both of them t
       'learned': [],
       'pair_outer_cutoff': 1.0e8,
       'eig': True,
-      'excited_states': {'n_states':10, 'method':'rpa' #set either rpa/cis},
+      'excited_states': {'n_states': 10},
    }
 
 User-defined parameters for calculations are set using the seqm_parameters dictionary.
@@ -67,7 +66,7 @@ User-defined parameters for calculations are set using the seqm_parameters dicti
 
 **scf_eps:** If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.
 
-**scf_converger:** Converger tolerance for SCF.
+**scf_converger:** Converger used for scf loop.
 
 **sp2:** Planarity correction on/off, threshold.
 
@@ -77,35 +76,13 @@ User-defined parameters for calculations are set using the seqm_parameters dicti
 
 **pair_outer_cutoff:** The value for how far apart two atoms can be before their interaction is ignored.
 
-**eig:** Whether or not to calcuate final eigenvalues.
+**eig:** Whether or not to diagonalize the Fock matrix.
 
-**excited_states:** 
-    **number of states:**  The number of excited states to calcuate.
-
-
-    **method:** Set to run either rpa or cis.
+**excited_states:** The number of excited states to calcuate.
 
 
 
 
-
-.. code-block:: python
-
-
-
-   molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
-   esdriver = Electronic_Structure(seqm_parameters).to(device)
-   esdriver(molecules)
-
-Sends all information collected so far to the GPU and runs the calculation.
-
-
-
-
-
-
-BOMD
-------------------------------
 
 .. code-block:: python
 
@@ -172,7 +149,7 @@ User-defined parameters for calculations are set using the seqm_parameters dicti
 
 **scf_eps:** If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.
 
-**scf_converger:** Converger tolerance for SCF.
+**scf_converger:** Converger used for scf loop.
 
 **sp2:** Planarity correction on/off, threshold.
 
@@ -182,7 +159,7 @@ User-defined parameters for calculations are set using the seqm_parameters dicti
 
 **pair_outer_cutoff:** The value for how far apart two atoms can be before their interaction is ignored.
 
-**eig:** Whether or not to calcuate final eigenvalues.
+**eig:** Whether or not to diagonalize the Fock matrix.
 
 .. code-block:: python
 
