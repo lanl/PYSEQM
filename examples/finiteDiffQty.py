@@ -10,6 +10,10 @@ warnings.filterwarnings("ignore")
 
 def get_qty_from_output(geometry):
     molecules = Molecule(const, seqm_parameters, geometry, species).to(device)
+    molecules.active_state = 1
+    esdriver(molecules)
+    return molecules.Etot
+
     # Capture the printed output of calculate_energy
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
@@ -53,14 +57,14 @@ mol_coord = torch.tensor([
                                 # [-0.51336 ,   0.88916 ,  -0.36300],
                             # [1.82, 0.94, 0.00],
                             # [1.82, -0.94, 0.00],
-                               # [0.00,    0.00,    0.00],
-                               # [1.22,    0.00,    0.20],
-                               # [1.82,    0.94,    0.00],
-                               # [1.81,   -0.93,    -0.20]
                                [0.00,    0.00,    0.00],
-                               [1.22,    0.00,    0.00],
+                               [1.22,    0.00,    0.20],
                                [1.82,    0.94,    0.00],
-                               [1.82,   -0.94,    0.00]
+                               [1.81,   -0.93,    -0.20]
+                               # [0.00,    0.00,    0.00],
+                               # [1.22,    0.00,    0.00],
+                               # [1.82,    0.94,    0.00],
+                               # [1.82,   -0.94,    0.00]
                          ],device=device)
 fd_gradient = torch.zeros_like(mol_coord)
 const = Constants().to(device)
@@ -80,7 +84,7 @@ seqm_parameters = {
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
-                   'excited_states': {'n_states':4,'tolerance':1e-6,'method':'rpa'},
+                   'excited_states': {'n_states':4,'tolerance':1e-6,'method':'cis'},
                    # 'cis_tolerance' : 1e-8,
                    }
 

@@ -74,7 +74,7 @@ molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
 esdriver = Electronic_Structure(seqm_parameters).to(device)
 
 ### Run esdriver on molecules:
-esdriver(molecules,cis_gradient=[True])
+esdriver(molecules)
 # esdriver(molecules,analytical_gradient=[True,'numerical'])
 # esdriver(molecules,analytical_gradient=[True,'analytical'])
 # force_analy = molecules.force

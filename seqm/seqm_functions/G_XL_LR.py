@@ -91,7 +91,7 @@ def G(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, h
         #W = calc_integral(zetas, zetap, zetad, Z, size, maskd, P, F0SD, G2SD)
         PTMP = P.clone()
         TMP = torch.zeros(size,9,9, device = P0.device )
-        FLocal = torch.zeros(size,45)
+        FLocal = torch.zeros(size,45, device = P0.device)
         tril_indices = torch.tril_indices(row=9, col=9, offset=0)
         tril1_indices = [[1,2,2,3,3,3,4,4,4,4,5,5,5,5,5,6,6,6,6,6,6,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8],
                          [0,0,1,0,1,2,0,1,2,3,0,1,2,3,4,0,1,2,3,4,5,0,1,2,3,4,5,6,0,1,2,3,4,5,6,7]]
@@ -286,6 +286,7 @@ def G(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, h
     # mu, nu in A
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
+    
     if(themethod == 'PM6'):
         sum = torch.zeros(w.shape[0],9,9,dtype=dtype, device=device)
     else:
