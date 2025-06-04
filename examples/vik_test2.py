@@ -60,7 +60,9 @@ seqm_parameters = {
                    'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':6,'method':'rpa'},
+                   'excited_states': {'n_states':6,'method':'cis'},
+                   'active_state': 0,
+                   'scf_backward': 1
                    # 'cis_tolerance' : 1e-8,
                    }
 
@@ -75,13 +77,14 @@ esdriver = Electronic_Structure(seqm_parameters).to(device)
 
 ### Run esdriver on molecules:
 esdriver(molecules,cis_gradient=[True])
+# esdriver(molecules)
 # esdriver(molecules,analytical_gradient=[True,'numerical'])
 # esdriver(molecules,analytical_gradient=[True,'analytical'])
 # force_analy = molecules.force
 # print(f'Force is\n{force_analy}')
 # analytic_grad = molecules.ground_analytical_gradient
 # esdriver(molecules)
-# force = molecules.force
+force = molecules.force
 # print(f'Force is\n{force}')
 # print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force-force_analy))}')
 # # if analytic_grad is not None:

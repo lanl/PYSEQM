@@ -80,7 +80,7 @@ seqm_parameters = {
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
-                   'excited_states': {'n_states':4,'tolerance':1e-6,'method':'rpa'},
+                   'excited_states': {'n_states':4,'tolerance':1e-6,'method':'cis'},
                    # 'cis_tolerance' : 1e-8,
                    }
 

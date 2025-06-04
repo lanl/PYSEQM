@@ -44,7 +44,17 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
     else:
         nstart = nroots
-        V[:,:nstart,:] = init_amplitude_guess
+        if nroots>1:
+            print("WARNING: Orthogonalizing inital guess")
+            init_amplitude_guess, _ = torch.linalg.qr(init_amplitude_guess.transpose(1,2), mode='reduced')
+            V[:,:nstart,:] = init_amplitude_guess.transpose(1,2)
+        else:
+            V[:,:nstart,:] = init_amplitude_guess
+            V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
+        # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
+        # This fails when orbitals are degenerate and switch order
+        mol.eig_vec *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.eig_vec,mol.old_mos))).unsqueeze(1)
+
 
     max_iter = 100 # TODO: User-defined
     vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
@@ -155,15 +165,16 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             raise Exception("Maximum iterations reached but roots have not converged")
 
     # print("-" * len(header))
-    print("\nCIS excited states:")
-    for j in range(nmol):
-        if nmol>1: print(f"\nMolecule {j+1}")
-        print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
-        for i, energy in enumerate(e_val_n[j], start=1):
-            print(f"State {i:3d}: {energy:.15f} eV")
-    print("")
+    # print("\nCIS excited states:")
+    # for j in range(nmol):
+    #     if nmol>1: print(f"\nMolecule {j+1}")
+    #     print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
+    #     for i, energy in enumerate(e_val_n[j], start=1):
+    #         print(f"State {i:3d}: {energy:.15f} eV")
+    # print("")
 
     # Post CIS analysis
+    print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
     rcis_analysis(mol,e_val_n,amplitude_store,nroots)
 
     return e_val_n, amplitude_store
@@ -340,8 +351,8 @@ def makeA_pi_symm_batch(mol,P0,w):
     del PA
     F.index_add_(2,maskd[idxj],sumA)
 
-    sumB = sumA
-    sumB.zero_()
+    sumB = torch.zeros_like(sumA)
+    del sumA
     PB = (Pdiag_symmetrized[:,:,idxj][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight)#.unsqueeze(-2)
     del Pdiag_symmetrized
     sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.einsum('nrpS,npsS->nrps',PB,w) # torch.sum(PB*w[:,None,...],dim=4)
@@ -354,7 +365,8 @@ def makeA_pi_symm_batch(mol,P0,w):
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
 
-    sumK = sumB
+    sumK = torch.empty_like(sumB)
+    del sumB
 
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     #   0,     1         2       3       4         5       6      7         8        9
@@ -664,4 +676,39 @@ def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
     V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
     return nstart, nroots
+
+def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False):
+
+    norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
+    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
+        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    norb, nocc = norb_batch[0], nocc_batch[0]
+
+    C = mol.eig_vec
+    Cocc = C[:,:,:nocc]
+    Cvirt = C[:,:,nocc:norb]
+
+    ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
+
+    if not rpa: #CIS: w = XAX
+        HV = matrix_vector_product_batched(mol, amplitude.unsqueeze(1), w, ea_ei, Cocc, Cvirt)
+        E_cis = torch.linalg.vecdot(amplitude,HV.squeeze(1))
+    else: # RPA
+        #  w = (X Y)(A B)(X) = X(AX+BY) + Y(BX+AY)
+        #           (B A)(Y)
+        X = amplitude[0,...]
+        Y = amplitude[1,...]
+        AX, BX= matrix_vector_product_batched(mol, X.unsqueeze(1), w, ea_ei, Cocc, Cvirt,makeB=True)
+        AY, BY= matrix_vector_product_batched(mol, Y.unsqueeze(1), w, ea_ei, Cocc, Cvirt,makeB=True)
+        E_cis = torch.linalg.vecdot(X,(AX+BY).squeeze(1)) + torch.linalg.vecdot(Y,(BX+AY).squeeze(1))
+
+    L = E_cis.sum()
+    L.backward(create_graph=False,retain_graph=True)
+    force = mol.coordinates.grad.clone()
+    with torch.no_grad(): mol.coordinates.grad.zero_()
+    torch.set_printoptions(precision=15)
+    print(f'E_cis is {E_cis}')
+    print(f'Grad CIS from backprop is\n{force}')
+
+    return E_cis
 

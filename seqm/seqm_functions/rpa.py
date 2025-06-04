@@ -9,10 +9,13 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     :param mol: Molecule Orbital Coefficients
     :param w: 2-electron integrals
-    :param e_mo: Orbital energies
-    :param nroots: Number of CIS states requested
+    :param e_mo: Molecular Orbital energies
+    :param nroots: Number of RPA states requested
     :returns: 
-
+        e_val_n: RPA excitation energies
+        amplitude_store: tensor containing the [X;Y] RPA amplitudes.
+                         amplitude_store has shape (2,nmol,nroots,nov),
+                         where amplitude_store[0,...] are the X amplitudes, and amplitude_store[1,...] are the Y amplitudes
     """
 
     device = w.device

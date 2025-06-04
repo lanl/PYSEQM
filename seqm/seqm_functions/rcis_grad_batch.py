@@ -1,14 +1,15 @@
 import torch
-from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der
+from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der, core_core_der
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch
 from .constants import a0
 
-def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
+def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc,rpa=False,include_ground_state=False):
     """
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
          state for which the gradient is required has to be selected and put together into the amp tensor
     """
+    amp = mol.cis_amplitudes[...,mol.active_state-1,:]
     device = amp.device
     dtype = amp.dtype
     norb = mol.norb[0]
@@ -106,6 +107,17 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
 
     B = B0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+    if include_ground_state:
+        pair_grad = core_core_der(mol, gam, w_x, method, parnuc)
+        B += 0.5*P
+        # Typically you add ground state density to excited state density if you want to include gradient of ground state energy in the gradient of excited state energy.
+        # But there is a factor of 2 when contracting excited state density with two-electron gradient matrix (not sure why), but not for ground state density. 
+        # That's why I add 0.5 times the ground state density to the excited state density. 
+        # In doing so, I have to also add 0.5 time the contraction of ground state density with the one-electron gradient matrix. I add 0.5 time the overlap contribution here and 0.5 time core-valence term e1b_x and e2a_x below.
+        pair_grad += 0.5*(P[mol.mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3))
+    else:
+        pair_grad = torch.zeros_like(Xij)
+        
     
     # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
 
@@ -130,7 +142,7 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
             # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
             overlap_KAB_x[..., i, j] -= torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
-    pair_grad = (B[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
+    pair_grad += (B[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
 
     # Coulomb integrals -- only on the diagonal
     #F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
@@ -150,6 +162,14 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
 
+    scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
+                                [0.0, 1.0, 2.0, 2.0],
+                                [0.0, 0.0, 1.0, 2.0],
+                                [0.0, 0.0, 0.0, 1.0] ],dtype=dtype, device=device)
+    if include_ground_state:
+        pair_grad.add_(0.5*(P[mol.maskd[mol.idxj], None, :, :] * e2a_x*scale_emat).sum(dim=(2, 3)) +
+                       0.5*(P[mol.maskd[mol.idxi], None, :, :] * e1b_x*scale_emat).sum(dim=(2, 3)))
+
     # Collect in sumA and sumB tensors
     # reususe overlap_KAB_x here instead of creating new arrays
     # I am going to be alliasing overlap_KAB_x to sumA and then further aliasing it to sumB
@@ -167,11 +187,6 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
     del suma, sumb
     e1b_x.add_(sumB)
 
-    # Core-elecron interaction
-    scale_emat = torch.tensor([ [1.0, 2.0, 2.0, 2.0],
-                                [0.0, 1.0, 2.0, 2.0],
-                                [0.0, 0.0, 1.0, 2.0],
-                                [0.0, 0.0, 0.0, 1.0] ],dtype=dtype, device=device)
     e1b_x *= scale_emat
     e2a_x *= scale_emat   
     # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
@@ -244,7 +259,7 @@ def rcis_grad_batch(mol, amp, w, e_mo, riXH, ri, P0, zvec_tolerance,rpa=False):
 
     grad_cis = grad_cis.view(nmol, molsize, 3)
 
-    torch.set_printoptions(precision=9)
+    torch.set_printoptions(precision=15)
     print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')
 
     return grad_cis

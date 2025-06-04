@@ -16,9 +16,10 @@ import warnings
 import time
 from .build_two_elec_one_center_int_D import calc_integral #, calc_integral_os
 #from .check import check
+
 #scf_backward==0: ignore the gradient on density matrix
 #scf_backward==1: use recursive formula/implicit autodiff
-#scf_backward==2: go backward scf loop directly
+#scf_backward==2: go backward scf loop directly. TODO: converge the density matrix to a certain degree with torch.no_grad, and then use this converged density matrix as initial guess to start another scf cycle with gradient tracking turned on. Benchmark and see if this saves time.
 
 debug = False
 MAX_ITER = 2000
@@ -33,10 +34,11 @@ RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 
 # use memory-efficient evaluation of gradients in implicit autodiff
 SCF_IMPLICIT_BACKWARD = True
+# SCF_IMPLICIT_BACKWARD = False
 # tolerance, max no. iteration, and history size for Anderson acceleration
 # in solving fixed point problem in SCF_IMPLICIT_BACKWARD
-SCF_BACKWARD_ANDERSON_TOLERANCE = 1e-4  # this seems stable enough, but TODO!
-SCF_BACKWARD_ANDERSON_MAXITER = 50      # sufficient for all test cases
+SCF_BACKWARD_ANDERSON_TOLERANCE = 5e-7  # this seems stable enough, but TODO!
+SCF_BACKWARD_ANDERSON_MAXITER = 80      # sufficient for all test cases
 SCF_BACKWARD_ANDERSON_HISTSIZE = 5      # seems reasonable, but TODO!
 
 
@@ -1678,10 +1680,12 @@ def scf_loop(molecule, \
 
     # apply_params = {k:pp[k] for k in apply_param_map}
     if scf_backward==0 or scf_backward==1:
-        Pconv, notconverged = scfapply(M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
-            molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
-            nmol, molecule.molsize, \
-            molecule.maskd, molecule.mask, molecule.atom_molid, molecule.pair_molid, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'] )
+        with torch.set_grad_enabled(scf_backward==1): # no grad if scf_backward==0
+            Pconv, notconverged = scfapply(M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
+                molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
+                nmol, molecule.molsize, \
+                molecule.maskd, molecule.mask, molecule.atom_molid, molecule.pair_molid, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'] )
+
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
         print('did not converge', nnot)
