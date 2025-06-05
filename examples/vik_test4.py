@@ -15,21 +15,22 @@ else:
 torch.set_printoptions(precision=7)
 ### create molecule object:
 species = torch.as_tensor([
-                            [8,1,1],
+                            # [8,1,1],
                            # [1,1,],
                            # [1,1,1,1],
                            # [8,8,],
                           # [8,6,1,1],
+                          [8,6,1,1,1,1],
                           # [8,8,6,0]
                           ], # zero-padding for batching
                           dtype=torch.int64, device=device)
 
 coordinates = torch.tensor([
-                              [
-                               [0.82,    0.00,    0.00],
-                               [1.82,    0.94,    0.00],
-                               [1.82,   -0.94,    0.00],
-                              ],
+                              # [
+                              #  [0.82,    0.00,    0.00],
+                              #  [1.82,    0.94,    0.00],
+                              #  [1.82,   -0.94,    0.00],
+                              # ],
                               # [
                               #  [1.82,    0.0,    0.00],
                               #  [1.82,   -0.6633,    0.00],
@@ -50,6 +51,14 @@ coordinates = torch.tensor([
                              #  [1.82,    0.94,    0.00],
                              #  [1.81,   -0.93,    -0.20]
                              # ],
+                            [
+                              [0.702557224724283, 0.009082218612640677, 0.0032799875195913897],
+                              [-0.707614145212714, -0.016445490928756433, -0.0053160302976097504],
+                              [-1.0976860826353918, -0.7955775292486926, 0.6962719690854523],
+                              [-1.097755234761741, -0.2082662697782238, -1.0360554595036433],
+                              [-1.020222647310211, 1.001104652073342, 0.33967650723822534],
+                              [1.0046208851957734, -0.8579975807303093, -0.29065697404201524]
+                            ],
                             #  [
                             #   [0.00,    0.00,    0.00],
                             #   [1.23,    0.00,    0.00],
@@ -64,7 +73,7 @@ elements = [0]+sorted(set(species.reshape(-1).tolist()))
 
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
-                   'scf_eps' : 1.0e-12,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
+                   'scf_eps' : 1.0e-10,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
                    'scf_converger' : [0,0.1], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
@@ -77,11 +86,12 @@ seqm_parameters = {
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
                    # 'uhf' : True,
-                   # 'analytical_grad':True,
+                   # 'analytical_gradient':[True],
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':6, 'method': 'rpa', 'cis_tolerance': 1e-10},
-                   'active_state' : 2,
+                   # 'excited_states': {'n_states':6, 'method': 'rpa', 'cis_tolerance': 1e-10},
+                   # 'active_state' : 2,
                    'scf_backward' : 2,
+                   'normal modes': True,
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -108,7 +118,7 @@ print(' Total Energy (eV):\n', molecules.Etot)
 # print('\n Nuclear Energy (eV):\n', molecules.Enuc)
 # print('\n Heat of Formation (ev):\n', molecules.Hf)
 # print('\n Orbital energies (eV):\n', molecules.e_mo)
-
+exit()
 import io
 import contextlib
 fd_gradient = torch.zeros_like(coordinates)
@@ -126,13 +136,13 @@ for atom in range(natoms):
         with contextlib.redirect_stdout(io.StringIO()):
             molecules = Molecule(const, seqm_parameters, mol_coord_plus, species).to(device)
             esdriver(molecules)
-            energy_plus = molecules.cis_energies[:,seqm_parameters['active_state']-1]
-            # energy_plus = molecules.Etot
+            # energy_plus = molecules.cis_energies[:,seqm_parameters['active_state']-1]
+            energy_plus = molecules.Etot
 
             molecules = Molecule(const, seqm_parameters, mol_coord_minus, species).to(device)
             esdriver(molecules)
-            energy_minus = molecules.cis_energies[:,seqm_parameters['active_state']-1]
-            # energy_minus = molecules.Etot
+            # energy_minus = molecules.cis_energies[:,seqm_parameters['active_state']-1]
+            energy_minus = molecules.Etot
 
         fd_gradient[0,atom, x] = (energy_plus-energy_minus)/(2.0*delta)
 

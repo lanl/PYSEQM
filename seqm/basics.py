@@ -10,6 +10,7 @@ from .seqm_functions.rcis_batch import rcis_batch, calc_cis_energy
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rpa import rpa
+from .seqm_functions.normal_modes import normal_modes
 
 import os
 import time
@@ -563,6 +564,11 @@ class Force(torch.nn.Module):
 
         Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, cis_amp=cis_amp, *args, **kwargs)
+
+        if self.seqm_parameters.get('normal modes', False):
+            if self.seqm_parameters.get('scf_backward', 0) != 2:
+                raise Exception("You have requested for normal mode calculation but scf_backward has not been set to 2 in your input seqm_parameters")
+            normal_modes(molecule,Hf)
         
         if self.eig:
             e = e.detach()
