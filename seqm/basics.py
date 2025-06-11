@@ -76,7 +76,7 @@ class Parser(torch.nn.Module):
         super().__init__()
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         if seqm_parameters.get('elements') is None:
-            raise RuntimeError("Instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class")
+            raise RuntimeError("Please instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class")
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
         self.hipnn_automatic_doublet = seqm_parameters.get('HIPNN_automatic_doublet', False)
@@ -223,7 +223,7 @@ class Pack_Parameters(torch.nn.Module):
         """
         super().__init__()
         self.elements = seqm_parameters['elements']
-        self.learned_list = seqm_parameters['learned']
+        self.learned_list = seqm_parameters.get('learned',[])
         self.method = seqm_parameters['method']
         self.filedir = seqm_parameters['parameter_file_dir'] \
             if 'parameter_file_dir' in seqm_parameters \
@@ -505,7 +505,7 @@ class Energy(torch.nn.Module):
 
                 cis_nac = kwargs.get('cis_nac',[False])
                 if cis_nac[0]:
-                    calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
+                    calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
 
                 if do_analytical_gradient[0]:
                     molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa')#,include_ground_state=True)
@@ -552,7 +552,7 @@ class Force(torch.nn.Module):
     def forward(self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs):
         
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
-        do_analytical_gradient = [False]
+        do_analytical_gradient = self.seqm_parameters.get('analytical_gradient', [False])
 
         # For excited states, back-prop forces work only if we have scf_backward == 1 or 2. We will have to fall back on analytical_gradient otherwise
         if molecule.active_state > 0 and do_force:

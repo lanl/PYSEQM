@@ -3,11 +3,13 @@ from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der
 from seqm.seqm_functions.rcis_batch import unpackone_batch
 from .constants import a0
 
-def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2,):
+def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2,rpa=False):
     """
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
          state for which the gradient is required has to be selected and put together into the amp tensor
     """
+    if rpa:
+        raise NotImplementedError("Nonadiabatic coupling vecotrs not yet implemented for RPA. Use CIS instead.")
     device = amp.device
     dtype = amp.dtype
     norb = mol.norb[0]

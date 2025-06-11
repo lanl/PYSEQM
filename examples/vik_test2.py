@@ -1,5 +1,4 @@
 import torch
-from seqm.seqm_functions import anal_grad
 from seqm.seqm_functions.constants import Constants
 from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
@@ -61,8 +60,8 @@ seqm_parameters = {
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
                    'excited_states': {'n_states':6,'method':'cis'},
-                   'active_state': 0,
-                   'scf_backward': 1
+                   'active_state': 1,
+                   'scf_backward': 2
                    # 'cis_tolerance' : 1e-8,
                    }
 
@@ -85,7 +84,7 @@ esdriver(molecules,cis_gradient=[True])
 # analytic_grad = molecules.ground_analytical_gradient
 # esdriver(molecules)
 force = molecules.force
-# print(f'Force is\n{force}')
+print(f'Force is\n{force}')
 # print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force-force_analy))}')
 # # if analytic_grad is not None:
 # #     print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force+analytic_grad))}')
