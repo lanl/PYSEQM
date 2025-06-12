@@ -702,13 +702,14 @@ def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False):
         AY, BY= matrix_vector_product_batched(mol, Y.unsqueeze(1), w, ea_ei, Cocc, Cvirt,makeB=True)
         E_cis = torch.linalg.vecdot(X,(AX+BY).squeeze(1)) + torch.linalg.vecdot(Y,(BX+AY).squeeze(1))
 
-    L = E_cis.sum()
-    L.backward(create_graph=False,retain_graph=True)
-    force = mol.coordinates.grad.clone()
-    with torch.no_grad(): mol.coordinates.grad.zero_()
-    torch.set_printoptions(precision=15)
-    print(f'E_cis is {E_cis}')
-    print(f'Grad CIS from backprop is\n{force}')
+    # For calculating excitation energy gradient with backprop
+    # L = E_cis.sum()
+    # L.backward(create_graph=False,retain_graph=True)
+    # force = mol.coordinates.grad.clone()
+    # with torch.no_grad(): mol.coordinates.grad.zero_()
+    # torch.set_printoptions(precision=15)
+    # print(f'E_cis is {E_cis}')
+    # print(f'Grad CIS from backprop is\n{force}')
 
     return E_cis
 

@@ -49,9 +49,9 @@ seqm_parameters = {
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
-                   # 'analytical_grad':True
+                   'analytical_gradient':[True]#,'numerical']
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':3},
+                   # 'excited_states': {'n_states':3},
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
