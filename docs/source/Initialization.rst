@@ -13,7 +13,7 @@ Using PyTorch Tensors
 Each row represents a molecule. 
 
 
-- species: a tensor of atomic numbers (Z) for the atoms in each molecule.
+- species: a tensor containing the atomic numbers (Z) of the atoms in each molecule, ordered from the highest to the lowest atomic number. 
 - coordinates: a tensor of 3D Cartesian coordinates (x, y, z) for each atom.
 
 .. code-block:: python
@@ -223,15 +223,12 @@ Implements an efficient Born-Oppenheimer MD scheme using extended Lagrangian and
 
 
 
-
+.. _seqm-parameters:
 
 SEQM Parameters
 ---------------
 
-
-The `seqm_parameters` dictionary defines settings for your semi-empirical quantum mechanics (SEQM) simulation.
-
-
+The ``seqm_parameters`` dictionary defines settings for a semi-empirical quantum mechanics (SEQM) simulation.
 
 .. code-block:: python
 
@@ -240,36 +237,76 @@ The `seqm_parameters` dictionary defines settings for your semi-empirical quantu
         'scf_eps': 1.0e-6,
         'scf_converger': [2, 0.0],
         'sp2': [False, 1.0e-5],
-        'elements': elements,
         'learned': [],
         'pair_outer_cutoff': 1.0e10,
         'eig': True,
     }
 
-
 **method**  
-Specifies the semi-empirical method to use. Options:
+    Specifies the semi-empirical method to use.
 
-`'MNDO'`
-
-`'AM1'`
-
-`'PM3'`
-
-`'PM6'`
+    :type: str  
+    :accepted values: ``'MNDO'``, ``'AM1'``, ``'PM3'``, ``'PM6'``
 
 **scf_eps**  
-Convergence threshold for the SCF (Self-Consistent Field) loop. The simulation stops if the energy change between steps is smaller than this value.
+    Convergence threshold for the SCF (Self-Consistent Field) loop.
+
+    The SCF iteration stops when the energy difference between steps is less than this value.
+
+    :type: float
 
 **scf_converger**  
-Settings for the SCF convergence algorithm. Format: `[type, tolerance]`.  
+    Controls the mixing strategy used in the SCF loop.
 
+    :type: list
+
+    Accepted formats:
+
+    - ``[0, alpha]``  
+      Constant linear mixing:  
+      ``P = alpha * P_old + (1 - alpha) * P_new``  
+      where ``alpha`` is the mixing coefficient (e.g., 0.5).
+
+    - ``[1]``  
+      Simple adaptive mixing.
+
+    - ``[1, K, L, M]``  
+      Advanced adaptive mixing:  
+        * Use linear mixing for the first ``M`` steps.  
+        * Start with mixing coefficient ``K`` for the first 5 steps.  
+        * Linearly transition from ``K`` to ``L`` between steps 6 and ``M``.  
+        * After step ``M``, switch to adaptive mixing.
+
+    - ``[2]``  
+      Use adaptive mixing initially, then switch to Pulay mixing.
+
+**sp2**  
+    Enables special treatment for sp2 hybridized atoms.
+
+    :type: list  
+    :format: ``[enabled, tolerance]``  
+    * ``enabled`` (bool): Whether to activate sp2 constraints.  
+    * ``tolerance`` (float): Constraint threshold.
+
+**learned**  
+    Optional parameters for integrating learned models (e.g., using PySEQM with machine learning).
+
+    :type: list
 
 **pair_outer_cutoff**  
-Maximum distance between two atoms for considering interactions. Atoms farther apart are ignored.  
+    Maximum interatomic distance for considering pairwise interactions.
+
+    Atoms farther than this cutoff are ignored.
+
+    :type: float
 
 **eig**  
-Whether or not to calculate the final molecular orbitals. If eig is set to False, then SCF calculates the converged density matrix only. If eig is set to true, the converged molecular orbitals are also calculated by diagonalizing the Fock matrix.
+    Whether to compute molecular orbitals after SCF convergence.
+
+    - If ``True``, the Fock matrix is diagonalized to obtain molecular orbitals.  
+    - If ``False``, only the converged density matrix is computed.
+
+    :type: bool
 
 Must be added to run Excited States
 ------------------------
@@ -300,6 +337,8 @@ Method used for excited state calculations. Available options:
 By default it is set to `cis`
 
 **cis_tolerance**
+
+is optional set can be left blank 
 Convergence criterion for CIS/RPA excited states. By default it is set to 1e-6.
 
 

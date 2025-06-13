@@ -18,8 +18,12 @@ User Guide
    :maxdepth: 2
    :caption: USER GUIDE
 
-   features
-   Examples
+
+   Feature-SCF
+   Feature-CIS-RPA
+   Feature-XLBOMD
+   Feature-BOMD
+
    Initialization
-   
+
 
