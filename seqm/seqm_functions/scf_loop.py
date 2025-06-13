@@ -37,9 +37,6 @@ SCF_IMPLICIT_BACKWARD = True
 # SCF_IMPLICIT_BACKWARD = False
 # tolerance, max no. iteration, and history size for Anderson acceleration
 # in solving fixed point problem in SCF_IMPLICIT_BACKWARD
-SCF_BACKWARD_ANDERSON_TOLERANCE = 5e-7  # this seems stable enough, but TODO!
-SCF_BACKWARD_ANDERSON_MAXITER = 80      # sufficient for all test cases
-SCF_BACKWARD_ANDERSON_HISTSIZE = 5      # seems reasonable, but TODO!
 
 
 # number of iterations in canon_dm_prt.py (m)
@@ -1231,7 +1228,15 @@ def scf_forward3(M, w, W_pm6, gss, gpp, gsp, gp2, hsp, \
             return P, notconverged
         
 
-def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
+SCF_BACKWARD_ANDERSON_MAXITER = 100      # sufficient for all test cases
+SCF_BACKWARD_ANDERSON_HISTSIZE = 3      # seems reasonable, but TODO!
+SCF_BACKWARD_LAMBDA_MIN   = 1e-8          # floor for λ
+SCF_BACKWARD_BETA0        = 0.20          # mixing for the first 3 steps
+SCF_BACKWARD_BETA         = 0.95          # mixing afterwards
+def fixed_point_anderson(fp_fun, u0, tol, lam=1e-3, 
+                         beta0=SCF_BACKWARD_BETA0,
+                         beta=SCF_BACKWARD_BETA,
+                         lam_min=SCF_BACKWARD_LAMBDA_MIN):
     """
     Anderson acceleration for fixed point solver adapted from
     http://implicit-layers-tutorial.org/deep_equilibrium_models
@@ -1246,6 +1251,8 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
         regularization for solving linear system
     beta : float
         mixing parameter
+    tol : float
+        convergence tolerance
     
     Returns
     -------
@@ -1279,13 +1286,16 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
         E_n = torch.eye(n, dtype=u0.dtype, device=u0.device)
         H[:,1:n+1,1:n+1] = GTG + lam * E_n[None]
         alpha = torch.linalg.solve(H[:,:n+1,:n+1], y[:,:n+1])[:,1:n+1,0]
-        Xold = (1 - beta) * (alpha[:,None] @ X[:,:n])[:,0]
-        X[:,k%m] = beta * (alpha[:,None] @ F[:,:n])[:,0] + Xold
+        beta_k = beta if k > 3 else beta0
+        Xold = (1 - beta_k) * (alpha[:,None] @ X[:,:n])[:,0]
+        X[:,k%m] = beta_k * (alpha[:,None] @ F[:,:n])[:,0] + Xold
         F[:,k%m] = fp_fun(X[:,k%m].view_as(u0)).view(nmol, -1)
         resid1 = (F[:,k%m] - X[:,k%m]).norm().item()
         resid = resid1 / (1e-5 + F[:,k%m].norm().item())
-        cond = resid < SCF_BACKWARD_ANDERSON_TOLERANCE
+        cond = resid < tol # SCF_BACKWARD_ANDERSON_TOLERANCE
         if cond: break   # solver converged
+        # λ exponential decay (once we are in the basin)
+        lam = max(lam * 0.5, lam_min)
     if not cond:
         msg = "Anderson solver in SCF backward did not converge for some molecule(s)"
         if RAISE_ERROR_IF_SCF_BACKWARD_FAILS: raise ValueError(msg)
@@ -1293,6 +1303,17 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
     u_conv = X[:,k%m].view_as(u0)
     return u_conv
     
+
+def fixed_point_picard(fp_fun, u0, tol, maxiter=SCF_BACKWARD_ANDERSON_MAXITER):
+    u = u0.clone()
+    for k in range(maxiter):
+        u_new = fp_fun(u)
+        # relative residual
+        resid = (u_new - u).norm() / (1e-6 + u_new.norm())
+        if resid < tol:
+            return u_new
+        u = u_new
+    raise RuntimeError(f"Picard did not converge in {maxiter} steps (resid={resid:.2e})")
 
 class SCF(torch.autograd.Function):
     """
@@ -1313,14 +1334,19 @@ class SCF(torch.autograd.Function):
       parameter tensors θ = M, w, W, gss, gpp, gsp, gp2, hsp, etc.
 
       By the chain rule,
-          ∂L/∂θ = (∂L/∂P*) · (∂P*/∂θ).
+          ∂L/∂θ = (∂L/∂P*) · (∂P*/∂θ) = vᵀ·J (vector-Jacobian product) 
 
-      We first need (∂P*/∂θ). Implicit differentiation of P* = g(P*;θ) gives
+      Hence we need the jacobian (∂P*/∂θ). 
+      Implicit differentiation of P* = g(P*;θ) gives
           (I − ∂g/∂P) · (∂P*/∂θ) = ∂g/∂θ,
       so formally
           ∂P*/∂θ = [I − ∂g/∂P]⁻¹ · ∂g/∂θ.
 
-      We never invert the full Jacobian, i.e. we dont explicitly calculate [I − A]⁻¹; Instead: 
+      We never formally invert F = [I − ∂g/∂P]. Let B = ∂g/∂θ
+      We need to calculate the vector-Jacobian product:
+      vᵀ · J = vᵀ· F⁻¹ · B = zᵀ · B,
+      where zᵀ = vᵀ· F⁻¹. So we only need to solve for z. 
+
       1. if SCF_IMPLICIT_BACKWARD is False, we expand the inverse via the
       Neumann series (valid when spectral radius(∂g/∂P)<1):
           [I − A]⁻¹ = I + A + A² + ⋯ ,  A = ∂g/∂P.
@@ -1331,43 +1357,40 @@ class SCF(torch.autograd.Function):
       and accumulate
           ∂L/∂θ = Σ_k G_kᵀ · (∂g/∂θ).
 
-      2. if SCF_IMPLICIT_BACKWARD is True, we do Implicit‐adjoint solve via Anderson acceleration (no double‐backward support).
+      2. if SCF_IMPLICIT_BACKWARD is True, we do Implicit‐adjoint solve
       We have 
-          ∂L/∂θ = (∂L/∂P*) · (∂P*/∂θ) = (∂L/∂P*) · [I − ∂g/∂P]⁻¹ · ∂g/∂θ.
+        zᵀ = vᵀ· F⁻¹ = vᵀ· [I-A]⁻¹  
+        or zᵀ = vᵀ + zᵀ · A or z = v + Aᵀ · z 
 
-      Defining the “adjoint” vector
-        u = (∂L/∂P*) · (I − J)⁻¹,     where J = ∂g/∂P  evaluated at P*.
+      Instead of unrolling a Neumann series for (I−A)⁻¹,
+      we solve the affine equation for z: z = v + Aᵀ · z  directly in fixed_point_picard
 
-      we have the linear equation
-          u = g_P + Jᵀ u,
-      with g_P ≡ ∂L/∂P*.  Once u is known,
-          ∂L/∂θ = u · (∂g/∂θ).
-
-      Instead of unrolling a Neumann series for (I−J)⁻¹,
-      we solve u = g_P + Jᵀ u directly via Anderson acceleration:
-
-        1. Initialize u⁽⁰⁾ = 0.
+      However if fixed_point_picard does not converge we can accelerate the convergence 
+      using Anderson acceleration, which is the same as DIIS. This is done like so: 
+        1. Initialize z⁽⁰⁾ = 0.
         2. For k = 0,1,2,… until convergence:
-           a) f(u⁽ᵏ⁾) = g_P + Jᵀ · u⁽ᵏ⁾    # vector‐Jacobian product via autograd
-           b) r⁽ᵏ⁾ = f(u⁽ᵏ⁾) − u⁽ᵏ⁾        # residual
-           c) Keep the last m pairs {(u⁽ᵏ⁻ʲ⁾, r⁽ᵏ⁻ʲ⁾)} for j=0…m−1
+           a) f(z⁽ᵏ⁾) = v + Aᵀ · z⁽ᵏ⁾    # vector‐Jacobian product via autograd
+           b) r⁽ᵏ⁾ = f(z⁽ᵏ⁾) − z⁽ᵏ⁾        # residual
+           c) Keep the last m pairs {(z⁽ᵏ⁻ʲ⁾, r⁽ᵏ⁻ʲ⁾)} for j=0…m−1
            d) Solve the small least‐squares problem
                  min_{α_j, ∑α_j=1} ‖∑_j α_j r⁽ᵏ⁻ʲ⁾‖
-           e) Update
-                 u⁽ᵏ⁺¹⁾ = ∑_j α_j f(u⁽ᵏ⁻ʲ⁾)
-        3. Stop when ‖u⁽ᵏ⁺¹⁾ − u⁽ᵏ⁾‖ < tol.
+           e) update
+                 z⁽ᵏ⁺¹⁾ = ∑_j α_j f(z⁽ᵏ⁻ʲ⁾)
+        3. Stop when ‖z⁽ᵏ⁺¹⁾ − z⁽ᵏ⁾‖ < tol.
 
-      Once converged, the final u approximates (I − Jᵀ)⁻¹ g_P.
+      Once converged, the final z approximates (I − Aᵀ)⁻¹ g_P.
+      With some testing it seems that using Anderson acceleration is slower than directly solving for z!
+      I have commented out the call to fixed_point_anderson for now
+
       We then compute all parameter gradients in one shot:
           grads = torch.autograd.grad(Pout, gv, grad_outputs=u)
-      so that each grads[i] = u · (∂g/∂θ_i) = ∂L/∂θ_i.
+      so that each grads[i] = z · (∂g/∂θ_i) = ∂L/∂θ_i.
 
       Notes:
         - We wrap the Anderson solve in torch.no_grad(), so this path does not
           support double‐backward (second derivatives).
-        - Anderson acceleration often converges in far fewer iterations than
-          a simple fixed‐point or Neumann‐series unrolling, especially when
-          the spectral radius of J is close to 1.
+        - Anderson acceleration seems to converges in fewer iterations than
+          Neumann‐series unrolling.
     """
     def __init__(self, scf_converger=[2], use_sp2=[False], scf_backward_eps=1.0e-2):
         SCF.sp2 = use_sp2
@@ -1382,6 +1405,7 @@ class SCF(torch.autograd.Function):
                 nmol, molsize, \
                 maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
         
+        SCF.scf_backward_eps = eps # set the convergence tolerance for backprop the same as the scf tolerance
         SCF.themethod = themethod
         if SCF.converger[0] == 0:
             if P.dim() == 4:
@@ -1486,9 +1510,10 @@ class SCF(torch.autograd.Function):
             ## TODO: INCLUDING THIS PART IN GRAPH CAUSES MEMORY LEAK.
             ##       RESOLVE THIS WHEN IMPLEMENTING DOUBLE-BACKWARD!
             with torch.no_grad():
-                def affine_eq(u): return grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
-                u_init = torch.zeros_like(Pin)  #TODO: better initial guess?
-                u = fixed_point_anderson(affine_eq, u_init)
+                def affine_eq(u): return grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0] # agrad is torch.autograd.grad
+                u_init = torch.zeros_like(Pin)  
+                u = fixed_point_picard(affine_eq, u_init,backward_eps)
+                # u = fixed_point_anderson(affine_eq, u_init, backward_eps)
                 gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
                 for t, i in enumerate(gvind): grads[i] = gradients[t]
         else:
