@@ -166,6 +166,21 @@ Using lower precision (e.g., `torch.float32`) may result in:
 
 
 
+Units
+-----
+
+The default units used in PySEQM calculations are:
+
+- **Length**: Å (angstroms)  
+- **Energy**: eV (electronvolts)  
+- **Temperature**: K (Kelvin)  
+- **Time**: fs (femtoseconds)  
+- **Force**: eV/Å  
+- **Velocity**: Å/fs
+
+These units are consistent across all molecular dynamics simulations and electronic structure calculations in PySEQM. Ensure that any input data (e.g., coordinates, velocities) and interpretation of output quantities use the appropriate units.
+
+
 Imports  
 ---------------
 
@@ -307,6 +322,22 @@ The ``seqm_parameters`` dictionary defines settings for a semi-empirical quantum
     - If ``False``, only the converged density matrix is computed.
 
     :type: bool
+
+
+
+GPU Computation
+---------------
+
+PySEQM supports GPU acceleration via PyTorch. To enable this, move all tensors and modules to the GPU using:
+
+.. code-block:: python
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
+    esdriver = Electronic_Structure(seqm_parameters).to(device)
+
+Calling ``.to(device)`` moves data and models to the GPU. All operations will then be performed on the GPU. Mixing CPU and GPU tensors in operations will result in errors.
+
 
 Must be added to run Excited States
 ------------------------

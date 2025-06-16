@@ -93,7 +93,6 @@ See :ref:`seqm-parameters` for more personalized parameter settings for the calc
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
-      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
    }

@@ -8,15 +8,8 @@ User Guide
 
 .. toctree::
    :maxdepth: 2
-   :caption: GETTING STARTED
 
    installation
-
-
-
-.. toctree::
-   :maxdepth: 2
-   :caption: USER GUIDE
 
 
    Feature-SCF
@@ -25,5 +18,8 @@ User Guide
    Feature-BOMD
 
    Initialization
+   SEQM Parameters
+   ExcitedStateSetup
+   MolecularDynamicsSetup
 
 

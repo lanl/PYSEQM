@@ -65,7 +65,6 @@ Computes the electronic structure of a molecule by iteratively solving for the e
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
-      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
       'eig': True
@@ -139,7 +138,6 @@ Estimates the energies of electronically excited states by solving for higher en
       'scf_eps': 1.0e-8,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
-      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e8,
       'eig': True,
@@ -207,7 +205,6 @@ Tracks the natural evolution of a system of atoms under Newton’s laws in an is
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
-      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
    }
@@ -281,7 +278,6 @@ Simulates atomic trajectories under the influence of both deterministic interato
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
-      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
       'eig': True
