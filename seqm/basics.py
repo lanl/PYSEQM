@@ -519,8 +519,8 @@ class Energy(torch.nn.Module):
                 if self.seqm_parameters.get('scf_backward', 0) >= 1:
                     Eelec += calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
-
-        molecule.old_mos = molecule.eig_vec.clone()
+        if self.eig:
+            molecule.old_mos = molecule.eig_vec.clone()
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)

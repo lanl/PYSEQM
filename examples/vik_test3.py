@@ -2,6 +2,7 @@ import torch
 from seqm.seqm_functions.constants import Constants
 from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
+from seqm.geometryOptimization import geomeTRIC_optimization
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -38,8 +39,8 @@ const = Constants().to(device)
 
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
-                   'scf_eps' : 1.0e-6,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
-                   'scf_converger' : [2,0.0], # converger used for scf loop
+                   'scf_eps' : 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
+                   'scf_converger' : [0,0.1], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
@@ -48,13 +49,14 @@ seqm_parameters = {
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
-                   'eig' : True,
+                   # 'eig' : True,
                    'analytical_gradient':[True]#,'numerical']
-                   # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
                    # 'excited_states': {'n_states':3},
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
+geomeTRIC_optimization(molecules)
+exit()
 
 ### Create electronic structure driver:
 esdriver = Electronic_Structure(seqm_parameters).to(device)

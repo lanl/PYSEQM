@@ -15,3 +15,5 @@ examples/hipnn_train_reactive/combined_datasets/15_cut/DM.npy
 PYSEQM.egg-info/
 **/__pycache__/
 **/.ipynb_checkpoints/
+**/.DS_Store
+.ignore
