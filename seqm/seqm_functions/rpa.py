@@ -56,7 +56,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     vend = torch.full((nmol,),nstart,dtype=torch.long,device=device)
     done = torch.zeros(nmol,dtype=torch.bool,device=device)
 
-    C = mol.eig_vec
+    C = mol.molecular_orbitals
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
 

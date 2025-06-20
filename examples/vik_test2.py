@@ -53,10 +53,7 @@ seqm_parameters = {
                                          # [2], adaptive mixing, then pulay
                    'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
                                             #[True, eps] or [False], eps for SP2 conve criteria
-                   'learned' : [], # learned parameters name list, e.g ['U_ss']
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
-                   'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
-                   'eig' : True,
                    # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
                    'excited_states': {'n_states':6,'method':'cis'},

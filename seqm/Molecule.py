@@ -105,6 +105,7 @@ class Molecule(torch.nn.Module):
         self.active_state = seqm_parameters.get('active_state',0)
         self.cis_amplitudes = None
         self.cis_energies = None
+        self.molecular_orbitals = None
         self.old_mos = None
         
                 

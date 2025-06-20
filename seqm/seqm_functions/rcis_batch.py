@@ -53,7 +53,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
         # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
         # This fails when orbitals are degenerate and switch order
-        mol.eig_vec *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.eig_vec,mol.old_mos))).unsqueeze(1)
+        mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
 
 
     max_iter = 100 # TODO: User-defined
@@ -66,7 +66,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False # TODO: User-defined/fixed
 
-    C = mol.eig_vec
+    C = mol.molecular_orbitals
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
 
@@ -557,7 +557,7 @@ def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat
 
     nocc, norb = mol.nocc[0], mol.norb[0]
     nvirt = norb - nocc
-    C = mol.eig_vec
+    C = mol.molecular_orbitals
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
 
@@ -684,7 +684,7 @@ def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
     norb, nocc = norb_batch[0], nocc_batch[0]
 
-    C = mol.eig_vec
+    C = mol.molecular_orbitals
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
 

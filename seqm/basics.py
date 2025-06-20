@@ -74,7 +74,7 @@ class Parser(torch.nn.Module):
         Constructor
         """
         super().__init__()
-        self.outercutoff = seqm_parameters['pair_outer_cutoff']
+        self.outercutoff = seqm_parameters.get('pair_outer_cutoff',1e10)
         if seqm_parameters.get('elements') is None:
             raise RuntimeError("Please instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class")
         self.elements = seqm_parameters['elements']
@@ -278,7 +278,7 @@ class Hamiltonian(torch.nn.Module):
         self.sp2 = seqm_parameters.get('sp2', [False])
         self.scf_converger = seqm_parameters['scf_converger']
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
-        self.eig = seqm_parameters.get('eig', False)
+        self.eig = seqm_parameters.get('eig', True)
         self.scf_backward = seqm_parameters.get('scf_backward', 0)
         scf_back_eps = seqm_parameters.get('scf_backward_eps', 1e-2)
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(scf_back_eps), requires_grad=False)
@@ -315,7 +315,7 @@ class Hamiltonian(torch.nn.Module):
         
         
         if(themethod == 'PM6'): # not implemented yet
-            F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, eig_vec = scf_loop(molecule,
+            F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals = scf_loop(molecule,
                                   eps = self.eps,
                                   P=P0,
                                   sp2=self.sp2,
@@ -325,7 +325,7 @@ class Hamiltonian(torch.nn.Module):
                                   scf_backward_eps=self.scf_backward_eps)
 
         else:
-            F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec = scf_loop(molecule,
+            F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals = scf_loop(molecule,
                               eps = self.eps,
                               P=P0,
                               sp2=self.sp2,
@@ -334,7 +334,7 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps)
         #
-        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, eig_vec
+        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals
 
 class Energy(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -349,7 +349,7 @@ class Energy(torch.nn.Module):
         self.hamiltonian = Hamiltonian(seqm_parameters)
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
-        self.eig = seqm_parameters.get('eig', False)
+        self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
@@ -386,7 +386,7 @@ class Energy(torch.nn.Module):
         
         molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
         
-        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec =  self.hamiltonian(molecule, self.method, \
+        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
         
         
@@ -406,7 +406,7 @@ class Energy(torch.nn.Module):
         else:
             e_gap = None
         
-        molecule.eig_vec = eig_vec
+        molecule.molecular_orbitals = molecular_orbitals
         
         #nuclear energy
         alpha = molecule.parameters['alpha']
@@ -520,7 +520,7 @@ class Energy(torch.nn.Module):
                     Eelec += calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
         if self.eig:
-            molecule.old_mos = molecule.eig_vec.clone()
+            molecule.old_mos = molecule.molecular_orbitals.clone()
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
@@ -549,7 +549,7 @@ class Force(torch.nn.Module):
         self.energy = Energy(seqm_parameters)
         self.create_graph = seqm_parameters.get('2nd_grad', False)
         self.uhf = seqm_parameters.get('UHF', False)
-        self.eig = seqm_parameters.get('eig', False)
+        self.eig = seqm_parameters.get('eig', True)
         self.seqm_parameters = seqm_parameters
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs):

@@ -17,7 +17,7 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2,rpa=False):
     nvirt = norb - nocc
 
     # CIS unrelaxed density B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j 
-    C = mol.eig_vec 
+    C = mol.molecular_orbitals 
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
     nmol = mol.nmol
