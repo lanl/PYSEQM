@@ -10,7 +10,7 @@ try:
 except ImportError as e:
     raise ImportError(
         "To use geometry‐optimization with geomeTRIC, you must install the optional "
-        "dependency: `pip install pyseqm[geomopt]`"
+        "dependency using `pip install '.[geomopt]'` in the PYSEQM/ directory"
     ) from e
 
 from geometric.engine import Engine
