@@ -1,5 +1,5 @@
 #TODO: Add this to the website/manual
-import tempfile
+import tempfile,os, uuid
 import torch
 
 from .ElectronicStructure import Electronic_Structure as esdriver
@@ -91,6 +91,9 @@ def geomeTRIC_optimization(
         raise ValueError("Geometry optimization with geomeTRIC does not work in batch mode, i.e., with inputs of more than one molecule. Please input only one molecule")
 
     # 3) Run geomeTRIC
-    tmp = tempfile.mktemp()
     engine = pyseqm_engine(molecule, traj_file)
-    result = run_optimizer(customengine=engine, input=tmp, **run_kwargs)
+    # Making a temp directory and a temp file because geomeTRIC uses this for logging but I dont want these files saved
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpf = os.path.join(tmpdir, str(uuid.uuid4()))
+
+        result = run_optimizer(customengine=engine, input=tmpf, **run_kwargs)
