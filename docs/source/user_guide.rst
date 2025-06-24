@@ -8,16 +8,18 @@ User Guide
 
 .. toctree::
    :maxdepth: 2
-   :caption: GETTING STARTED
 
    installation
 
 
+   Feature-SCF
+   Feature-CIS-RPA
+   Feature-XLBOMD
+   Feature-BOMD
 
-.. toctree::
-   :maxdepth: 2
-   :caption: USER GUIDE
+   Initialization
+   SEQM Parameters
+   ExcitedStateSetup
+   MolecularDynamicsSetup
 
-   features
-   Examples
 

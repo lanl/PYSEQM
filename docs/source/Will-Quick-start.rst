@@ -4,7 +4,7 @@ Quickstart
 
 
 
-This quickstart is a high-level introduction on how to get started with using PySEQM. 
+This quickstart is a high level introduction on how to get started using PySEQM. 
 
 For full examples, please check out our `GitHub repository <https://github.com/lanl/pyseqm>`_ and the `examples directory <https://github.com/lanl/PYSEQM/tree/master/examples>`_.
 
@@ -15,6 +15,9 @@ For full examples, please check out our `GitHub repository <https://github.com/l
 
 Single Point SCF
 ------------------------------
+
+
+Computes the electronic structure of a molecule by iteratively solving for the electron density or wavefunction until convergence, enabling calculation of total energy and related properties.
 
 .. code-block:: python
 
@@ -62,6 +65,7 @@ Single Point SCF
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
+      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
       'eig': True
@@ -76,7 +80,7 @@ Single Point SCF
 
 
 
-CIS Excited State Calculations
+SCF and Excited State Calculations
 ------------------------------
 
 Estimates the energies of electronically excited states by solving for higher energy eigenvalues of the electronic Hamiltonian, extending SCF results beyond the ground state.
@@ -135,6 +139,7 @@ Estimates the energies of electronically excited states by solving for higher en
       'scf_eps': 1.0e-8,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
+      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e8,
       'eig': True,
@@ -150,6 +155,9 @@ Estimates the energies of electronically excited states by solving for higher en
 Molecular Dynamics(NVE)
 ----------------------
 
+Tracks the natural evolution of a system of atoms under Newton’s laws in an isolated environment—no energy exchange with surroundings. Energy is conserved, and atomic motion arises solely from interatomic forces.
+
+
 .. code-block:: python
 
    import torch
@@ -160,6 +168,7 @@ Molecular Dynamics(NVE)
 
    torch.set_default_dtype(torch.float64)
    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
    species = torch.as_tensor([[8,6,1,1],
                               [8,6,1,1],
@@ -187,16 +196,22 @@ Molecular Dynamics(NVE)
                                  ]
                               ], device=device)
 
+   species = torch.as_tensor(species, dtype=torch.int64, device=device)[:]
+   coordinates = torch.tensor(coordinates, device=device)[:]
    const = Constants().to(device)
+
+   elements = [0] + sorted(set(species.reshape(-1).tolist()))
 
    seqm_parameters = {
       'method': 'AM1',
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
+      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
    }
+
 
    output = {
    'molid': [0], 
@@ -266,6 +281,7 @@ Simulates atomic trajectories under the influence of both deterministic interato
       'scf_eps': 1.0e-6,
       'scf_converger': [2, 0.0],
       'sp2': [False, 1.0e-5],
+      'elements': elements,
       'learned': [],
       'pair_outer_cutoff': 1.0e10,
       'eig': True
@@ -284,4 +300,5 @@ Simulates atomic trajectories under the influence of both deterministic interato
    md = Molecular_Dynamics_Langevin(damp=100.0, seqm_parameters=seqm_parameters, Temp=400.0, timestep=0.4, output=output).to(device)
    md.initialize_velocity(molecule)
    _ = md.run(molecule, 10, remove_com=[True, 1], Info_log=True)
+
 
