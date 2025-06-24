@@ -49,7 +49,7 @@
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Installation" href="installation.html" />
-    <link rel="prev" title="Developers &amp; Contributors" href="about.html" />
+    <link rel="prev" title="Quickstart" href="quick_start.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -118,8 +118,8 @@
       
     
     
-    <img src="_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
-    <img src="_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/PySEQM-Light.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/PySEQM-Light.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
   
   
 </a></div>
@@ -142,15 +142,15 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="about.html">
-    About
+  <a class="nav-link nav-internal" href="#">
+    User Guide
   </a>
 </li>
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="#">
-    User Guide
+  <a class="nav-link nav-internal" href="about.html">
+    About
   </a>
 </li>
 
@@ -231,15 +231,15 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="about.html">
-    About
+  <a class="nav-link nav-internal" href="#">
+    User Guide
   </a>
 </li>
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="#">
-    User Guide
+  <a class="nav-link nav-internal" href="about.html">
+    About
   </a>
 </li>
 
@@ -272,14 +272,17 @@
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
   <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="quick_start.html">Quick Start</a></li>
-<li class="toctree-l1"><a class="reference internal" href="about.html">Developers &amp; Contributors</a></li>
-
 <li class="toctree-l1 current active has-children"><a class="current reference internal" href="#">User Guide</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="installation.html">Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-SCF.html">SCF Ground State Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-CIS-RPA.html">CIS Excited State Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-BOMD.html">Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html">Initialization</a></li>
 </ul>
 </details></li>
+<li class="toctree-l1"><a class="reference internal" href="about.html">About PYSEQM</a></li>
+
 </ul>
 </div>
 </nav></div>
@@ -356,23 +359,27 @@
   <section id="user-guide">
 <h1>User Guide<a class="headerlink" href="#user-guide" title="Link to this heading">#</a></h1>
 <div class="toctree-wrapper compound">
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">GETTING STARTED</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="installation.html#clone-pyseqm">Clone PySEQM</a></li>
 <li class="toctree-l2"><a class="reference internal" href="installation.html#test-the-installation">Test the Installation</a></li>
 </ul>
 </li>
-</ul>
-</div>
-<div class="toctree-wrapper compound">
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">USER GUIDE</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l1"><a class="reference internal" href="Examples.html">Examples</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="Examples.html#excited-states-rpa-cis">Excited States RPA/CIS</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Examples.html#bomd">BOMD</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Examples.html#molecular-dynamics">Molecular Dynamics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Feature-SCF.html">SCF Ground State Calculations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Feature-CIS-RPA.html">CIS Excited State Calculations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Feature-BOMD.html">Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Initialization.html">Initialization</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#input-formats">Input Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#padding-for-variable-length-molecules">Padding for Variable Length Molecules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#device-and-gpu-usage">Device and GPU Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#precision">Precision</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#units">Units</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#imports">Imports</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#seqm-parameters">SEQM Parameters</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#gpu-computation">GPU Computation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#must-be-added-to-run-excited-states">Must be added to run Excited States</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html#must-be-added-to-run-molecular-dynamics">Must be added to run Molecular Dynamics</a></li>
 </ul>
 </li>
 </ul>

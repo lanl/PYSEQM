@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>About PYSEQM &#8212; PYSEQM 1.0 documentation</title>
+    <title>SCF Ground State Calculations &#8212; PYSEQM 1.0 documentation</title>
   
   
   
@@ -44,11 +44,12 @@
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="_static/copybutton.js?v=f281be69"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'about';</script>
-    <link rel="author" title="About these documents" href="#" />
+    <script>DOCUMENTATION_OPTIONS.pagename = 'Feature-SCF';</script>
+    <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="prev" title="Initialization" href="Initialization.html" />
+    <link rel="next" title="CIS Excited State Calculations" href="Feature-CIS-RPA.html" />
+    <link rel="prev" title="Installation" href="installation.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -148,7 +149,7 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="#">
+  <a class="nav-link nav-internal" href="about.html">
     About
   </a>
 </li>
@@ -196,10 +197,6 @@
   
 
   
-    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
-      <span class="fa-solid fa-outdent"></span>
-    </button>
-  
 </div>
 
     </header>
@@ -241,7 +238,7 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="#">
+  <a class="nav-link nav-internal" href="about.html">
     About
   </a>
 </li>
@@ -275,16 +272,16 @@
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
   <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="quick_start.html">Quick Start</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="user_guide.html">User Guide</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="user_guide.html">User Guide</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="installation.html">Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Feature-SCF.html">SCF Ground State Calculations</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">SCF Ground State Calculations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="Feature-CIS-RPA.html">CIS Excited State Calculations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics</a></li>
 <li class="toctree-l2"><a class="reference internal" href="Feature-BOMD.html">Born Oppenheimer Molecular Dynamics</a></li>
 <li class="toctree-l2"><a class="reference internal" href="Initialization.html">Initialization</a></li>
 </ul>
 </details></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">About PYSEQM</a></li>
+<li class="toctree-l1"><a class="reference internal" href="about.html">About PYSEQM</a></li>
 
 </ul>
 </div>
@@ -342,7 +339,10 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">About PYSEQM</span></li>
+    
+    <li class="breadcrumb-item"><a href="user_guide.html" class="nav-link">User Guide</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">SCF Ground State Calculations</span></li>
   </ul>
 </nav>
 </div>
@@ -359,27 +359,63 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="about-pyseqm">
-<h1>About PYSEQM<a class="headerlink" href="#about-pyseqm" title="Link to this heading">#</a></h1>
-<p>PYSEQM is a powerful and userfriendly simulation tool built on PyTorch, designed to help researchers model molecular behavior with speed and efficiency. Leveraging GPU acceleration, PYSEQM allows scientists to simulate atomic motion, optimize molecular geometries, and explore how molecular systems respond to varying environmental conditions. Its seamless integration with PyTorch makes it especially suitable for combining traditional molecular simulations with modern machine learning techniques, opening up new possibilities in computational chemistry and materials science.</p>
-</section>
-<section id="how-to-cite">
-<h1>How to Cite<a class="headerlink" href="#how-to-cite" title="Link to this heading">#</a></h1>
-<p>If you use PYSEQM in your research, please cite the following publications:</p>
-<ol class="arabic simple">
-<li><p>Zhou, G., Lubbers, N., Barros, K., Tretiak, S., &amp; Nebgen, B. (2022).
-<em>Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics.</em>
-<em>Proceedings of the National Academy of Sciences</em>, <a href="#id1"><span class="problematic" id="id2">**</span></a>119**(27), e2120333119.
-<a class="reference external" href="https://doi.org/10.1073/pnas.2120333119">https://doi.org/10.1073/pnas.2120333119</a></p></li>
-<li><p>Kulichenko, M., Barros, K., Lubbers, N., Fedik, N., Zhou, G., Tretiak, S., Nebgen, B., &amp; Niklasson, A. M. N. (2023).
-<em>Semi-empirical shadow molecular dynamics: A PyTorch implementation.</em>
-<em>Journal of Chemical Theory and Computation</em>, <a href="#id3"><span class="problematic" id="id4">**</span></a>19**(11), 3209–3222.
-<a class="reference external" href="https://doi.org/10.1021/acs.jctc.3c00234">https://doi.org/10.1021/acs.jctc.3c00234</a></p></li>
-<li><p>Zhou, G., Nebgen, B., Lubbers, N., Malone, W., Niklasson, A. M. N., &amp; Tretiak, S. (2020).
-<em>Graphics processing unit-accelerated semiempirical Born–Oppenheimer molecular dynamics using PyTorch.</em>
-<em>Journal of Chemical Theory and Computation</em>, <a href="#id5"><span class="problematic" id="id6">**</span></a>16**(8), 4951–4962.
-<a class="reference external" href="https://doi.org/10.1021/acs.jctc.0c00243">https://doi.org/10.1021/acs.jctc.0c00243</a></p></li>
-</ol>
+  <section id="scf-ground-state-calculations">
+<h1>SCF Ground State Calculations<a class="headerlink" href="#scf-ground-state-calculations" title="Link to this heading">#</a></h1>
+<p>Computes the electronic ground state energy of a molecular system using the Self-Consistent Field (SCF) method. SCF iteratively solves the electronic Schrödinger equation within an approximate mean-field framework, where the motion of each electron is averaged over the positions of all others. This process refines the electron density until self-consistency is achieved.</p>
+<p>See <a class="reference internal" href="Initialization.html#seqm-parameters"><span class="std std-ref">SEQM Parameters</span></a> for more personalized parameter settings for the calculation.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+  <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
+  <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
+  <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.ElectronicStructure</span><span class="w"> </span><span class="kn">import</span> <span class="n">Electronic_Structure</span>
+
+  <span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+  <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
+
+  <span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
+                          <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
+                          <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">0</span><span class="p">]],</span>
+                          <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+  <span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">]</span>
+                              <span class="p">],</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">]</span>
+                              <span class="p">],</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.23</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span>     <span class="mf">0.0</span><span class="p">,</span>     <span class="mf">0.0</span><span class="p">]</span>
+                              <span class="p">]</span>
+                          <span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+
+  <span class="n">const</span> <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+  <span class="n">elements</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">species</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))</span>
+
+  <span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
+  <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
+  <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-6</span><span class="p">,</span>
+  <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+  <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
+  <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
+  <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e10</span><span class="p">,</span>
+  <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span>
+  <span class="p">}</span>
+
+  <span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+  <span class="n">esdriver</span> <span class="o">=</span> <span class="n">Electronic_Structure</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+  <span class="n">esdriver</span><span class="p">(</span><span class="n">molecules</span><span class="p">)</span>
+</pre></div>
+</div>
 </section>
 
 
@@ -392,26 +428,6 @@
             </div>
             
             
-              
-                <dialog id="pst-secondary-sidebar-modal"></dialog>
-                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
-
-
-  <div class="sidebar-secondary-item">
-<div
-    id="pst-page-navigation-heading-2"
-    class="page-toc tocsection onthispage">
-    <i class="fa-solid fa-list"></i> On this page
-  </div>
-  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
-    <ul class="visible nav section-nav flex-column">
-<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#">About PYSEQM</a></li>
-<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#how-to-cite">How to Cite</a></li>
-</ul>
-
-  </nav></div>
-
-</div></div>
               
             
           </div>

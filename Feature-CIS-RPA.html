@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Excited States Calculation &#8212; PYSEQM 1.0 documentation</title>
+    <title>CIS Excited State Calculations &#8212; PYSEQM 1.0 documentation</title>
   
   
   
@@ -44,10 +44,12 @@
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="_static/copybutton.js?v=f281be69"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'quick_start.pt2';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'Feature-CIS-RPA';</script>
     <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Extended Lagrangian Born Oppenheimer Molecular Dynamics" href="Feature-XLBOMD.html" />
+    <link rel="prev" title="SCF Ground State Calculations" href="Feature-SCF.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -195,10 +197,6 @@
   
 
   
-    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
-      <span class="fa-solid fa-outdent"></span>
-    </button>
-  
 </div>
 
     </header>
@@ -208,8 +206,6 @@
     <div class="bd-container__inner bd-page-width">
       
       
-      
-        
       
       <dialog id="pst-primary-sidebar-modal"></dialog>
       <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
@@ -271,6 +267,26 @@
   
     <div class="sidebar-primary-items__start sidebar-primary__section">
         <div class="sidebar-primary-item">
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="quick_start.html">Quick Start</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="user_guide.html">User Guide</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-SCF.html">SCF Ground State Calculations</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">CIS Excited State Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-BOMD.html">Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html">Initialization</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="about.html">About PYSEQM</a></li>
+
+</ul>
+</div>
+</nav></div>
+        <div class="sidebar-primary-item">
 <form class="bd-search d-flex align-items-center"
       action="search.html"
       method="get">
@@ -323,7 +339,10 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Excited States Calculation</span></li>
+    
+    <li class="breadcrumb-item"><a href="user_guide.html" class="nav-link">User Guide</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">CIS Excited State Calculations</span></li>
   </ul>
 </nav>
 </div>
@@ -340,140 +359,94 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="excited-states-calculation">
-<h1>Excited States Calculation<a class="headerlink" href="#excited-states-calculation" title="Link to this heading">#</a></h1>
-<p>Once initialized, a SCF calculation can be run directly to compute total energy:</p>
+  <section id="cis-excited-state-calculations">
+<h1>CIS Excited State Calculations<a class="headerlink" href="#cis-excited-state-calculations" title="Link to this heading">#</a></h1>
+<p>Estimates electronically excited-state energies using the Configuration Interaction Singles (CIS) method, which extends SCF results to higher energy eigenstates of the electronic Hamiltonian. The CIS wavefunction approximates excited states by considering single-electron excitations from the ground-state configuration. While less computationally intensive than correlated methods like the Random Phase Approximation (RPA), CIS provides a stable and widely used framework for modeling vertical excitation energies.</p>
+<p>This implementation allows users to compute multiple excited states efficiently, making it suitable for large-scale or semiempirical simulations.</p>
+<p>Must be added to run Excited States</p>
+<p>For excited state calculations, add the <cite>excited_states</cite> key to your <cite>seqm_parameters</cite> dictionary:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="s1">&#39;excited_states&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;n_states&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+        <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;rpa&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;cis_tolerance&#39;</span><span class="p">:</span> <span class="mf">1e-5</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The <cite>excited_states</cite> key takes a dictionary as its value.
+This value dictionary should contain the following key/value pairs:
+n_states
+Number of excited states to compute.</p>
+<p><strong>method</strong>
+Method used for excited state calculations. Available options:</p>
+<ul class="simple">
+<li><p><cite>‘rpa’</cite></p></li>
+<li><p><cite>‘cis’</cite></p></li>
+</ul>
+<p>By default it is set to <cite>cis</cite></p>
+<p><strong>cis_tolerance</strong></p>
+<p>is optional set can be left blank
+Convergence criterion for CIS/RPA excited states. By default it is set to 1e-6.</p>
+<p>See <a class="reference internal" href="Initialization.html#seqm-parameters"><span class="std std-ref">SEQM Parameters</span></a> for more personalized parameter settings for the calculation.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions</span><span class="w"> </span><span class="kn">import</span> <span class="n">anal_grad</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.ElectronicStructure</span><span class="w"> </span><span class="kn">import</span> <span class="n">Electronic_Structure</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.read_xyz</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_xyz</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
-
 
 <span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
 <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>Add import statements for PyTorch, PySEQM and its seqm modules.
-Set the floating point precision to 64 bit and set device to GPU.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([</span><span class="s1">&#39;../../data.xyz&#39;</span><span class="p">])</span>
+
+<span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
+                           <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
+                           <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">0</span><span class="p">]],</span>
+                        <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">]</span>
+                              <span class="p">],</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">]</span>
+                              <span class="p">],</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.23</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span>     <span class="mf">0.0</span><span class="p">,</span>     <span class="mf">0.0</span><span class="p">]</span>
+                              <span class="p">]</span>
+                           <span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 
 <span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">species</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
 <span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">coordinates</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
 <span class="n">const</span> <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 
 <span class="n">elements</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">species</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))</span>
-</pre></div>
-</div>
-<p>Load data in xyz form collecting species and coordinates and move both of them to the GPU.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
+
+<span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
    <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
    <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-8</span><span class="p">,</span>
    <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
    <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
-   <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">elements</span><span class="p">,</span>
    <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
    <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e8</span><span class="p">,</span>
    <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
    <span class="s1">&#39;excited_states&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;n_states&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">},</span>
 <span class="p">}</span>
-</pre></div>
-</div>
-<p>User-defined parameters for calculations are set using the seqm_parameters dictionary.</p>
-<p><strong>method:</strong> Austin Model 1</p>
-<p><strong>scf_eps:</strong> If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.</p>
-<p><strong>scf_converger:</strong> Converger used for scf loop.</p>
-<p><strong>sp2:</strong> Planarity correction on/off, threshold.</p>
-<p><strong>elements:</strong> Atomic numbers in the data from species.</p>
-<p><strong>learned:</strong> Learned parameters name list.</p>
-<p><strong>pair_outer_cutoff:</strong> The value for how far apart two atoms can be before their interaction is ignored.</p>
-<p><strong>eig:</strong> Whether or not to diagonalize the Fock matrix.</p>
-<p><strong>excited_states:</strong> The number of excited states to calcuate.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 <span class="n">esdriver</span> <span class="o">=</span> <span class="n">Electronic_Structure</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
 <span class="n">esdriver</span><span class="p">(</span><span class="n">molecules</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>Sends all information collected so far to the GPU and runs the calculation.</p>
-</section>
-<section id="molecular-dynamics">
-<h1>Molecular Dynamics<a class="headerlink" href="#molecular-dynamics" title="Link to this heading">#</a></h1>
-<p>You can run molecular dynamics using Born-Oppenheimer or Extended-Lagrangian BOMD:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.MolecularDynamics</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecular_Dynamics_Basic</span><span class="p">,</span> <span class="n">Molecular_Dynamics_Langevin</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.read_xyz</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_xyz</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
-
-<span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
-<span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>Add import import statements for PyTorch, PySEQM and its seqm modules.
-Set the float size to 64 for more memory and set device to GPU.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([</span><span class="s1">&#39;../../data.xyz&#39;</span><span class="p">])</span>
-
-<span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">species</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
-<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">coordinates</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
-<span class="n">const</span> <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-
-<span class="n">elements</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">species</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))</span>
-</pre></div>
-</div>
-<p>Load data in xyz form collecting species and coordinates and move both of them to the GPU.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
-   <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
-   <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-6</span><span class="p">,</span>
-   <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
-   <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
-   <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">elements</span><span class="p">,</span>
-   <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
-   <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e10</span><span class="p">,</span>
-   <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-<p>User-defined parameters for calculations are set using the seqm_parameters dictionary.</p>
-<p><strong>method:</strong> Austin Model 1</p>
-<p><strong>scf_eps:</strong> If the energy change between two SCF steps is smaller than this value, then the simulation stops and considers it converged.</p>
-<p><strong>scf_converger:</strong> Converger used for scf loop.</p>
-<p><strong>sp2:</strong> Planarity correction on/off, threshold.</p>
-<p><strong>elements:</strong> Atomic numbers in the data from species.</p>
-<p><strong>learned:</strong> Learned parameters name list.</p>
-<p><strong>pair_outer_cutoff:</strong> The value for how far apart two atoms can be before their interaction is ignored.</p>
-<p><strong>eig:</strong> Whether or not to diagonalize the Fock matrix.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">output</span> <span class="o">=</span> <span class="p">{</span>
-<span class="s1">&#39;molid&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">],</span>
-<span class="s1">&#39;thermo&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
-<span class="s1">&#39;dump&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
-<span class="s1">&#39;prefix&#39;</span><span class="p">:</span>
-<span class="s1">&#39;../../Outputs_location&#39;</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-<p>Set the molecule ID to allow simulation of multiple molecules by passing different IDs.</p>
-<p>xxx</p>
-<p>xxx</p>
-<p>Set the output file path.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">molecule</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-<span class="n">md</span> <span class="o">=</span> <span class="n">Molecular_Dynamics_Basic</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="o">=</span><span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">Temp</span><span class="o">=</span><span class="mf">300.0</span><span class="p">,</span> <span class="n">timestep</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="n">output</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-<span class="n">md</span><span class="o">.</span><span class="n">initialize_velocity</span><span class="p">(</span><span class="n">molecule</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>Temp specifies the simulation temperature in Kelvin.</p>
-<p>Timestep specifies the time step in femtoseconds.</p>
-<p>Sends all collected information to the GPU.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">_</span> <span class="o">=</span> <span class="n">md</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">molecule</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="n">remove_com</span><span class="o">=</span><span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">Info_log</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>The number of MD steps.</p>
-<p>Removes center of mass velocity every set number of step to prevent drifting.</p>
-<p>Info_log determines whether to save additional information.</p>
-<p>Then runs the calculation.</p>
 </section>
 
 
@@ -486,26 +459,6 @@ Set the float size to 64 for more memory and set device to GPU.</p>
             </div>
             
             
-              
-                <dialog id="pst-secondary-sidebar-modal"></dialog>
-                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
-
-
-  <div class="sidebar-secondary-item">
-<div
-    id="pst-page-navigation-heading-2"
-    class="page-toc tocsection onthispage">
-    <i class="fa-solid fa-list"></i> On this page
-  </div>
-  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
-    <ul class="visible nav section-nav flex-column">
-<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#">Excited States Calculation</a></li>
-<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics">Molecular Dynamics</a></li>
-</ul>
-
-  </nav></div>
-
-</div></div>
               
             
           </div>

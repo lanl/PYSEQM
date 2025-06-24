@@ -48,7 +48,7 @@
     <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Features" href="features.html" />
+    <link rel="next" title="SCF Ground State Calculations" href="Feature-SCF.html" />
     <link rel="prev" title="User Guide" href="user_guide.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -118,8 +118,8 @@
       
     
     
-    <img src="_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
-    <img src="_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/PySEQM-Light.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/PySEQM-Light.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
   
   
 </a></div>
@@ -142,15 +142,15 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="about.html">
-    About
+  <a class="nav-link nav-internal" href="user_guide.html">
+    User Guide
   </a>
 </li>
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="user_guide.html">
-    User Guide
+  <a class="nav-link nav-internal" href="about.html">
+    About
   </a>
 </li>
 
@@ -235,15 +235,15 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="about.html">
-    About
+  <a class="nav-link nav-internal" href="user_guide.html">
+    User Guide
   </a>
 </li>
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="user_guide.html">
-    User Guide
+  <a class="nav-link nav-internal" href="about.html">
+    About
   </a>
 </li>
 
@@ -276,14 +276,17 @@
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
   <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="quick_start.html">Quick Start</a></li>
-<li class="toctree-l1"><a class="reference internal" href="about.html">Developers &amp; Contributors</a></li>
-
 <li class="toctree-l1 current active has-children"><a class="reference internal" href="user_guide.html">User Guide</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
 <li class="toctree-l2 current active"><a class="current reference internal" href="#">Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Examples.html">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-SCF.html">SCF Ground State Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-CIS-RPA.html">CIS Excited State Calculations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Feature-BOMD.html">Born Oppenheimer Molecular Dynamics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Initialization.html">Initialization</a></li>
 </ul>
 </details></li>
+<li class="toctree-l1"><a class="reference internal" href="about.html">About PYSEQM</a></li>
+
 </ul>
 </div>
 </nav></div>
@@ -366,6 +369,8 @@
 <h2>Clone PySEQM<a class="headerlink" href="#clone-pyseqm" title="Link to this heading">#</a></h2>
 <p>This is the recommended way to install PySEQM</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/lanl/PYSEQM.git
+<span class="nb">cd</span><span class="w"> </span>PYSEQM
+pip<span class="w"> </span>install<span class="w"> </span>.
 </pre></div>
 </div>
 <div class="admonition note">
@@ -376,9 +381,8 @@
 <section id="test-the-installation">
 <h2>Test the Installation<a class="headerlink" href="#test-the-installation" title="Link to this heading">#</a></h2>
 <p>To verify the installation, run:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import torch; print(&#39;PyTorch version:&#39;, torch.__version__)&quot;</span>
-python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import torch; print(&#39;CUDA available:&#39;, torch.cuda.is_available())&quot;</span>
-python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import torch; print(&#39;GPU name:&#39;, torch.cuda.get_device_name(0) if torch.cuda.is_available() else &#39;None&#39;)&quot;</span>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import seqm; print(&#39;PySEQM imported successfully&#39;)&quot;</span>
+python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import torch; print(f&#39;PyTorch installed | CUDA available: {torch.cuda.is_available()}&#39;)&quot;</span>
 </pre></div>
 </div>
 </section>

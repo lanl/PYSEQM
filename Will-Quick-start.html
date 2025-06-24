@@ -44,12 +44,10 @@
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="_static/copybutton.js?v=f281be69"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'quick_start';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'Will-Quick-start';</script>
     <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="User Guide" href="user_guide.html" />
-    <link rel="prev" title="Welcome to PYSEQM Documentation" href="index.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -135,7 +133,7 @@
   <ul class="bd-navbar-elements navbar-nav">
     
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="#">
+  <a class="nav-link nav-internal" href="quick_start.html">
     Quick Start
   </a>
 </li>
@@ -211,6 +209,8 @@
       
       
       
+        
+      
       <dialog id="pst-primary-sidebar-modal"></dialog>
       <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
         
@@ -228,7 +228,7 @@
   <ul class="bd-navbar-elements navbar-nav">
     
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="#">
+  <a class="nav-link nav-internal" href="quick_start.html">
     Quick Start
   </a>
 </li>
@@ -270,26 +270,6 @@
   </div>
   
     <div class="sidebar-primary-items__start sidebar-primary__section">
-        <div class="sidebar-primary-item">
-<nav class="bd-docs-nav bd-links"
-     aria-label="Section Navigation">
-  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
-  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">Quick Start</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="user_guide.html">User Guide</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="installation.html">Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Feature-SCF.html">SCF Ground State Calculations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Feature-CIS-RPA.html">CIS Excited State Calculations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Feature-BOMD.html">Born Oppenheimer Molecular Dynamics</a></li>
-<li class="toctree-l2"><a class="reference internal" href="Initialization.html">Initialization</a></li>
-</ul>
-</details></li>
-<li class="toctree-l1"><a class="reference internal" href="about.html">About PYSEQM</a></li>
-
-</ul>
-</div>
-</nav></div>
         <div class="sidebar-primary-item">
 <form class="bd-search d-flex align-items-center"
       action="search.html"
@@ -362,10 +342,11 @@
                   
   <section id="quickstart">
 <h1>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">#</a></h1>
-<p>This quickstart is a high-level introduction on how to get started with using PySEQM.</p>
+<p>This quickstart is a high level introduction on how to get started using PySEQM.</p>
 <p>For full examples, please check out our <a class="reference external" href="https://github.com/lanl/pyseqm">GitHub repository</a> and the <a class="reference external" href="https://github.com/lanl/PYSEQM/tree/master/examples">examples directory</a>.</p>
 <section id="single-point-scf">
 <h2>Single Point SCF<a class="headerlink" href="#single-point-scf" title="Link to this heading">#</a></h2>
+<p>Computes the electronic structure of a molecule by iteratively solving for the electron density or wavefunction until convergence, enabling calculation of total energy and related properties.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
@@ -409,6 +390,7 @@
    <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-6</span><span class="p">,</span>
    <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
    <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
+   <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">elements</span><span class="p">,</span>
    <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
    <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e10</span><span class="p">,</span>
    <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span>
@@ -420,8 +402,8 @@
 </pre></div>
 </div>
 </section>
-<section id="cis-excited-state-calculations">
-<h2>CIS Excited State Calculations<a class="headerlink" href="#cis-excited-state-calculations" title="Link to this heading">#</a></h2>
+<section id="scf-and-excited-state-calculations">
+<h2>SCF and Excited State Calculations<a class="headerlink" href="#scf-and-excited-state-calculations" title="Link to this heading">#</a></h2>
 <p>Estimates the energies of electronically excited states by solving for higher energy eigenvalues of the electronic Hamiltonian, extending SCF results beyond the ground state.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
@@ -473,6 +455,7 @@
    <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-8</span><span class="p">,</span>
    <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
    <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
+   <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">elements</span><span class="p">,</span>
    <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
    <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e8</span><span class="p">,</span>
    <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
@@ -487,6 +470,7 @@
 </section>
 <section id="molecular-dynamics-nve">
 <h2>Molecular Dynamics(NVE)<a class="headerlink" href="#molecular-dynamics-nve" title="Link to this heading">#</a></h2>
+<p>Tracks the natural evolution of a system of atoms under Newton’s laws in an isolated environment—no energy exchange with surroundings. Energy is conserved, and atomic motion arises solely from interatomic forces.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
@@ -495,6 +479,7 @@
 
 <span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
 <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
+
 
 <span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
                            <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
@@ -522,16 +507,22 @@
                               <span class="p">]</span>
                            <span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 
+<span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">species</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">coordinates</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
 <span class="n">const</span> <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">elements</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">species</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()))</span>
 
 <span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
    <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
    <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-6</span><span class="p">,</span>
    <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
    <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
+   <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">elements</span><span class="p">,</span>
    <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
    <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e10</span><span class="p">,</span>
 <span class="p">}</span>
+
 
 <span class="n">output</span> <span class="o">=</span> <span class="p">{</span>
 <span class="s1">&#39;molid&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">],</span>
@@ -598,6 +589,7 @@
    <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-6</span><span class="p">,</span>
    <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
    <span class="s1">&#39;sp2&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="mf">1.0e-5</span><span class="p">],</span>
+   <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">elements</span><span class="p">,</span>
    <span class="s1">&#39;learned&#39;</span><span class="p">:</span> <span class="p">[],</span>
    <span class="s1">&#39;pair_outer_cutoff&#39;</span><span class="p">:</span> <span class="mf">1.0e10</span><span class="p">,</span>
    <span class="s1">&#39;eig&#39;</span><span class="p">:</span> <span class="kc">True</span>
@@ -645,7 +637,7 @@
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#single-point-scf">Single Point SCF</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cis-excited-state-calculations">CIS Excited State Calculations</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#scf-and-excited-state-calculations">SCF and Excited State Calculations</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics-nve">Molecular Dynamics(NVE)</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#molecular-dynamics-langevin-thermostat">Molecular Dynamics(Langevin Thermostat)</a></li>
 </ul>

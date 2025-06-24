@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Installation &#8212; PYSEQM 1.0 documentation</title>
+    <title>Features &#8212; PYSEQM 1.0 documentation</title>
   
   
   
@@ -44,7 +44,7 @@
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="_static/copybutton.js?v=f281be69"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'installation_old';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'features_old';</script>
     <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
@@ -116,8 +116,8 @@
       
     
     
-    <img src="_static/LANL_logo.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
-    <img src="_static/LANL_logo.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/PySEQM-Light.png" class="logo__image only-light" alt="PYSEQM 1.0 documentation - Home"/>
+    <img src="_static/PySEQM-Light.png" class="logo__image only-dark pst-js-only" alt="PYSEQM 1.0 documentation - Home"/>
   
   
 </a></div>
@@ -140,15 +140,15 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="about.html">
-    About
+  <a class="nav-link nav-internal" href="user_guide.html">
+    User Guide
   </a>
 </li>
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="user_guide.html">
-    User Guide
+  <a class="nav-link nav-internal" href="about.html">
+    About
   </a>
 </li>
 
@@ -235,15 +235,15 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="about.html">
-    About
+  <a class="nav-link nav-internal" href="user_guide.html">
+    User Guide
   </a>
 </li>
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="user_guide.html">
-    User Guide
+  <a class="nav-link nav-internal" href="about.html">
+    About
   </a>
 </li>
 
@@ -323,7 +323,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Installation</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Features</span></li>
   </ul>
 </nav>
 </div>
@@ -340,19 +340,82 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="installation">
-<h1>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h1>
-<section id="requirements">
-<h2>Requirements<a class="headerlink" href="#requirements" title="Link to this heading">#</a></h2>
-<dl class="simple">
-<dt><strong>Required Dependencies:</strong></dt><dd><ul class="simple">
-<li><p><a href="#id1"><span class="problematic" id="id2">Python_</span></a> &gt;= 3.9</p></li>
-<li><p><a href="#id3"><span class="problematic" id="id4">PyTorch_</span></a> &gt;= 2.0</p></li>
-<li><p><a href="#id5"><span class="problematic" id="id6">NumPy_</span></a></p></li>
-<li><p><a href="#id7"><span class="problematic" id="id8">SciPy_</span></a></p></li>
+  <section id="features">
+<h1>Features<a class="headerlink" href="#features" title="Link to this heading">#</a></h1>
+<p>PySEQM supports input data from <cite>.xyz</cite> files or directly from PyTorch tensors.</p>
+<p>Reading from .xyz files:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span><span class="p">,</span> <span class="n">coordinates</span> <span class="o">=</span> <span class="n">read_xyz</span><span class="p">([</span>
+    <span class="s1">&#39;../../data_one.xyz&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;../../data_two.xyz&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;../../data_three.xyz&#39;</span>
+<span class="p">])</span>
+</pre></div>
+</div>
+<p>Manual tensor input:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span>
+    <span class="p">[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span>
+    <span class="p">[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
+<span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span>
+    <span class="p">[</span>
+        <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span> <span class="mf">0.94</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">]</span>
+    <span class="p">],</span>
+    <span class="p">[</span>
+        <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.20</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span> <span class="mf">0.94</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+        <span class="p">[</span><span class="mf">1.81</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.93</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.20</span><span class="p">]</span>
+    <span class="p">]</span>
+<span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+</pre></div>
+</div>
+<section id="padding-for-variable-length-molecules">
+<h2>Padding for Variable-Length Molecules<a class="headerlink" href="#padding-for-variable-length-molecules" title="Link to this heading">#</a></h2>
+<p>When batching molecules with different numbers of atoms, <strong>0-padding</strong> must be applied so all inputs have the same shape.</p>
+<ul class="simple">
+<li><p>Pad species with <cite>0</cite> to represent a non-existent atom.</p></li>
+<li><p>Pad coordinates with <cite>[0.0, 0.0, 0.0]</cite> for those atoms.</p></li>
 </ul>
-</dd>
-</dl>
+<p>Example: Padding a molecule with 3 atoms to match a batch of size 4:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([</span><span class="mi">8</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span>
+    <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+    <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+    <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span> <span class="mf">0.94</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
+    <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">]</span>  <span class="c1"># padded atom</span>
+<span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Ensure the batch tensor dimensions are consistent across all molecules:
+- <cite>species</cite>: shape <cite>[batch_size, max_atoms]</cite>
+- <cite>coordinates</cite>: shape <cite>[batch_size, max_atoms, 3]</cite></p>
+</section>
+<section id="device-and-precision">
+<h2>Device and Precision<a class="headerlink" href="#device-and-precision" title="Link to this heading">#</a></h2>
+<p>Set the computation device automatically using:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>This ensures your code will use a GPU if available, and fall back to CPU otherwise.</p>
+<p>All tensors in PySEQM should be explicitly placed on the correct device to avoid runtime errors:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">tensor</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+</pre></div>
+</div>
+<section id="precision">
+<h3>Precision<a class="headerlink" href="#precision" title="Link to this heading">#</a></h3>
+<p>PySEQM requires <strong>double precision</strong> floats (<cite>torch.float64</cite> for floats) to maintain numerical accuracy in electronic structure and molecular dynamics calculations.</p>
+<p>Specify the dtype when creating new tensors. For example:</p>
+<p>Using lower precision (e.g., <cite>torch.float32</cite>) may result in:</p>
+<ul class="simple">
+<li><p>Inaccurate energy or force evaluations</p></li>
+<li><p>Unstable SCF convergence</p></li>
+<li><p>Incorrect gradient behavior in autograd</p></li>
+</ul>
+</section>
 </section>
 </section>
 
@@ -379,7 +442,11 @@
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#requirements">Requirements</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#padding-for-variable-length-molecules">Padding for Variable-Length Molecules</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#device-and-precision">Device and Precision</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#precision">Precision</a></li>
+</ul>
+</li>
 </ul>
   </nav></div>
 
