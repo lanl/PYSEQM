@@ -34,7 +34,7 @@ class pyseqm_engine(Engine):
     """
     geomeTRIC Engine that calls PYSEQM’s Electronic_Structure
     """
-    def __init__(self, molecule, traj_file):
+    def __init__(self, molecule, traj_file, learned_parameters = dict()):
         self.molecule = molecule
 
         geomol   = GeomMolecule()
@@ -42,7 +42,8 @@ class pyseqm_engine(Engine):
         geomol.xyzs = [self.molecule.coordinates.clone().detach().cpu().numpy()[0]]
         super().__init__(geomol)
 
-        self.esdriver = esdriver(self.molecule.seqm_parameters)
+        self.learned_parameters = learned_parameters
+        self.esdriver = esdriver(self.molecule.seqm_parameters).to(self.molecule.coordinates.device)
         self.step = 0
         self.traj_file = traj_file
 
@@ -57,7 +58,7 @@ class pyseqm_engine(Engine):
           self.molecule.coordinates = torch.nn.Parameter(xyz_ang)
 
         # 2) run SCF
-        self.esdriver(self.molecule, P0=self.molecule.dm, dm_prop='SCF')
+        self.esdriver(self.molecule, P0=self.molecule.dm, dm_prop='SCF', learned_parameters=self.learned_parameters)
 
         # 3) Energy & gradient → atomic units
         E_h = self.molecule.Etot.item() * _EV_TO_HARTREE
