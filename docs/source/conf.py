@@ -26,26 +26,13 @@ html_static_path = ['_static']
 # Only set theme-level logo, not `html_logo`
 html_theme_options = {
     "logo": {
-        # "image_light": "LANL-Light.png",     
-        # "image_dark": "LANL-Dark.png",     
-
         "image_light": "PySEQM-Light.png",
         "image_dark": "PySEQM-Light.png",
     },
     "navbar_start": ["navbar-logo"],
     "navbar_center": ["navbar-nav"],
-    "navbar_end": ["theme-switcher"],  # Removed 'github-link' for compatibility
-    "navigation_with_keys": False,
-    "show_prev_next": False,
     "secondary_sidebar_items": ["page-toc"],
     "github_url": "https://github.com/lanl/pyseqm",
-    "icon_links": [
-        {
-            "name": "GitHub",
-            "url": "https://github.com/lanl/pyseqm",
-            "icon": "fa-brands fa-github",
-        },
-    ],
 }
 
 

@@ -1,7 +1,9 @@
+from numpy import int64
 import torch
 from seqm.seqm_functions.constants import Constants
 from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
+from seqm.seqm_functions.read_xyz import read_xyz
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -37,6 +39,10 @@ coordinates = torch.tensor([
                             #  ]
                             ], device=device)
 
+# species, coordinates = read_xyz(['h2o.xyz','./XYZ.0.xyz'])
+# species = torch.as_tensor(species,dtype=torch.int64,device=device)
+# coordinates = torch.as_tensor(coordinates, device=device)
+
 const = Constants().to(device)
 
 seqm_parameters = {
@@ -46,16 +52,16 @@ seqm_parameters = {
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
-                   'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
+                   # 'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
                                             #[True, eps] or [False], eps for SP2 conve criteria
-                   'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
-                   'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
-                   'eig' : True,
+                   # 'learned' : [], # learned parameters name list, e.g ['U_ss']
+                   # 'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
+                   # 'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
+                   # 'eig' : True,
                    # 'uhf' : True,
                    # 'analytical_grad':True
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':1}
+                   # 'excited_states': {'n_states':1}
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)

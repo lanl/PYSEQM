@@ -96,7 +96,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         super().__init__(*args, **kwargs)
         self.seqm_parameters = seqm_parameters
-        self.Temp = Temp
+        self.Temp = Temp + 1e-7 # Having zero temperature causes Nans in the calculation
         self.timestep = timestep
         self.esdriver = esdriver(self.seqm_parameters)
         self.acc_scale = 0.009648532800137615

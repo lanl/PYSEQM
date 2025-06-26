@@ -1,25 +1,25 @@
 User Guide
 ============
 
-.. PYSEQM documentation master file, created by
-   sphinx-quickstart on Thu Mar 13 12:29:18 2025.
-
 
 
 .. toctree::
-   :maxdepth: 2
-
+   :caption: Get Started
+   
    installation
 
+.. toctree::
+   :caption: How to run PYSEQM
 
-   Feature-SCF
-   Feature-CIS-RPA
-   Feature-XLBOMD
-   Feature-BOMD
+   run_pyseqm
 
+.. toctree::
+   :caption: Components and Features
+   :maxdepth: 1
+   
    Initialization
-   SEQM Parameters
-   ExcitedStateSetup
-   MolecularDynamicsSetup
-
-
+   single_point_scf
+   excited_states
+   bomd
+   Feature-XLBOMD
+   geometry_optimization
