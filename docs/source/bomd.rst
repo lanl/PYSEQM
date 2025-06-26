@@ -112,7 +112,7 @@ In addition to specifying :ref:`seqm-parameters`, the MD engines also require an
   If you set prefix to `'my_output'`, files will be named like ``./my_output.{molid}.xyz``, etc.
 
 Running the MD Simulation
-----------------------
+--------------------------
 Once your MD driver is initialized, call its `.run()` method:
 
 .. code-block:: python

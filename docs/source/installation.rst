@@ -16,7 +16,7 @@ This is the recommended way to install PYSEQM
 
 
 Verify the Installation
----------------------
+-------------------------
 
 After installation, confirm that the package imports correctly:
 

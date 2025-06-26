@@ -255,6 +255,7 @@ Some of the basic parameters in the ``seqm_parameters`` dictionary are:
     SP2 expands the density matrix in terms of the Hamiltonian Operator with an iterative scheme, which is much more efficient on modern GPU architectures.
 
     :format: ``[enabled, tolerance]``  
+
     * ``enabled`` (`bool`): Whether to activate SP2
     * ``tolerance`` (`float`): SP2 threshold. Recommened between 1e-3 to 1e-7
 

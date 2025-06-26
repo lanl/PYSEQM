@@ -1,0 +1,10 @@
+# Core Sphinx
+sphinx
+
+# Theme
+pydata-sphinx-theme
+
+# Extensions
+sphinx-copybutton
+sphinx-autodoc-typehints
+sphinx-autobuild
