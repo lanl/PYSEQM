@@ -14,7 +14,7 @@
 About PYSEQM
 ============
 
-PYSEQM is a powerful and userfriendly simulation tool built on PyTorch, designed to help researchers model molecular behavior with speed and efficiency. Leveraging GPU acceleration, PYSEQM allows scientists to simulate atomic motion, optimize molecular geometries, and explore how molecular systems respond to varying environmental conditions. Its seamless integration with PyTorch makes it especially suitable for combining traditional molecular simulations with modern machine learning techniques, opening up new possibilities in computational chemistry and materials science.
+PYSEQM is a powerful and user-friendly simulation tool built on PyTorch, designed to help researchers model molecular behavior with speed and efficiency. Leveraging GPU acceleration, PYSEQM allows physicists and chemists to simulate atomic motion, optimize molecular geometries, and explore how molecular systems respond to varying environmental conditions. Its seamless integration with PyTorch makes it especially suitable for combining traditional molecular simulations with modern machine learning techniques, opening up new possibilities in computational chemistry and materials science.
 
 How to Cite
 ===========

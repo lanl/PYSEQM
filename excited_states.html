@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Quickstart &#8212; PYSEQM 1.0 documentation</title>
+    <title>CIS &amp; RPA Excited State Calculations &#8212; PYSEQM 1.0 documentation</title>
   
   
   
@@ -44,12 +44,12 @@
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="_static/copybutton.js?v=f281be69"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'quick_start';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'excited_states';</script>
     <link rel="author" title="About these documents" href="about.html" />
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="About PYSEQM" href="about.html" />
-    <link rel="prev" title="Geometry Optimization" href="geometry_optimization.html" />
+    <link rel="next" title="Born–Oppenheimer Molecular Dynamics (BOMD)" href="bomd.html" />
+    <link rel="prev" title="Single-Point SCF Calculations" href="single_point_scf.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -134,15 +134,15 @@
 <nav>
   <ul class="bd-navbar-elements navbar-nav">
     
-<li class="nav-item ">
+<li class="nav-item current active">
   <a class="nav-link nav-internal" href="user_guide.html">
     User Guide
   </a>
 </li>
 
 
-<li class="nav-item current active">
-  <a class="nav-link nav-internal" href="#">
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="quick_start.html">
     Quick Start
   </a>
 </li>
@@ -243,15 +243,15 @@
 <nav>
   <ul class="bd-navbar-elements navbar-nav">
     
-<li class="nav-item ">
+<li class="nav-item current active">
   <a class="nav-link nav-internal" href="user_guide.html">
     User Guide
   </a>
 </li>
 
 
-<li class="nav-item current active">
-  <a class="nav-link nav-internal" href="#">
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="quick_start.html">
     Quick Start
   </a>
 </li>
@@ -306,7 +306,24 @@
 <nav class="bd-docs-nav bd-links"
      aria-label="Section Navigation">
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
-  <div class="bd-toc-item navbar-nav"></div>
+  <div class="bd-toc-item navbar-nav"><p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to run PYSEQM</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="run_pyseqm.html">Run PYSEQM</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Components and Features</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="Initialization.html">Initialization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="single_point_scf.html">Single-Point SCF Calculations</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">CIS &amp; RPA Excited State Calculations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bomd.html">Born–Oppenheimer Molecular Dynamics (BOMD)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Feature-XLBOMD.html">Extended Lagrangian Born Oppenheimer Molecular Dynamics (XL-BOMD)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="geometry_optimization.html">Geometry Optimization</a></li>
+</ul>
+</div>
 </nav></div>
         <div class="sidebar-primary-item">
 <form class="bd-search d-flex align-items-center"
@@ -361,7 +378,10 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Quickstart</span></li>
+    
+    <li class="breadcrumb-item"><a href="user_guide.html" class="nav-link">User Guide</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">CIS &amp; RPA Excited State Calculations</span></li>
   </ul>
 </nav>
 </div>
@@ -378,78 +398,102 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="quickstart">
-<span id="quick-start"></span><h1>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">#</a></h1>
-<p>This quickstart is a high-level introduction on how to get started with using PYSEQM.</p>
-<p>For full examples, please check out the <a class="reference external" href="https://github.com/lanl/PYSEQM/tree/master/examples">examples directory</a> in our <a class="reference external" href="https://github.com/lanl/pyseqm">GitHub repository</a>.</p>
-<section id="install-pyseqm">
-<h2>1. Install PYSEQM<a class="headerlink" href="#install-pyseqm" title="Link to this heading">#</a></h2>
-<p>Refer to <a class="reference internal" href="installation.html"><span class="doc">Installation</span></a> instructions.</p>
+  <section id="cis-rpa-excited-state-calculations">
+<span id="excited-states"></span><h1>CIS &amp; RPA Excited State Calculations<a class="headerlink" href="#cis-rpa-excited-state-calculations" title="Link to this heading">#</a></h1>
+<p>PYSEQM supports two methods for excited-state calculations: Configuration Interaction Singles (CIS) and Time-Dependent Hartree-Fock (TD-HF), also known as the Random Phase Approximation (RPA).</p>
+<p>CIS constructs excited states by promoting electrons from occupied to virtual orbitals starting from the ground-state Hartree-Fock reference. These singly excited configurations form the basis for excited-state wavefunctions. CIS can be spin-adapted to target specific spin states (e.g., singlets) efficiently.</p>
+<p>RPA includes both excitation and de-excitation operators, and accounts for more electronic correlation than CIS.</p>
+<p>Both methods are calculated with <cite>Electronic_Structure</cite> driver; you simply add an <cite>excited_states</cite> key to your <cite>seqm_parameters</cite> dictionary.</p>
+<section id="configuring-excited-states">
+<h2>Configuring Excited States<a class="headerlink" href="#configuring-excited-states" title="Link to this heading">#</a></h2>
+<p>In order to prompt an excited state calculation, add an <cite>excited_states</cite> dictionary to <cite>seqm_parameters</cite>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="s1">&#39;excited_states&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;n_states&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+        <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;rpa&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;cis_tolerance&#39;</span><span class="p">:</span> <span class="mf">1e-5</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The <cite>excited_states</cite> key takes a dictionary as its value.
+This value dictionary should contain the following key/value pairs:</p>
+<ul>
+<li><p><strong>n_states</strong>  (<cite>int</cite>): Number of excited states to compute.</p></li>
+<li><p><strong>method</strong>  (<cite>str</cite>): Method used for excited state calculations. Available options:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><cite>‘rpa’</cite></p></li>
+<li><p><cite>‘cis’</cite></p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+<p>By default it is set to <cite>cis</cite></p>
+<ul class="simple">
+<li><p><strong>cis_tolerance</strong> (<cite>float</cite>): Convergence criterion for CIS/RPA excited states. By default it is set to 1e-6.</p></li>
+</ul>
+<p>See <a class="reference internal" href="Initialization.html#seqm-parameters"><span class="std std-ref">SEQM Parameters</span></a> for other settings for the calculation.</p>
 </section>
-<section id="write-your-first-input-file">
-<h2>2. Write Your First Input File<a class="headerlink" href="#write-your-first-input-file" title="Link to this heading">#</a></h2>
-<p>Create a file called <cite>run_quickstart.py</cite> with the following contents:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="ch">#!/usr/bin/env python</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<section id="running-an-excited-state-calculation">
+<h2>Running an Excited-State Calculation<a class="headerlink" href="#running-an-excited-state-calculation" title="Link to this heading">#</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.seqm_functions.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constants</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.Molecule</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecule</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">seqm.ElectronicStructure</span><span class="w"> </span><span class="kn">import</span> <span class="n">Electronic_Structure</span>
 
-<span class="c1"># 1. Precision &amp; device</span>
 <span class="n">torch</span><span class="o">.</span><span class="n">set_default_dtype</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
 <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
 
-<span class="c1"># 2. Define a simple molecule (H₂O)</span>
-<span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
-<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
-    <span class="p">[[[</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
-      <span class="p">[</span><span class="mf">0.96</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">],</span>
-      <span class="p">[</span><span class="o">-</span><span class="mf">0.24</span><span class="p">,</span> <span class="mf">0.93</span><span class="p">,</span> <span class="mf">0.00</span><span class="p">]]],</span>
-    <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span>
-<span class="p">)</span>
-<span class="n">const</span>    <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">([[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
+                           <span class="p">[</span><span class="mi">8</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span>
+                        <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
 
-<span class="c1"># 3. Set up SCF parameters</span>
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">]</span>
+                              <span class="p">],</span>
+                              <span class="p">[</span>
+                              <span class="p">[</span><span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.22</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">,</span>    <span class="mf">0.00</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.81</span><span class="p">,</span>    <span class="mf">0.94</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.20</span><span class="p">],</span>
+                              <span class="p">[</span><span class="mf">1.82</span><span class="p">,</span>   <span class="o">-</span><span class="mf">0.94</span><span class="p">,</span>    <span class="mf">0.20</span><span class="p">]</span>
+                              <span class="p">],</span>
+                           <span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+<span class="n">species</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">as_tensor</span><span class="p">(</span><span class="n">species</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">coordinates</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)[:]</span>
+<span class="n">const</span> <span class="o">=</span> <span class="n">Constants</span><span class="p">()</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
 <span class="n">seqm_parameters</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s1">&#39;method&#39;</span><span class="p">:</span>        <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
-    <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span>       <span class="mf">1e-8</span><span class="p">,</span>
-    <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">],</span>
+   <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;AM1&#39;</span><span class="p">,</span>
+   <span class="s1">&#39;scf_eps&#39;</span><span class="p">:</span> <span class="mf">1.0e-8</span><span class="p">,</span>
+   <span class="s1">&#39;scf_converger&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+   <span class="s1">&#39;excited_states&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;n_states&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">},</span>
 <span class="p">}</span>
 
 <span class="n">molecule</span> <span class="o">=</span> <span class="n">Molecule</span><span class="p">(</span><span class="n">const</span><span class="p">,</span> <span class="n">seqm_parameters</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">species</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-
-<span class="c1"># 4. Run single‐point SCF</span>
-<span class="n">driver</span> <span class="o">=</span> <span class="n">Electronic_Structure</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
-<span class="n">driver</span><span class="o">.</span><span class="p">(</span><span class="n">molecule</span><span class="p">)</span>
-
-<span class="c1"># 5. Print results</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Total Energy (eV):   </span><span class="si">{</span><span class="n">molecule</span><span class="o">.</span><span class="n">Etot</span><span class="o">.</span><span class="n">item</span><span class="p">()</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Heat of Formation:   </span><span class="si">{</span><span class="n">molecule</span><span class="o">.</span><span class="n">Hf</span><span class="o">.</span><span class="n">item</span><span class="p">()</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Force on Atoms:</span><span class="se">\n</span><span class="s2">      </span><span class="si">{</span><span class="n">molecule</span><span class="o">.</span><span class="n">force</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">esdriver</span> <span class="o">=</span> <span class="n">Electronic_Structure</span><span class="p">(</span><span class="n">seqm_parameters</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">esdriver</span><span class="p">(</span><span class="n">molecule</span><span class="p">)</span>
 </pre></div>
 </div>
+<p>After <code class="docutils literal notranslate"><span class="pre">esdriver(molecule)</span></code>, inspect the <code class="docutils literal notranslate"><span class="pre">molecule</span></code> attributes:</p>
+<ul class="simple">
+<li><p><strong>Excited-State Energies</strong> (<cite>molecule.cis_energies</cite>)
+Tensor of shape <cite>(batch, n_states)</cite> giving excitation energies (eV) above the ground state.</p></li>
+</ul>
+<p>In addition, excitation energies and a few other useful quantities are printed to console.</p>
 </section>
-<section id="execute-the-script">
-<h2>3. Execute the Script<a class="headerlink" href="#execute-the-script" title="Link to this heading">#</a></h2>
-<p>Run your quickstart script:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>run_quickstart.py
-</pre></div>
+<section id="batch-homogeneity-requirement">
+<h2>Batch Homogeneity Requirement<a class="headerlink" href="#batch-homogeneity-requirement" title="Link to this heading">#</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Excited-state calculations (<strong>CIS</strong> or <strong>RPA</strong>) require a <strong>homogeneous</strong> batch: every molecule must have the <strong>same atomic composition and ordering</strong>. Only their <strong>coordinates</strong> may differ. Heterogeneous batches (different species across entries) are not supported for excited states. Use separate runs for mixed batches.</p>
 </div>
-<p>You should see printed:</p>
-<ul class="simple">
-<li><p>Total energy (eV)</p></li>
-<li><p>Heat of formation (eV)</p></li>
-<li><p>Forces on each atom (eV/Å)</p></li>
-</ul>
-</section>
-<section id="next-steps">
-<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
-<ul class="simple">
-<li><p>Consult <a class="reference internal" href="Initialization.html"><span class="doc">Initialization</span></a> for batching, GPU, and input formats</p></li>
-<li><p>Explore <a class="reference internal" href="single_point_scf.html"><span class="doc">Single-Point SCF Calculations</span></a> for more SCF options</p></li>
-<li><p>Try <a class="reference internal" href="excited_states.html"><span class="doc">CIS &amp; RPA Excited State Calculations</span></a> to compute excited states</p></li>
-<li><p>See <a class="reference internal" href="bomd.html"><span class="doc">Born–Oppenheimer Molecular Dynamics (BOMD)</span></a> for running MD trajectories</p></li>
-</ul>
 </section>
 </section>
 
@@ -464,20 +508,20 @@
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="geometry_optimization.html"
+       href="single_point_scf.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Geometry Optimization</p>
+        <p class="prev-next-title">Single-Point SCF Calculations</p>
       </div>
     </a>
     <a class="right-next"
-       href="about.html"
+       href="bomd.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">About PYSEQM</p>
+        <p class="prev-next-title">Born–Oppenheimer Molecular Dynamics (BOMD)</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -500,10 +544,9 @@
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#install-pyseqm">1. Install PYSEQM</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#write-your-first-input-file">2. Write Your First Input File</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#execute-the-script">3. Execute the Script</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuring-excited-states">Configuring Excited States</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#running-an-excited-state-calculation">Running an Excited-State Calculation</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#batch-homogeneity-requirement">Batch Homogeneity Requirement</a></li>
 </ul>
   </nav></div>
 

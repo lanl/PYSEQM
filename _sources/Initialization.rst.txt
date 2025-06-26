@@ -1,27 +1,33 @@
 Initialization
 ==============
 
-Input Formats
--------------
+Overview
+--------
+PYSEQM is built for **batch processing** of molecular systems, whether you have a single molecule or hundreds in one batch. This design maximizes GPU utilization for high-throughput semiempirical QM calculations and is especially useful in machine‐learning workflows where you often train or test on many samples at once.
 
-PySEQM supports input data from PyTorch tensors or `.xyz` files. 
+Supported Molecular Input Formats
+---------------------------------
+You can supply molecular data (atoms and coordinates) in two ways:
+
+- **PyTorch tensors** (in-memory, zero-padded batches)  
+- **`.xyz` files** (read and padded automatically)
 
 
 Using PyTorch Tensors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When you provide tensors directly, the first dimension is the **batch size** (number of molecules). All molecules in the batch must share the same atom count, with zero-padding added to smaller molecules.
+You should make the following two tensors:
 
-Each row represents a molecule. 
-
-
-- species: a tensor containing the atomic numbers (Z) of the atoms in each molecule, ordered from the highest to the lowest atomic number. 
-- coordinates: a tensor of 3D Cartesian coordinates (x, y, z) for each atom.
+- **`species`**: an integer tensor of shape `(batch, n_atoms)` containing atomic numbers, ordered from the highest to the lowest atomic number.
+- **`coordinates`**: a float tensor of shape `(batch, n_atoms, 3)` with Cartesian coordinates in Å.
 
 .. code-block:: python
-
+   
+    # Example: batch of 3 molecules, padded to 5 atoms each
     species = torch.as_tensor([
-        [8, 6, 1, 0, 0],           # Molecule 1: O, C, H (padded with 2 zeros)
-        [1, 1, 0, 0, 0],           # Molecule 2: H2 (padded with 3 zeros)
-        [6, 1, 1, 1, 1],           # Molecule 3: CH4 (no padding needed)
+        [8, 6, 1, 0, 0],           # Molecule 1: O, C, H + 2 padding
+        [1, 1, 0, 0, 0],           # Molecule 2: H2 + 3 padding
+        [6, 1, 1, 1, 1],           # Molecule 3: CH₄ (no padding needed)
     ], dtype=torch.int64, device=device)
 
     coordinates = torch.tensor([
@@ -46,12 +52,13 @@ Each row represents a molecule.
             [-0.63, 0.63, -0.63],
             [0.63, -0.63, -0.63],
         ],
-    ], dtype=torch.float32, device=device)
+    ], dtype=torch.float64, device=device)
+
 
 Reading from `.xyz` Files
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PySEQM can also read molecular data directly from `.xyz` files.
+PYSEQM can read multiple `.xyz` files and pad them to a uniform atom count:
 
 An `.xyz` file includes:
 
@@ -59,83 +66,39 @@ An `.xyz` file includes:
 2. Comment or title (second line)
 3. Atom symbol and coordinates per line (x, y, z)
 
-**Example `water.xyz` file**
-
-.. code-block:: text
-
-    3
-    Water molecule
-    O    0.000    0.000    0.000
-    H    0.757    0.586    0.000
-    H   -0.757    0.586    0.000
-
-To read and pad multiple `.xyz` files:
+Use `read_xyz` to load and pad.
+The `read_xyz` function returns numpy tensors (species and coordinates) that have to be converted to PyTorch tensors
 
 .. code-block:: python
+
+    from seqm.seqm_functions.read_xyz import read_xyz
 
     species, coordinates = read_xyz([
-        '../../data_one.xyz',
-        '../../data_two.xyz',
-        '../../data_three.xyz'
+        'data_one.xyz',
+        'data_two.xyz',
+        'data_three.xyz',
     ])
 
-Padding for Variable Length Molecules
--------------------------------------
-
-To batch molecules of varying sizes, **zero-padding** ensures all tensors have consistent shapes:
-
-All molecules are padded to match the maximum number of atoms in the batch.
+    species = torch.as_tensor(species,dtype=torch.int64,device=device)
+    coordinates = torch.as_tensor(coordinates, device=device)
 
 
+Device Selection & Precision
+----------------------------
 
-.. code-block:: python
-
-    species = torch.as_tensor([
-        [8, 1, 0, 0],     # 2 real atoms, 2 padded
-        [8, 6, 1, 1],     # 4 real atoms
-        [8, 6, 1, 0]      # 3 real atoms, 1 padded
-    ], dtype=torch.int64, device=device)
-
-    coordinates = torch.tensor([
-        [
-            [0.00,  0.00,  0.00],
-            [1.22,  0.00,  0.00],
-            [0.00,  0.00,  0.00],  # padding
-            [0.00,  0.00,  0.00]   # padding
-        ],
-        [
-            [0.00,  0.00,  0.00],
-            [1.22,  0.00,  0.20],
-            [1.82,  0.94,  0.00],
-            [1.81, -0.93, -0.20]
-        ],
-        [
-            [0.00,  0.00,  0.00],
-            [1.23,  0.00,  0.00],
-            [1.82,  0.94,  0.00],
-            [0.00,  0.00,  0.00]   # padding
-        ]
-    ], device=device)
-
-Atoms with ``species = 0`` and ``coordinates = [0.0, 0.0, 0.0]`` are ignored in model computation.
-
-
-Device and GPU Usage
---------------------
-
-PySEQM supports running on both CPU and GPU. To enable this, set the device automatically:
+PySEQM supports running on both CPU and GPU. Set the device for your calculations using:
 
 .. code-block:: python
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-This ensures that your code will use a GPU if one is available, and fall back to the CPU otherwise.
+This ensures that your calculation will use an NVIDIA CUDA GPU if one is available, and fall back to CPU otherwise.
 
-All tensors and model components should be explicitly moved to the selected device to avoid runtime errors:
+All tensors and modules should be explicitly moved to the selected device to avoid runtime errors. For example,
 
 .. code-block:: python
 
-    tensor = tensor.to(device)
+    const = Constants().to(device)
 
 When creating new tensors, it’s recommended to specify the device directly:
 
@@ -146,23 +109,14 @@ When creating new tensors, it’s recommended to specify the device directly:
 Using a consistent device across all tensors and operations is essential. Operations between tensors on different devices (e.g., one on CPU and one on GPU) will result in errors.
 
 
-
-Precision
---------
-
-
-PySEQM requires **double precision** floats (`torch.float64` for floats) to maintain numerical accuracy in electronic structure and molecular dynamics calculations.
-
-Specify the dtype when creating new tensors. For example:
+PySEQM requires **double precision** floats (`torch.float64`) to maintain numerical accuracy in electronic structure and molecular dynamics calculations.
+Set this up using
 
 .. code-block:: python
-    dtype=torch.float64  # for coordinates, etc.
 
-Using lower precision (e.g., `torch.float32`) may result in:
+   torch.set_default_dtype(torch.float64)
 
-- Inaccurate energy or force evaluations
-- Unstable SCF convergence
-- Incorrect gradient behavior in autograd
+Manually specify the datatype for tensors that don't need to have `torch.float64` type.
 
 
 
@@ -195,23 +149,23 @@ These imports provide the core components needed to define molecules and access 
 
 **Required if reading molecular structures from a `.xyz` file:**
 
-Use this to load molecular geometries from `.xyz` files, a standard format for storing atomic positions and elements.
+Use this to load molecular geometries from `.xyz` files
 
 .. code-block:: python
 
     from seqm.seqm_functions.read_xyz import read_xyz
 
-**Required for ground and excited state electronic structure calculations:**
+**Required for single-point ground-state and excited-state electronic structure calculations:**
 
-This module performs semiempirical quantum mechanical calculations, including total energies, forces, and excited states via methods like CIS.
+This module performs semiempirical quantum mechanical calculations, including total energies, and gradients.
 
 .. code-block:: python
 
     from seqm.ElectronicStructure import Electronic_Structure
 
-**Required for basic Molecular Dynamics simulations:**
+**Required for Molecular Dynamics simulations:**
 
-Use this for standard molecular dynamics simulations with basic integration, suitable for energy conservation tests and observing free molecular motion.
+Use this for standard energy conserving molecular dynamics simulations
 
 .. code-block:: python
 
@@ -223,7 +177,7 @@ Includes stochastic and frictional forces to model interaction with a heat bath,
 
 .. code-block:: python
 
-    from seqm.MolecularDynamics import Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
+    from seqm.MolecularDynamics import Molecular_Dynamics_Langevin
 
 **Required for KSA-XL Born-Oppenheimer Molecular Dynamics:**
 
@@ -243,49 +197,49 @@ Implements an efficient Born-Oppenheimer MD scheme using extended Lagrangian and
 SEQM Parameters
 ---------------
 
-The ``seqm_parameters`` dictionary defines settings for a semi-empirical quantum mechanics (SEQM) simulation.
+The ``seqm_parameters`` dictionary defines settings for a semiempirical quantum mechanics (SEQM) simulation.
+Below is a typical configuration:
 
 .. code-block:: python
 
     seqm_parameters = {
         'method': 'AM1',
         'scf_eps': 1.0e-6,
-        'scf_converger': [2, 0.0],
+        'scf_converger': [2,],
         'sp2': [False, 1.0e-5],
-        'learned': [],
-        'pair_outer_cutoff': 1.0e10,
-        'eig': True,
     }
 
-**method**  
-    Specifies the semi-empirical method to use.
+Some of the basic parameters in the ``seqm_parameters`` dictionary are:
 
-    :type: str  
+**method**  (`str`)
+    Specifies the semiempirical model to use.
+
     :accepted values: ``'MNDO'``, ``'AM1'``, ``'PM3'``, ``'PM6'``
 
-**scf_eps**  
+**scf_eps** (`float`) 
     Convergence threshold for the SCF (Self-Consistent Field) loop.
-
     The SCF iteration stops when the energy difference between steps is less than this value.
 
-    :type: float
+    :recommended: 1e-5 for single point SCF, 1e-8 for excited state calculations
 
-**scf_converger**  
-    Controls the mixing strategy used in the SCF loop.
+**scf_converger** (`list`) 
+    Specifies the alorithm used to update the density matrix to converge SCF.
 
-    :type: list
-
-    Accepted formats:
+    Available options:
 
     - ``[0, alpha]``  
-      Constant linear mixing:  
-      ``P = alpha * P_old + (1 - alpha) * P_new``  
-      where ``alpha`` is the mixing coefficient (e.g., 0.5).
+      
+      Constant linear mixing of the density matrix:  
+
+      ``P_new = alpha * P_old + (1 - alpha) * P_candidate``  
+      where ``alpha`` is the mixing coefficient (e.g., 0.2).
 
     - ``[1]``  
-      Simple adaptive mixing.
+      
+      Adaptive mixing, where instead of fixing `alpha`, you let the code estimate a nearly optimal `alpha` at each step, based on changes in the density matrix elements. This gives fast convergence when things are well-behaved, with automatic damping when needed. 
 
     - ``[1, K, L, M]``  
+      
       Advanced adaptive mixing:  
         * Use linear mixing for the first ``M`` steps.  
         * Start with mixing coefficient ``K`` for the first 5 steps.  
@@ -293,112 +247,19 @@ The ``seqm_parameters`` dictionary defines settings for a semi-empirical quantum
         * After step ``M``, switch to adaptive mixing.
 
     - ``[2]``  
-      Use adaptive mixing initially, then switch to Pulay mixing.
+      
+      Use adaptive mixing initially, then switch to Pulay DIIS algorithm.
 
-**sp2**  
-    Enables special treatment for sp2 hybridized atoms.
+**sp2**  (`list`)
+    This is an alternative algorithm to update the density matrix at every step of the SCF procedure where density matrix expansion happens with second-order spectral projection polynomials (SP2).
+    SP2 expands the density matrix in terms of the Hamiltonian Operator with an iterative scheme, which is much more efficient on modern GPU architectures.
 
-    :type: list  
     :format: ``[enabled, tolerance]``  
-    * ``enabled`` (bool): Whether to activate sp2 constraints.  
-    * ``tolerance`` (float): Constraint threshold.
+    * ``enabled`` (`bool`): Whether to activate SP2
+    * ``tolerance`` (`float`): SP2 threshold. Recommened between 1e-3 to 1e-7
 
-**learned**  
-    Optional parameters for integrating learned models (e.g., using PySEQM with machine learning).
+**eig**  (`bool`)
+    Optional parameter to control whether to compute molecular orbitals after SCF convergence.
 
-    :type: list
-
-**pair_outer_cutoff**  
-    Maximum interatomic distance for considering pairwise interactions.
-
-    Atoms farther than this cutoff are ignored.
-
-    :type: float
-
-**eig**  
-    Whether to compute molecular orbitals after SCF convergence.
-
-    - If ``True``, the Fock matrix is diagonalized to obtain molecular orbitals.  
+    - If ``True`` (default), the Fock matrix is diagonalized to obtain molecular orbitals.  
     - If ``False``, only the converged density matrix is computed.
-
-    :type: bool
-
-
-
-GPU Computation
----------------
-
-PySEQM supports GPU acceleration via PyTorch. To enable this, move all tensors and modules to the GPU using:
-
-.. code-block:: python
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
-    esdriver = Electronic_Structure(seqm_parameters).to(device)
-
-Calling ``.to(device)`` moves data and models to the GPU. All operations will then be performed on the GPU. Mixing CPU and GPU tensors in operations will result in errors.
-
-
-Must be added to run Excited States
-------------------------
-
-For excited state calculations, add the `excited_states` key to your `seqm_parameters` dictionary:
-
-.. code-block:: python
-
-    seqm_parameters = {
-        ...
-        'excited_states': {
-            'n_states': 10,
-            'method': 'rpa',
-            'cis_tolerance': 1e-5
-        }
-    }
-
-The `excited_states` key takes a dictionary as its value. 
-This value dictionary should contain the following key/value pairs: 
-n_states  
-Number of excited states to compute.
-
-**method**  
-Method used for excited state calculations. Available options:
-
-- `'rpa'`
-- `'cis'`
-By default it is set to `cis`
-
-**cis_tolerance**
-
-is optional set can be left blank 
-Convergence criterion for CIS/RPA excited states. By default it is set to 1e-6.
-
-
-Must be added to run Molecular Dynamics 
-----------------------------------
-
-The `output` dictionary controls the output settings for Molecular Dynamics (MD) runs:
-
-.. code-block:: python
-
-    output = {
-        'molid': [0],
-        'thermo': 1,
-        'dump': 1,
-        'prefix': '../../Outputs_location'
-    }
-
-:molid:  
-    List of molecule IDs to simulate.  
-    Example: ``[0]`` runs molecule 0.
-
-:thermo:  
-    Frequency (in time steps) to print XYZ position information to the screen.  
-    For example, ``1`` = every timestep, ``2`` = every other timestep, etc.
-
-:dump:  
-    Frequency (in time steps) to write XYZ electronic structure trajectory to output files.
-    Follows the same format as ``thermo``.
-
-:prefix:  
-    File path prefix for all output files.  
-    Example: ``'../../Outputs_location'`` saves outputs to the specified directory.
