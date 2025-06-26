@@ -1,5 +1,5 @@
 Extended Lagrangian Born Oppenheimer Molecular Dynamics (XL-BOMD)
-========================================================
+=================================================================
 
 Extended Lagrangian Born–Oppenheimer Molecular Dynamics (XL-BOMD) improves upon traditional Born–Oppenheimer Molecular Dynamics (BOMD) by introducing auxiliary dynamical variables that track the electronic density matrix in a harmonic potential. This reduces the need for fully converged self-consistent field (SCF) calculations at each time step.
 

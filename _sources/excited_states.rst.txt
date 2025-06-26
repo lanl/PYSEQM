@@ -36,6 +36,7 @@ This value dictionary should contain the following key/value pairs:
 
         - `'rpa'`
         - `'cis'`
+
 By default it is set to `cis`
 
 - **cis_tolerance** (`float`): Convergence criterion for CIS/RPA excited states. By default it is set to 1e-6.
