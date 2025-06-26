@@ -48,12 +48,12 @@ Create a file called `run_quickstart.py` with the following contents:
 
    # 4. Run single‐point SCF
    driver = Electronic_Structure(seqm_parameters).to(device)
-   driver.(molecule)
+   driver(molecule)
 
    # 5. Print results
    print(f"Total Energy (eV):   {molecule.Etot.item():.6f}")
    print(f"Heat of Formation:   {molecule.Hf.item():.6f}")
-   print(f"Force on Atoms:\n      {molecule.force}")
+   print(f"Force on Atoms:\n{molecule.force}")
 
 3. Execute the Script
 ---------------------

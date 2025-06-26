@@ -10,7 +10,7 @@ Supported Molecular Input Formats
 You can supply molecular data (atoms and coordinates) in two ways:
 
 - **PyTorch tensors** (in-memory, zero-padded batches)  
-- **`.xyz` files** (read and padded automatically)
+- **.xyz files** (read and padded automatically)
 
 
 Using PyTorch Tensors
@@ -66,8 +66,8 @@ An `.xyz` file includes:
 2. Comment or title (second line)
 3. Atom symbol and coordinates per line (x, y, z)
 
-Use `read_xyz` to load and pad.
-The `read_xyz` function returns numpy tensors (species and coordinates) that have to be converted to PyTorch tensors
+Use `read_xyz(...)` to load and pad.
+The `read_xyz(...)` function returns numpy tensors (species and coordinates) that have to be converted to PyTorch tensors
 
 .. code-block:: python
 
@@ -147,7 +147,7 @@ These imports provide the core components needed to define molecules and access 
     from seqm.seqm_functions.constants import Constants
     from seqm.Molecule import Molecule
 
-**Required if reading molecular structures from a `.xyz` file:**
+**Required if reading molecular structures from .xyz files:**
 
 Use this to load molecular geometries from `.xyz` files
 
@@ -179,12 +179,15 @@ Includes stochastic and frictional forces to model interaction with a heat bath,
 
     from seqm.MolecularDynamics import Molecular_Dynamics_Langevin
 
-**Required for KSA-XL Born-Oppenheimer Molecular Dynamics:**
+**Required for Extended-Lagrangian Born-Oppenheimer Molecular Dynamics:**
 
-Implements an efficient Born-Oppenheimer MD scheme using extended Lagrangian and Krylov subspace methods for long, accurate simulations on quantum surfaces.
+Implements an extended Lagrangian Born-Oppenheimer MD (XL-BOMD) scheme and an improved Krylov subspace approximation (KSA) scheme for the integration of the electronic equations of motion within XL-BOMD termed as KSA-XL-BOMD for long, accurate MD simulations.
 
 .. code-block:: python
 
+    # basic XL-BOMD
+    from seqm.MolecularDynamics import XL_BOMD
+    # XL-BOMD with Krylov subspace approximation for the integration of the electronic equations of motion
     from seqm.MolecularDynamics import KSA_XL_BOMD
 
 
@@ -197,7 +200,7 @@ Implements an efficient Born-Oppenheimer MD scheme using extended Lagrangian and
 SEQM Parameters
 ---------------
 
-The ``seqm_parameters`` dictionary defines settings for a semiempirical quantum mechanics (SEQM) simulation.
+The ``seqm_parameters`` dictionary helps you give the specifications for the semiempirical quantum mechanics (SEQM) calculation.
 Below is a typical configuration:
 
 .. code-block:: python
@@ -207,9 +210,10 @@ Below is a typical configuration:
         'scf_eps': 1.0e-6,
         'scf_converger': [2,],
         'sp2': [False, 1.0e-5],
+        ...
     }
 
-Some of the basic parameters in the ``seqm_parameters`` dictionary are:
+Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
 
 **method**  (`str`)
     Specifies the semiempirical model to use.
@@ -220,10 +224,10 @@ Some of the basic parameters in the ``seqm_parameters`` dictionary are:
     Convergence threshold for the SCF (Self-Consistent Field) loop.
     The SCF iteration stops when the energy difference between steps is less than this value.
 
-    :recommended: 1e-5 for single point SCF, 1e-8 for excited state calculations
+    :recommended: ``1e-5`` for single-point SCF, ``1e-8`` for excited-state calculations
 
 **scf_converger** (`list`) 
-    Specifies the alorithm used to update the density matrix to converge SCF.
+    Specifies the alorithm and other details that will be used to update the density matrix to converge SCF.
 
     Available options:
 
@@ -232,7 +236,7 @@ Some of the basic parameters in the ``seqm_parameters`` dictionary are:
       Constant linear mixing of the density matrix:  
 
       ``P_new = alpha * P_old + (1 - alpha) * P_candidate``  
-      where ``alpha`` is the mixing coefficient (e.g., 0.2).
+      where ``alpha`` is the mixing coefficient (e.g., ``0.2``).
 
     - ``[1]``  
       
@@ -257,7 +261,7 @@ Some of the basic parameters in the ``seqm_parameters`` dictionary are:
     :format: ``[enabled, tolerance]``  
 
     * ``enabled`` (`bool`): Whether to activate SP2
-    * ``tolerance`` (`float`): SP2 threshold. Recommened between 1e-3 to 1e-7
+    * ``tolerance`` (`float`): SP2 threshold. Recommened between ``1e-3`` to ``1e-7`` for double-precision calculations
 
 **eig**  (`bool`)
     Optional parameter to control whether to compute molecular orbitals after SCF convergence.

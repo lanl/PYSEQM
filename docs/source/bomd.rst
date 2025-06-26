@@ -13,30 +13,28 @@ PYSEQM had MD engines for:
 - **Born–Oppenheimer MD** via `Molecular_Dynamics_Basic`  
 - **Langevin-thermostatted dynamics** via `Molecular_Dynamics_Langevin`
 
+.. _bomd_driver:
+
 BOMD driver
 ~~~~~~~~~~~~~~~~~
 Call the BOMD engine using
 
 .. code-block:: python
 
-   from seqm.MolecularDynamics import (
-       Molecular_Dynamics_Basic,
-       Molecular_Dynamics_Langevin
-   )
+   from seqm.MolecularDynamics import Molecular_Dynamics_Basic
 
-   # Basic BOMD
-   md = Molecular_Dynamics_Basic( seqm_parameters=seqm_parameters, Temp=300.0,
+   md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=300.0,
                                   timestep=0.5, output=output).to(device)
 
 The parameters of `Molecular_Dynamics_Basic` are:
 
-- `seqm_parameters` (`dict`)
+- ``seqm_parameters`` (`dict`)
   
-- `Temp` (`float`) Specify the inital temperature (K) for BOMD. Given the initial temperature in BOMD, the initial nuclear velocities are set by drawing from a Maxwell–Boltzmann distribution so that each degree of freedom has an average kinetic energy of ½ kT
+- ``Temp`` (`float`) Specify the inital temperature (K) for BOMD. Given the initial temperature in BOMD, the initial nuclear velocities are set by drawing from a Maxwell–Boltzmann distribution so that each degree of freedom has an average kinetic energy of ½ kT
 
-- `timestep` (`float`) Integration step size (fs)
+- ``timestep`` (`float`) Integration step size (fs)
 
-- `output`: (`dict`) controlling prints & file dumps, see below
+- ``output``: (`dict`) controlling prints & file dumps, see below
 
 Langevin dynamics
 ~~~~~~~~~~~~~~~~~
@@ -74,13 +72,15 @@ Call the Langevin dynamics engine using
 
 .. code-block:: python
 
+   from seqm.MolecularDynamics import Molecular_Dynamics_Langevin
+
    md_langevin = Molecular_Dynamics_Langevin( damp=100.0, seqm_parameters=seqm_parameters,
                                               Temp=300.0, timestep=0.5, 
                                               output=output).to(device)
 
 In addition to the same parameters as `Molecular_Dynamics_Basic`, `Molecular_Dynamics_Langevin` has the following parameter(s):
 
-- `damp` (`float`) Damping constant in fs
+- ``damp`` (`float`) Damping constant in fs
 
 Configuring Outputs from BOMD
 -----------------------------
@@ -109,7 +109,7 @@ In addition to specifying :ref:`seqm-parameters`, the MD engines also require an
 
 - **prefix** (`str`)  
   Path prefix for all output files.  
-  If you set prefix to `'my_output'`, files will be named like ``./my_output.{molid}.xyz``, etc.
+  If you set prefix to `'my_output'`, then output files will be named like ``./my_output.{molid}.xyz``, etc.
 
 Running the MD Simulation
 --------------------------
@@ -134,6 +134,7 @@ Parameters:
 
 - **remove_com** (`[bool, int]`)  
   Control removal of center‐of‐mass motion:  
+
   - First element (`bool`): whether to remove COM drift.  
   - Second element (`int`): how often to apply it (every N steps).
 

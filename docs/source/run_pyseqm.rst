@@ -65,17 +65,16 @@ Minimal Input File Template
 
    # 5a. Run single-point SCF
    driver = Electronic_Structure(seqm_parameters).to(device)
-   driver.run(molecule)
+   driver(molecule)
    print("Total Energy (eV):", molecule.Etot)
    print("Forces (eV/Å):",   molecule.force)
 
-   # 5b. (Alternative) Run a BOMD simulation
+   # # 5b. (Alternative) Run a BOMD simulation
    # md = Molecular_Dynamics_Basic(
-   #     damp=100.0,
-   #     seqm_parameters=seqm_parameters,
-   #     Temp=300.0,
-   #     timestep=0.5,
-   #     output={'molid':[0],'thermo':1,'dump':1,'prefix':'./out'}
+   #  seqm_parameters=seqm_parameters,
+   #  Temp=300.0,
+   #  timestep=0.5,
+   #  output={'molid':[0],'thermo':1,'dump':1,'prefix':'./out'}
    # ).to(device)
    # md.initialize_velocity(molecule)
-   # _ = md.run(molecule, n_steps=100, remove_com=[True,1], Info_log=True)
+   # _ = md.run(molecule, steps=10, remove_com=[True,1], Info_log=True)

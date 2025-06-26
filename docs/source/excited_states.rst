@@ -9,12 +9,12 @@ CIS constructs excited states by promoting electrons from occupied to virtual or
 
 RPA includes both excitation and de-excitation operators, and accounts for more electronic correlation than CIS. 
 
-Both methods are calculated with `Electronic_Structure` driver; you simply add an `excited_states` key to your `seqm_parameters` dictionary.
+Both methods are calculated with `Electronic_Structure` driver.
 
 Configuring Excited States
 --------------------------
 
-In order to prompt an excited state calculation, add an `excited_states` dictionary to `seqm_parameters`:
+In order to prompt an excited state calculation, simply add an `excited_states` key/value pair to your `seqm_parameters` dictionary:
 
 .. code-block:: python
 
@@ -34,12 +34,12 @@ This value dictionary should contain the following key/value pairs:
 
 - **method**  (`str`): Method used for excited state calculations. Available options:
 
-        - `'rpa'`
-        - `'cis'`
+  - ``'rpa'``
+  - ``'cis'``
 
-By default it is set to `cis`
+By default it is set to ``'cis'``
 
-- **cis_tolerance** (`float`): Convergence criterion for CIS/RPA excited states. By default it is set to 1e-6.
+- **cis_tolerance** (`float`): Convergence criterion for CIS/RPA excited states. By default it is set to ``1e-6``.
 
 See :ref:`seqm-parameters` for other settings for the calculation.
 
@@ -58,7 +58,7 @@ Running an Excited-State Calculation
    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
    species = torch.as_tensor([[8,6,1,1],
-                              [8,6,1,1],
+                              [8,6,1,1],],
                            dtype=torch.int64, device=device)
 
    coordinates = torch.tensor([
@@ -76,27 +76,24 @@ Running an Excited-State Calculation
                                  ],
                               ], device=device)
 
-   species = torch.as_tensor(species, dtype=torch.int64, device=device)[:]
-   coordinates = torch.tensor(coordinates, device=device)[:]
    const = Constants().to(device)
 
    seqm_parameters = {
       'method': 'AM1',
       'scf_eps': 1.0e-8,
-      'scf_converger': [2],
-      'excited_states': {'n_states': 5},
+      'scf_converger': [1],
+      'excited_states': {'n_states': 10},
    }
 
    molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
    esdriver = Electronic_Structure(seqm_parameters).to(device)
    esdriver(molecule)
 
-After ``esdriver(molecule)``, inspect the ``molecule`` attributes:
+After ``esdriver(molecule)`` has run, inspect the ``molecule`` attributes:
 
-- **Excited-State Energies** (`molecule.cis_energies`)  
-  Tensor of shape `(batch, n_states)` giving excitation energies (eV) above the ground state.
+- ``molecule.cis_energies`` Tensor of shape `(batch, n_states)` containing excitation energies (eV) above the ground state.
 
-In addition, excitation energies and a few other useful quantities are printed to console.
+In addition, excitation energies and a few other useful quantities (transition dipole moments, oscillator strengths) are printed to console.
 
 Batch Homogeneity Requirement
 -----------------------------

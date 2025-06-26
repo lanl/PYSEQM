@@ -7,7 +7,7 @@ PYSEQM (PYtorch based SemiEmpirical Quantum Mechanics) is is a flexible, high-pe
 - **Semiempirical quantum chemical calculations**  
 
   Fast evaluation of molecular energies and forces using established semiempirical methods such as AM1, PM3, PM6.
-- **GPU accelerate calculations**  
+- **GPU accelerated calculations**  
 
   Leverage NVIDIA CUDA hardware for highly accelerated simulations; also fully supported on CPU-only systems.
 - **Machine-learning integration**  

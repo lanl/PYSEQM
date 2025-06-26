@@ -5,10 +5,10 @@ Overview
 --------
 PYSEQM provides two approaches for finding minimum-energy structures:
 
-- **geomeTRIC** integration via `geomeTRIC_optimization`  
+- **geomeTRIC** integration 
   
-  Robust, advanced algorithms (`external package <https://geometric.readthedocs.io/en/latest/>`_; single-molecule only).
-- **Steepest-Descent (SD)** via `Geometry_Optimization_SD`  
+  Robust, advanced algorithms using an external package called `geomeTRIC <https://geometric.readthedocs.io/en/latest/>`_; single-molecule only.
+- **Steepest-Descent (SD)** via `Geometry_Optimization_SD` driver  
 
   Batch-capable but may converge extremely slowly or fail on complex surfaces.  
 
@@ -40,7 +40,6 @@ Example optimization with geomeTRIC
     import torch
     from seqm.seqm_functions.constants import Constants
     from seqm.Molecule import Molecule
-    from seqm.ElectronicStructure import Electronic_Structure
     from seqm.geometryOptimization import geomeTRIC_optimization
     
     torch.set_default_dtype(torch.float64)
@@ -75,13 +74,14 @@ Example optimization with geomeTRIC
                        }
     
     molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
+
     geomeTRIC_optimization(molecules)
 
 
 
 Built-in Steepest-Descent
 -------------------------
-Use `Geometry_Optimization_SD` for simple, batched optimization:
+Use `Geometry_Optimization_SD` driver for simple, batched optimizations:
 
 .. code-block:: python
 

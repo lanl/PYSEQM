@@ -67,22 +67,15 @@ Basic Usage
 
 Accessing Results
 -----------------
-After ``esdriver(molecule)``, inspect the ``molecule`` attributes:
+After ``esdriver(molecule)`` has run, inspect the ``molecule`` attributes:
 
-- **Heat of formation** (`molecule.Hf`)  
-   Total heat of formation (eV)
-- **Total Energy** (`molecule.Etot`)  
-  Sum of electronic + nuclear energies (eV)
-- **Electronic Energy** (`molecule.Eelec`)  
-  SCF electronic energy (eV)
-- **Nuclear Repulsion** (`molecule.Enuc`)  
-  Nuclear-nuclear repulsion energy (eV)
-- **Forces** (`molecule.force`)  
-  Forces on atoms (eV/Å), equal to −∇Etot
-- **Orbital Energies** (`molecule.e_mo`)  
-  Vector of molecular orbital eigenvalues (eV)
-- **HOMO–LUMO Gap** (`molecule.e_gap`)  
-  Difference between highest occupied and lowest unoccupied orbital (eV)
+- ``molecule.Hf`` Heat of formation (eV)
+- ``molecule.Etot`` Total Energy (electronic + nuclear energies) (eV)
+- ``molecule.Eelec`` Electronic Energy (eV)
+- ``molecule.Enuc`` Nuclear-nuclear repulsion energy (eV)
+- ``molecule.force`` Forces on atoms (eV/Å), equal to −∇Etot
+- ``molecule.e_mo`` Molecular orbital eigenvalues (eV)
+- ``molecule.e_gap`` HOMO–LUMO Gap (eV)
 
 Batch Processing
 ----------------
