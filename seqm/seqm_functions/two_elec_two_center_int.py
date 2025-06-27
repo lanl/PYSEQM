@@ -281,6 +281,28 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     ###############################33
     # X-H hevay atom - Hydrogen
     xXH=-xij[XH]
+
+    # We rotate the 2-electron integrals from the local frame to the molecular frame
+    # O @ I_local, where O is the rotation matrix built from the unit vectors xij (X,Y,Z).
+    #
+    # The rotation matrix O is 
+    #    O = [[X/R_AB,           Y/R_AB,            Z/R_AB],
+    #         [-Y/R_XY*sign(X),  abs(X/R_XY),            0],
+    #         [-XZ/(R_XY R_AB), -YZ/(R_XY R_AB), R_XY/R_AB]]
+    #
+    #    where X = x_A - x_B, Y = y_A - y_B, Z = z_A - z_B
+    #    R_XY = sqrt(X^2 + Y^2), and R_AB = sqrt(X^2 + Y^2 + Z^2)
+    #
+    # However, derivatives of components like sign(X) and abs(X) are undefined at
+    # X = 0, which breaks autograd. To avoid that “kink” at zero:
+    #
+    # 1) Grab machine epsilon for the tensor’s dtype — the smallest Δ such that
+    #    1 + Δ ≠ 1. This is as tiny as the hardware can represent.
+    # 2) Add it to X so that we never hit
+    #    exactly zero, without materially changing any component ≫ ε.
+    eps = torch.finfo(dtype).eps
+    xXH[...,0] +=eps
+
     yXH=torch.zeros(xXH.shape[0],2,dtype=dtype, device=device)
     zXH=torch.zeros_like(xXH)
 
@@ -374,6 +396,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     # X-X heavy atom - heavy atom
     K = XX | YX | YY
     x=-xij[K]
+    x[...,0] +=eps 
     y=torch.zeros(x.shape[0],2,dtype=dtype, device=device)
     #z=torch.zeros_like(x)
     #cond1 = torch.abs(x[...,3-1])>0.99999999
