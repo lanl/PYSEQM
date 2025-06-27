@@ -57,6 +57,6 @@ def Fermi_Q(H0,T, Nocc, nHeavy, nHydro, kB, scf_backward, OccErrThrs = 1e-9):
     # $$$
     for i,j in zip(range(0,len(S)), mask_S):
         S[i] = S_temp[i, j].sum()
-    print('mu:', mu0, 'S_elec:', S_temp)
+    # print('mu:', mu0, 'S_elec:', S_temp)
 
     return D0, S, QQ, e, Fe_vec, mu0, Occ_mask

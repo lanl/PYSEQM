@@ -46,16 +46,17 @@ In `Molecular_Dynamics_Langevin`, the total force on each atom is
 
 where:
 
-- **F_c**: conservative force (–∇E_tot)  
-- **F_f**: frictional force  
+- :math:`F_c` is the conservative force (:math:`-\nabla E_{\mathrm{tot}}`)  
+
+- :math:`F_f` is the frictional force
 
   .. math::
 
      \mathbf{F}_f = -\frac{m}{\tau}\,\mathbf{v}
 
-  with `τ` being the damping constant (in units of time)
+  with :math:`\tau` being the damping constant (in units of time).
 
-- **F_r**: random force  
+- :math:`F_r` is the random force  
 
   .. math::
 

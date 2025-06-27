@@ -70,10 +70,10 @@ Accessing Results
 After ``esdriver(molecule)`` has run, inspect the ``molecule`` attributes:
 
 - ``molecule.Hf`` Heat of formation (eV)
-- ``molecule.Etot`` Total Energy (electronic + nuclear energies) (eV)
+- ``molecule.Etot`` Total Energy (electronic + nuclear energies), :math:`E_{\mathrm{tot}}` (eV)
 - ``molecule.Eelec`` Electronic Energy (eV)
 - ``molecule.Enuc`` Nuclear-nuclear repulsion energy (eV)
-- ``molecule.force`` Forces on atoms (eV/Å), equal to −∇Etot
+- ``molecule.force`` Forces on atoms (eV/Å), equal to :math:`-\nabla E_{\mathrm{tot}}`
 - ``molecule.e_mo`` Molecular orbital eigenvalues (eV)
 - ``molecule.e_gap`` HOMO–LUMO Gap (eV)
 

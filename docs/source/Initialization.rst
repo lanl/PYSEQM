@@ -236,7 +236,7 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
       Constant linear mixing of the density matrix:  
 
       ``P_new = alpha * P_old + (1 - alpha) * P_candidate``  
-      where ``alpha`` is the mixing coefficient (e.g., ``0.2``).
+      where ``alpha`` is the mixing coefficient between ``0.0`` and ``1.0``.
 
     - ``[1]``  
       
@@ -244,11 +244,15 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
 
     - ``[1, K, L, M]``  
       
+      where ``K`` and ``L`` are of mixing coefficients between 0.0 and 1.0, and ``M`` is an `int` greater than ``6``. 
+
       Advanced adaptive mixing:  
         * Use linear mixing for the first ``M`` steps.  
         * Start with mixing coefficient ``K`` for the first 5 steps.  
-        * Linearly transition from ``K`` to ``L`` between steps 6 and ``M``.  
+        * Linearly transition the mixing coefficient from ``K`` to ``L`` between steps 6 and ``M``.  
         * After step ``M``, switch to adaptive mixing.
+      
+      For example, ``[1, 0.5, 0.1, 20]`` would mean a linear mixing starting with the mixing coefficient of 0.5 for the first 5 steps, then from step 5 to step 20 the mixing coefficient transitions from 0.5 to 0.1, and adaptive mixing thereafter.
 
     - ``[2]``  
       

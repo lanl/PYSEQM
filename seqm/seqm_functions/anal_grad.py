@@ -20,6 +20,7 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
     """
     if method not in {'PM3', 'AM1', 'MNDO'}:
         raise Exception("Analytical gradients implented only for MNDO, AM1 and PM3 methods")
+    print("Doing anal grad")
 
     # torch.set_printoptions(precision=6)
     # torch.set_printoptions(linewidth=110)
@@ -777,10 +778,11 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # and hence the derivative will not exist. So I'm printing a warning that there might be numerical errors here
     # Similaryly the (1,1) element of the rotation matrix is abs(X/sqrt(X^2+Y^2)). Again, the derivative of abs(X) will not exist when X=0, and hence this
     # will lead to errors.
-    if (xij_[:, 0].any() == 0):
-        print(
-            "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
-        )
+
+    # if torch.any(xij_[:, 0] == 0):
+    #     print(
+    #         "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
+    #     )
 
     # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
     signcorrect = torch.sign(xij_[:, 0] + torch.finfo(dtype).eps)
