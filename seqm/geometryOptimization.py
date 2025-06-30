@@ -1,9 +1,7 @@
-#TODO: Add this to the website/manual
 import tempfile,os, uuid
 import torch
 
 from .ElectronicStructure import Electronic_Structure as esdriver
-from .seqm_functions.constants import a0, ev
 
 try:
     from geometric.engine import Engine
@@ -16,11 +14,8 @@ except ImportError as e:
 from geometric.engine import Engine
 from geometric.molecule import Molecule as GeomMolecule, Elements
 from geometric.optimize import run_optimizer
+from geometric.nifty import bohr2ang, ev2au
 
-
-# ─── Globals & Conversions ────────────────────────────────────────────────────
-_BOHR_TO_ANG     = a0
-_EV_TO_HARTREE   = 1.0/ev
 
 def _write_trajectory(path, step, molecule):
     """Write a multi‐frame .xyz"""
@@ -50,7 +45,7 @@ class pyseqm_engine(Engine):
     def calc_new(self, coords, dirname=None):
         # 1) Bohr → Å tensor
         xyz_ang = torch.tensor(
-            coords.reshape(-1, 3) * _BOHR_TO_ANG,
+            coords.reshape(-1, 3) * bohr2ang,
             device=self.molecule.coordinates.device, dtype=self.molecule.coordinates.dtype
         ).unsqueeze(0)
 
@@ -61,9 +56,9 @@ class pyseqm_engine(Engine):
         self.esdriver(self.molecule, P0=self.molecule.dm, dm_prop='SCF', learned_parameters=self.learned_parameters)
 
         # 3) Energy & gradient → atomic units
-        E_h = self.molecule.Etot.item() * _EV_TO_HARTREE
+        E_h = self.molecule.Etot.item() * ev2au
         grad_eV_A = -self.molecule.force.detach().cpu().numpy()[0]      # (N,3)
-        grad_ha = (grad_eV_A * _EV_TO_HARTREE * _BOHR_TO_ANG).reshape(-1)
+        grad_ha = (grad_eV_A * ev2au * bohr2ang).reshape(-1)
         self.step += 1
 
         # 4) write trajectory
@@ -98,3 +93,6 @@ def geomeTRIC_optimization(
         tmpf = os.path.join(tmpdir, str(uuid.uuid4()))
 
         result = run_optimizer(customengine=engine, input=tmpf, **run_kwargs)
+
+    with open('optimized.xyz','w') as f:
+        f.write("\n".join(result.write_xyz(selection=[-1]))) # Write the geometry at the last step of optimization as the optimized geometry
