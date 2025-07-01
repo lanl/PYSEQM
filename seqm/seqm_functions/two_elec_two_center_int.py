@@ -287,21 +287,16 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #
     # The rotation matrix O is 
     #    O = [[X/R_AB,           Y/R_AB,            Z/R_AB],
-    #         [-Y/R_XY*sign(X),  abs(X/R_XY),            0],
+    #         [-Y/R_XY,          X/R_XY,                 0],
     #         [-XZ/(R_XY R_AB), -YZ/(R_XY R_AB), R_XY/R_AB]]
     #
     #    where X = x_A - x_B, Y = y_A - y_B, Z = z_A - z_B
     #    R_XY = sqrt(X^2 + Y^2), and R_AB = sqrt(X^2 + Y^2 + Z^2)
-    #
-    # However, derivatives of components like sign(X) and abs(X) are undefined at
-    # X = 0, which breaks autograd. To avoid that “kink” at zero:
-    #
-    # 1) Grab machine epsilon for the tensor’s dtype — the smallest Δ such that
-    #    1 + Δ ≠ 1. This is as tiny as the hardware can represent.
-    # 2) Add it to X so that we never hit
-    #    exactly zero, without materially changing any component ≫ ε.
-    eps = torch.finfo(dtype).eps
-    xXH[...,0] +=eps
+    # When R_XY is nearly zero, i.e., the z-axis of the local-frame and the molecular-frame
+    # coincide, then there will be numerical instabilites in the rotation matrix.
+    # So we fix the default orientation in this case. However, this leads to problems
+    # with differentiaing the rotation matrix w.r.t. the coordinates
+    
 
     yXH=torch.zeros(xXH.shape[0],2,dtype=dtype, device=device)
     zXH=torch.zeros_like(xXH)
@@ -325,27 +320,33 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
     zXH2 = torch.zeros_like(xXH[...,2])
     cond_xXH2 = torch.abs(xXH[...,3-1])<1.0
-    zXH2[cond_xXH2] = torch.sqrt(1.0-xXH[cond_xXH2,3-1]**2)
-    cond1XH = zXH2>1.0e-5
-    aXH = 1.0/zXH2[cond1XH]
+    zXH2[cond_xXH2] = -torch.sqrt(1.0-xXH[cond_xXH2,3-1]**2)
+    zalign_thresh = 1.0e-5
+    cond1XH = -zXH2>zalign_thresh
+    aXH = -1.0/zXH2[cond1XH]
     zXH0 =  torch.ones_like(zXH2)
-    zXH0[cond1XH] = -aXH*xXH[cond1XH,1-1]*xXH[cond1XH,3-1]
+    zXH0[cond1XH] = aXH*xXH[cond1XH,1-1]*xXH[cond1XH,3-1]
     zXH1 = torch.zeros_like(zXH2)
-    zXH1[cond1XH] = -aXH*xXH[cond1XH,2-1]*xXH[cond1XH,3-1]
+    zXH1[cond1XH] = aXH*xXH[cond1XH,2-1]*xXH[cond1XH,3-1]
     zXH = torch.stack((zXH0, zXH1, zXH2), dim=1)
 
+    # xXH[~cond1XH,:2] = 0.0
+    # xXH[~cond1XH,2] = torch.sign(xXH[~cond1XH,2])
 
-    #yXH[...,1-1]=0.0
-    yXH[cond1XH,0] =  aXH*xXH[cond1XH,2-1] * \
-                      torch.where( xXH[cond1XH,1-1]>=0.0, \
-                                   torch.tensor(-1.0,dtype=dtype, device=device), \
-                                   torch.tensor(1.0,dtype=dtype, device=device) )
+    yXH[cond1XH,0] =  -aXH*xXH[cond1XH,2-1]
+    # yXH[cond1XH,0] =  aXH*xXH[cond1XH,2-1] * \
+    #                   torch.where( xXH[cond1XH,1-1]>=0.0, \
+    #                                torch.tensor(-1.0,dtype=dtype, device=device), \
+    #                                torch.tensor(1.0,dtype=dtype, device=device) )
     #yXH[cond1XH,1-1] = -aXH*xXH[cond1XH,2-1]
     #yXH[xXH[...,1-1]<0.0,1-1] *= -1.0
     #yXH[xXH[...,1-1]<0.0,1-1].mul_(-1.0)
 
     yXH[...,2-1]=1.0
-    yXH[cond1XH,2-1] = torch.abs(aXH * xXH[cond1XH,1-1])
+    # yXH[...,2-1]=torch.sign(xXH[...,2])
+    yXH[cond1XH,2-1] = aXH * xXH[cond1XH,1-1]
+    # print(f"Rotmat XH ortho norm: {(xXH[...,:2]*yXH).sum()}, {torch.sum(yXH*zXH[...,:2])}, {torch.sum(xXH*zXH)}")
+    # print(f"Rotmat XH ortho norm: {(xXH*xXH).sum()}, {torch.sum(yXH*yXH)}, {torch.sum(zXH*zXH)}")
     #y[3] is not used
 
     xx11XH = xXH[...,1-1]**2
@@ -396,7 +397,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     # X-X heavy atom - heavy atom
     K = XX | YX | YY
     x=-xij[K]
-    x[...,0] +=eps 
+    # x[...,0] +=eps 
     y=torch.zeros(x.shape[0],2,dtype=dtype, device=device)
     #z=torch.zeros_like(x)
     #cond1 = torch.abs(x[...,3-1])>0.99999999
@@ -424,15 +425,18 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #z2 = torch.sqrt(1.0-x[...,3-1]**2)
     cond_x2 = torch.abs(x[...,3-1])<1.0
     z2 = torch.zeros_like(x[...,2])
-    z2[cond_x2] = torch.sqrt(1.0-x[cond_x2,3-1]**2)
-    cond1XX = z2>1.0e-5
-    a = 1.0/z2[cond1XX]
+    z2[cond_x2] = -torch.sqrt(1.0-x[cond_x2,3-1]**2)
+    cond1XX = -z2>zalign_thresh
+    a = -1.0/z2[cond1XX]
     z0 = torch.ones_like(z2)
-    z0[cond1XX] = -a*x[cond1XX,1-1]*x[cond1XX,3-1]
+    z0[cond1XX] = a*x[cond1XX,1-1]*x[cond1XX,3-1]
     z1 = torch.zeros_like(z2)
-    z1[cond1XX] = -a*x[cond1XX,2-1]*x[cond1XX,3-1]
+    z1[cond1XX] = a*x[cond1XX,2-1]*x[cond1XX,3-1]
 
     z = torch.stack((z0,z1,z2),dim=1)
+
+    # x[~cond1XX,:2] = 0.0
+    # x[~cond1XX,2] = torch.sign(x[~cond1XX,2])
 
     #y[...,1-1]=0.0
     #y[cond1XX,0] =  a*x[cond1XX,2-1] * \
@@ -443,16 +447,20 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #y[x[...,1-1]<0.0,1-1] *= -1.0
 
     y[...,1-1]=0.0
-    cond1XX_X1g0 = cond1XX & ( x[...,1-1]>=0.0 )
-    cond1XX_X1l0 = cond1XX & ( x[...,1-1]<0.0 )
-    y[cond1XX_X1g0,1-1] = -(1.0/z2[cond1XX_X1g0])*x[cond1XX_X1g0,2-1]
-    y[cond1XX_X1l0,1-1] = (1.0/z2[cond1XX_X1l0])*x[cond1XX_X1l0,2-1]
+    # cond1XX_X1g0 = cond1XX & ( x[...,1-1]>=0.0 )
+    # cond1XX_X1l0 = cond1XX & ( x[...,1-1]<0.0 )
+    # y[cond1XX_X1g0,1-1] = -(1.0/z2[cond1XX_X1g0])*x[cond1XX_X1g0,2-1]
+    # y[cond1XX_X1l0,1-1] = (1.0/z2[cond1XX_X1l0])*x[cond1XX_X1l0,2-1]
+    y[cond1XX,1-1] = -a*x[cond1XX,2-1]
 
 
 
     y[...,2-1]=1.0
-    y[cond1XX,2-1] = torch.abs(a * x[cond1XX,1-1])
+    # y[...,2-1]=torch.sign(x[...,2])
+    y[cond1XX,2-1] = a * x[cond1XX,1-1]
     #y[3] is not used
+    # print(f"Rotmat XX ortho norm: {(x[...,:2]*y).sum()}, {torch.sum(y*z[...,:2])}, {torch.sum(x*z)}")
+    # print(f"Rotmat XX ortho norm: {(x*x).sum()}, {torch.sum(y*y)}, {torch.sum(z*z)}")
 
     
     xx11 = x[...,1-1]**2
