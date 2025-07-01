@@ -317,12 +317,14 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #zXH[...,2-1]=0.0
     zXH[cond1XH,2-1] = -aXH*xXH[cond1XH,2-1]*xXH[cond1XH,3-1]
     """
-
+    eps = torch.finfo(dtype).eps
     zXH2 = torch.zeros_like(xXH[...,2])
     cond_xXH2 = torch.abs(xXH[...,3-1])<1.0
     zXH2[cond_xXH2] = -torch.sqrt(1.0-xXH[cond_xXH2,3-1]**2)
-    zalign_thresh = 1.0e-5
+    zalign_thresh = 1.0e-6
     cond1XH = -zXH2>zalign_thresh
+    xXH[~cond1XH] = 0.0
+    xXH[~cond1XH,2] = torch.sign(xXH[~cond1XH,2]+eps)
     aXH = -1.0/zXH2[cond1XH]
     zXH0 =  torch.ones_like(zXH2)
     zXH0[cond1XH] = aXH*xXH[cond1XH,1-1]*xXH[cond1XH,3-1]
@@ -342,7 +344,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #yXH[xXH[...,1-1]<0.0,1-1] *= -1.0
     #yXH[xXH[...,1-1]<0.0,1-1].mul_(-1.0)
 
-    yXH[...,2-1]=1.0
+    yXH[...,2-1]=xXH[...,2]
     # yXH[...,2-1]=torch.sign(xXH[...,2])
     yXH[cond1XH,2-1] = aXH * xXH[cond1XH,1-1]
     # print(f"Rotmat XH ortho norm: {(xXH[...,:2]*yXH).sum()}, {torch.sum(yXH*zXH[...,:2])}, {torch.sum(xXH*zXH)}")
@@ -427,6 +429,8 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     z2 = torch.zeros_like(x[...,2])
     z2[cond_x2] = -torch.sqrt(1.0-x[cond_x2,3-1]**2)
     cond1XX = -z2>zalign_thresh
+    x[~cond1XX] = 0.0
+    x[~cond1XX,2] = torch.sign(x[~cond1XX,2]+eps)
     a = -1.0/z2[cond1XX]
     z0 = torch.ones_like(z2)
     z0[cond1XX] = a*x[cond1XX,1-1]*x[cond1XX,3-1]
@@ -446,7 +450,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #y[cond1XX,1-1] = -a*x[cond1XX,2-1]
     #y[x[...,1-1]<0.0,1-1] *= -1.0
 
-    y[...,1-1]=0.0
     # cond1XX_X1g0 = cond1XX & ( x[...,1-1]>=0.0 )
     # cond1XX_X1l0 = cond1XX & ( x[...,1-1]<0.0 )
     # y[cond1XX_X1g0,1-1] = -(1.0/z2[cond1XX_X1g0])*x[cond1XX_X1g0,2-1]
@@ -455,7 +458,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
 
 
-    y[...,2-1]=1.0
+    y[...,2-1]=x[...,2]
     # y[...,2-1]=torch.sign(x[...,2])
     y[cond1XX,2-1] = a * x[cond1XX,1-1]
     #y[3] is not used

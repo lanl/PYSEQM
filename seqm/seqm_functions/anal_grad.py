@@ -715,7 +715,7 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     rxy2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 1])
     # ryz2 = torch.square(Xij[:, 1]) + torch.square(Xij[:, 2])
     # rxz2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 2])
-    axis_tolerance = 1e-10
+    axis_tolerance = 1e-12
     onerij = 1.0 / a0 / r0
 
     # Xalign = ryz2 < axis_tolerance
@@ -728,7 +728,6 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
 
     xij_ = -xij[Noalign, ...]
     rot[Noalign, 0, :] = xij_
-    rxy2 += torch.finfo(dtype).eps
     onerxy = 1.0 / torch.sqrt(rxy2[Noalign])
     rxy_over_rab = (torch.sqrt(rxy2) / r0)[Noalign] / a0
     rab_over_rxy = a0 * r0[Noalign] * onerxy
@@ -745,13 +744,12 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     #     )
 
     # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
-    signcorrect = torch.sign(xij_[:, 0] + torch.finfo(dtype).eps)
-    rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy * signcorrect
-    rot[Noalign, 1, 1] = torch.abs(xij_[:, 0] * rab_over_rxy)
+    rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy
+    rot[Noalign, 1, 1] = xij_[:, 0] * rab_over_rxy
 
-    rot[Noalign, 2, 0] = -xij_[:, 0] * xij_[:, 2] * rab_over_rxy
-    rot[Noalign, 2, 1] = -xij_[:, 1] * xij_[:, 2] * rab_over_rxy
-    rot[Noalign, 2, 2] = rxy_over_rab
+    rot[Noalign, 2, 0] = xij_[:, 0] * xij_[:, 2] * rab_over_rxy
+    rot[Noalign, 2, 1] = xij_[:, 1] * xij_[:, 2] * rab_over_rxy
+    rot[Noalign, 2, 2] = -rxy_over_rab
 
     # Derivative of the rotation matrix
     termX = xij_[:, 0] * onerij[Noalign]
@@ -770,8 +768,8 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     rot_der[Noalign, 2, 0, 1] = -xij_[:, 2] * termY
     rot_der[Noalign, 2, 0, 2] = onerij[Noalign] - xij_[:, 2] * termZ
 
-    rot_der[Noalign, 0, 2, 2] = xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
-    rot_der[Noalign, 1, 2, 2] = xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
+    rot_der[Noalign, 0, 2, 2] = -xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
+    rot_der[Noalign, 1, 2, 2] = -xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
     rot_der[Noalign, 2, 2, 2] = -rot[Noalign, 2, 2] * termZ
 
     rot_der[Noalign, 0, 1, 0] = -rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
@@ -781,8 +779,6 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # assert torch.allclose(rot_der[Noalign,0,1,0],-rot_der[Noalign,1,0,0]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq,atol=tolerance)
     # assert torch.allclose(rot_der[Noalign,1,1,0],-rot_der[Noalign,1,0,1]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
     # assert torch.all(torch.abs(-rot_der[Noalign,1,0,2]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-
-    rot_der[Noalign, 0:2, 1, 0] *= signcorrect.unsqueeze(1)
 
     rot_der[Noalign, 0, 1, 1] = torch.square(rot[Noalign, 1, 0]) * onerxy
     rot_der[Noalign, 1, 1, 1] = rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
@@ -794,25 +790,23 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # assert torch.allclose(rot_der[Noalign,1,1,1],rot_der[Noalign,0,0,1]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
     # assert torch.all(torch.abs(rot_der[Noalign,0,0,2]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
 
-    rot_der[Noalign, 0:2, 1, 1] *= signcorrect.unsqueeze(1)
-
-    rot_der[Noalign, 0, 2, 0] = -xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy - xij_[:, 0] * rot_der[
+    rot_der[Noalign, 0, 2, 0] = xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy + xij_[:, 0] * rot_der[
         Noalign, 2, 0, 0] * rab_over_rxy + xij_[:, 0] * xij_[:, 2] * rot_der[Noalign, 0, 2, 2] * rab_over_rxy_sq
-    rot_der[Noalign, 1, 2, 0] = torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
-    rot_der[Noalign, 2, 2, 0] = -termX * rxy_over_rab
+    rot_der[Noalign, 1, 2, 0] = -torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
+    rot_der[Noalign, 2, 2, 0] = termX * rxy_over_rab
 
     rot_der[Noalign, 0, 2, 1] = rot_der[Noalign, 1, 2, 0]
-    rot_der[Noalign, 1, 2, 1] = -xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy - xij_[:, 1] * rot_der[
+    rot_der[Noalign, 1, 2, 1] = xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy + xij_[:, 1] * rot_der[
         Noalign, 2, 0, 1] * rab_over_rxy + xij_[:, 1] * xij_[:, 2] * rot_der[Noalign, 1, 2, 2] * rab_over_rxy_sq
-    rot_der[Noalign, 2, 2, 1] = -termY * rxy_over_rab
+    rot_der[Noalign, 2, 2, 1] = termY * rxy_over_rab
 
     rot[Zalign, 0, 2] = torch.sign(-xij[Zalign, 2])
-    rot[Zalign, 1, 1] = 1.0
-    rot[Zalign, 2, 0] = rot[Zalign, 0, 2]
-    rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
-    rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
-    rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
-    rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
+    rot[Zalign, 1, 1] = rot[Zalign, 0, 2]
+    rot[Zalign, 2, 0] = 1.0
+    # rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
+    # rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
+    # rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
+    # rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
 
     # rot[Xalign, 0, 0] = torch.sign(-xij[Xalign, 0])
     # rot[Xalign, 1, 1] = rot[Xalign, 0, 0]
@@ -829,6 +823,12 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # rot_der[Yalign, 0, 1, 1] = onerij[Yalign]
     # rot_der[Yalign, 2, 0, 2] = onerij[Yalign]
     # rot_der[Yalign, 2, 2, 1] = -rot[Yalign, 0, 1] * onerij[Yalign]
+
+    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot[Noalign].shape[0]*3}")
+    #
+    # print(f"rot der check zero: {torch.sum(rot_der[:,0,...]@rot.transpose(1,2)+rot@rot_der[:,0,...].transpose(1,2))}")
+    # print(f"rot der check zero: {torch.sum(rot_der[:,1,...]@rot.transpose(1,2)+rot@rot_der[:,1,...].transpose(1,2))}")
+    # print(f"rot der check zero: {torch.sum(rot_der[:,2,...]@rot.transpose(1,2)+rot@rot_der[:,2,...].transpose(1,2))}")
 
     rotXH = rot[XH, ...]
     rot = rot[XX, ...]
