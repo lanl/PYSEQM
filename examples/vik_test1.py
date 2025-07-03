@@ -17,26 +17,29 @@ else:
 ### create molecule object:
 species = torch.as_tensor([
                             # [8,1,1],
-                           [1,1,],
                            # [1,1,],
+                           # [1,1,0,0],
                            # [8,6,],
-                          # [8,6,1,1],
+                          [8,6,1,1],
                           # [8,8,6,0]
                           ], # zero-padding for batching
                           dtype=torch.int64, device=device)
 
 coordinates = torch.tensor([
-                              [
-                               # [0.82,    0.00,    0.00],
-                               [1.82,    0.94,    0.00],
-                               [1.82,   -0.94,    0.00],
-                              ],
-                            #  [
-                            #   [0.00,    0.00,    0.00],
-                            #   [1.23,    0.00,    0.00],
-                            #   [1.82,    0.94,    0.00],
-                            #   [0.0,0.0,0.0]            # zero-padding for batching
-                            #  ]
+                              # [
+                              #  [0.82,    0.00,    0.00],
+                              #  [1.82,    0.94,    0.00],
+                              #  [1.81,   -0.94,    0.10],
+                              # # [0.0,0.0,0.0],            # zero-padding for batching
+                              # # [0.0,0.0,0.0],            # zero-padding for batching
+                              # ],
+                             [
+                              [0.00,    0.00,    0.00],
+                              [1.23,    0.00,    0.00],
+                              [1.82,    0.94,    0.00],
+                              [1.81,    -0.94,    0.00],
+                              # [0.0,0.0,0.0],            # zero-padding for batching
+                             ]
                             ], device=device)
 
 # species, coordinates = read_xyz(['h2o.xyz','./XYZ.0.xyz'])
@@ -47,8 +50,8 @@ const = Constants().to(device)
 
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
-                   'scf_eps' : 1.0e-6,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
-                   'scf_converger' : [2,0.0], # converger used for scf loop
+                   'scf_eps' : 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
+                   'scf_converger' : [0,0.3], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
@@ -59,9 +62,9 @@ seqm_parameters = {
                    # 'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    # 'eig' : True,
                    # 'uhf' : True,
-                   # 'analytical_grad':True
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
                    # 'excited_states': {'n_states':1}
+                   'analytical_gradient':[True]
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)

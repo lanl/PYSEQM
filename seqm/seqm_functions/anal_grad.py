@@ -709,122 +709,150 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # But in the molecular frame we have px,py,pz which are rotations of p-sigma, p-pi, p-pi'
     # The p orbitals rotate just like the coordinate frame, so the rotation matrix is easy to express
     # We now make the rotation matrix and its derivative for the p-orbitals
-    rot = torch.zeros(r0.shape[0], 3, 3, device=device, dtype=dtype)
-    rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
 
-    rxy2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 1])
-    # ryz2 = torch.square(Xij[:, 1]) + torch.square(Xij[:, 2])
-    # rxz2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 2])
-    axis_tolerance = 1e-12
-    onerij = 1.0 / a0 / r0
+    # rot = torch.zeros(r0.shape[0], 3, 3, device=device, dtype=dtype)
+    # rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
+    #
+    # rxy2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 1])
+    # # ryz2 = torch.square(Xij[:, 1]) + torch.square(Xij[:, 2])
+    # # rxz2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 2])
+    # axis_tolerance = 1e-12
+    # onerij = 1.0 / a0 / r0
+    #
+    # # Xalign = ryz2 < axis_tolerance
+    # # Yalign = rxz2 < axis_tolerance
+    # Zalign = rxy2 < axis_tolerance
+    # # Noalign = ~(Xalign | Yalign | Zalign)
+    # Noalign = ~(Zalign)
+    # # if torch.any(Zalign):
+    # #     print(f"Unfortunately z-axes align for {xij.shape[0]+ ~Noalign.sum() + 1}/{xij.shape[0]} pairs. This may cause some numerical instabilities in the derivative of two-electron integrals")
+    #
+    # xij_ = -xij[Noalign, ...]
+    # rot[Noalign, 0, :] = xij_
+    # onerxy = 1.0 / torch.sqrt(rxy2[Noalign])
+    # rxy_over_rab = (torch.sqrt(rxy2) / r0)[Noalign] / a0
+    # rab_over_rxy = a0 * r0[Noalign] * onerxy
+    # rab_over_rxy_sq = torch.square(rab_over_rxy)
+    #
+    # # The (1,0) element of the rotation matrix is -Y/sqrt(X^2+Y^2)*sign(X). If X (=xi-xj) is zero then there is a discontinuity in the sign function
+    # # and hence the derivative will not exist. So I'm printing a warning that there might be numerical errors here
+    # # Similaryly the (1,1) element of the rotation matrix is abs(X/sqrt(X^2+Y^2)). Again, the derivative of abs(X) will not exist when X=0, and hence this
+    # # will lead to errors.
+    #
+    # # if torch.any(xij_[:, 0] == 0):
+    # #     print(
+    # #         "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
+    # #     )
+    #
+    # # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
+    # rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy
+    # rot[Noalign, 1, 1] = xij_[:, 0] * rab_over_rxy
+    #
+    # rot[Noalign, 2, 0] = xij_[:, 0] * xij_[:, 2] * rab_over_rxy
+    # rot[Noalign, 2, 1] = xij_[:, 1] * xij_[:, 2] * rab_over_rxy
+    # rot[Noalign, 2, 2] = -rxy_over_rab
+    #
+    # # Derivative of the rotation matrix
+    # termX = xij_[:, 0] * onerij[Noalign]
+    # termY = xij_[:, 1] * onerij[Noalign]
+    # termZ = xij_[:, 2] * onerij[Noalign]
+    # # term = Xij[Noalign,:]*onerij.unsqueeze(1)
+    # rot_der[Noalign, 0, 0, 0] = onerij[Noalign] - xij_[:, 0] * termX
+    # rot_der[Noalign, 0, 0, 1] = -xij_[:, 0] * termY
+    # rot_der[Noalign, 0, 0, 2] = -xij_[:, 0] * termZ
+    #
+    # rot_der[Noalign, 1, 0, 0] = -xij_[:, 1] * termX
+    # rot_der[Noalign, 1, 0, 1] = onerij[Noalign] - xij_[:, 1] * termY
+    # rot_der[Noalign, 1, 0, 2] = -xij_[:, 1] * termZ
+    #
+    # rot_der[Noalign, 2, 0, 0] = -xij_[:, 2] * termX
+    # rot_der[Noalign, 2, 0, 1] = -xij_[:, 2] * termY
+    # rot_der[Noalign, 2, 0, 2] = onerij[Noalign] - xij_[:, 2] * termZ
+    #
+    # rot_der[Noalign, 0, 2, 2] = -xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
+    # rot_der[Noalign, 1, 2, 2] = -xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
+    # rot_der[Noalign, 2, 2, 2] = -rot[Noalign, 2, 2] * termZ
+    #
+    # rot_der[Noalign, 0, 1, 0] = -rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
+    # rot_der[Noalign, 1, 1, 0] = -torch.square(rot[Noalign, 1, 1]) * onerxy
+    # # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
+    # # tolerance = 1e-8
+    # # assert torch.allclose(rot_der[Noalign,0,1,0],-rot_der[Noalign,1,0,0]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq,atol=tolerance)
+    # # assert torch.allclose(rot_der[Noalign,1,1,0],-rot_der[Noalign,1,0,1]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
+    # # assert torch.all(torch.abs(-rot_der[Noalign,1,0,2]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
+    #
+    # rot_der[Noalign, 0, 1, 1] = torch.square(rot[Noalign, 1, 0]) * onerxy
+    # rot_der[Noalign, 1, 1, 1] = rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
+    # # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
+    # # tolerance = 1e-8
+    # # mopacs = rot_der[Noalign,0,0,0]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq
+    # # mine = rot_der[Noalign,0,1,1]
+    # # assert torch.allclose(mine,mopacs,atol=tolerance)
+    # # assert torch.allclose(rot_der[Noalign,1,1,1],rot_der[Noalign,0,0,1]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
+    # # assert torch.all(torch.abs(rot_der[Noalign,0,0,2]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
+    #
+    # rot_der[Noalign, 0, 2, 0] = xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy + xij_[:, 0] * rot_der[
+    #     Noalign, 2, 0, 0] * rab_over_rxy + xij_[:, 0] * xij_[:, 2] * rot_der[Noalign, 0, 2, 2] * rab_over_rxy_sq
+    # rot_der[Noalign, 1, 2, 0] = -torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
+    # rot_der[Noalign, 2, 2, 0] = termX * rxy_over_rab
+    #
+    # rot_der[Noalign, 0, 2, 1] = rot_der[Noalign, 1, 2, 0]
+    # rot_der[Noalign, 1, 2, 1] = xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy + xij_[:, 1] * rot_der[
+    #     Noalign, 2, 0, 1] * rab_over_rxy + xij_[:, 1] * xij_[:, 2] * rot_der[Noalign, 1, 2, 2] * rab_over_rxy_sq
+    # rot_der[Noalign, 2, 2, 1] = termY * rxy_over_rab
+    #
+    # rot[Zalign, 0, 2] = torch.sign(-xij[Zalign, 2])
+    # rot[Zalign, 1, 1] = rot[Zalign, 0, 2]
+    # rot[Zalign, 2, 0] = 1.0
+    # # rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
+    # # rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
+    # # rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
+    # # rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
+    #
+    # # rot[Xalign, 0, 0] = torch.sign(-xij[Xalign, 0])
+    # # rot[Xalign, 1, 1] = rot[Xalign, 0, 0]
+    # # rot[Xalign, 2, 2] = 1.0
+    # # rot_der[Xalign, 1, 0, 1] = onerij[Xalign]
+    # # rot_der[Xalign, 1, 1, 0] = -onerij[Xalign]
+    # # rot_der[Xalign, 2, 0, 2] = onerij[Xalign]
+    # # rot_der[Xalign, 2, 2, 0] = -rot[Xalign, 0, 0] * onerij[Xalign]
+    #
+    # # rot[Yalign, 0, 1] = torch.sign(-xij[Yalign, 1])
+    # # rot[Yalign, 1, 0] = -rot[Yalign, 0, 1]
+    # # rot[Yalign, 2, 2] = 1.0
+    # # rot_der[Yalign, 0, 0, 0] = onerij[Yalign]
+    # # rot_der[Yalign, 0, 1, 1] = onerij[Yalign]
+    # # rot_der[Yalign, 2, 0, 2] = onerij[Yalign]
+    # # rot_der[Yalign, 2, 2, 1] = -rot[Yalign, 0, 1] * onerij[Yalign]
 
-    # Xalign = ryz2 < axis_tolerance
-    # Yalign = rxz2 < axis_tolerance
-    Zalign = rxy2 < axis_tolerance
-    # Noalign = ~(Xalign | Yalign | Zalign)
-    Noalign = ~(Zalign)
-    # if torch.any(Zalign):
-    #     print(f"Unfortunately z-axes align for {xij.shape[0]+ ~Noalign.sum() + 1}/{xij.shape[0]} pairs. This may cause some numerical instabilities in the derivative of two-electron integrals")
+    # v = -xij
+    # v.requires_grad_()
+    # rot = rotate_with_quaternion(v)
+    # rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
+    # for j in range(3):
+    #     # build a batched “direction” d with 1’s in coordinate j
+    #     d = torch.zeros_like(v)
+    #     d[:, j] = 1.0
+    #
+    #     # jvp returns (r, dr) where dr = (∂r/∂v) ⋅ d, shape = (n,3,3)
+    #     _, dr = jvp(rotate_with_quaternion, (v,), (d,), create_graph=True)
+    #
+    #     # dr[i,a,b] == ∂r[i,a,b] / ∂v[i,j]
+    #     rot_der[:, j, :, :] = dr
 
-    xij_ = -xij[Noalign, ...]
-    rot[Noalign, 0, :] = xij_
-    onerxy = 1.0 / torch.sqrt(rxy2[Noalign])
-    rxy_over_rab = (torch.sqrt(rxy2) / r0)[Noalign] / a0
-    rab_over_rxy = a0 * r0[Noalign] * onerxy
-    rab_over_rxy_sq = torch.square(rab_over_rxy)
+    v = -xij
+    from .two_elec_two_center_int import rotate_with_quaternion
+    rot, rot_der = rotate_with_quaternion(v,calculate_gradient=True)
 
-    # The (1,0) element of the rotation matrix is -Y/sqrt(X^2+Y^2)*sign(X). If X (=xi-xj) is zero then there is a discontinuity in the sign function
-    # and hence the derivative will not exist. So I'm printing a warning that there might be numerical errors here
-    # Similaryly the (1,1) element of the rotation matrix is abs(X/sqrt(X^2+Y^2)). Again, the derivative of abs(X) will not exist when X=0, and hence this
-    # will lead to errors.
+    # rot_der is dR/dv. But I want dR/dx (x are components of -Xij). We have, dR_ij/dx_a = \sum_b dR_ij/dv_b * dv_b/dx_a
+    # We first need the Jacobian J, where J_ba = dv_b/dx_a. 
+    # v is -Xij/norm(Xij)
+    # J_{ba} = ∂u_b/∂v_a = (δ_ba - v_b v_a/||v||) / ||Xij||
+    I = torch.eye(3, device=device, dtype=dtype)  # (3,3)
+    J_uv = (I - v.unsqueeze(-1) * v.unsqueeze(-2)) / r0.unsqueeze(-1).unsqueeze(-1) / a0
+    rot_der = torch.einsum('nbij,nba->naij', rot_der, J_uv)  # (n,4,3)
 
-    # if torch.any(xij_[:, 0] == 0):
-    #     print(
-    #         "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
-    #     )
-
-    # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
-    rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy
-    rot[Noalign, 1, 1] = xij_[:, 0] * rab_over_rxy
-
-    rot[Noalign, 2, 0] = xij_[:, 0] * xij_[:, 2] * rab_over_rxy
-    rot[Noalign, 2, 1] = xij_[:, 1] * xij_[:, 2] * rab_over_rxy
-    rot[Noalign, 2, 2] = -rxy_over_rab
-
-    # Derivative of the rotation matrix
-    termX = xij_[:, 0] * onerij[Noalign]
-    termY = xij_[:, 1] * onerij[Noalign]
-    termZ = xij_[:, 2] * onerij[Noalign]
-    # term = Xij[Noalign,:]*onerij.unsqueeze(1)
-    rot_der[Noalign, 0, 0, 0] = onerij[Noalign] - xij_[:, 0] * termX
-    rot_der[Noalign, 0, 0, 1] = -xij_[:, 0] * termY
-    rot_der[Noalign, 0, 0, 2] = -xij_[:, 0] * termZ
-
-    rot_der[Noalign, 1, 0, 0] = -xij_[:, 1] * termX
-    rot_der[Noalign, 1, 0, 1] = onerij[Noalign] - xij_[:, 1] * termY
-    rot_der[Noalign, 1, 0, 2] = -xij_[:, 1] * termZ
-
-    rot_der[Noalign, 2, 0, 0] = -xij_[:, 2] * termX
-    rot_der[Noalign, 2, 0, 1] = -xij_[:, 2] * termY
-    rot_der[Noalign, 2, 0, 2] = onerij[Noalign] - xij_[:, 2] * termZ
-
-    rot_der[Noalign, 0, 2, 2] = -xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
-    rot_der[Noalign, 1, 2, 2] = -xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
-    rot_der[Noalign, 2, 2, 2] = -rot[Noalign, 2, 2] * termZ
-
-    rot_der[Noalign, 0, 1, 0] = -rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
-    rot_der[Noalign, 1, 1, 0] = -torch.square(rot[Noalign, 1, 1]) * onerxy
-    # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
-    # tolerance = 1e-8
-    # assert torch.allclose(rot_der[Noalign,0,1,0],-rot_der[Noalign,1,0,0]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # assert torch.allclose(rot_der[Noalign,1,1,0],-rot_der[Noalign,1,0,1]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # assert torch.all(torch.abs(-rot_der[Noalign,1,0,2]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-
-    rot_der[Noalign, 0, 1, 1] = torch.square(rot[Noalign, 1, 0]) * onerxy
-    rot_der[Noalign, 1, 1, 1] = rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
-    # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
-    # tolerance = 1e-8
-    # mopacs = rot_der[Noalign,0,0,0]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq
-    # mine = rot_der[Noalign,0,1,1]
-    # assert torch.allclose(mine,mopacs,atol=tolerance)
-    # assert torch.allclose(rot_der[Noalign,1,1,1],rot_der[Noalign,0,0,1]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # assert torch.all(torch.abs(rot_der[Noalign,0,0,2]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-
-    rot_der[Noalign, 0, 2, 0] = xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy + xij_[:, 0] * rot_der[
-        Noalign, 2, 0, 0] * rab_over_rxy + xij_[:, 0] * xij_[:, 2] * rot_der[Noalign, 0, 2, 2] * rab_over_rxy_sq
-    rot_der[Noalign, 1, 2, 0] = -torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
-    rot_der[Noalign, 2, 2, 0] = termX * rxy_over_rab
-
-    rot_der[Noalign, 0, 2, 1] = rot_der[Noalign, 1, 2, 0]
-    rot_der[Noalign, 1, 2, 1] = xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy + xij_[:, 1] * rot_der[
-        Noalign, 2, 0, 1] * rab_over_rxy + xij_[:, 1] * xij_[:, 2] * rot_der[Noalign, 1, 2, 2] * rab_over_rxy_sq
-    rot_der[Noalign, 2, 2, 1] = termY * rxy_over_rab
-
-    rot[Zalign, 0, 2] = torch.sign(-xij[Zalign, 2])
-    rot[Zalign, 1, 1] = rot[Zalign, 0, 2]
-    rot[Zalign, 2, 0] = 1.0
-    # rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
-    # rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
-    # rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
-    # rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
-
-    # rot[Xalign, 0, 0] = torch.sign(-xij[Xalign, 0])
-    # rot[Xalign, 1, 1] = rot[Xalign, 0, 0]
-    # rot[Xalign, 2, 2] = 1.0
-    # rot_der[Xalign, 1, 0, 1] = onerij[Xalign]
-    # rot_der[Xalign, 1, 1, 0] = -onerij[Xalign]
-    # rot_der[Xalign, 2, 0, 2] = onerij[Xalign]
-    # rot_der[Xalign, 2, 2, 0] = -rot[Xalign, 0, 0] * onerij[Xalign]
-
-    # rot[Yalign, 0, 1] = torch.sign(-xij[Yalign, 1])
-    # rot[Yalign, 1, 0] = -rot[Yalign, 0, 1]
-    # rot[Yalign, 2, 2] = 1.0
-    # rot_der[Yalign, 0, 0, 0] = onerij[Yalign]
-    # rot_der[Yalign, 0, 1, 1] = onerij[Yalign]
-    # rot_der[Yalign, 2, 0, 2] = onerij[Yalign]
-    # rot_der[Yalign, 2, 2, 1] = -rot[Yalign, 0, 1] * onerij[Yalign]
-
-    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot[Noalign].shape[0]*3}")
+    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")
     #
     # print(f"rot der check zero: {torch.sum(rot_der[:,0,...]@rot.transpose(1,2)+rot@rot_der[:,0,...].transpose(1,2))}")
     # print(f"rot der check zero: {torch.sum(rot_der[:,1,...]@rot.transpose(1,2)+rot@rot_der[:,1,...].transpose(1,2))}")
