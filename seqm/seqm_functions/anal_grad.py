@@ -4,6 +4,7 @@ from .constants import a0, ev
 from .cal_par import *
 from .diat_overlap import diatom_overlap_matrix
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
+from .two_elec_two_center_int import rotate_with_quaternion
 
 delta = 5e-5 # delta for finite difference calcs
 
@@ -841,7 +842,6 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     #     rot_der[:, j, :, :] = dr
 
     v = -xij
-    from .two_elec_two_center_int import rotate_with_quaternion
     rot, rot_der = rotate_with_quaternion(v,calculate_gradient=True)
 
     # rot_der is dR/dv. But I want dR/dx (x are components of -Xij). We have, dR_ij/dx_a = \sum_b dR_ij/dv_b * dv_b/dx_a
