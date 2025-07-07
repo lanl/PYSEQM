@@ -30,6 +30,6 @@ If you have NVIDIA CUDA–enabled hardware and installed a compatible PyTorch bu
 
 .. code-block:: bash
 
-    python -c "import torch; print(f'PyTorch installed | CUDA available: {torch.cuda.is_available()}')"
+    python -c "import torch; print(f'PyTorch {torch.__version__} installed | CUDA available: {torch.cuda.is_available()}')"
 
 
