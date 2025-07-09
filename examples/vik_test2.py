@@ -47,18 +47,18 @@ const = Constants().to(device)
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
                    'scf_eps' : 1.0e-10,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
-                   'scf_converger' : [0,0.2], # converger used for scf loop
+                   'scf_converger' : [2,0.2], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
                    'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
-                   # 'analytical_grad':True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
                    'excited_states': {'n_states':6,'method':'cis'},
                    'active_state': 1,
-                   'scf_backward': 1
+                   # 'scf_backward': 2,
+                   # 'analytical_gradient':[True],
                    # 'cis_tolerance' : 1e-8,
                    }
 

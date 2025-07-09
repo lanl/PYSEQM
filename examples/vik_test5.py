@@ -73,7 +73,7 @@ seqm_parameters = {
                    # 'uhf' : True,
                    # 'analytical_grad':True
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':10,'method':'rpa'},
+                   'excited_states': {'n_states':10,'method':'cis'},
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)

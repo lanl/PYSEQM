@@ -19,7 +19,7 @@ from .build_two_elec_one_center_int_D import calc_integral #, calc_integral_os
 
 #scf_backward==0: ignore the gradient on density matrix
 #scf_backward==1: use recursive formula/implicit autodiff
-#scf_backward==2: go backward scf loop directly. TODO: converge the density matrix to a certain degree with torch.no_grad, and then use this converged density matrix as initial guess to start another scf cycle with gradient tracking turned on. Benchmark and see if this saves time.
+#scf_backward==2: go backward scf loop directly. If the density matrix converges too fast then the gradients are wrong because not enough info about gradient of density is built up
 
 debug = False
 MAX_ITER = 2000
@@ -42,7 +42,51 @@ SCF_IMPLICIT_BACKWARD = True
 # number of iterations in canon_dm_prt.py (m)
 CANON_DM_PRT_ITER = 8
 
+def make_Pnew(F, method, nSuperHeavy, nHeavy, nHydro, nOccMO, sp2, molsize, backward = False, scf_converger=None, openshell=False):
+    """
+    Given F[batch,…], returns Pnew[batch,…] according to the requested conditions.
+    """
+    if openshell and method == 'PM6':
+        raise ValueError('DO NOT use PM6 for open shell for now')
 
+    if backward:
+        if method == 'PM6':
+            return sym_eig_trunc1d(F, nSuperHeavy, nHeavy, nHydro, nOccMO)[1]
+        else:
+            return sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1]
+
+    if sp2[0]:
+        # SP2 branch
+        packer   = packd  if method=='PM6' else pack
+        unpacker = unpackd if method=='PM6' else unpack
+        pack_args = (nSuperHeavy,nHeavy,nHydro) if method=='PM6' else (nHeavy,nHydro)
+        unpac_args= (nSuperHeavy,nHeavy,nHydro,9*molsize) if method=='PM6' else (nHeavy,nHydro,4*molsize)
+
+        return unpacker(
+            SP2(packer(F, *pack_args), nOccMO, sp2[1]),
+            *unpac_args
+        )
+
+    # default symmetric‐truncation branch
+    if method == 'PM6':
+        return sym_eig_truncd(F, nSuperHeavy, nHeavy, nHydro, nOccMO)[1]
+    else:
+        if scf_converger is not None and 'T_el' in scf_converger:
+            return Fermi_Q(F, scf_converger[3], nOccMO,
+                    nHeavy, nHydro, 8.61739e-5, False, OccErrThrs = 1e-9)[0]
+        return sym_eig_trunc(F, nHeavy, nHydro, nOccMO)[1]
+
+def get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps):
+    dm_err[notconverged] = torch.norm(P[notconverged] - Pold[notconverged], dim = (1,2)) \
+                             / matrix_size_sqrt[notconverged]
+    max_dm_err = torch.max(dm_err)
+    dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
+    max_dm_element_err = torch.max(dm_element_err)
+    
+    err[notconverged] = Eelec_new[notconverged]-Eelec[notconverged]
+    
+    notconverged = (err.abs() > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
+    return notconverged, max_dm_err, max_dm_element_err
 
 # constant mixing
 def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
@@ -68,91 +112,37 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
     dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp,themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-    if(themethod == 'PM6'):
-        Hcore = M.reshape(nmol,molsize,molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molsize, 9*molsize)
-    else:
-        Hcore = M.reshape(nmol,molsize,molsize,4,4) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 4*molsize, 4*molsize)
+    num_orbitals = 9 if themethod == 'PM6' else 4
+    Hcore = M.reshape(nmol,molsize,molsize,num_orbitals,num_orbitals) \
+             .transpose(2,3) \
+             .reshape(nmol, num_orbitals*molsize, num_orbitals*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
+    matrix_size_sqrt = torch.sqrt((nSuperHeavy * 9 + nHeavy * 4 + nHydro * 4)**2)
+    one_minus_alpha = 1.0 - alpha
     for k in range(MAX_ITER+1):
-        start_time = time.time()
-        if backward:
-            if(themethod == 'PM6'):
-                Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                   nSuperHeavy[notconverged],
-                                                   nHeavy[notconverged],
-                                                   nHydro[notconverged],
-                                                   nOccMO[notconverged])[1]
-            else:
-                e, Pnew[notconverged], v = sym_eig_trunc1(F[notconverged],
-                                                        nHeavy[notconverged],
-                                                        nHydro[notconverged],
-                                                        nOccMO[notconverged])
-        elif sp2[0]:
-            if(themethod == 'PM6'):
-                Pnew[notconverged] = unpackd(
-                                        SP2(
-                                            packd(F[notconverged],nSuperHeavy[notconverged],  nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-            else:
-                Pnew[notconverged] = unpack(
-                                        SP2(
-                                            pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-        else:
-            if(themethod == 'PM6'):
-                Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                   nSuperHeavy[notconverged],
-                                                   nHeavy[notconverged],
-                                                   nHydro[notconverged],
-                                                   nOccMO[notconverged])[1]
-            else:
-                if 'T_el' in scf_converger:
-                    Pnew[notconverged], _, _, _, _, _, _ = Fermi_Q(F[notconverged], scf_converger[3], nOccMO[notconverged],
-                    nHeavy[notconverged],
-                    nHydro[notconverged], 8.61739e-5, False, OccErrThrs = 1e-9)
-                else:
-                    e, Pnew[notconverged], v = sym_eig_trunc(F[notconverged],
-                                                            nHeavy[notconverged],
-                                                            nHydro[notconverged],
-                                                            nOccMO[notconverged])
-                #print('GRAD:', Pnew[notconverged].requires_grad)
+        Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward, scf_converger)
 
         if backward:
-            Pold = P + 0.0  # Create a shallow copy of P to preserve its current value; avoids reference aliasing while still keeping autograd tracking.
-            P = alpha * P + (1.0 - alpha) * Pnew
+            Pold = P.clone()
+            P = torch.lerp(Pnew,P,alpha) # alpha * P + (1.0 - alpha) * Pnew
         else:
             Pold[notconverged] = P[notconverged]
-            P[notconverged] = alpha * P[notconverged] + (1.0 - alpha) * Pnew[notconverged]
+            P[notconverged] = alpha * P[notconverged] + one_minus_alpha * Pnew[notconverged]
         
         F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-        dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-        max_dm_err = torch.max(dm_err)
-        dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-        max_dm_element_err = torch.max(dm_element_err)
-        
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-        err[notconverged] = Eelec_new[notconverged]-Eelec[notconverged]
+
+        notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
         
         Eelec[notconverged] = Eelec_new[notconverged]
-        notconverged = (abs(err) > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-        #max_err = torch.max(err)
-        Nnot = torch.sum(notconverged).item()
+
+        Nnot = int(notconverged.sum())
         if debug:
             print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             
-        if not notconverged.any(): 
+        if Nnot == 0: 
             print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             break
@@ -180,49 +170,21 @@ def scf_forward0_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     F = fock_u_batch(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp,themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
 
-    if(themethod == 'PM6'):
-        Hcore = M.reshape(nmol,molsize,molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molsize, 9*molsize)
-    else:
-        Hcore = M.reshape(nmol, molsize, molsize, 4, 4) \
+    num_orbitals = 9 if themethod == 'PM6' else 4
+    Hcore = M.reshape(nmol,molsize,molsize,num_orbitals,num_orbitals) \
              .transpose(2,3) \
-             .reshape(nmol, 4*molsize, 4*molsize)
+             .reshape(nmol, num_orbitals*molsize, num_orbitals*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
 
     for k in range(MAX_ITER+1):
         start_time = time.time()
-        if backward:
-            if(themethod == 'PM6'):
-                raise ValueError('DO NOT use PM6 for open shell now')
-            else:
-                e, P_ab[notconverged], v = sym_eig_trunc1(F[notconverged],
-                            nHeavy[notconverged], nHydro[notconverged],
-                            nOccMO[notconverged])
-            P_ab[notconverged] = P_ab[notconverged] / 2
-        elif sp2[0]:
-            if(themethod == 'PM6'):
-                raise ValueError('DO NOT use PM6 for open shell now')
-            else:
-                P_ab[notconverged] = unpack(
-                                        SP2(
-                                            pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-        else:
-            if(themethod == 'PM6'):
-                raise ValueError('DO NOT use PM6 for open shell now')
-            else:
-                e, P_ab[notconverged], v = sym_eig_trunc(F[notconverged],
-                            nHeavy[notconverged], nHydro[notconverged],
-                            nOccMO[notconverged])
-
+        P_ab[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward, openshell=True)
+        if not sp2[0]:
             P_ab[notconverged] = P_ab[notconverged] / 2
 
         if backward:
-            P_old = P + 0.0 # ???
+            P_old = P.clone()
             P = alpha * P + (1.0 - alpha) * P_ab
         else:
             P_old[notconverged] = P[notconverged]
@@ -250,13 +212,6 @@ def scf_forward0_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
         if debug:
             print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
-
-        
-        # if (k+1)%5 == 0:
-        #     if torch.max(err)/torch.max(err_N_steps_back) > 0.9:
-        #         alpha = alpha + (1-alpha)/3
-        #     err_N_steps_back = err.clone()
-
 
         if not notconverged.any(): break
     return P, notconverged
@@ -302,60 +257,22 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
     Pnew = torch.zeros_like(P)
     Pold = torch.zeros_like(P)
-    if(themethod=='PM6'):
-        Hcore = M.reshape(nmol,molsize,molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molsize, 9*molsize)
-    else:
-        Hcore = M.reshape(nmol,molsize,molsize,4,4) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 4*molsize, 4*molsize)
+
+    num_orbitals = 9 if themethod == 'PM6' else 4
+    Hcore = M.reshape(nmol,molsize,molsize,num_orbitals,num_orbitals) \
+             .transpose(2,3) \
+             .reshape(nmol, num_orbitals*molsize, num_orbitals*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
     
+    matrix_size_sqrt = torch.sqrt((nSuperHeavy * 9 + nHeavy * 4 + nHydro * 4)**2)
+    Nnot = nmol
     for i in range(nDirect1):
+        Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward, scf_converger)
+
         if backward:
-            if(themethod=='PM6'):
-                Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                
-                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                                                nHeavy[notconverged],
-                                                nHydro[notconverged],
-                                                nOccMO[notconverged])[1]
-        elif sp2[0]:
-            if(themethod=='PM6'):
-                Pnew[notconverged] = unpackd(
-                                        SP2(
-                                            packd(F[notconverged],nSuperHeavy[notconverged],  nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-            else:
-                Pnew[notconverged] = unpack(
-                                        SP2(
-                                            pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-        else:
-            if(themethod=='PM6'):
-                Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                nSuperHeavy[notconverged],
-                                                nHeavy[notconverged],
-                                                nHydro[notconverged],
-                                                nOccMO[notconverged])[1]
-            else:
-                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                                                nHeavy[notconverged],
-                                                nHydro[notconverged],
-                                                nOccMO[notconverged])[1]
-        if backward:
-            Pold = P + 0.0 # ???
-            P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
+            Pold = P.clone()
+            P = torch.lerp(Pnew,P,alpha_direct) # alpha * P + (1.0 - alpha) * Pnew
         else:
             Pold[notconverged] = P[notconverged]
             P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
@@ -367,116 +284,53 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
         F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
 
-        dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-        max_dm_err = torch.max(dm_err)
-
-        dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-        max_dm_element_err = torch.max(dm_element_err)
-
-
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
 
-        err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
-
+        notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
+        
         Eelec[notconverged] = Eelec_new[notconverged]
-        #notconverged = err > eps
-        max_err = torch.max(err)
-        Nnot = torch.sum(notconverged).item()
-        if debug: print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
+        Nnot = int(notconverged.sum())
+        if debug: print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
         k = k + 1
-    if backward: fac_register = []
     while(1):
-        if notconverged.any():
+        if Nnot > 0:
+            Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward, scf_converger)
+            with torch.no_grad():
+                Dn   = Pnew[notconverged].diagonal(dim1=1, dim2=2)
+                D    = P[notconverged].diagonal(dim1=1, dim2=2)
+                Do   = Pold[notconverged].diagonal(dim1=1, dim2=2)
+                num  = (Dn - D).pow(2).sum(1, keepdim=True)
+                den  = (Dn - 2.0*D + Do).pow(2).sum(1, keepdim=True)
+                fac = torch.sqrt(num/den).view(-1,1,1)
+                if backward:
+                    fac_register = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
+                    fac_register[notconverged] = fac
+
             if backward:
-                if(themethod=='PM6'):
-                    Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                             nHeavy[notconverged], nHydro[notconverged],
-                             nOccMO[notconverged])[1]
-            elif sp2[0]:
-                if(themethod=='PM6'):
-                    Pnew[notconverged] = unpackd(
-                                        SP2(
-                                            packd(F[notconverged],nSuperHeavy[notconverged],  nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-                else:
-                    Pnew[notconverged] = unpack(
-                                            SP2(
-                                                pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                nOccMO[notconverged], sp2[1]
-                                                ),
-                                            nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-            else:
-                if(themethod=='PM6'):
-                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                   nSuperHeavy[notconverged],
-                                                   nHeavy[notconverged],
-                                                   nHydro[notconverged],
-                                                   nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                             nHeavy[notconverged], nHydro[notconverged],
-                             nOccMO[notconverged])[1]
-            if backward:
-                with torch.no_grad():
-                    f = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
-                    
-                    f[notconverged] = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                               - P[notconverged].diagonal(dim1=1,dim2=2) \
-                                             )**2, dim=1 ) / \
-                                  torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                              - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
-                                              + Pold[notconverged].diagonal(dim1=1,dim2=2)
-                                          )**2, dim=1 ) ).reshape(-1,1,1)
-                    fac_register.append(f)
-            else:
-                fac = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                           - P[notconverged].diagonal(dim1=1,dim2=2) \
-                                         )**2, dim=1 ) / \
-                                  torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                           - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
-                                           + Pold[notconverged].diagonal(dim1=1,dim2=2)
-                                         )**2, dim=1 ) ).reshape(-1,1,1)
-            if backward:
-                Pold = P + 0.0  # ???
-                P = (1. + fac_register[-1]) * Pnew - fac_register[-1] * P
+                Pold = P + 0.0
+                P = (1. + fac_register) * Pnew - fac_register * P
             else:
                 Pold[notconverged] = P[notconverged]
                 P[notconverged] = (1. + fac) * Pnew[notconverged] - fac * P[notconverged]
             
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-            dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-            max_dm_err = torch.max(dm_err)
-            dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-            max_dm_element_err = torch.max(dm_element_err)
-
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
+
+            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
+            
             Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-            max_err = torch.max(err)
-            Nnot = torch.sum(notconverged).item()
+
+            Nnot = int(notconverged.sum())
             if debug: print("scf adaptive step: {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                            k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+                            k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
             print("scf direct+adaptive steps  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+                        k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
 
 def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
@@ -523,47 +377,19 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
     dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     P_ab_new = torch.zeros_like(P)
     P_ab_old = torch.zeros_like(P)
-    if(themethod=='PM6'):
-        Hcore = M.reshape(nmol,molsize,molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molsize, 9*molsize)
-    else:
-        Hcore = M.reshape(nmol,molsize,molsize,4,4) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 4*molsize, 4*molsize)
+    num_orbitals = 9 if themethod == 'PM6' else 4
+    Hcore = M.reshape(nmol,molsize,molsize,num_orbitals,num_orbitals) \
+             .transpose(2,3) \
+             .reshape(nmol, num_orbitals*molsize, num_orbitals*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
     
     for i in range(nDirect1):
         #print(alpha_direct)
-        if backward:
-            if(themethod=='PM6'):
-                raise ValueError('DO NOT use PM6 for open shell now')
-            else:
-                P_ab_new[notconverged] = sym_eig_trunc1(F[notconverged],
-                                                nHeavy[notconverged],
-                                                nHydro[notconverged],
-                                                nOccMO[notconverged])[1]
-                P_ab_new[notconverged] = P_ab_new[notconverged] / 2
-        elif sp2[0]:
-            if(themethod=='PM6'):
-                raise ValueError('DO NOT use PM6 for open shell now')
-            else:
-                P_ab_new[notconverged] = unpack(
-                                        SP2(
-                                            pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                            nOccMO[notconverged], sp2[1]
-                                            ),
-                                        nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-        else:
-            if(themethod=='PM6'):
-                raise ValueError('DO NOT use PM6 for open shell now')
-            else:
-                P_ab_new[notconverged] = sym_eig_trunc(F[notconverged],
-                                                nHeavy[notconverged],
-                                                nHydro[notconverged],
-                                                nOccMO[notconverged])[1]
-                P_ab_new[notconverged] = P_ab_new[notconverged] / 2
+        P_ab_new[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward, openshell=True)
+        if not sp2[0]:
+            P_ab_new[notconverged] = P_ab_new[notconverged] / 2
+
         if backward:
             P_ab_old = P + 0.0 # ???
             P = alpha_direct * P + (1.0 - alpha_direct) * P_ab_new
@@ -615,32 +441,10 @@ def scf_forward1_u(M, w, W, gss, gpp, gsp, gp2, hsp, \
     init_fac = True
     while(1):
         if notconverged.any():
-            if backward:
-                if(themethod=='PM6'):
-                    raise ValueError('DO NOT use PM6 now')
-                else:
-                    P_ab_new[notconverged] = sym_eig_trunc1(F[notconverged],
-                             nHeavy[notconverged], nHydro[notconverged],
-                             nOccMO[notconverged])[1]
-                    P_ab_new[notconverged] = P_ab_new[notconverged] / 2
-            elif sp2[0]:
-                if(themethod=='PM6'):
-                    raise ValueError('DO NOT use PM6 now')
-                else:
-                    P_ab_new[notconverged] = unpack(
-                                            SP2(
-                                                pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                nOccMO[notconverged], sp2[1]
-                                                ),
-                                            nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-            else:
-                if(themethod=='PM6'):
-                    raise ValueError('DO NOT use PM6 now')
-                else:
-                    P_ab_new[notconverged] = sym_eig_trunc(F[notconverged],
-                             nHeavy[notconverged], nHydro[notconverged],
-                             nOccMO[notconverged])[1]
-                    P_ab_new[notconverged] = P_ab_new[notconverged] / 2
+            P_ab_new[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward, openshell=True)
+            if not sp2[0]:
+                P_ab_new[notconverged] = P_ab_new[notconverged] / 2
+
             if backward:
                 with torch.no_grad():
                     f = torch.zeros((P.shape[0], 2, 1, 1), dtype=P.dtype, device=P.device)
@@ -729,6 +533,101 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     alpha_direct = 0.7
 
     nAdapt = 1
+    num_orbitals = 9 if themethod == 'PM6' else 4
+    notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
+    k = 0
+    F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
+    err = torch.ones(nmol, dtype=P.dtype, device=P.device)
+    Pnew = torch.zeros_like(P)
+    Pold = torch.zeros_like(P)
+    dm_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
+    dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
+    Hcore = M.reshape(nmol,molsize,molsize,num_orbitals,num_orbitals) \
+             .transpose(2,3) \
+             .reshape(nmol, num_orbitals*molsize, num_orbitals*molsize)
+        
+    Eelec = elec_energy(P, F, Hcore)
+    Eelec_new = torch.zeros_like(Eelec)
+
+    matrix_size_sqrt = torch.sqrt((nSuperHeavy * 9 + nHeavy * 4 + nHydro * 4)**2)
+
+    Nnot = nmol
+    for i in range(nDirect1):
+
+        if Nnot > 0:
+            Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward=backward)
+            if backward:
+                Pold = P.clone()
+                P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
+            else:
+                Pold[notconverged] = P[notconverged]
+                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
+
+            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
+            
+            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
+
+            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
+            
+            Eelec[notconverged] = Eelec_new[notconverged]
+
+            Nnot = int(notconverged.sum())
+            if debug:
+                print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            k = k + 1
+        else:
+            return P, notconverged
+    
+    
+    """
+    cFock = cFock + 1 if cFock < nFock else nFock
+    #store fock matrix
+    FOCK[...,counter,:,:] = F
+    FPPF[...,counter,:,:] = (F.matmul(P) - P.matmul(F)).triu()
+    # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
+    #only compute lower triangle as Emat are symmetric
+    EMAT[...,counter,:cFock] = torch.sum(FPPF[..., counter:(counter+1),:,:]*FPPF[...,:cFock,:,:], dim=(2,3))
+    """
+    for i in range(nAdapt):
+        if Nnot > 0:
+            Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
+                    
+            #fac = sqrt( \sum_i (P_ii^(k) - P_ii^(k-1))**2 / \sum_i (P_ii^(k) - 2*P_ii^(k-1) + P_ii^(k-2))**2 )
+            with torch.no_grad():
+                Dn   = Pnew[notconverged].diagonal(dim1=1, dim2=2)
+                D    = P[notconverged].diagonal(dim1=1, dim2=2)
+                Do   = Pold[notconverged].diagonal(dim1=1, dim2=2)
+                num  = (Dn - D).pow(2).sum(1, keepdim=True)
+                den  = (Dn - 2.0*D + Do).pow(2).sum(1, keepdim=True)
+                fac = torch.sqrt(num/den).view(-1,1,1)
+                if backward:
+                    fac_register = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
+                    fac_register[notconverged] = fac
+                
+            if backward:
+                Pold = P.clone()
+                P = (1.0+fac_register)*Pnew - fac_register*P
+            else:
+                Pold[notconverged] = P[notconverged]
+                P[notconverged] = (1.0+fac)*Pnew[notconverged] - fac*P[notconverged]
+            
+            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
+            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
+
+            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
+            
+            Eelec[notconverged] = Eelec_new[notconverged]
+
+            Nnot = int(notconverged.sum())
+            if debug: print("scf adaptive step: {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                            k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+
+            k = k + 1
+        else:
+            return P, notconverged
+    #del Pold, Pnew
+
     # number of maximal fock matrixes used
     nFock = 4
 
@@ -745,220 +644,19 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     *   TIMES [F*P] FOR ITERATION J.
     """
     # F*P - P*F = [F*P]
-    if(themethod == 'PM6'):
-        FPPF = torch.zeros(nmol, nFock, molsize*9, molsize*9, dtype=dtype,device=device)
-    else:
-        FPPF = torch.zeros(nmol, nFock, molsize*4, molsize*4, dtype=dtype,device=device)
+    FPPF = torch.zeros(nmol, nFock, molsize*num_orbitals, molsize*num_orbitals, dtype=dtype,device=device)
         
     EMAT = (torch.eye(nFock+1, nFock+1, dtype=dtype, device=device) - 1.0).expand(nmol,nFock+1,nFock+1).tril().clone()
     EVEC = torch.zeros_like(EMAT) # EVEC is <E(i)*E(j)> scaled by a constant
     FOCK = torch.zeros_like(FPPF) # store last n=nFock number of Fock matrixes
-    notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
-    k = 0
-    F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-    err = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    Pnew = torch.zeros_like(P)
-    Pold = torch.zeros_like(P)
-    dm_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    if(themethod == 'PM6'):
-        Hcore = M.reshape(nmol,molsize,molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molsize, 9*molsize)
-    else:
-        Hcore = M.reshape(nmol,molsize,molsize,4,4) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 4*molsize, 4*molsize)
-        
-    Eelec = elec_energy(P, F, Hcore)
-    Eelec_new = torch.zeros_like(Eelec)
-
-    for i in range(nDirect1):
-
-        if notconverged.any():
-            if backward:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-            elif sp2[0]:
-                if(themethod == 'PM6'):                     
-                    Pnew[notconverged] = unpackd(
-                                                SP2(
-                                                    packd(F[notconverged], nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-                else:
-                    Pnew[notconverged] = unpack(
-                                                SP2(
-                                                    pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-            else:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-            if backward:
-                #P=Pnew.clone()
-                Pold = P+0.0
-                P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
-            else:
-                Pold[notconverged] = P[notconverged]
-                #P[notconverged] = Pnew[notconverged]
-                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
-
-            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-            
-            dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-            max_dm_err = torch.max(dm_err)
-            dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-            max_dm_element_err = torch.max(dm_element_err)
-
-            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
-            Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-            max_err = torch.max(err).item()
-            Nnot = torch.sum(notconverged).item()
-            if debug:
-                print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
-            
-            k = k + 1
-        else:
-            return P, notconverged
-    
-    
-    """
-    cFock = cFock + 1 if cFock < nFock else nFock
-    #store fock matrix
-    FOCK[...,counter,:,:] = F
-    FPPF[...,counter,:,:] = (F.matmul(P) - P.matmul(F)).triu()
-    # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
-    #only compute lower triangle as Emat are symmetric
-    EMAT[...,counter,:cFock] = torch.sum(FPPF[..., counter:(counter+1),:,:]*FPPF[...,:cFock,:,:], dim=(2,3))
-    """
-    if backward:
-        fac_register = []
-    for i in range(nAdapt):
-        if notconverged.any():
-
-            if backward:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-            elif sp2[0]:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = unpackd(
-                                                SP2(
-                                                    packd(F[notconverged], nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-                else:
-                    Pnew[notconverged] = unpack(
-                                                SP2(
-                                                    pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-            else:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                   nSuperHeavy[notconverged],
-                                                   nHeavy[notconverged],
-                                                   nHydro[notconverged],
-                                                   nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                                                   nHeavy[notconverged],
-                                                   nHydro[notconverged],
-                                                   nOccMO[notconverged])[1]
-                    
-            #fac = sqrt( \sum_i (P_ii^(k) - P_ii^(k-1))**2 / \sum_i (P_ii^(k) - 2*P_ii^(k-1) + P_ii^(k-2))**2 )
-            if backward:
-                with torch.no_grad():
-                    f = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
-                    f[notconverged] = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                               - P[notconverged].diagonal(dim1=1,dim2=2) \
-                                             )**2, dim=1 ) / \
-                                  torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                              - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
-                                              + Pold[notconverged].diagonal(dim1=1,dim2=2)
-                                          )**2, dim=1 ) ).reshape(-1,1,1)
-                    fac_register.append(f)
-            else:
-                fac = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                           - P[notconverged].diagonal(dim1=1,dim2=2) \
-                                         )**2, dim=1 ) / \
-                                  torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
-                                          - P[notconverged].diagonal(dim1=1,dim2=2)*2.0
-                                          + Pold[notconverged].diagonal(dim1=1,dim2=2)
-                                      )**2, dim=1 ) ).reshape(-1,1,1)
-                
-            if backward:
-                Pold = P+0.0
-                P = (1.0+fac_register[-1])*Pnew - fac_register[-1]*P
-            else:
-                Pold[notconverged] = P[notconverged]
-                P[notconverged] = (1.0+fac)*Pnew[notconverged] - fac*P[notconverged]
-            
-            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-            dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-            max_dm_err = torch.max(dm_err)
-            dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-            max_dm_element_err = torch.max(dm_element_err)
-
-            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
-            Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-            max_err = torch.max(err).item()
-            Nnot = torch.sum(notconverged).item()
-            if debug: print("scf adaptive step: {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                            k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
-
-            k = k + 1
-        else:
-            return P, notconverged
-    #del Pold, Pnew
-
     #start prepare for pulay algorithm
     counter = -1 # index of stored FPPF for current iteration: 0, 1, ..., cFock-1
     cFock = 0 # in current iteraction, number of fock matrixes stored, cFock <= nFock
     #Pulay algorithm needs at least two previous stored density and Fock matrixes to start
+    alpha_direct = 0.3
     while (cFock<2):
 
-        if notconverged.any():
+        if Nnot>0:
             cFock = cFock + 1 if cFock < nFock else nFock
             #store fock matrix
             counter = (counter + 1)%nFock
@@ -967,70 +665,26 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
             #only compute lower triangle as Emat are symmetric
             EMAT[notconverged, counter, :cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:] * FPPF[notconverged,:cFock,:,:], dim=(2,3))
-            if backward:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-            elif sp2[0]:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = unpackd(
-                                                SP2(
-                                                    packd(F[notconverged], nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-                else:
-                    Pnew[notconverged] = unpack(
-                                                SP2(
-                                                    pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-            else:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
+            Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
                     
             if backward:
-                #P=Pnew.clone()
-                Pold = P+0.0
-                P =  Pnew
+                Pold = P.clone()
+                P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
             else:
                 Pold[notconverged] = P[notconverged]
-                #P[notconverged] = Pnew[notconverged]
-                P[notconverged] = Pnew[notconverged]
+                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
             
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
             
-            dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-            max_dm_err = torch.max(dm_err)
-            dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-            max_dm_element_err = torch.max(dm_element_err)
-
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
+
+            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
+            
             Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-            if debug: print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                            k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+
+            Nnot = int(notconverged.sum())
+            if debug: print("scf pulay seeding step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                            k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
             k = k + 1
         else:
@@ -1039,69 +693,29 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #start pulay algorithm
     while(1):
 
-        if notconverged.any():
+        if Nnot>0:
             EVEC[notconverged] = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
-#            EVEC[notconverged,:cFock,:cFock] /= EVEC[notconverged,counter:(counter+1),counter:(counter+1)]
+            # EVEC[notconverged,:cFock,:cFock] /= EVEC[notconverged,counter:(counter+1),counter:(counter+1)]
             # work-around for in-place operation (more elegant solution?)
-            EVcF = EVEC[notconverged,:cFock,:cFock].clone()
-            EVnorm = EVEC[notconverged,counter:(counter+1),counter:(counter+1)].clone()
-            EVEC[notconverged,:cFock,:cFock] = EVcF / EVnorm
-            coeff = -torch.inverse(EVEC[notconverged,:(cFock+1),:(cFock+1)])[...,:-1,-1]
+            # EVcF = EVEC[notconverged,:cFock,:cFock].clone()
+            # EVnorm = EVEC[notconverged,counter:(counter+1),counter:(counter+1)].clone()
+            denom = EVEC[notconverged, counter, counter]
+            EVEC[notconverged,:cFock,:cFock] /= denom.view(-1,1,1)
+            rhs = torch.zeros(notconverged.sum(), cFock+1, device=device, dtype=dtype)
+            rhs[:,-1] = 1.0
+            x = torch.linalg.solve(EVEC[notconverged,:(cFock+1),:(cFock+1)], rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
+            coeff = -x[:, :cFock]                      # drop the last entry, apply “–” sign
+            # coeff = -torch.inverse(EVEC[notconverged,:(cFock+1),:(cFock+1)])[...,:-1,-1]
             F[notconverged] = torch.sum(FOCK[notconverged,:cFock,:,:]*coeff.unsqueeze(-1).unsqueeze(-1), dim=1)
+            Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
             if backward:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_trunc1d(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-            elif sp2[0]:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = unpackd(
-                                                SP2(
-                                                    packd(F[notconverged], nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nSuperHeavy[notconverged], nHeavy[notconverged], nHydro[notconverged], 9*molsize)
-                else:
-                    Pnew[notconverged] = unpack(
-                                                SP2(
-                                                    pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-                                                    nOccMO[notconverged], sp2[1]
-                                                    ),
-                                                nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-            else:
-                if(themethod == 'PM6'):
-                    Pnew[notconverged] = sym_eig_truncd(F[notconverged],
-                                                       nSuperHeavy[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-                else:
-                    Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                                                       nHeavy[notconverged],
-                                                       nHydro[notconverged],
-                                                       nOccMO[notconverged])[1]
-            if backward:
-                #P=Pnew.clone()
-                Pold = P+0.0
-                P =  Pnew
+                Pold = P.clone()
+                P =  Pnew.clone()
             else:
                 Pold[notconverged] = P[notconverged]
                 P[notconverged] = Pnew[notconverged]
 
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-            dm_err[notconverged] = torch.sqrt(torch.sum(torch.square(P[notconverged] - Pold[notconverged]), dim = (1,2)) \
-                                 /((nSuperHeavy[notconverged] * 9 + nHeavy[notconverged] * 4 + nHydro[notconverged] * 4)**2)
-                    )
-            max_dm_err = torch.max(dm_err)
-            dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
-            max_dm_element_err = torch.max(dm_element_err)
 
             cFock = cFock + 1 if cFock < nFock else nFock
             counter = (counter + 1)%nFock
@@ -1112,19 +726,20 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             EMAT[notconverged,counter,:cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:]*FPPF[notconverged,:cFock,:,:], dim=(2,3))
             
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-            err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
+
+            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
+            
             Eelec[notconverged] = Eelec_new[notconverged]
-            notconverged = (err > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
-            max_err = torch.max(err).item()
-            Nnot = torch.sum(notconverged).item()
+
+            Nnot = int(notconverged.sum())
             if debug: print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                            k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+                            k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
             print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                    k, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+                    k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
             return P, notconverged
 
@@ -1476,7 +1091,7 @@ class SCF(torch.autograd.Function):
         grads, gvind = {}, []
         gv = [] if SCF_IMPLICIT_BACKWARD else [Pin]
         # Build the list gv = [Pin, θ₁=M, θ₂=w, θ₃=W, θ₄=gss, …]
-        for i, st in enumerate([M, w, gss, gpp, gsp, gp2, hsp]):
+        for i, st in enumerate([M, w, W, gss, gpp, gsp, gp2, hsp]):
             if st.requires_grad:
                 gv.append(st)
                 gvind.append(i+1)
@@ -1577,7 +1192,7 @@ class SCF(torch.autograd.Function):
                     if torch.is_tensor(grads[i]): grads[i][cond[atom_molid]] = 0.0
         
         return grads[1], grads[2], grads[3], grads[4], grads[5], grads[6], grads[7], \
-               None, None, None, \
+               grads[8], None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
                None, None, None, None, None, None, None, None, None
@@ -1616,33 +1231,19 @@ def scf_loop(molecule, \
         molecule.const.timing["Hcore + STO Integrals"].append(t1 - t0)
         t0 = time.time()
     #if scf_backward == 2 or (not torch.is_tensor(P)):
+    num_orbitals = 9 if molecule.method == 'PM6' else 4
     if (not torch.is_tensor(P)): # $$$ I'm not sure if it is okay to use DM initialized from make_dm_guess which corresponds to 1 SCF iteration + HOMO-LUMO mix.
-        if(molecule.method == 'PM6'):
-            P0 = torch.zeros_like(M)  # density matrix
-            P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
-            P0[molecule.maskd,1,1] = P0[molecule.maskd,0,0]
-            P0[molecule.maskd,2,2] = P0[molecule.maskd,0,0]
-            P0[molecule.maskd,3,3] = P0[molecule.maskd,0,0]
+        P0 = torch.zeros_like(M)  # density matrix
+        P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
+        P0[molecule.maskd,1,1] = P0[molecule.maskd,0,0]
+        P0[molecule.maskd,2,2] = P0[molecule.maskd,0,0]
+        P0[molecule.maskd,3,3] = P0[molecule.maskd,0,0]
 
-            P0[molecule.maskd[molecule.Z==1],0,0] = 1.0
-        #P0 += torch.randn(P0.shape,dtype=P0.dtype, device=P0.device)*0.01
-            P = P0.reshape(nmol,molecule.molsize,molecule.molsize,9,9) \
-                .transpose(2,3) \
-                .reshape(nmol, 9*molecule.molsize, 9*molecule.molsize)
-            ##print(P.shape)
-            ##sys.exit()
+        P0[molecule.maskd[molecule.Z==1],0,0] = 1.0
 
-
-        else:
-            P0 = torch.zeros_like(M)  # density matrix
-            P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
-            P0[molecule.maskd,1,1] = P0[molecule.maskd,0,0]
-            P0[molecule.maskd,2,2] = P0[molecule.maskd,0,0]
-            P0[molecule.maskd,3,3] = P0[molecule.maskd,0,0]
-            P0[molecule.maskd[molecule.Z==1],0,0] = 1.0
-            P = P0.reshape(nmol,molecule.molsize,molecule.molsize,4,4) \
-                .transpose(2,3) \
-                .reshape(nmol, 4*molecule.molsize, 4*molecule.molsize)
+        P = P0.reshape(nmol,molecule.molsize,molecule.molsize,num_orbitals,num_orbitals) \
+            .transpose(2,3) \
+            .reshape(nmol, num_orbitals*molecule.molsize, num_orbitals*molecule.molsize)
         
         if molecule.nocc.dim() == 2: # alpha and beta dm for open shell
             #print('DOING UHF!!!!!!')
@@ -1692,12 +1293,19 @@ def scf_loop(molecule, \
                          molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                          nmol, molecule.molsize, \
                          molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, scf_converger = scf_converger, backward=True)
+        elif scf_converger[0] == 2:
+            if P.dim() == 4:
+                raise NotImplementedError
+            else:
+                Pconv, notconverged =  scf_forward2(  M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
+                         molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
+                         nmol, molecule.molsize, \
+                         molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2,backward=True)
         else:
             raise ValueError("""For direct backpropagation through scf,
-                                must use constant mixing at this moment\n
-                                set scf_converger=[0, alpha] or [1]\n""")
+                                must set scf_converger=[0, alpha] or [1,...] or [2]\n""")
     #scf_backward 1, use recursive formula/implicit autodiff
-    if scf_backward == 1:
+    elif scf_backward == 1:
         scfapply = SCF(use_sp2=sp2, scf_converger=scf_converger, scf_backward_eps=scf_backward_eps).apply
     #scf_backward 0: ignore the gradient on density matrix
     elif scf_backward == 0:
@@ -1731,14 +1339,9 @@ def scf_loop(molecule, \
         F = fock        (nmol, molecule.molsize, Pconv, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, w, W,\
                          molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'])
         
-    if(molecule.method == 'PM6'):
-         Hcore = M.reshape(nmol,molecule.molsize,molecule.molsize,9,9) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 9*molecule.molsize, 9*molecule.molsize)
-    else:
-         Hcore = M.reshape(nmol,molecule.molsize,molecule.molsize,4,4) \
-                 .transpose(2,3) \
-                 .reshape(nmol, 4*molecule.molsize, 4*molecule.molsize)
+    Hcore = M.reshape(nmol,molecule.molsize,molecule.molsize,num_orbitals,num_orbitals) \
+             .transpose(2,3) \
+             .reshape(nmol, num_orbitals*molecule.molsize, num_orbitals*molecule.molsize)
     #
     #return Fock matrix, eigenvalues, density matrix, Hcore,  2 electron 2 center integrals, eigenvectors
     if eig: #

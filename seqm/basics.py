@@ -483,6 +483,7 @@ class Energy(torch.nn.Module):
         if molecule.active_state > 0 and self.excited_states is None:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
+        Eexcited = 0.0
         if self.excited_states is not None:
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
@@ -516,8 +517,7 @@ class Energy(torch.nn.Module):
             if molecule.active_state>0:
                 molecule.cis_energies = excitation_energies
                 # Eelec += excitation_energies[:,molecule.active_state-1]
-                if self.seqm_parameters.get('scf_backward', 0) >= 1:
-                    Eelec += calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+                Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
         if self.eig:
             molecule.old_mos = molecule.molecular_orbitals.clone()
@@ -532,6 +532,7 @@ class Energy(torch.nn.Module):
                                          gsp=molecule.parameters['g_sp'],
                                          gp2=molecule.parameters['g_p2'],
                                          hsp=molecule.parameters['h_sp'])
+            Etot += Eexcited
             Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:
