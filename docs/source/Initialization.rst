@@ -240,7 +240,7 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
 
     - ``[1]``  
       
-      Adaptive mixing, where instead of fixing `alpha`, you let the code estimate a nearly optimal `alpha` at each step, based on changes in the density matrix elements. This gives fast convergence when things are well-behaved, with automatic damping when needed. 
+      Adaptive mixing, where instead of fixing the mixing coefficient `alpha`, you let the code estimate a nearly optimal `alpha` at each step, based on changes in the density matrix elements. This gives fast convergence when things are well-behaved, with automatic damping when needed. 
 
     - ``[1, K, L, M]``  
       
@@ -249,7 +249,8 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
       Advanced adaptive mixing:  
         * Use linear mixing for the first ``M`` steps.  
         * Start with mixing coefficient ``K`` for the first 5 steps.  
-        * Linearly transition the mixing coefficient from ``K`` to ``L`` between steps 6 and ``M``.  
+        * Linearly transition the mixing coefficient from ``K`` to ``L`` between step 6 and step ``M-5``.
+        * From step ``M-5`` to step ``M`` keep the mixing coefficient ``L``
         * After step ``M``, switch to adaptive mixing.
       
       For example, ``[1, 0.5, 0.1, 20]`` would mean a linear mixing starting with the mixing coefficient of 0.5 for the first 5 steps, then from step 5 to step 20 the mixing coefficient transitions from 0.5 to 0.1, and adaptive mixing thereafter.
