@@ -508,16 +508,17 @@ class Energy(torch.nn.Module):
                 if cis_nac[0]:
                     calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
 
+            if molecule.active_state>0:
+                molecule.cis_energies = excitation_energies
+                # Eelec += excitation_energies[:,molecule.active_state-1]
+                Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+
                 if do_analytical_gradient[0]:
                     if molecule.const.do_timing: t0 = time.time()
                     molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
                     t1 = time.time()
                     molecule.const.timing["Force"].append(t1 - t0)
 
-            if molecule.active_state>0:
-                molecule.cis_energies = excitation_energies
-                # Eelec += excitation_energies[:,molecule.active_state-1]
-                Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
         if self.eig:
             molecule.old_mos = molecule.molecular_orbitals.clone()

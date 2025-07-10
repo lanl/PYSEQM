@@ -629,7 +629,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #del Pold, Pnew
 
     # number of maximal fock matrixes used
-    nFock = 4
+    nFock = 10
 
     """
     *      Emat is matrix with form
@@ -647,7 +647,6 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     FPPF = torch.zeros(nmol, nFock, molsize*num_orbitals, molsize*num_orbitals, dtype=dtype,device=device)
         
     EMAT = (torch.eye(nFock+1, nFock+1, dtype=dtype, device=device) - 1.0).expand(nmol,nFock+1,nFock+1).tril().clone()
-    EVEC = torch.zeros_like(EMAT) # EVEC is <E(i)*E(j)> scaled by a constant
     FOCK = torch.zeros_like(FPPF) # store last n=nFock number of Fock matrixes
     #start prepare for pulay algorithm
     counter = -1 # index of stored FPPF for current iteration: 0, 1, ..., cFock-1
@@ -661,10 +660,12 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             #store fock matrix
             counter = (counter + 1)%nFock
             FOCK[notconverged, counter, :, :] = F[notconverged]
-            FPPF[notconverged, counter, :, :] = (F[notconverged].matmul(P[notconverged]) - P[notconverged].matmul(F[notconverged])).triu()
-            # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
-            #only compute lower triangle as Emat are symmetric
-            EMAT[notconverged, counter, :cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:] * FPPF[notconverged,:cFock,:,:], dim=(2,3))
+            with torch.no_grad():
+                FPPF[notconverged, counter, :, :] = (F[notconverged].matmul(P[notconverged]) - P[notconverged].matmul(F[notconverged])).triu()
+                # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
+                # only compute lower triangle as Emat are symmetric
+                EMAT[notconverged, counter, :cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:] * FPPF[notconverged,:cFock,:,:], dim=(2,3))
+
             Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
                     
             if backward:
@@ -694,18 +695,29 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     while(1):
 
         if Nnot>0:
-            EVEC[notconverged] = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
-            # EVEC[notconverged,:cFock,:cFock] /= EVEC[notconverged,counter:(counter+1),counter:(counter+1)]
-            # work-around for in-place operation (more elegant solution?)
-            # EVcF = EVEC[notconverged,:cFock,:cFock].clone()
-            # EVnorm = EVEC[notconverged,counter:(counter+1),counter:(counter+1)].clone()
-            denom = EVEC[notconverged, counter, counter]
-            EVEC[notconverged,:cFock,:cFock] /= denom.view(-1,1,1)
-            rhs = torch.zeros(notconverged.sum(), cFock+1, device=device, dtype=dtype)
-            rhs[:,-1] = 1.0
-            x = torch.linalg.solve(EVEC[notconverged,:(cFock+1),:(cFock+1)], rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
-            coeff = -x[:, :cFock]                      # drop the last entry, apply “–” sign
-            # coeff = -torch.inverse(EVEC[notconverged,:(cFock+1),:(cFock+1)])[...,:-1,-1]
+            with torch.no_grad():
+                EVEC = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
+                EVEC = EVEC[:,:(cFock+1),:(cFock+1)]
+                denom = EVEC[:, counter, counter].clamp(1.0e-15)
+                EVEC[:,:cFock,:cFock] /= denom.view(-1,1,1)
+
+                rhs = torch.zeros(Nnot, cFock+1, device=device, dtype=dtype)
+                rhs[:,-1] = 1.0
+                x = torch.linalg.solve(EVEC, rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
+                coeff = -x[:, :cFock]                      # drop the last entry, apply “–” sign
+
+                # # Below code does the same as above but with SVD pseudo inverse, 
+                # # could be useful when torch.linalg.solve above fails
+                # U, S, Vh = torch.linalg.svd(EVEC[:,:cFock,:cFock], full_matrices=False)
+                # tol = 1e-15
+                # Sinv = torch.where(S.abs()>tol, 1.0/S, torch.zeros_like(S))
+                # BBinv = (U@torch.diag_embed(Sinv)@Vh).transpose(-2,-1)
+                #
+                # ones = torch.ones(Nnot, cFock, device=device, dtype=dtype)
+                # BBinvb = torch.einsum('bij,bj->bi', BBinv, ones)  # [B, m-1]
+                # rk = 1.0 / (ones * BBinvb).sum(dim=1)
+                # coeff = rk.unsqueeze(-1) * BBinvb
+
             F[notconverged] = torch.sum(FOCK[notconverged,:cFock,:,:]*coeff.unsqueeze(-1).unsqueeze(-1), dim=1)
             Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
             if backward:
@@ -720,10 +732,11 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             cFock = cFock + 1 if cFock < nFock else nFock
             counter = (counter + 1)%nFock
             FOCK[notconverged,counter,:,:] = F[notconverged]
-            FPPF[notconverged,counter,:,:] = (F[notconverged].matmul(P[notconverged]) - P[notconverged].matmul(F[notconverged])).triu()
-            # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
-            #only compute lower triangle as Emat are symmetric
-            EMAT[notconverged,counter,:cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:]*FPPF[notconverged,:cFock,:,:], dim=(2,3))
+            with torch.no_grad():
+                FPPF[notconverged,counter,:,:] = (F[notconverged].matmul(P[notconverged]) - P[notconverged].matmul(F[notconverged])).triu()
+                # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
+                #only compute lower triangle as Emat are symmetric
+                EMAT[notconverged,counter,:cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:]*FPPF[notconverged,:cFock,:,:], dim=(2,3))
             
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
 
