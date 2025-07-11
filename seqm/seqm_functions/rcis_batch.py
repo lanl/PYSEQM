@@ -218,10 +218,10 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
                 B[:,start:end,:] = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
 
     A += Via*ea_ei.unsqueeze(1)
-    A = A.view(nmol, nNewRoots, -1)
+    A = A.reshape(nmol, nNewRoots, -1)
 
     if makeB:
-        B = B.view(nmol,nNewRoots, -1)
+        B = B.reshape(nmol,nNewRoots, -1)
         return  A, B
 
     return A
@@ -251,7 +251,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     #     unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
     #     for i in range(nmol) for j in range(nnewRoots)
     # ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
-    P0 = unpackone_batch(P_xi.view(nmol*nnewRoots,norb,norb), 4*nHeavy, nHydro, molsize * 4).view(nmol,nnewRoots,4*molsize,4*molsize)
+    P0 = unpackone_batch(P_xi.reshape(nmol*nnewRoots,norb,norb), 4*nHeavy, nHydro, molsize * 4).view(nmol,nnewRoots,4*molsize,4*molsize)
     del P_xi
 
     w = w_.view(nmol,npairs_per_mol,10,10)

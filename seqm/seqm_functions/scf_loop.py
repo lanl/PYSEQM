@@ -76,16 +76,20 @@ def make_Pnew(F, method, nSuperHeavy, nHeavy, nHydro, nOccMO, sp2, molsize, back
                     nHeavy, nHydro, 8.61739e-5, False, OccErrThrs = 1e-9)[0]
         return sym_eig_trunc(F, nHeavy, nHydro, nOccMO)[1]
 
-def get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps):
-    dm_err[notconverged] = torch.norm(P[notconverged] - Pold[notconverged], dim = (1,2)) \
+def get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps, diis_error=None):
+    dP = P[notconverged] - Pold[notconverged]
+    dm_err[notconverged] = torch.norm(dP, dim = (1,2)) \
                              / matrix_size_sqrt[notconverged]
-    max_dm_err = torch.max(dm_err)
-    dm_element_err[notconverged] = torch.amax(torch.abs(P[notconverged] - Pold[notconverged]), dim=(1,2))
+    dm_element_err[notconverged] = torch.amax(torch.abs(dP), dim=(1,2))
     max_dm_element_err = torch.max(dm_element_err)
+    max_dm_err = torch.max(dm_err)
     
     err[notconverged] = Eelec_new[notconverged]-Eelec[notconverged]
     
-    notconverged = (err.abs() > eps) + (dm_err > eps*2) + (dm_element_err > eps*15)
+    notconverged = (err.abs() > eps) | (dm_err > eps*2) | (dm_element_err > eps*15)
+    if diis_error is not None:
+        notconverged |= (diis_error > 80*eps)
+
     return notconverged, max_dm_err, max_dm_element_err
 
 # constant mixing
@@ -653,7 +657,8 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     cFock = 0 # in current iteraction, number of fock matrixes stored, cFock <= nFock
     #Pulay algorithm needs at least two previous stored density and Fock matrixes to start
     alpha_direct = 0.3
-    while (cFock<2):
+    diis_error = torch.ones_like(Eelec) # set this to torch.finfo(dtype).max
+    while (1):
 
         if Nnot>0:
             cFock = cFock + 1 if cFock < nFock else nFock
@@ -662,25 +667,46 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
             FOCK[notconverged, counter, :, :] = F[notconverged]
             with torch.no_grad():
                 FPPF[notconverged, counter, :, :] = (F[notconverged].matmul(P[notconverged]) - P[notconverged].matmul(F[notconverged])).triu()
+                diis_error[notconverged] = torch.amax(FPPF[notconverged,counter].abs(),dim=(1,2))
                 # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
                 # only compute lower triangle as Emat are symmetric
                 EMAT[notconverged, counter, :cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:] * FPPF[notconverged,:cFock,:,:], dim=(2,3))
 
+            if cFock>=2:
+                with torch.no_grad():
+                    EVEC = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
+                    EVEC = EVEC[:,:(cFock+1),:(cFock+1)]
+                    denom = EVEC[:, counter, counter].clamp(1.0e-15)
+                    EVEC[:,:cFock,:cFock] /= denom.view(-1,1,1)
+
+                    rhs = torch.zeros(Nnot, cFock+1, device=device, dtype=dtype)
+                    rhs[:,-1] = 1.0
+                    x = torch.linalg.solve(EVEC, rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
+                    # x = torch.linalg.lstsq(EVEC, rhs.unsqueeze(-1)).solution.squeeze(-1)  # [B, cFock+1]
+                    coeff = -x[:, :cFock]  # drop the last entry, apply “–” sign
+                F[notconverged] = torch.sum(FOCK[notconverged,:cFock,:,:]*coeff.unsqueeze(-1).unsqueeze(-1), dim=1)
+
             Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
-                    
+
             if backward:
                 Pold = P.clone()
-                P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
+                if cFock<2:
+                    P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
+                else:
+                    P = Pnew.clone()
             else:
                 Pold[notconverged] = P[notconverged]
-                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
-            
+                if cFock<2:
+                    P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
+                else:
+                    P[notconverged] = Pnew[notconverged]
+
             F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-            
+
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
 
-            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
-            
+            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps, diis_error=diis_error)
+
             Eelec[notconverged] = Eelec_new[notconverged]
 
             Nnot = int(notconverged.sum())
@@ -689,71 +715,8 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
             k = k + 1
         else:
-            return P, notconverged
-    
-    #start pulay algorithm
-    while(1):
-
-        if Nnot>0:
-            with torch.no_grad():
-                EVEC = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
-                EVEC = EVEC[:,:(cFock+1),:(cFock+1)]
-                denom = EVEC[:, counter, counter].clamp(1.0e-15)
-                EVEC[:,:cFock,:cFock] /= denom.view(-1,1,1)
-
-                rhs = torch.zeros(Nnot, cFock+1, device=device, dtype=dtype)
-                rhs[:,-1] = 1.0
-                x = torch.linalg.solve(EVEC, rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
-                coeff = -x[:, :cFock]                      # drop the last entry, apply “–” sign
-
-                # # Below code does the same as above but with SVD pseudo inverse, 
-                # # could be useful when torch.linalg.solve above fails
-                # U, S, Vh = torch.linalg.svd(EVEC[:,:cFock,:cFock], full_matrices=False)
-                # tol = 1e-15
-                # Sinv = torch.where(S.abs()>tol, 1.0/S, torch.zeros_like(S))
-                # BBinv = (U@torch.diag_embed(Sinv)@Vh).transpose(-2,-1)
-                #
-                # ones = torch.ones(Nnot, cFock, device=device, dtype=dtype)
-                # BBinvb = torch.einsum('bij,bj->bi', BBinv, ones)  # [B, m-1]
-                # rk = 1.0 / (ones * BBinvb).sum(dim=1)
-                # coeff = rk.unsqueeze(-1) * BBinvb
-
-            F[notconverged] = torch.sum(FOCK[notconverged,:cFock,:,:]*coeff.unsqueeze(-1).unsqueeze(-1), dim=1)
-            Pnew[notconverged] = make_Pnew(F[notconverged], themethod, nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged], sp2, molsize, backward)
-            if backward:
-                Pold = P.clone()
-                P =  Pnew.clone()
-            else:
-                Pold[notconverged] = P[notconverged]
-                P[notconverged] = Pnew[notconverged]
-
-            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD)
-
-            cFock = cFock + 1 if cFock < nFock else nFock
-            counter = (counter + 1)%nFock
-            FOCK[notconverged,counter,:,:] = F[notconverged]
-            with torch.no_grad():
-                FPPF[notconverged,counter,:,:] = (F[notconverged].matmul(P[notconverged]) - P[notconverged].matmul(F[notconverged])).triu()
-                # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
-                #only compute lower triangle as Emat are symmetric
-                EMAT[notconverged,counter,:cFock] = torch.sum(FPPF[notconverged, counter:(counter+1),:,:]*FPPF[notconverged,:cFock,:,:], dim=(2,3))
-            
-            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-
-            notconverged, max_dm_err, max_dm_element_err =  get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps)
-            
-            Eelec[notconverged] = Eelec_new[notconverged]
-
-            Nnot = int(notconverged.sum())
-            if debug: print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                            k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
-
-            k = k + 1
-            if k >= MAX_ITER: return P, notconverged
-        else:
             print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                     k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
-
             return P, notconverged
 
         
