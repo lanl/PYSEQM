@@ -520,7 +520,7 @@ class Energy(torch.nn.Module):
                     molecule.const.timing["Force"].append(t1 - t0)
 
 
-        if self.eig:
+        if self.eig and not self.uhf:
             molecule.old_mos = molecule.molecular_orbitals.clone()
 
         if all_terms:
