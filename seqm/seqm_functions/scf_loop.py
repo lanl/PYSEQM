@@ -15,6 +15,7 @@ from .diag_d import sym_eig_truncd, sym_eig_trunc1d
 import warnings
 import time
 from .build_two_elec_one_center_int_D import calc_integral #, calc_integral_os
+from .cg_solver import conjugate_gradient_batch
 #from .check import check
 
 #scf_backward==0: ignore the gradient on density matrix
@@ -108,7 +109,7 @@ def get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, E
     
     notconverged = (err.abs() > eps) | (dm_err > eps*2) | (dm_element_err > eps*15)
     if diis_error is not None:
-        notconverged |= (diis_error > 80*eps)
+        notconverged |= (diis_error > 100*eps)
 
     return notconverged, max_dm_err, max_dm_element_err
 
@@ -344,7 +345,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 20
+    nDirect1 = 15
     alpha_direct = 0.7
 
     nAdapt = 1
@@ -470,7 +471,9 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     cFock = 0 # in current iteraction, number of fock matrixes stored, cFock <= nFock
     #Pulay algorithm needs at least two previous stored density and Fock matrixes to start
     alpha_direct = 0.3
-    diis_error = torch.ones_like(Eelec) # set this to torch.finfo(dtype).max
+    diis_error = torch.empty_like(Eelec).fill_(torch.finfo(dtype).max)
+
+    reset_diis = False
     while (1):
 
         if Nnot>0:
@@ -487,16 +490,27 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
             if cFock>=2:
                 with torch.no_grad():
-                    EVEC = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
-                    EVEC = EVEC[:,:(cFock+1),:(cFock+1)]
+                    EVEC = EMAT[notconverged,:(cFock+1),:(cFock+1)]
+                    # EVEC += EVEC.tril(-1).transpose(1,2) # no need to symmetrize because torch.linalg.eigh uses only the lower triangle
                     denom = EVEC[:, counter, counter].clamp(1.0e-15)
                     EVEC[:,:cFock,:cFock] /= denom.view(-1,1,1)
 
-                    rhs = torch.zeros(Nnot, cFock+1, device=device, dtype=dtype)
-                    rhs[:,-1] = 1.0
-                    # x = torch.linalg.solve(EVEC, rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
-                    x = torch.linalg.lstsq(EVEC, rhs.unsqueeze(-1)).solution.squeeze(-1)  # [B, cFock+1]
-                    coeff = -x[:, :cFock]  # drop the last entry, apply “–” sign
+                    # Calculate the pseudo-inverse to get the DIIS mixing coeffients
+                    L, Q = torch.linalg.eigh(EVEC)
+                    absvals = L.abs()
+                    # calculate the condition-number to see if EVEC is ill-conditioned and hence DIIS needs to be reset
+                    cond =  torch.amax(absvals,dim=-1) / torch.amin(absvals,dim=-1)#.clamp(min=1e-15)
+                    reset_diis = torch.any(cond > 1e7)
+                    valid_eigs = absvals > 1e-15 
+                    inv_eig = torch.zeros_like(L)
+                    inv_eig[valid_eigs] = L[valid_eigs].reciprocal()
+                    coeff = -torch.einsum('bki,bi,bi', Q[:, :cFock, :],inv_eig,Q[:,-1,:])  # (b', cFock)
+
+                    # rhs = torch.zeros(Nnot, cFock+1, device=device, dtype=dtype)
+                    # rhs[:,-1] = 1.0
+                    # # x = torch.linalg.solve(EVEC, rhs.unsqueeze(-1)).squeeze(-1)  # [B, cFock+1]
+                    # x = torch.linalg.lstsq(EVEC, rhs.unsqueeze(-1)).solution.squeeze(-1)  # [B, cFock+1]
+                    # coeff = -x[:, :cFock]  # drop the last entry, apply “–” sign
                 F[notconverged] = torch.sum(FOCK[notconverged,:cFock,:,:]*coeff.unsqueeze(-1).unsqueeze(-1), dim=1)
 
             Pnew[notconverged] = make_Pnew(F[notconverged], nSuperHeavy[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])
@@ -527,6 +541,15 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                             k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
 
             k = k + 1
+            if reset_diis:
+                reset_diis = False
+                if debug: print(f"Resetting DIIS at k = {k}, cFock is {cFock}, counter is {counter}")
+                counter = -1
+                cFock = 0
+                FPPF.zero_()
+                EMAT = (torch.eye(nFock+1, nFock+1, dtype=dtype, device=device) - 1.0).expand(nmol,nFock+1,nFock+1).tril().clone()
+                FOCK.zero_()
+
         else:
             print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                     k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
@@ -632,7 +655,7 @@ def scf_forward3(M, w, W_pm6, gss, gpp, gsp, gp2, hsp, \
             return P, notconverged
         
 
-SCF_BACKWARD_ANDERSON_MAXITER = 100      # sufficient for all test cases
+SCF_BACKWARD_ANDERSON_MAXITER = 200      # sufficient for all test cases
 SCF_BACKWARD_ANDERSON_HISTSIZE = 3      # seems reasonable, but TODO!
 SCF_BACKWARD_LAMBDA_MIN   = 1e-8          # floor for λ
 SCF_BACKWARD_BETA0        = 0.20          # mixing for the first 3 steps
@@ -683,20 +706,21 @@ def fixed_point_anderson(fp_fun, u0, tol, lam=1e-3,
     y[:,0] = 1
     cond, resid = False, 100.
     # solve iteratively
-    for k in range(2, SCF_BACKWARD_ANDERSON_MAXITER):
+    max_iters = SCF_BACKWARD_ANDERSON_MAXITER
+    for k in range(2, max_iters):
         n = min(k, m)
         G = F[:,:n] - X[:,:n]
         GTG = torch.bmm(G, G.transpose(1,2))
         E_n = torch.eye(n, dtype=u0.dtype, device=u0.device)
         H[:,1:n+1,1:n+1] = GTG + lam * E_n[None]
         alpha = torch.linalg.solve(H[:,:n+1,:n+1], y[:,:n+1])[:,1:n+1,0]
-        beta_k = beta if k > 3 else beta0
+        beta_k = beta if k > 10 else beta0
         Xold = (1 - beta_k) * (alpha[:,None] @ X[:,:n])[:,0]
         X[:,k%m] = beta_k * (alpha[:,None] @ F[:,:n])[:,0] + Xold
         F[:,k%m] = fp_fun(X[:,k%m].view_as(u0)).view(nmol, -1)
-        resid1 = (F[:,k%m] - X[:,k%m]).norm().item()
-        resid = resid1 / (1e-5 + F[:,k%m].norm().item())
-        cond = resid < tol # SCF_BACKWARD_ANDERSON_TOLERANCE
+        resid1 = (F[:,k%m] - X[:,k%m]).norm()
+        resid = resid1 / (1e-5 + F[:,k%m].norm())
+        cond = resid.item() < tol # SCF_BACKWARD_ANDERSON_TOLERANCE
         if cond: break   # solver converged
         # λ exponential decay (once we are in the basin)
         lam = max(lam * 0.5, lam_min)
@@ -705,6 +729,7 @@ def fixed_point_anderson(fp_fun, u0, tol, lam=1e-3,
         if RAISE_ERROR_IF_SCF_BACKWARD_FAILS: raise ValueError(msg)
         print(msg)
     u_conv = X[:,k%m].view_as(u0)
+    # print(f"Anderson took {k} iterations")
     return u_conv
     
 
@@ -715,6 +740,7 @@ def fixed_point_picard(fp_fun, u0, tol, maxiter=SCF_BACKWARD_ANDERSON_MAXITER):
         # relative residual
         resid = (u_new - u).norm() / (1e-6 + u_new.norm())
         if resid < tol:
+            # print(f"Picard convered in {k} iters")
             return u_new
         u = u_new
     raise RuntimeError(f"Picard did not converge in {maxiter} steps (resid={resid:.2e})")
@@ -904,8 +930,12 @@ class SCF(torch.autograd.Function):
             with torch.no_grad():
                 def affine_eq(u): return grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0] # agrad is torch.autograd.grad
                 u_init = torch.zeros_like(Pin)  
-                u = fixed_point_picard(affine_eq, u_init,backward_eps)
-                # u = fixed_point_anderson(affine_eq, u_init, backward_eps)
+                u = fixed_point_anderson(affine_eq, u_init, backward_eps*10)
+                u = fixed_point_picard(affine_eq, u, backward_eps)
+                # u = fixed_point_picard(affine_eq, u_init,backward_eps)
+                # def A_matvec(u): return u - agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
+                # u = conjugate_gradient_batch(A_matvec,grad_P,tol=backward_eps*100)
+
                 gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
                 for t, i in enumerate(gvind): grads[i] = gradients[t]
         else:
