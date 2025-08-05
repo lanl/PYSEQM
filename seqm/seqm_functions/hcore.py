@@ -10,15 +10,14 @@ import sys
 
 def hcore(molecule, doTETCI=True):
     """
-    Get Hcore and two electron and two center integrals
-    """
-    #If doTETCI is False, w, e1b, e2a,rho0xi,rho0xj will not be computed, i.e. no pairwise interactions in diagonal summations nad no 2c-2e ints.
-    #Option for SEDACS.
-    #t0 = time.time()
-    dtype = molecule.xij.dtype
-    device = molecule.xij.device
-    qn_int = molecule.const.qn_int
-    qnD_int = molecule.const.qnD_int
+    Get Hcore and two electron two center integrals
+    doTETCI : bool, optional
+        Whether to compute two‐electron integrals via TETCI.
+        This flag was added because pyseqm is also used in SEDACS,
+        which only needs the Hcore matrix (no two‐electron integrals),
+        so you can skip TETCI to save time/memory.
+    """    
+
     # pair type tensor: idxi, idxj, ni,nj,xij,rij, mask (batch dim is pair)
     # atom type tensor: Z, zetas,zetap, uss, upp , gss, gpp, gp2, hsp, beta(isbeta_pair=False)
     #                   (batch dim is atom)
@@ -60,204 +59,110 @@ def hcore(molecule, doTETCI=True):
     #rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b) => w, e1b, e2a
     #h1elec(idxi, idxj, ni, nj, xij, rij, zeta_a, zeta_b, beta, ispair=False) =>  beta_mu_nu
 
-    #use uss upp to the diagonal block for hcore
-    if(molecule.method == 'PM6'):
-        zeta = torch.cat((molecule.parameters['zeta_s'].unsqueeze(1), molecule.parameters['zeta_p'].unsqueeze(1), molecule.parameters['zeta_d'].unsqueeze(1)),dim=1)
+    #t0 = time.time()
+    is_pm6 = (molecule.method == 'PM6')
+    orb_dim = 9 if is_pm6 else 4
+    if is_pm6:
+        overlap_fn = diatom_overlap_matrixD
+        overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
     else:
-        zeta = torch.cat((molecule.parameters['zeta_s'].unsqueeze(1), molecule.parameters['zeta_p'].unsqueeze(1)),dim=1)
-    overlap_pairs = molecule.rij<=overlap_cutoff
-
-    if(molecule.method == 'PM6'):
-        di = torch.zeros((molecule.xij.shape[0], 9, 9),dtype=dtype, device=device)
-        di[overlap_pairs] = diatom_overlap_matrixD(molecule.ni[overlap_pairs],
-                                   molecule.nj[overlap_pairs],
-                                   molecule.xij[overlap_pairs],
-                                   molecule.rij[overlap_pairs],
-                                   zeta[molecule.idxi][overlap_pairs],
-                                   zeta[molecule.idxj][overlap_pairs],
-                                   qn_int, qnD_int)
-    elif molecule.method == 'PM6_SP':
-        di = torch.zeros((molecule.xij.shape[0], 4, 4),dtype=dtype, device=device)
-        di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(molecule.ni[overlap_pairs],
-                                molecule.nj[overlap_pairs],
-                                molecule.xij[overlap_pairs],
-                                molecule.rij[overlap_pairs],
-                                zeta[molecule.idxi][overlap_pairs],
-                                zeta[molecule.idxj][overlap_pairs],
-                                qn_int)
-        
-    else:
-        di = torch.zeros((molecule.xij.shape[0], 4, 4),dtype=dtype, device=device)
-        di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(molecule.ni[overlap_pairs],
-                                   molecule.nj[overlap_pairs],
-                                   molecule.xij[overlap_pairs],
-                                   molecule.rij[overlap_pairs],
-                                   zeta[molecule.idxi][overlap_pairs],
-                                   zeta[molecule.idxj][overlap_pairs],
-                                   qn_int)
-
-    t0 = time.time()
-    #di shape (npairs,4,4)
+        overlap_fn = diatom_overlap_matrix_PM6_SP
+        overlap_args = (molecule.const.qn_int,)
     
+    # Compute the overlap matrix (called di)
+    # Prepare the arguments for the overlap function
+    # 1) Stack zeta for s/p(/d)
+    zeta_fields = ['zeta_s', 'zeta_p', 'zeta_d'] if is_pm6 else ['zeta_s', 'zeta_p']
+    zeta = torch.stack([molecule.parameters[f] for f in zeta_fields], dim=1)
+
+    # 3) Compute diatomic overlaps only where rij ≤ cutoff
+    xij, rij = molecule.xij, molecule.rij
+    ni, nj      = molecule.ni, molecule.nj
+    idxi, idxj  = molecule.idxi, molecule.idxj
+
+    npairs = xij.size(0)
+    di = torch.zeros((npairs, orb_dim, orb_dim),
+                     dtype=xij.dtype, device=xij.device)
+    mask_ov = (rij <= overlap_cutoff)
+    di[mask_ov] = overlap_fn(
+        ni[mask_ov], nj[mask_ov],
+        xij[mask_ov], rij[mask_ov],
+        zeta[idxi[mask_ov]], zeta[idxj[mask_ov]],
+        *overlap_args
+    )
+
+    # Optionally run the full TETCI kernel
+    # (skip when using this in the external SEDACS program to get only Hcore)
     if doTETCI:
-        #print('Doing TETCI.')
-        tic = time.time()
-        w, e1b, e2a,rho0xi,rho0xj, riXH, ri = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij, molecule.Z,\
-                                        molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
-                                        molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
-                                        molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
-                                        molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
-                                        molecule.alp, molecule.chi, molecule.method)
-        #print('Time to compute TETCI', time.time() - tic)
+        w, e1b, e2a, rho0xi,rho0xj, riXH, ri  = TETCI(
+            molecule.const, idxi, idxj, ni, nj, xij, rij, molecule.Z,
+            molecule.parameters['zeta_s'], molecule.parameters['zeta_p'],
+            molecule.parameters.get('zeta_d', None),
+            molecule.parameters.get('s_orb_exp_tail', None),
+            molecule.parameters.get('p_orb_exp_tail', None),
+            molecule.parameters.get('d_orb_exp_tail', None),
+            molecule.parameters['g_ss'], molecule.parameters['g_pp'],
+            molecule.parameters['g_p2'], molecule.parameters['h_sp'],
+            molecule.parameters['F0SD'], molecule.parameters['G2SD'],
+            molecule.parameters['rho_core'], molecule.alp, molecule.chi,
+            molecule.method
+        )
     else:
-        #print('w, e1b, e2a,rho0xi,rho0xj will not be computed')
-        w, e1b, e2a,rho0xi,rho0xj, riXH, ri = None, None, None, None, None, None, None
-    #w shape (napirs, 10,10)
-    #e1b, e2a shape (npairs, 10)
-    #di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
-    ntotatoms = molecule.nmol * molecule.molsize
-    if(molecule.method == 'PM6'):
-        M = torch.zeros(molecule.nmol*molecule.molsize*molecule.molsize,9,9,dtype=dtype,device=device)
-    else:
-        M = torch.zeros(molecule.nmol*molecule.molsize*molecule.molsize,4,4,dtype=dtype,device=device)
+        w = e1b = e2a = rho0xi = rho0xj = riXH = ri = None
 
-    #fill the upper triangle part
-    #unlike the mopac, which fills the lower triangle part
-    #Hcore is symmetric
-    #diagonal part in Hcore
-    #t1 = torch.tensor([i*molsize+i for i in range(molsize)],dtype=dtypeint,device=device).reshape((1,-1))
-    #t2 = torch.tensor([i*molsize**2 for i in range(nmol)],dtype=dtypeint,device=device).reshape((-1,1))
-    #maskd = (t1+t2).reshape(-1) # mask for diagonal blocks
-    #M[...,0,0].index_add_(0,maskd,uss)
-    if(molecule.method == 'PM6'):
-        M[molecule.maskd,0,0] = molecule.parameters['U_ss']
-        M[molecule.maskd,1,1] = molecule.parameters['U_pp']
-        M[molecule.maskd,2,2] = molecule.parameters['U_pp']
-        M[molecule.maskd,3,3] = molecule.parameters['U_pp']
-        M[molecule.maskd,4,4] = molecule.parameters['U_dd']
-        M[molecule.maskd,5,5] = molecule.parameters['U_dd']
-        M[molecule.maskd,6,6] = molecule.parameters['U_dd']
-        M[molecule.maskd,7,7] = molecule.parameters['U_dd']
-        M[molecule.maskd,8,8] = molecule.parameters['U_dd']
-        if doTETCI:
-            M.index_add_(0,molecule.maskd[molecule.idxj], e1b)
-            M.index_add_(0,molecule.maskd[molecule.idxi], e2a)
+    # Allocate final Hcore matrix (called the block-matrix M)
+    Nblocks = molecule.nmol * molecule.molsize * molecule.molsize
+    M = torch.zeros((Nblocks, orb_dim, orb_dim),
+                    dtype=di.dtype, device=di.device)
 
-    else:
-        M[molecule.maskd,0,0] = molecule.parameters['U_ss']
-        M[molecule.maskd,1,1] = molecule.parameters['U_pp']
-        M[molecule.maskd,2,2] = molecule.parameters['U_pp']
-        M[molecule.maskd,3,3] = molecule.parameters['U_pp']
-        if doTETCI:
-            M.index_add_(0,molecule.maskd[molecule.idxi], e1b)
-            M.index_add_(0,molecule.maskd[molecule.idxj], e2a)
+    # Fill one-center once electron pure-atomic (U_ss, U_pp, …) diagonal
+    U_keys = ['U_ss'] + ['U_pp']*3
+    if is_pm6:
+        U_keys += ['U_dd']*5
+    for orb, key in enumerate(U_keys):
+        M[molecule.maskd, orb, orb] = molecule.parameters[key]
 
-    #warning, as for all the pairs, ni>=nj, or idxi<idxj, i.e, pairs are not symmetric
-    #so in the summation below, there is no need to divide by 2
-    # V_{mu,nv,B} = -ZB*(mu^A nv^A, s^B s^B), stored on e1b, e2a
+    # Scatter in core-electron TETCI terms which go into the diagonal blocks
+    # V_{mu,nv,B} = -ZB*(mu^A nv^A, s^B s^B), stored in e1b, e2a
     # \sum_B V_{ss,B}
     # e1b ==> V_{,B} E1B = ELECTRON ON ATOM NI ATTRACTING NUCLEUS OF NJ.
     # e2a ==> V_{,A}
-    #e1b, e2a order: (s s/), (px s/), (px px/), (py s/), (py px/), (py py/)
-    #                (pz s/), (pz px/) (pz py/) (pz pz/)
-
-    #diagonal block, elecron nuclear interation
-    """
-
-    #(s s)
-    M[...,0,0].index_add_(0,maskd[idxi], e1b[...,0])
-    M[...,0,0].index_add_(0,maskd[idxj], e2a[...,0])
-    #(px s/s s) = (s px/s s)
-    M[...,0,1].index_add_(0,maskd[idxi], e1b[...,1])
-    M[...,0,1].index_add_(0,maskd[idxj], e2a[...,1])
-    #(px px/)
-    M[...,1,1].index_add_(0,maskd[idxi], e1b[...,2])
-    M[...,1,1].index_add_(0,maskd[idxj], e2a[...,2])
-    #(py s/)
-    M[...,0,2].index_add_(0,maskd[idxi], e1b[...,3])
-    M[...,0,2].index_add_(0,maskd[idxj], e2a[...,3])
-    #(py px/)
-    M[...,1,2].index_add_(0,maskd[idxi], e1b[...,4])
-    M[...,1,2].index_add_(0,maskd[idxj], e2a[...,4])
-    #(py py/)
-    M[...,2,2].index_add_(0,maskd[idxi], e1b[...,5])
-    M[...,2,2].index_add_(0,maskd[idxj], e2a[...,5])
-    #(pz s/)
-    M[...,0,3].index_add_(0,maskd[idxi], e1b[...,6])
-    M[...,0,3].index_add_(0,maskd[idxj], e2a[...,6])
-    #(pz px/)
-    M[...,1,3].index_add_(0,maskd[idxi], e1b[...,7])
-    M[...,1,3].index_add_(0,maskd[idxj], e2a[...,7])
-    #(pz py/)
-    M[...,2,3].index_add_(0,maskd[idxi], e1b[...,8])
-    M[...,2,3].index_add_(0,maskd[idxj], e2a[...,8])
-    #(pz pz/)
-    M[...,3,3].index_add_(0,maskd[idxi], e1b[...,9])
-    M[...,3,3].index_add_(0,maskd[idxj], e2a[...,9])
-    """
-    #e1b, e2a are reshaped to be (...,4,4) in rotate.py
-
-    if(molecule.method == 'PM6'):
-        if torch.is_tensor(molecule.parameters['Kbeta']):
-            M[molecule.mask,0,0]   = di[...,0,0]*(molecule.parameters['beta'][molecule.idxi,0]+molecule.parameters['beta'][molecule.idxj,0])/2.0* molecule.parameters['Kbeta'][:,0]
-            M[molecule.mask,0,1:4]  = di[...,0,1:4]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,1:2])/2.0*molecule.parameters['Kbeta'][:,1,None]
-            M[molecule.mask,1:4,0]  = di[...,1:4,0]*(molecule.parameters['beta'][molecule.idxi,1:2]+molecule.parameters['beta'][molecule.idxj,0:1])/2.0*molecule.parameters['Kbeta'][:,2,None]
-            M[molecule.mask,1:4,1:4] = di[...,1:4,1:4]*(molecule.parameters['beta'][molecule.idxi,1:2,None]+molecule.parameters['beta'][molecule.idxj,1:2,None])/2.0** molecule.parameters['Kbeta'][:,3:,None]
-
-            M[molecule.mask,0,4:]  = di[...,0,4:]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,2:3])/2.0
-            M[molecule.mask,4:,0]  = di[...,4:,0]*(molecule.parameters['beta'][molecule.idxi,2:3]+molecule.parameters['beta'][molecule.idxj,0:1])/2.0
-
-
-            M[molecule.mask,1:4,4:] = di[...,1:4,4:]*(molecule.parameters['beta'][molecule.idxi,1:2,None]+molecule.parameters['beta'][molecule.idxj,2:3,None])/2.0
-            M[molecule.mask,4:,1:4] = di[...,4:,1:4]*(molecule.parameters['beta'][molecule.idxi,2:3,None]+molecule.parameters['beta'][molecule.idxj,1:2,None])/2.0
-
-            M[molecule.mask,4:,4:] =  di[...,4:,4:]*(molecule.parameters['beta'][molecule.idxi,2:3,None]+molecule.parameters['beta'][molecule.idxj,2:3,None])/2.0
-
-
+    if doTETCI:
+        if is_pm6:
+            # PM6: idxj gets e1b, idxi gets e2a
+            M.index_add_(0, molecule.maskd[idxj], e1b)
+            M.index_add_(0, molecule.maskd[idxi], e2a)
         else:
-            M[molecule.mask,0,0]   = di[...,0,0]*(molecule.parameters['beta'][molecule.idxi,0]+molecule.parameters['beta'][molecule.idxj,0])/2.0
-            M[molecule.mask,0,1:4]  = di[...,0,1:4]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,1:2])/2.0
-            M[molecule.mask,1:4,0]  = di[...,1:4,0]*(molecule.parameters['beta'][molecule.idxi,1:2]+molecule.parameters['beta'][molecule.idxj,0:1])/2.0
-            M[molecule.mask,1:4,1:4] = di[...,1:4,1:4]*(molecule.parameters['beta'][molecule.idxi,1:2,None]+molecule.parameters['beta'][molecule.idxj,1:2,None])/2.0
+            # non-PM6: idxi gets e1b, idxj gets e2a
+            M.index_add_(0, molecule.maskd[idxi], e1b)
+            M.index_add_(0, molecule.maskd[idxj], e2a)
 
-            M[molecule.mask,0,4:]  = di[...,0,4:]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,2:3])/2.0
-            M[molecule.mask,4:,0]  = di[...,4:,0]*(molecule.parameters['beta'][molecule.idxi,2:3]+molecule.parameters['beta'][molecule.idxj,0:1])/2.0
+    # Build two-center Hcore term: βsum * overlap
 
+    # First, build per-orbital beta from per-atom beta
+    b_atom = molecule.parameters['beta']  # shape (n_atoms, 3) or (n_atoms, 2)
+    beta_atoms = torch.empty((b_atom.shape[0], orb_dim),
+                             dtype=b_atom.dtype, device=b_atom.device)
+    beta_atoms[:, 0]   = b_atom[:, 0]            # s
+    beta_atoms[:, 1:4] = b_atom[:, 1].unsqueeze(-1)  # p
+    if is_pm6:
+        beta_atoms[:, 4:9] = b_atom[:, 2].unsqueeze(-1)  # d
 
-            M[molecule.mask,1:4,4:] = di[...,1:4,4:]*(molecule.parameters['beta'][molecule.idxi,1:2,None]+molecule.parameters['beta'][molecule.idxj,2:3,None])/2.0
-            M[molecule.mask,4:,1:4] = di[...,4:,1:4]*(molecule.parameters['beta'][molecule.idxi,2:3,None]+molecule.parameters['beta'][molecule.idxj,1:2,None])/2.0
+    # Then, make the two-center one-elecron matrix terms
+    bi   = beta_atoms[idxi]          # (npairs, orb_dim)
+    bj   = beta_atoms[idxj]
+    bsum = (bi.unsqueeze(2) + bj.unsqueeze(1)) * 0.5      # (npairs,orb_dim,orb_dim)
+    Kb = molecule.parameters.get('Kbeta', None)
+    if torch.is_tensor(Kb):
+        bsum[:, 0, 0]   *= Kb[:, 0]
+        bsum[:, 0, 1:4] *= Kb[:, 1].unsqueeze(-1)
+        bsum[:, 1:4, 0] *= Kb[:, 2].unsqueeze(-1)
+        bsum[:, 1:4, 1:4] *= Kb[:, 3:].unsqueeze(-1)
 
-            M[molecule.mask,4:,4:] =  di[...,4:,4:]*(molecule.parameters['beta'][molecule.idxi,2:3,None]+molecule.parameters['beta'][molecule.idxj,2:3,None])/2.0
+    M[molecule.mask] = di * bsum
 
-
-    else:
-        if torch.is_tensor(molecule.parameters['Kbeta']):
-            M[molecule.mask,0,0]   = di[...,0,0]*(molecule.parameters['beta'][molecule.idxi,0]+molecule.parameters['beta'][molecule.idxj,0])/2.0 * molecule.parameters['Kbeta'][:,0]
-            M[molecule.mask,0,1:]  = di[...,0,1:]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,1:2])/2.0 * molecule.parameters['Kbeta'][:,1,None]
-            M[molecule.mask,1:,0]  = di[...,1:,0]*(molecule.parameters['beta'][molecule.idxi,1:2]+molecule.parameters['beta'][molecule.idxj,0:1])/2.0 * molecule.parameters['Kbeta'][:,2,None]
-            M[molecule.mask,1:,1:] = di[...,1:,1:]*(molecule.parameters['beta'][molecule.idxi,1:2,None]+molecule.parameters['beta'][molecule.idxj,1:2,None])/2.0 * molecule.parameters['Kbeta'][:,3:,None]
-            #raise ValueError('Kbeta for each pair is not implemented yet')
-        else:
-            #beta is for each atom in the molecules, shape (ntotatoms,2)
-            M[molecule.mask,0,0]   = di[...,0,0]*(molecule.parameters['beta'][molecule.idxi,0]+molecule.parameters['beta'][molecule.idxj,0])/2.0
-            M[molecule.mask,0,1:]  = di[...,0,1:]*(molecule.parameters['beta'][molecule.idxi,0:1]+molecule.parameters['beta'][molecule.idxj,1:2])/2.0
-            M[molecule.mask,1:,0]  = di[...,1:,0]*(molecule.parameters['beta'][molecule.idxi,1:2]+molecule.parameters['beta'][molecule.idxj,0:1])/2.0
-            M[molecule.mask,1:,1:] = di[...,1:,1:]*(molecule.parameters['beta'][molecule.idxi,1:2,None]+molecule.parameters['beta'][molecule.idxj,1:2,None])/2.0
-
-        #caution
-        #the lower triangle part is not filled here
-
-    """
-    #it is easier to use M for the construction of fock matrix with density matrix
-
-    Hcore = M.reshape(nmol,molsize,molsize,4,4) \
-             .transpose(2,3) \
-             .reshape(nmol, 4*molsize, 4*molsize) #\
-             #.contiguous().clone()
-    #not sure if need contiguous, clone
-
-    #what will be used in SCF is Hcore and w
-    return Hcore, w
-    #"""
+    #caution
+    #the lower triangle part of Hcore is not filled here
+    # It is easier to retain Hcore as M without reshaping it 
 
     return M, w, rho0xi, rho0xj, riXH, ri
