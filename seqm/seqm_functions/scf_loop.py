@@ -16,6 +16,7 @@ import warnings
 import time
 from .build_two_elec_one_center_int_D import calc_integral #, calc_integral_os
 from .cg_solver import conjugate_gradient_batch
+from .energy import log_memory
 #from .check import check
 
 #scf_backward==0: ignore the gradient on density matrix
@@ -1031,6 +1032,7 @@ def scf_loop(molecule, \
     tore = molecule.const.tore
     if molecule.const.do_timing: t0 = time.time()
     M, w,rho0xi,rho0xj, riXH, ri = hcore(molecule)
+    # log_memory("Hcore+2e integrals")
 
     if molecule.const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -1076,6 +1078,7 @@ def scf_loop(molecule, \
     #scf_backward == 2, directly backward through scf loop
     #             can't reuse P, so put P=None and initial P above
     #"""
+    # log_memory("SCF start")
     if scf_backward == 2:
         if sp2[0]:
             warnings.warn('SP2 is not used for direct backpropagation through scf loop')
@@ -1115,6 +1118,7 @@ def scf_loop(molecule, \
                 molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                 nmol, molecule.molsize, \
                 molecule.maskd, molecule.mask, molecule.atom_molid, molecule.pair_molid, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'] )
+    # log_memory("SCF end")
 
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
@@ -1174,6 +1178,8 @@ def scf_loop(molecule, \
         else:
             charge = None
         
+        # log_memory("SCF Fock, Hcore, MOs, etc end")
         return F, e,    Pconv, Hcore, w, charge, rho0xi, rho0xj, riXH, ri, notconverged, v
     else:
+        # log_memory("SCF Fock, Hcore, MOs, etc end")
         return F, None, Pconv, Hcore, w, None,   rho0xi, rho0xj, riXH, ri, notconverged, None

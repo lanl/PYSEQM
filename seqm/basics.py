@@ -351,17 +351,19 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
+        # log_memory("Energy Initialization")
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
         """
         get the energy terms
         """
 
+        # log_memory("Energy forward start")
         molecule.nmol, molecule.molsize, \
         molecule.nSuperHeavy, molecule.nHeavy, molecule.nHydro, molecule.nocc, \
         molecule.Z, molecule.maskd, molecule.atom_molid, \
         molecule.mask, molecule.pair_molid, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.xij, molecule.rij = self.parser(molecule, self.method, *args, **kwargs)
-        
+         
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
             molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(self.packpar(molecule.Z, learned_params = adict)   )
@@ -385,10 +387,12 @@ class Energy(torch.nn.Module):
 
         
         molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
+        # log_memory("Energy forward scf start")
         
         F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
         
+        # log_memory("Energy forward scf done")
         
         if self.eig:
             if self.uhf:
@@ -448,13 +452,17 @@ class Energy(torch.nn.Module):
             gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b)**2)
         else:
             gam = w[...,0,0]
+        # log_memory("Energy forward energy param stack done")
         
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
+        # log_memory("Energy forward EnucAB done")
         Eelec = elec_energy(P, F, Hcore)
+        # log_memory("Energy forward Eelec done")
         
         do_analytical_gradient = self.seqm_parameters.get('analytical_gradient',[False])
         if do_analytical_gradient[0] and molecule.active_state==0:
+            log_memory("Energy forward ground analytical start")
             # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so 
             # we can save on memory since the compuational graph doesn't have to be stored.
             beta = molecule.parameters['beta']
@@ -475,6 +483,7 @@ class Energy(torch.nn.Module):
                               gpp=molecule.parameters['g_pp'], gp2=molecule.parameters['g_p2'], hsp=molecule.parameters['h_sp'],
                               beta=beta, ri=ri, riXH=riXH,)
                     
+            log_memory("Energy forward ground analytical done")
             if molecule.const.do_timing:
                 if torch.cuda.is_available(): torch.cuda.synchronize()
                 t1 = time.time()
@@ -485,6 +494,7 @@ class Energy(torch.nn.Module):
 
         Eexcited = 0.0
         if self.excited_states is not None:
+            # log_memory("Energy forward excited states start")
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
             with torch.no_grad():
@@ -495,6 +505,7 @@ class Energy(torch.nn.Module):
                     excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                 else:
                     raise Exception("Excited state method has to be CIS or RPA")
+                torch.cuda.empty_cache()
 
                 molecule.cis_amplitudes = exc_amps
 
@@ -508,21 +519,27 @@ class Energy(torch.nn.Module):
                 if cis_nac[0]:
                     calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
 
+            # log_memory("Energy forward excited states done")
             if molecule.active_state>0:
                 molecule.cis_energies = excitation_energies
                 # Eelec += excitation_energies[:,molecule.active_state-1]
+                log_memory("Energy forward excited states energy start")
                 Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+                log_memory("Energy forward excited states energy done")
 
                 if do_analytical_gradient[0]:
+                    log_memory("Energy forward excited states analytical grad start")
                     if molecule.const.do_timing: t0 = time.time()
                     molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
                     t1 = time.time()
                     molecule.const.timing["Force"].append(t1 - t0)
+                    log_memory("Energy forward excited states analytical grad done")
 
 
         if self.eig and not self.uhf:
             molecule.old_mos = molecule.molecular_orbitals.clone()
 
+        # log_memory("Energy forward clone mo's")
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,
@@ -535,6 +552,7 @@ class Energy(torch.nn.Module):
                                          hsp=molecule.parameters['h_sp'])
             Etot += Eexcited
             Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
+            # log_memory("Energy forward total energy done")
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough
@@ -553,9 +571,11 @@ class Force(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', True)
         self.seqm_parameters = seqm_parameters
+        # log_memory("Force Initialization")
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs):
         
+        # log_memory("Force forward start")
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
         do_analytical_gradient = self.seqm_parameters.get('analytical_gradient', [False])
 
@@ -569,6 +589,7 @@ class Force(torch.nn.Module):
 
         Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, cis_amp=cis_amp, *args, **kwargs)
+        # log_memory("Force forward energy done")
 
         if self.seqm_parameters.get('normal modes', False):
             if self.seqm_parameters.get('scf_backward', 0) != 2:
@@ -580,10 +601,13 @@ class Force(torch.nn.Module):
             e_gap = e_gap.detach()
 
         if do_analytical_gradient[0]:
+            # log_memory("Force forward analytical gradient start")
             force = -molecule.analytical_gradient
+            # log_memory("Force forward analytical gradient done")
             return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
         #L = Etot.sum()
         if do_force:
+            log_memory("Force forward backprop start")
             L = Hf.sum()
             if molecule.const.do_timing: t0 = time.time()
 
@@ -602,9 +626,13 @@ class Force(torch.nn.Module):
             else:
                 force = -molecule.coordinates.grad.detach()
                 molecule.coordinates.grad.zero_()
+            log_memory("Force forward backprop done")
         else:
             force = torch.tensor([])
+            # log_memory("Force forward noforce done")
             return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec, Enuc, Eiso.detach(), e, e_gap, charge, notconverged
 
 
+        # log_memory("Force forward done")
         return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
+

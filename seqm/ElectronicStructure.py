@@ -3,6 +3,7 @@ from .basics import *
 import time
 from seqm.XLBOMD import ForceXL
 #from seqm.XLBOMD_LR import ForceXL as ForceXL_lr
+from seqm.basics import log_memory
 
 class Electronic_Structure(torch.nn.Module):
     def __init__(self, seqm_parameters, *args, **kwargs):
@@ -21,6 +22,7 @@ class Electronic_Structure(torch.nn.Module):
         #self.conservative_force_xl_lr = ForceXL_lr(self.seqm_parameters)
 
 
+        # log_memory("Electronic_Structure Initialization")
         #self.acc_scale = 0.009648532800137615
         #self.output = output
     
@@ -44,6 +46,7 @@ class Electronic_Structure(torch.nn.Module):
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch
         """
+        # log_memory("Electronic_Structure forward start")
         if dm_prop=='SCF':
             molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, self.charge, self.notconverged = \
                         self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
@@ -71,6 +74,7 @@ class Electronic_Structure(torch.nn.Module):
 
                 molecule.d = self.dipole(molecule.q, molecule.coordinates)
  
+        # log_memory("Electronic_Structure forward done")
             
 
 

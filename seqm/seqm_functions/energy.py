@@ -205,3 +205,30 @@ def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
         return Etot - Eiso_sum + eheat_sum, Eiso_sum
     else:
         return Etot - Eiso_sum, Eiso_sum
+    
+import psutil, os
+def log_memory(step_desc="", log_peak=True, reset_peak=True):
+    process = psutil.Process(os.getpid())
+    cpu_mem = process.memory_info().rss / 1024 ** 2
+
+    if torch.cuda.is_available():
+        gpu_mem_allocated = torch.cuda.memory_allocated() / 1024 ** 2
+        gpu_mem_reserved = torch.cuda.memory_reserved() / 1024 ** 2
+        peak_mem = torch.cuda.max_memory_allocated() / 1024**2 if log_peak else None
+        if reset_peak:
+            torch.cuda.reset_peak_memory_stats()
+    else:
+        gpu_mem_allocated = gpu_mem_reserved = 0
+        peak_mem = None
+
+        # Prepare peak field
+    peak_str = f"{peak_mem:6.0f}" if peak_mem is not None else "  N/A"
+
+    # Print a fixed-width row with labels on every call
+    print(
+        f"| {step_desc:<40}"              # step description, left-justified in 30 chars
+        f"| CPU: {cpu_mem:>6.0f} MB  "      # CPU mem
+        f"| GPU Alloc: {gpu_mem_allocated:>6.0f} MB  "
+        f"| GPU Reserved: {gpu_mem_reserved:>6.0f} MB  "
+        f"| Peak GPU Mem: {peak_str:>6s} MB |"
+    )

@@ -2,6 +2,7 @@ import torch
 from .dipole import calc_dipole_matrix
 from .constants import a0
 import math
+from .energy import log_memory
 # from seqm.seqm_functions.pack import packone, unpackone
 
 def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
@@ -16,7 +17,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     :returns: 
 
     """
-
+    # print_mem(mol,factor=138)
+    # log_memory("RCIS start")
     device = w.device
     dtype = w.dtype
 
@@ -79,6 +81,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print("-" * len(header))
     # print(header)
     # print("-" * len(header))
+    # print_mem(mol,factor=138,factor_R=8*maxSubspacesize + 4*nroots)
+    # log_memory("RCIS before davidson start")
 
     while davidson_iter <= max_iter: # Davidson loop
 
@@ -95,7 +99,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
-        HV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
+        if davidson_iter == 0: print_mem(mol,factor=138,factor_R=8*maxSubspacesize + 4*nroots + 4*max_v)
+        HV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt,iter_no=davidson_iter)
         HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
 
         # Make H by multiplying V.T * HV
@@ -157,6 +162,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
                 # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
                 # print(f"{davidson_iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
 
+        # log_memory(f"Iter = {davidson_iter}, roots = {max_v}")
         if torch.all(done):
             break
         if davidson_iter > max_iter:
@@ -175,18 +181,20 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     # Post CIS analysis
     print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots)
+    log_memory("RCIS done")
+    # rcis_analysis(mol,e_val_n,amplitude_store,nroots)
 
     return e_val_n, amplitude_store
 
 
-def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
+def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, iter_no = -1):
     # C: Molecule Orbital Coefficients
     nmol, nNewRoots, nov = V.shape
 
     norb = mol.norb[0]
     nocc = mol.nocc[0]
     nvirt = norb - nocc
+    # log_memory("RCIS before mat-vec start")
 
     Via = V.view(nmol,nNewRoots, nocc, nvirt)
 
@@ -197,25 +205,39 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
 
     if not need_to_chunk:
         P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via, Cvirt)
+        # log_memory("RCIS make P_xi")
         F0 = makeA_pi_batched(mol,P_xi,w)
+        # log_memory("RCIS makeA_pi_batched")
         # why am I multiplying by A 2?
         A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
         if makeB:
             B = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
+        if iter_no==0:
+            print_mem(mol,factor=0,factor_R=nNewRoots*4+16*chunk_size+70*chunk_size)
     else:
         # F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
         A = torch.empty(nmol,nNewRoots,nocc,nvirt,device=V.device,dtype=V.dtype)
+        # print_mem(mol,factor=0,factor_R=nNewRoots*4)
+        # log_memory("RCIS chunk mat-vec: alloc A")
         if makeB:
             B = torch.empty_like(A)
         for start in range(0, nNewRoots, chunk_size):
             end = min(start + chunk_size, nNewRoots)
             P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via[:,start:end], Cvirt)
+            # P_xi =  (Cocc @ Via[:,start:end]) @ Cvirt.transpose(-2,-1) # torch.einsum('bmi,bria,bna->brmn', Cocc,Via[:,start:end], Cvirt)
+            # print_mem(mol,factor=0,factor_R=nNewRoots*4+16*chunk_size)
+            # log_memory(f"RCIS chunk {start} mat-vec: Pxi")
             # F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
             P_xi = makeA_pi_batched(mol,P_xi,w)
             F0 = P_xi
+            # log_memory(f"RCIS chunk {start} mat-vec: makeApi")
             A[:,start:end,:] = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
             if makeB:
                 B[:,start:end,:] = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
+            # log_memory(f"RCIS chunk {start} mat-vec: form A")
+        
+        if iter_no == 0:
+           print_mem(mol,factor=0,factor_R=nNewRoots*4+16*chunk_size+70*chunk_size)
 
     A += Via*ea_ei.unsqueeze(1)
     A = A.reshape(nmol, nNewRoots, -1)
@@ -224,6 +246,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
         B = B.reshape(nmol,nNewRoots, -1)
         return  A, B
 
+    # log_memory("RCIS make A")
     return A
 
 
@@ -712,4 +735,11 @@ def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False):
     # print(f'Grad CIS from backprop is\n{force}')
 
     return E_cis
+
+def print_mem(mol,factor,R=1,factor_R=0):
+    M = mol.nmol
+    S = mol.molsize
+    bytes_per_element = 8 #double precision
+    memory_usage_mb = M * S * S * (factor + factor_R * R) * bytes_per_element / (1024 ** 2)
+    print(f"Memory usage should be {memory_usage_mb:.0f} MB")
 

@@ -13,6 +13,7 @@ class Molecule(torch.nn.Module):
             geometry is writted every dump step to the file with name prefix + molid + .xyz
             step, temp, and total energy is print to screens for select molecules every thermo
         """
+        # log_memory("Molecule Initialization start")
         super().__init__(*args, **kwargs)
         self.const = const
 
@@ -108,13 +109,13 @@ class Molecule(torch.nn.Module):
         self.molecular_orbitals = None
         self.old_mos = None
         
+        # log_memory("Molecule Initialization done")
                 
         def get_coordinates(self):
             return self.coordinates
 
         def get_species(self):
             return self.species
-
 
 def check_input(species):
     """
