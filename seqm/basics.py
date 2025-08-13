@@ -7,6 +7,7 @@ from .seqm_functions.constants import ev
 from .seqm_functions.pack import pack
 from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
 from .seqm_functions.rcis_batch import rcis_batch, calc_cis_energy
+from .seqm_functions.rcis_new import rcis_any_batch, calc_cis_energy_any_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rpa import rpa
@@ -485,16 +486,25 @@ class Energy(torch.nn.Module):
 
         Eexcited = 0.0
         if self.excited_states is not None:
+            all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
             with torch.no_grad():
-                if molecule.const.do_timing: t0 = time.time()
-                if method == 'cis':
-                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
-                elif method == 'rpa':
-                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                if all_same_mols:
+                    if molecule.const.do_timing: t0 = time.time()
+                    if method == 'cis':
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    elif method == 'rpa':
+                        excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    else:
+                        raise Exception("Excited state method has to be CIS or RPA")
                 else:
-                    raise Exception("Excited state method has to be CIS or RPA")
+                    if molecule.const.do_timing: t0 = time.time()
+                    if method == 'cis':
+                        excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    else:
+                        raise NotImplementedError
+
 
                 molecule.cis_amplitudes = exc_amps
 
@@ -510,14 +520,21 @@ class Energy(torch.nn.Module):
 
             if molecule.active_state>0:
                 molecule.cis_energies = excitation_energies
-                # Eelec += excitation_energies[:,molecule.active_state-1]
-                Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
                 if do_analytical_gradient[0]:
+                    if not all_same_mols:
+                        raise NotImplementedError
+
+                    Eexcited = excitation_energies[:,molecule.active_state-1]
                     if molecule.const.do_timing: t0 = time.time()
                     molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
                     t1 = time.time()
                     molecule.const.timing["Force"].append(t1 - t0)
+                else:
+                    if all_same_mols:
+                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+                    else: 
+                        Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
 
         if self.eig and not self.uhf:

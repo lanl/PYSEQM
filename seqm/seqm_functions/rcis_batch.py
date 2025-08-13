@@ -231,7 +231,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     """
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
-    In other words for an amplitued X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
+    In other words, for an amplitude X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
     """
     device = P_xi.device
     dtype = P_xi.dtype

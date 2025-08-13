@@ -15,8 +15,8 @@ else:
 
 ### create molecule object:
 species = torch.as_tensor([[8,6,1,1],
-                           [8,6,1,1],
-                           # [8,8,6,0]
+                           # [8,6,1,1],
+                           [8,8,6,0]
                            ], # zero-padding for batching
                           dtype=torch.int64, device=device)
 
@@ -58,7 +58,7 @@ seqm_parameters = {
                    'excited_states': {'n_states':6,'method':'cis'},
                    'active_state': 1,
                    'scf_backward': 2,
-                   'analytical_gradient':[True],
+                   # 'analytical_gradient':[True],
                    # 'cis_tolerance' : 1e-8,
                    }
 
