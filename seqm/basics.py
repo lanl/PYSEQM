@@ -489,11 +489,12 @@ class Energy(torch.nn.Module):
             all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
+            orbital_window=self.excited_states.get('orbital_window',None)
             with torch.no_grad():
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis':
-                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window)
                     elif method == 'rpa':
                         excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:
@@ -532,7 +533,7 @@ class Energy(torch.nn.Module):
                     molecule.const.timing["Force"].append(t1 - t0)
                 else:
                     if all_same_mols:
-                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa',orbital_window=orbital_window)
                     else: 
                         Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 

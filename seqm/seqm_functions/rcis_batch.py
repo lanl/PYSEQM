@@ -4,7 +4,7 @@ from .constants import a0
 import math
 # from seqm.seqm_functions.pack import packone, unpackone
 
-def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
+def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbital_window=None):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -13,6 +13,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     :param w: 2-electron integrals
     :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
+    :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
     :returns: 
 
     """
@@ -23,16 +24,35 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
     if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    
     norb, nocc = norb_batch[0], nocc_batch[0]
     nvirt = norb - nocc
-    nov = nocc * nvirt
 
+    # Active orbital selection
+    if orbital_window is not None:
+        n_below, m_above = orbital_window
+        if n_below < 1 or m_above < 1:
+            raise ValueError("orbital_window values must be positive integers")
+        if n_below > nocc:
+            raise ValueError(f"n_below={n_below} exceeds available occupied orbitals ({nocc})")
+        if m_above > (norb - nocc):
+            raise ValueError(f"m_above={m_above} exceeds available virtual orbitals ({nvirt})")
+        occ_idx  = torch.arange(nocc - n_below, nocc)
+        virt_idx = torch.arange(nocc, nocc + m_above)
+    else:
+        occ_idx  = torch.arange(nocc)
+        virt_idx = torch.arange(nocc, norb)
+
+    nocc_a, nvirt_a = occ_idx.numel(), virt_idx.numel()
+    nov = nocc_a * nvirt_a
     if nroots > nov:
-        raise Exception(f"Maximum number of roots for this molecule is {nov}. Reduce the requested number of roots")
+        raise Exception(f"Maximum number of roots for this molecule is {nov}.")
+
+    # Energy differences
+    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
 
     # Precompute energy differences (ea_ei) and form the approximate diagonal of the Hamiltonian (approxH)
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
-    ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
     approxH = ea_ei.view(-1,nov)
     
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
@@ -67,8 +87,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     nonorthogonal = False # TODO: User-defined/fixed
 
     C = mol.molecular_orbitals
-    Cocc = C[:,:,:nocc]
-    Cvirt = C[:,:,nocc:norb]
+    Cocc = C[:,:,occ_idx]
+    Cvirt = C[:,:,virt_idx]
 
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
@@ -175,7 +195,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     # Post CIS analysis
     print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window)
 
     return e_val_n, amplitude_store
 
@@ -185,8 +205,8 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     nmol, nNewRoots, nov = V.shape
 
     norb = mol.norb[0]
-    nocc = mol.nocc[0]
-    nvirt = norb - nocc
+    nocc = Cocc.shape[2]
+    nvirt = Cvirt.shape[2]
 
     Via = V.view(nmol,nNewRoots, nocc, nvirt)
 
@@ -548,18 +568,27 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None):
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
+    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
 
-def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False):
+def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
 
     nocc, norb = mol.nocc[0], mol.norb[0]
-    nvirt = norb - nocc
+    if orbital_window is not None:
+        n_below, m_above = orbital_window
+        occ_idx  = torch.arange(nocc - n_below, nocc)
+        virt_idx = torch.arange(nocc, nocc + m_above)
+    else:
+        occ_idx  = torch.arange(nocc)
+        virt_idx = torch.arange(nocc, norb)
+
     C = mol.molecular_orbitals
-    Cocc = C[:,:,:nocc]
-    Cvirt = C[:,:,nocc:norb]
+    Cocc = C[:,:,occ_idx]
+    Cvirt = C[:,:,virt_idx]
+
+    nocc, nvirt = occ_idx.numel(), virt_idx.numel()
 
     if rpa:
         amp_ia_X = amplitudes[0].view(mol.nmol,nroots,nocc,nvirt)
@@ -677,18 +706,25 @@ def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
 
     return nstart, nroots
 
-def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False):
+def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False,orbital_window=None):
 
     norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
     if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
     norb, nocc = norb_batch[0], nocc_batch[0]
+    if orbital_window is not None:
+        n_below, m_above = orbital_window
+        occ_idx  = torch.arange(nocc - n_below, nocc)
+        virt_idx = torch.arange(nocc, nocc + m_above)
+    else:
+        occ_idx  = torch.arange(nocc)
+        virt_idx = torch.arange(nocc, norb)
 
     C = mol.molecular_orbitals
-    Cocc = C[:,:,:nocc]
-    Cvirt = C[:,:,nocc:norb]
+    Cocc = C[:,:,occ_idx]
+    Cvirt = C[:,:,virt_idx]
 
-    ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
+    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
 
     if not rpa: #CIS: w = XAX
         HV = matrix_vector_product_batched(mol, amplitude.unsqueeze(1), w, ea_ei, Cocc, Cvirt)
