@@ -17,7 +17,7 @@ class Molecule(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.const = const
 
-        check_input(species)
+        # check_input(species)
         self.species = species
 
         #self.coordinates = coordinates

@@ -206,10 +206,14 @@ def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
     else:
         return Etot - Eiso_sum, Eiso_sum
     
-import psutil, os
+import psutil, os, resource
 def log_memory(step_desc="", log_peak=True, reset_peak=True):
     process = psutil.Process(os.getpid())
     cpu_mem = process.memory_info().rss / 1024 ** 2
+    # Peak CPU RSS (Linux: ru_maxrss is in kilobytes; macOS: bytes)
+    # We track a baseline so that “reset_peak” works.
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    raw_peak = usage.ru_maxrss / 1024 # in mb
 
     if torch.cuda.is_available():
         gpu_mem_allocated = torch.cuda.memory_allocated() / 1024 ** 2
@@ -226,8 +230,9 @@ def log_memory(step_desc="", log_peak=True, reset_peak=True):
 
     # Print a fixed-width row with labels on every call
     print(
-        f"| {step_desc:<40}"              # step description, left-justified in 30 chars
+        f"| {step_desc:<45}"              # step description, left-justified in 30 chars
         f"| CPU: {cpu_mem:>6.0f} MB  "      # CPU mem
+        f"| Peak CPU: {raw_peak:>6.0f} MB  "      # CPU mem
         f"| GPU Alloc: {gpu_mem_allocated:>6.0f} MB  "
         f"| GPU Reserved: {gpu_mem_reserved:>6.0f} MB  "
         f"| Peak GPU Mem: {peak_str:>6s} MB |"

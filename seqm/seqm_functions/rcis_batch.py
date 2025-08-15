@@ -206,14 +206,14 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, it
     if not need_to_chunk:
         P_xi = torch.einsum('bmi,bria,bna->brmn', Cocc,Via, Cvirt)
         # log_memory("RCIS make P_xi")
-        F0 = makeA_pi_batched(mol,P_xi,w)
+        F0 = makeA_pi_batched(mol,P_xi,w,iter_no=iter_no)
         # log_memory("RCIS makeA_pi_batched")
         # why am I multiplying by A 2?
         A = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
         if makeB:
             B = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
         if iter_no==0:
-            print_mem(mol,factor=0,factor_R=nNewRoots*4+16*chunk_size+70*chunk_size)
+            print_mem(mol,factor=0,factor_R=16*chunk_size+70*chunk_size)
     else:
         # F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
         A = torch.empty(nmol,nNewRoots,nocc,nvirt,device=V.device,dtype=V.dtype)
@@ -228,7 +228,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, it
             # print_mem(mol,factor=0,factor_R=nNewRoots*4+16*chunk_size)
             # log_memory(f"RCIS chunk {start} mat-vec: Pxi")
             # F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
-            P_xi = makeA_pi_batched(mol,P_xi,w)
+            P_xi = makeA_pi_batched(mol,P_xi,w,iter_no=iter_no)
             F0 = P_xi
             # log_memory(f"RCIS chunk {start} mat-vec: makeApi")
             A[:,start:end,:] = torch.einsum('bmi,brmn,bna->bria', Cocc, F0, Cvirt)*2.0
@@ -250,7 +250,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, it
     return A
 
 
-def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
+def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False,iter_no=-1):
     """
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
@@ -279,7 +279,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
 
     w = w_.view(nmol,npairs_per_mol,10,10)
     # Compute the (ai||jb)X_jb
-    F = makeA_pi_symm_batch(mol,P0,w)
+    F = makeA_pi_symm_batch(mol,P0,w,iter_no)
 
     if not allSymmetric:
 
@@ -336,7 +336,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
 
     return F0.view(nmol,nnewRoots,norb,norb)
 
-def makeA_pi_symm_batch(mol,P0,w):
+def makeA_pi_symm_batch(mol,P0,w,iter_no=-1):
 
     P0_sym = 0.5*(P0 + P0.transpose(2,3))
 
@@ -406,6 +406,8 @@ def makeA_pi_symm_batch(mol,P0,w):
             sumK[...,i,j] = -0.5*torch.einsum('nrpsS,npsS->nrp',Pp,w[...,ind[i],:][...,:,ind[j]])
     F.index_add_(2,mask,sumK)
     F[:,:,mask_l] += sumK.transpose(3,4)
+    if iter_no==0:
+        log_memory("RCIS mat-vec")
     del Pp
 
     Pptot = P[...,1,1]+P[...,2,2]+P[...,3,3]

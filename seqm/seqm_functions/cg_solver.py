@@ -48,7 +48,7 @@ def conjugate_gradient_batch(
 
         Ap = A(p)  # [B, D1…Dk]
         denom = torch.sum(p * Ap, dim=sum_dims)         # [B]
-        alpha = rs_old / denom.clamp(min=1e-20)         # [B]
+        alpha = rs_old / denom.clamp(min=1e-30)         # [B]
         # zero‐out for converged
         alpha = alpha * active.to(alpha_dtype)
 
@@ -72,7 +72,7 @@ def conjugate_gradient_batch(
 
         # update direction
         rs_new = torch.sum(r * z, dim=sum_dims)
-        beta = rs_new / rs_old.clamp(min=1e-20)
+        beta = rs_new / rs_old.clamp(min=1e-30)
         beta = beta * active.to(beta.dtype)
         beta_exp = beta.view(batch_size, *([1] * (b.dim() - 1)))
 

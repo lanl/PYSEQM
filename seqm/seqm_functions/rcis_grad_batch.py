@@ -278,4 +278,4 @@ def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
     A = torch.einsum('Nmi,Nmn,Nna->Nia', Cocc, F0.squeeze(1),Cvirt)*2.0
     A += Via*ea_ei
 
-    return A.view(nmol,-1)
+    return A.reshape(nmol,-1)

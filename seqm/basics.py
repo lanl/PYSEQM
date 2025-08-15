@@ -387,12 +387,12 @@ class Energy(torch.nn.Module):
 
         
         molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
-        # log_memory("Energy forward scf start")
+        log_memory("Energy forward scf start")
         
         F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
         
-        # log_memory("Energy forward scf done")
+        log_memory("Energy forward scf done")
         
         if self.eig:
             if self.uhf:
@@ -530,7 +530,7 @@ class Energy(torch.nn.Module):
                 if do_analytical_gradient[0]:
                     log_memory("Energy forward excited states analytical grad start")
                     if molecule.const.do_timing: t0 = time.time()
-                    molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                    molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,5.0*cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
                     t1 = time.time()
                     molecule.const.timing["Force"].append(t1 - t0)
                     log_memory("Energy forward excited states analytical grad done")
@@ -552,7 +552,7 @@ class Energy(torch.nn.Module):
                                          hsp=molecule.parameters['h_sp'])
             Etot += Eexcited
             Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
-            # log_memory("Energy forward total energy done")
+            log_memory("Energy forward total energy done")
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough
@@ -633,6 +633,6 @@ class Force(torch.nn.Module):
             return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec, Enuc, Eiso.detach(), e, e_gap, charge, notconverged
 
 
-        # log_memory("Force forward done")
+        log_memory("Force forward done")
         return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
 

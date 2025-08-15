@@ -178,6 +178,7 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
         if Nnot == 0: 
             print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            log_memory("SCF end")
             break
     return P, notconverged
 
@@ -346,10 +347,10 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 15
+    nDirect1 = 10
     alpha_direct = 0.7
 
-    nAdapt = 1
+    nAdapt = 3
     num_orbitals = 9 if themethod == 'PM6' else 4
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     k = 0
@@ -554,6 +555,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
         else:
             print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                     k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            log_memory("SCF end")
             return P, notconverged
 
         
@@ -1032,7 +1034,7 @@ def scf_loop(molecule, \
     tore = molecule.const.tore
     if molecule.const.do_timing: t0 = time.time()
     M, w,rho0xi,rho0xj, riXH, ri = hcore(molecule)
-    # log_memory("Hcore+2e integrals")
+    log_memory("Hcore+2e integrals")
 
     if molecule.const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()
