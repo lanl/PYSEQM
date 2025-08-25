@@ -15,8 +15,8 @@ else:
 
 ### create molecule object:
 species = torch.as_tensor([[8,6,1,1],
-                           [8,6,1,1],
-                           # [8,8,6,0]
+                           # [8,6,1,1],
+                           [8,8,6,0]
                            ], # zero-padding for batching
                           dtype=torch.int64, device=device)
 
@@ -55,7 +55,8 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':3,'method':'cis','orbital_window':(2,2)},
+                   # 'excited_states': {'n_states':3,'method':'cis','orbital_window':(2,2)},
+                   'excited_states': {'n_states':3,'method':'cis'},
                    'active_state': 1,
                    'scf_backward': 2,
                    # 'analytical_gradient':[True],

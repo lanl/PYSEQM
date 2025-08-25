@@ -402,7 +402,6 @@ def makeA_pi_symm_any_batch(mol,P0,w):
     md_i = maskd_exp[:, idxi]   # (nD, npairs_pairdiag)
     md_j = maskd_exp[:, idxj]   # (nD, npairs_pairdiag)
     # sum px,py,pz
-    Pptot = P[..., 1, 1] + P[..., 2, 2] + P[..., 3, 3]
 
     # ========== 1) One-center two-electron-like terms on diagonal blocks ==========
     gss = mol.parameters['g_ss'].expand(nD,-1).reshape(-1) 
@@ -413,7 +412,7 @@ def makeA_pi_symm_any_batch(mol,P0,w):
     # Build F2e1c for all densities and all diag blocks in one go
     md_flat = maskd_exp.reshape(-1)                 # (nD*nb_diag,)
     P_md = P[md_flat]                               # (nD*nb_diag, 4,4)
-    Pptot_md = Pptot[md_flat]                       # (nD*nb_diag,)
+    Pptot_md = P_md[..., 1, 1] + P_md[..., 2, 2] + P_md[..., 3, 3]                  # (nD*nb_diag,)
 
     F2e1c = torch.zeros_like(P_md)
 
@@ -476,10 +475,7 @@ def makeA_pi_symm_any_batch(mol,P0,w):
     sum_K = torch.zeros_like(Pp)
 
     # We’ll broadcast w (shape (1, npairs_ut, 10, 10)) across densities.
-    # NOTE: 'w' for these AB blocks must correspond to 'mask' order.
-    # If your K-term uses a different pairing than the earlier (idxi, idxj) 'w',
-    # pass the appropriate 'w_K' aligned with 'mask'. If it's the same, ensure orders match.
-    w_K = w.unsqueeze(0)  # adjust if you keep a separate tensor for off-diagonal pairs
+    w_K = w.unsqueeze(0)
 
     for i in range(4):
         Wi = w_K[..., ind[i], :]            # (1, npairs_ut, 4, 10)
@@ -493,8 +489,8 @@ def makeA_pi_symm_any_batch(mol,P0,w):
 
     mask_l_exp = (
         mask_l.view(1, -1)
-        + mol.pair_molid.view(1, -1) * (nD - 1) * molsize * molsize
-        + torch.arange(nD, device=device).view(nD, 1) * molsize * molsize
+        + mol.pair_molid.view(1, npairs_ut) * extra_per_mol
+        + dgrid * base_stride
     ).reshape(-1)
 
     F[mask_l_exp] = F[mask_flat].transpose(-1, -2)
