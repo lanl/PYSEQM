@@ -345,10 +345,10 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 15
+    nDirect1 = 0
     alpha_direct = 0.7
 
-    nAdapt = 1
+    nAdapt = 0
     num_orbitals = 9 if themethod == 'PM6' else 4
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     k = 0

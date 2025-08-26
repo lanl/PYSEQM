@@ -493,7 +493,7 @@ class Energy(torch.nn.Module):
             with torch.no_grad():
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
-                    if method == 'cis':
+                    if method == 'cis' or method == 'tda':
                         excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window)
                     elif method == 'rpa':
                         excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
