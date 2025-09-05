@@ -345,10 +345,10 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     #nFock-nAdapt steps of directly taking new density
     #pulay
 
-    nDirect1 = 0
+    nDirect1 = 5
     alpha_direct = 0.7
 
-    nAdapt = 0
+    nAdapt = 2
     num_orbitals = 9 if themethod == 'PM6' else 4
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     k = 0
@@ -470,7 +470,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     counter = -1 # index of stored FPPF for current iteration: 0, 1, ..., cFock-1
     cFock = 0 # in current iteraction, number of fock matrixes stored, cFock <= nFock
     #Pulay algorithm needs at least two previous stored density and Fock matrixes to start
-    alpha_direct = 0.3
+    alpha_direct = 0.5
     diis_error = torch.empty_like(Eelec).fill_(torch.finfo(dtype).max)
 
     reset_diis = False
