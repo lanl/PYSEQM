@@ -478,7 +478,7 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1,num_big_matrices=2):
     if device == 'cpu':
         available_memory = psutil.virtual_memory().available
     elif device == 'cuda':
-        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda:0'))
+        available_memory, _ = torch.cuda.mem_get_info(device)
     else:
         raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
 
@@ -666,7 +666,7 @@ def getMemUse(dtype,device,mol,nroots=1):
     if dev_type == 'cpu':
         available_memory = psutil.virtual_memory().available
     elif dev_type == 'cuda':
-        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda:0'))
+        available_memory, _ = torch.cuda.mem_get_info(device)
     else:
         raise ValueError("Unsupported device type. Use 'cpu' or 'cuda'.")
 
