@@ -109,7 +109,7 @@ def get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, E
     
     notconverged = (err.abs() > eps) | (dm_err > eps*2) | (dm_element_err > eps*15)
     if diis_error is not None:
-        notconverged |= (diis_error > 100*eps)
+        notconverged |= (diis_error > 50*eps)
 
     return notconverged, max_dm_err, max_dm_element_err
 
