@@ -3,6 +3,7 @@ from torch import pow
 from .constants import a0, ev
 from .cal_par import *
 from .diat_overlap import diatom_overlap_matrix
+from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .two_elec_two_center_int import rotate_with_quaternion
 
@@ -495,7 +496,7 @@ def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, ze
         rij_ = torch.cat([rij_plus, rij_minus])
         xij_ = torch.cat([xij_plus, xij_minus])
 
-        di_[overlap_pairs] = diatom_overlap_matrix(
+        di_[overlap_pairs] = diatom_overlap_matrix_PM6_SP(
             ni_[overlap_pairs],
             nj_[overlap_pairs],
             xij_[overlap_pairs],
