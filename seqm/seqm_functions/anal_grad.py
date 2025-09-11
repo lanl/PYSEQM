@@ -5,8 +5,9 @@ from .cal_par import *
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .two_elec_two_center_int import rotate_with_quaternion
+from .energy import pair_nuclear_energy
 
-delta = 5e-5 # delta for finite difference calcs
+delta = 1e-5 # delta for finite difference calcs
 
 # @profile
 def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, gam, parnuc, Z,
@@ -18,7 +19,7 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
     Dewar, Michael JS, and Yukio Yamaguchi. "Analytical first derivatives of the energy in MNDO." Computers & Chemistry 2.1 (1978): 25-29.
     https://doi.org/10.1016/0097-8485(78)80005-9
     """
-    if method not in {'PM3', 'AM1', 'MNDO'}:
+    if method not in {'PM3', 'AM1', 'MNDO','PM6_SP'}:
         raise Exception("Analytical gradients implented only for MNDO, AM1 and PM3 methods")
 
     # torch.set_printoptions(precision=6)
@@ -309,8 +310,60 @@ def w_derivative_numerical(mol, Xij, w_x_new):
 #     '''
 #     print(f'overlap_x from gaussians is \n{overlap_KAB_x}')
 
+def core_core_der_fd(mol,method, gam, parameters):
+    dtype = mol.rij.dtype
+    device = mol.rij.device
+    ni = mol.ni
+    nj = mol.nj
+    idxi = mol.idxi
+    idxj = mol.idxj
+    xij= mol.xij
+    rij=mol.rij
+    Xij = xij * rij.unsqueeze(1) * a0
+    npairs = Xij.shape[0]
+
+    pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
+    ni_ = repeat_tensor(ni)
+    nj_ = repeat_tensor(nj)
+    idxi_ = repeat_tensor(idxi)
+    idxj_ = repeat_tensor(idxj)
+    gss = mol.parameters['g_ss']
+    rho_0 = 0.5*ev/gss
+    rho0xi = rho_0[idxi_]
+    rho0xj = rho_0[idxj_]
+    rho_core = mol.parameters['rho_core']
+    A = (rho_core[idxi_] != 0.000)
+    B = (rho_core[idxj_] != 0.000)
+
+    rho0xi[A] =rho_core[idxi_][A]
+    rho0xj[B] =rho_core[idxj_][B]
+    alp = repeat_tensor(mol.alp)
+    chi = repeat_tensor(mol.chi)
+    gam_ = repeat_tensor(gam)
+
+
+    for coord in range(3):
+        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
+        Xij[:, coord] -= delta
+        rij_plus = torch.norm(Xij, dim=1)
+        rij_plus = rij_plus / a0
+
+        Xij[:, coord] += 2.0 * delta
+        rij_minus = torch.norm(Xij, dim=1)
+        rij_minus = rij_minus / a0
+
+        rij_ = torch.cat([rij_plus, rij_minus])
+
+        diff_save = pair_nuclear_energy(None, mol.const, mol.nmol, ni_, nj_, idxi_, idxj_, rij_, rho0xi,rho0xj, alp, chi, gam_, method=method, parameters=parameters)
+        Xij[:, coord] -= delta
+        pair_grad[:, coord] = (diff_save[:npairs] - diff_save[npairs:]) / (2.0 * delta)
+
+    return pair_grad
+
 
 def core_core_der(mol, gam, w_x, method, parameters):
+    if method =='PM6' or method =='PM6_SP' or method =='PM6_SP_STAR':
+        return core_core_der_fd(mol, method, gam, parameters)
     ni = mol.ni
     nj = mol.nj
     idxi = mol.idxi
@@ -335,7 +388,7 @@ def core_core_der(mol, gam, w_x, method, parameters):
     # For MNDO, core-core term is ZAZB*(SASA|SBSB)*g, where g=1+exp(-alpha_A*RAB)+exp(-alpha_B*RAB)
     prefactor = alpha[idxi]
     prefactor[XH] = prefactor[XH] * rija[XH] - 1.0
-    t3 = alpha[idxj] * torch.exp(-alpha[idxj] * rija)
+    t3 = alpha[idxj] * t3
     coreTerm = ZAZB * gam / rija * (prefactor * tmp + t3)
     # The derivative of the core-core term is ZAZB*(SASA|SBSB)*dg/dx + ZAZB*g*d(SASA|SBSB)/dx
     # Here we calculate the first term, i.e., ZAZB*(SASA|SBSB)*dg/dx
