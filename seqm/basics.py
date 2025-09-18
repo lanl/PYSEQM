@@ -313,28 +313,15 @@ class Hamiltonian(torch.nn.Module):
         w : two electron two center integrals
         v : eigenvectors of F
         """
-        
-        
-        if(themethod == 'PM6'): # not implemented yet
-            F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals = scf_loop(molecule,
-                                  eps = self.eps,
-                                  P=P0,
-                                  sp2=self.sp2,
-                                  scf_converger=self.scf_converger,
-                                  eig=self.eig,
-                                  scf_backward=self.scf_backward,
-                                  scf_backward_eps=self.scf_backward_eps)
+        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals = scf_loop(molecule,
+                          eps = self.eps,
+                          P=P0,
+                          sp2=self.sp2,
+                          scf_converger=self.scf_converger,
+                          eig=self.eig,
+                          scf_backward=self.scf_backward,
+                          scf_backward_eps=self.scf_backward_eps)
 
-        else:
-            F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals = scf_loop(molecule,
-                              eps = self.eps,
-                              P=P0,
-                              sp2=self.sp2,
-                              scf_converger=self.scf_converger,
-                              eig=self.eig,
-                              scf_backward=self.scf_backward,
-                              scf_backward_eps=self.scf_backward_eps)
-        #
         return F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals
 
 class Energy(torch.nn.Module):
