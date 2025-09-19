@@ -6,10 +6,12 @@ from torch.autograd import grad
 from .seqm_functions.constants import ev
 from .seqm_functions.pack import pack
 from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
-from .seqm_functions.rcis_batch import rcis_batch
+from .seqm_functions.rcis_batch import rcis_batch, calc_cis_energy
+from .seqm_functions.rcis_new import rcis_any_batch, calc_cis_energy_any_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rpa import rpa
+from .seqm_functions.normal_modes import normal_modes
 
 import os
 import time
@@ -73,9 +75,9 @@ class Parser(torch.nn.Module):
         Constructor
         """
         super().__init__()
-        self.outercutoff = seqm_parameters['pair_outer_cutoff']
+        self.outercutoff = seqm_parameters.get('pair_outer_cutoff',1e10)
         if seqm_parameters.get('elements') is None:
-            raise RuntimeError("Instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class")
+            raise RuntimeError("Please instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class")
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
         self.hipnn_automatic_doublet = seqm_parameters.get('HIPNN_automatic_doublet', False)
@@ -222,7 +224,7 @@ class Pack_Parameters(torch.nn.Module):
         """
         super().__init__()
         self.elements = seqm_parameters['elements']
-        self.learned_list = seqm_parameters['learned']
+        self.learned_list = seqm_parameters.get('learned',[])
         self.method = seqm_parameters['method']
         self.filedir = seqm_parameters['parameter_file_dir'] \
             if 'parameter_file_dir' in seqm_parameters \
@@ -277,7 +279,7 @@ class Hamiltonian(torch.nn.Module):
         self.sp2 = seqm_parameters.get('sp2', [False])
         self.scf_converger = seqm_parameters['scf_converger']
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
-        self.eig = seqm_parameters.get('eig', False)
+        self.eig = seqm_parameters.get('eig', True)
         self.scf_backward = seqm_parameters.get('scf_backward', 0)
         scf_back_eps = seqm_parameters.get('scf_backward_eps', 1e-2)
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(scf_back_eps), requires_grad=False)
@@ -311,29 +313,16 @@ class Hamiltonian(torch.nn.Module):
         w : two electron two center integrals
         v : eigenvectors of F
         """
-        
-        
-        if(themethod == 'PM6'): # not implemented yet
-            F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, eig_vec = scf_loop(molecule,
-                                  eps = self.eps,
-                                  P=P0,
-                                  sp2=self.sp2,
-                                  scf_converger=self.scf_converger,
-                                  eig=self.eig,
-                                  scf_backward=self.scf_backward,
-                                  scf_backward_eps=self.scf_backward_eps)
+        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals = scf_loop(molecule,
+                          eps = self.eps,
+                          P=P0,
+                          sp2=self.sp2,
+                          scf_converger=self.scf_converger,
+                          eig=self.eig,
+                          scf_backward=self.scf_backward,
+                          scf_backward_eps=self.scf_backward_eps)
 
-        else:
-            F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec = scf_loop(molecule,
-                              eps = self.eps,
-                              P=P0,
-                              sp2=self.sp2,
-                              scf_converger=self.scf_converger,
-                              eig=self.eig,
-                              scf_backward=self.scf_backward,
-                              scf_backward_eps=self.scf_backward_eps)
-        #
-        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, eig_vec
+        return F, e, P, Hcore, w, charge,rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals
 
 class Energy(torch.nn.Module):
     def __init__(self, seqm_parameters):
@@ -348,7 +337,7 @@ class Energy(torch.nn.Module):
         self.hamiltonian = Hamiltonian(seqm_parameters)
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
-        self.eig = seqm_parameters.get('eig', False)
+        self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
@@ -385,7 +374,7 @@ class Energy(torch.nn.Module):
         
         molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
         
-        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, eig_vec =  self.hamiltonian(molecule, self.method, \
+        F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
         
         
@@ -405,7 +394,7 @@ class Energy(torch.nn.Module):
         else:
             e_gap = None
         
-        molecule.eig_vec = eig_vec
+        molecule.molecular_orbitals = molecular_orbitals
         
         #nuclear energy
         alpha = molecule.parameters['alpha']
@@ -482,17 +471,28 @@ class Energy(torch.nn.Module):
         if molecule.active_state > 0 and self.excited_states is None:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
+        Eexcited = 0.0
         if self.excited_states is not None:
+            all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
+            orbital_window=self.excited_states.get('orbital_window',None)
             with torch.no_grad():
-                if molecule.const.do_timing: t0 = time.time()
-                if method == 'cis':
-                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
-                elif method == 'rpa':
-                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                if all_same_mols:
+                    if molecule.const.do_timing: t0 = time.time()
+                    if method == 'cis' or method == 'tda':
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window)
+                    elif method == 'rpa':
+                        excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    else:
+                        raise Exception("Excited state method has to be CIS or RPA")
                 else:
-                    raise Exception("Excited state method has to be CIS or RPA")
+                    if molecule.const.do_timing: t0 = time.time()
+                    if method == 'cis':
+                        excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    else:
+                        raise NotImplementedError
+
 
                 molecule.cis_amplitudes = exc_amps
 
@@ -504,14 +504,45 @@ class Energy(torch.nn.Module):
 
                 cis_nac = kwargs.get('cis_nac',[False])
                 if cis_nac[0]:
-                    calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2])
+                    calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
 
-                if molecule.active_state>0:
-                    Eelec += excitation_energies[:,molecule.active_state-1]
+            if molecule.active_state>0:
+                molecule.cis_energies = excitation_energies
 
-                    if do_analytical_gradient[0]:
-                        # current_amplitude = exc_amps[...,molecule.active_state-1,:]
-                        molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                if do_analytical_gradient[0]:
+                    if not all_same_mols:
+                        raise NotImplementedError
+
+                    Eexcited = excitation_energies[:,molecule.active_state-1]
+                    if molecule.const.do_timing: t0 = time.time()
+                    molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                    t1 = time.time()
+                    molecule.const.timing["Force"].append(t1 - t0)
+                else:
+                    if all_same_mols:
+                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa',orbital_window=orbital_window)
+                    else: 
+                        Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+
+            if self.seqm_parameters.get('do_all_forces',False):
+                init_active_state = molecule.active_state 
+                if not do_analytical_gradient[0]:
+                    raise Exception("when asking for calculating all gradients of excited states ask for analytical gradients")
+                if not all_same_mols:
+                    raise NotImplementedError
+
+                molecule.cis_energies = excitation_energies
+                nroots = self.excited_states['n_states']
+                molecule.all_forces = torch.empty(molecule.nmol,nroots+1,molecule.molsize,3)
+                molecule.all_forces[:,0,...] = -molecule.analytical_gradient
+                for i in range(1,nroots+1):
+                    molecule.active_state = i
+                    molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                molecule.active_state = init_active_state
+
+
+        if self.eig and not self.uhf:
+            molecule.old_mos = molecule.molecular_orbitals.clone()
 
         molecule.old_mos = molecule.eig_vec.clone()
         if all_terms:
@@ -524,6 +555,7 @@ class Energy(torch.nn.Module):
                                          gsp=molecule.parameters['g_sp'],
                                          gp2=molecule.parameters['g_p2'],
                                          hsp=molecule.parameters['h_sp'])
+            Etot += Eexcited
             Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:
@@ -541,22 +573,29 @@ class Force(torch.nn.Module):
         self.energy = Energy(seqm_parameters)
         self.create_graph = seqm_parameters.get('2nd_grad', False)
         self.uhf = seqm_parameters.get('UHF', False)
-        self.eig = seqm_parameters.get('eig', False)
+        self.eig = seqm_parameters.get('eig', True)
         self.seqm_parameters = seqm_parameters
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs):
         
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
-        # For excited states we dont have backprop forces
-        do_analytical_gradient = [False]
-        if molecule.active_state > 0 and do_force:
-            do_analytical_gradient = [True]
-            self.seqm_parameters['analytical_gradient'] = do_analytical_gradient
+        do_analytical_gradient = self.seqm_parameters.get('analytical_gradient', [False])
 
-        if not do_analytical_gradient[0] and do_force:
-            molecule.coordinates.requires_grad_(True)
+        # For excited states, back-prop forces work only if we have scf_backward == 1 or 2. We will have to fall back on analytical_gradient otherwise
+        if molecule.active_state > 0 and do_force:
+            if self.seqm_parameters.get('scf_backward', 0) == 0:
+                do_analytical_gradient = [True]
+                self.seqm_parameters['analytical_gradient'] = do_analytical_gradient
+
+        molecule.coordinates.requires_grad_(do_force and not do_analytical_gradient[0])
+
         Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, cis_amp=cis_amp, *args, **kwargs)
+
+        if self.seqm_parameters.get('normal modes', False):
+            if self.seqm_parameters.get('scf_backward', 0) != 2:
+                raise Exception("You have requested for normal mode calculation but scf_backward has not been set to 2 in your input seqm_parameters")
+            normal_modes(molecule,Hf)
         
         if self.eig:
             e = e.detach()

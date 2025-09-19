@@ -1,10 +1,227 @@
 import torch
-#from .build_two_elec_one_center_int import calc_integral
-import time
-# it is better to define mask as the same way defining maskd
-# as it will be better to do summation using the representation of P in
+from .fock import DEFAULT_NBF, PM6_NBF, TRIL_IDX_9, WEIGHT_45, PM6_FLOCAL_MAP, WEIGHT_10, TRIL_IDX_4, K_ind_4, K_ind_9
 
 def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
+    """
+    construct fock matrix
+
+    P0 : total density matrix, P0 = Palpha + Pbeta, Palpha==Pbeta,
+        shape (nmol, 4*molsize, 4*molsize)
+        for closed shell molecule only, RHF is used, alpha and beta has same WF
+    M : Hcore in the shape of (nmol*molsize**2,4,4)
+    to construct Hcore from M, check hcore.py
+    Hcore = M.reshape(nmol,molsize,molsize,4,4) \
+             .transpose(2,3) \
+             .reshape(nmol, 4*molsize, 4*molsize)
+
+    maskd : mask for diagonal block for M, shape(ntotatoms,)
+    M[maskd] take out the diagonal block
+    gss, gpp, gsp, shape (ntotatoms, )
+    P0: shape (nmol, 4*molsize, 4*molsize)
+    """
+    nbf = PM6_NBF if themethod=='PM6' else DEFAULT_NBF
+    P_tot = (P0[:,0]+P0[:,1]).reshape((nmol,molsize,nbf,molsize,nbf)) \
+          .transpose(2,3).reshape(nmol*molsize*molsize,nbf,nbf)
+
+    P_spin = P0.transpose(0,1).reshape((2,nmol,molsize,nbf,molsize,nbf)) \
+          .transpose(3,4).reshape(2,nmol*molsize*molsize,nbf,nbf)
+    
+    F_ = M.expand(2,-1,-1,-1).clone()
+
+    # one-center (intra-atomic) ERI contributions
+    F_ = _one_center_u(F_, P_tot, P_spin, maskd, gss, gpp, gsp, gp2, hsp)
+
+    # PM6 one-center ERI contributions from d-orbitals
+    if themethod == 'PM6':
+        F_ = _d_contrib_one_center_u(F_, P_tot, P_spin, W, maskd)
+
+    # 5) two-center (coulomb J & exchange K) neighbor-atom terms
+    F_ = _two_center_u(F_, P_tot, P_spin, w, maskd, mask,idxi, idxj, themethod)
+
+    # 6) reassemble full Fock matrix 
+    nrs = nbf * molsize
+    F_full = (F_
+              .view(2,nmol, molsize, molsize, nbf, nbf)
+              .transpose(3,4)
+              .reshape(2,nmol, nrs, nrs).transpose(0,1))
+    # symmetrize upper triangle since only the lower triangle of F has been built so far
+    F_full += F_full.triu(1).transpose(2,3)
+
+    return F_full
+
+def _one_center_u(F, Ptot, P_spin, maskd, gss, gpp, gsp, gp2, hsp):
+    """
+    Adds the intra-atomic (one-center) two-electron contributions.
+    """
+    Ptot_d   = Ptot[maskd].unsqueeze(0)           # (npairs, nbf, nbf)
+    Pspin_d  = P_spin[:, maskd]       # (2, npairs, nbf, nbf)
+    P_opp_spin_d = Pspin_d[[1,0]]
+
+    # precompute p‐shell populations
+    Pptot      = (Ptot_d[...,1,1] + Ptot_d[...,2,2] + Ptot_d[...,3,3])           # (npairs,)
+    Pspin_ptot = (Pspin_d[...,1,1] + Pspin_d[...,2,2] + Pspin_d[...,3,3])       # (2, npairs)
+
+    # temporary container for alpha/beta contributions
+    tmp = torch.zeros_like(Pspin_d)   # (2, npairs, nbf, nbf)
+
+    # F(s,s)
+    tmp[...,0,0] = P_opp_spin_d[...,0,0]*gss + Pptot*gsp - Pspin_ptot*hsp
+    pp_fac_d = gpp - gp2
+    sp_fac = hsp + gsp
+    pp_fac_off = gpp + gp2
+
+    # 2) (p,p) diagonal for i=1,2,3
+    for i in (1,2,3):
+        tmp[...,i,i] = (
+            Ptot_d[...,0,0]*gsp
+          - Pspin_d[...,0,0]*hsp
+          + P_opp_spin_d[...,i,i]*gpp
+          + (Pptot - Ptot_d[...,i,i])*gp2
+          - 0.5*(Pspin_ptot - Pspin_d[...,i,i])*pp_fac_d
+        )
+
+    # 3) (s,p) and (p,s)
+    for i in (1,2,3):
+        tmp[...,0,i] = 2*Ptot_d[...,0,i]*hsp \
+                      - Pspin_d[...,0,i]*sp_fac
+
+    # 4) (p,p*) off‐diagonals
+    for (i,j) in ((1,2),(1,3),(2,3)):
+        tmp[...,i,j] = (
+            Ptot_d[...,i,j]*pp_fac_d
+          - 0.5*Pspin_d[...,i,j]*pp_fac_off
+        )
+
+    F[:,maskd] += tmp
+    return F
+
+def _d_contrib_one_center_u(F, P_tot, P_spin, W, maskd):
+    """
+    Adds one-center PM6 d-orbital terms for UHF:
+      F:       (2, ncenters, 9, 9)
+      P_tot:   (ncenters, 9, 9)    = Palpha + Pbeta
+      P_spin:  (2, ncenters, 9, 9)  P_spin[0]=Palpha, P_spin[1]=Pbeta
+      W:       (ncenters, 243)      three-center integrals
+      maskd:   bool[ncenters]       selects on-atom blocks
+    """
+    dtype, device = F.dtype, F.device
+
+    # lower-triangle coords & scaling
+    i0, i1     = TRIL_IDX_9
+    tril_scale = WEIGHT_45.to(device=device, dtype=dtype)
+
+    # extract only the on-atom blocks
+    Ptot_d   = P_tot[maskd]        # (nc, 9, 9)
+    Palpha_d     = P_spin[0, maskd]    # (nc, 9, 9)
+    Pbeta_d     = P_spin[1, maskd]
+
+    # pack the (i1,i0) entries into length-45 vectors
+    Pnew_tot   = Ptot_d[:, i0, i1] * tril_scale.unsqueeze(0)  # (nc, 45)
+    Pnew_alpha     = Palpha_d[:,   i0, i1] * tril_scale.unsqueeze(0)
+    Pnew_beta     = Pbeta_d[:,   i0, i1] * tril_scale.unsqueeze(0)
+
+    nc = Pnew_tot.shape[0]
+    Wd = W[maskd]                  # (nc, 243)
+
+    # build local F contributions for alpha and beta
+    Floc_alpha = torch.zeros(nc, 45, device=device, dtype=dtype)
+    Floc_beta = torch.zeros(nc, 45, device=device, dtype=dtype)
+
+    for col, w_idxs, p_idxs in PM6_FLOCAL_MAP:
+        Jcol      = (Wd[:, w_idxs] * Pnew_tot[:,   p_idxs]).sum(dim=1)
+        Kcol_alpha    = (Wd[:, w_idxs] * Pnew_alpha[:,     p_idxs]).sum(dim=1)
+        Kcol_beta    = (Wd[:, w_idxs] * Pnew_beta[:,     p_idxs]).sum(dim=1)
+
+        # Coulomb minus half-exchange
+        Floc_alpha[:, col] = Jcol - 0.5 * Kcol_alpha
+        Floc_beta[:, col] = Jcol - 0.5 * Kcol_beta
+
+    F[0,maskd,i1,i0] += Floc_alpha
+    F[1,maskd,i1,i0] += Floc_beta
+    return F
+
+def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
+    """
+    Adds two-center (neighbor-atom) J & K contributions for UHF.
+    
+    F        : Tensor of shape (2, nPairs, nbf, nbf) – spin‐stacked Fock blocks
+    P_spin   : Tensor of shape (2, nPairs, nbf, nbf) – P_spin[0]=Pα, P_spin[1]=Pβ
+    P_tot    : Tensor of shape (nPairs, nbf, nbf)    – Pα + Pβ for Coulomb
+    w        : Tensor of shape (nPairs, nP, nP)       – two‐center integrals
+    maskd    : Boolean mask of length nPairs selecting “A” blocks
+    mask     : Boolean mask of length nPairs selecting pairs for exchange
+    idxi, idxj : LongTensors of length nPairs giving neighbor‐pair indices
+    themethod: 'PM6' or other
+    
+    Returns: F updated in‐place with J/K for both α and β channels.
+    """
+    # pick basis‐size‐dependent parameters
+    if themethod == 'PM6':
+        nbf      = PM6_NBF
+        tril_idx = TRIL_IDX_9
+        weight_tc= WEIGHT_45.to(device=F.device, dtype=F.dtype)
+    else:
+        nbf      = DEFAULT_NBF
+        tril_idx = TRIL_IDX_4
+        weight_tc= WEIGHT_10.to(device=F.device, dtype=F.dtype)
+
+    i0, i1 = tril_idx
+
+    # neighbor‐pair ordering: A and B centers
+    idxA, idxB = (idxj, idxi) if themethod=='PM6' else (idxi, idxj)
+
+    # ——— Coulomb (J) ———
+    # pack P_tot for A and B blocks
+    PA = (P_tot[maskd[idxA]][:, i1, i0] * weight_tc).unsqueeze(-1)  # (nPairs, nP, 1)
+    PB = (P_tot[maskd[idxB]][:, i1, i0] * weight_tc).unsqueeze(-2)  # (nPairs, 1, nP)
+
+    # contract to get J contributions
+    J_A = (PA * w).sum(dim=1)  # (nPairs, nP)
+    J_B = (PB * w).sum(dim=2)
+
+    # scatter J back into each spin‐block
+    B = w.shape[0]
+    sumA = torch.zeros(B, nbf, nbf, device=F.device, dtype=F.dtype)
+    sumB = torch.zeros_like(sumA)
+    sumA[:, i1, i0] = J_A
+    sumB[:, i1, i0] = J_B
+
+    # both α and β see the same Coulomb
+    F[0].index_add_(0, maskd[idxA], sumB)
+    F[0].index_add_(0, maskd[idxB], sumA)
+    F[1].index_add_(0, maskd[idxA], sumB)
+    F[1].index_add_(0, maskd[idxB], sumA)
+
+    # ——— Exchange (K) ———
+    # prepare indirect indexing
+    ind   = (K_ind_9 if themethod=='PM6' else K_ind_4).to(F.device)
+    p_idx = ind.view(-1)  # (nbf*nbf,)
+    w1    = w[:, p_idx, :].view(B, nbf, nbf, -1)
+
+    # for each spin, build and scatter its exchange
+    # same‐spin density, with the -½ factor
+    Pp = -P_spin[:,mask]      # (nExPairs, nbf, nbf)
+    Ksum = torch.zeros(2, B, nbf, nbf, device=F.device, dtype=F.dtype)
+
+    if themethod == 'PM6':
+        Pp = Pp.transpose(2, 3)  # align for d‐orbitals
+        for j in range(nbf):
+            q_idx = ind[j]                            # (nbf,)
+            w2    = w1[..., q_idx]                    # (nPairs, nbf, nbf)
+            Ksum[..., j, :] = (w2 * Pp.unsqueeze(2)).sum(dim=(3,4))
+    else:
+        for j in range(nbf):
+            q_idx = ind[j]
+            w2    = w1[..., q_idx]
+            Ksum[..., :, j] = (w2 * Pp.unsqueeze(2)).sum(dim=(3,4))
+
+    F.index_add_(1, mask, Ksum)
+
+    return F
+
+# This is the original version that works
+def old_fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
+    import time
     """
     construct fock matrix
 
@@ -226,7 +443,7 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
             TMP_[:,maskd,i,j] = P[maskd,i,j] * (gpp - gp2) - 0.5*PAlpha_[:,maskd,i,j]*(gpp + gp2)
 
         F_.add_(TMP_)
-    
+        
     ###############
     del TMP_, PAlpha_ptot_, Pptot
     
@@ -314,7 +531,6 @@ def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, 
         F_[1].index_add_(0, maskd[idxj], sumA)
 
         #\sum_B
-        #F_.index_add_(1, maskd[idxi], sumB)
         F_[0].index_add_(0, maskd[idxi], sumB)
         F_[1].index_add_(0, maskd[idxi], sumB)
     del suma, sumb, sumA, sumB

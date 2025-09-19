@@ -16,3 +16,5 @@ examples/Outputs/vik*
 PYSEQM.egg-info/
 **/__pycache__/
 **/.ipynb_checkpoints/
+**/.DS_Store
+.ignore

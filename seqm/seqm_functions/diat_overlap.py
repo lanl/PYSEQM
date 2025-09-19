@@ -1,9 +1,11 @@
 import torch
 
+# This function has been deprecated
 def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     """
     compute the overlap matrix for each pair
     """
+    print("DON'T USE THIS FUNCTION TO CALCULATE OVERLAP. THIS FUNCTION HAS BEEN DEPRECATED. USE diatom_overlap_matrix_PM6_SP() INSTEAD.")
     dtype = xij.dtype
     device = xij.device
 

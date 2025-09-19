@@ -18,7 +18,7 @@ def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc
     nov = nocc*nvirt
 
     # CIS unrelaxed density B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j 
-    C = mol.eig_vec 
+    C = mol.molecular_orbitals 
     Cocc = C[:,:,:nocc]
     Cvirt = C[:,:,nocc:norb]
     nmol = mol.nmol
@@ -259,7 +259,7 @@ def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc
 
     grad_cis = grad_cis.view(nmol, molsize, 3)
 
-    # torch.set_printoptions(precision=9)
+    # torch.set_printoptions(precision=15)
     # print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')
 
     return grad_cis

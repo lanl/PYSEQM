@@ -108,3 +108,29 @@ class Electronic_Structure(torch.nn.Module):
 
     #     return charge
 
+# ## Attempt at calculating the Hessian with functorch/torch.func but doesn't work for now
+# ## For now, use the loop-based implementation in seqm_functions/normal_modes.py
+# from functorch import hessian
+# from seqm.Molecule import Molecule
+# from seqm.seqm_functions.constants import Constants
+# class Hessian(torch.nn.Module):
+#     def __init__(self, seqm_parameters,species, coordinates):
+#         super().__init__()
+#         self.energy = Energy(seqm_parameters)
+#         self.seqm_parameters = seqm_parameters
+#         self.coordinates = coordinates
+#         const = Constants().to(self.coordinates.device) 
+#         self.molecule = Molecule(const, seqm_parameters, coordinates, species).to(coordinates.device)
+#
+#     def forward(self, learned_parameters=dict(), P0=None, cis_amp=None, *args, **kwargs):
+#
+#         def energy_function(x):
+#             # self.molecule.coordinates = torch.nn.Parameter(x)
+#             self.molecule.coordinates = x
+#             Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = \
+#                 self.energy(self.molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, cis_amp=cis_amp, *args, **kwargs)
+#             return Hf[0]
+#
+#         x = torch.nn.Parameter(self.coordinates)
+#         H = hessian(energy_function)(x)
+#         print(H)

@@ -4,7 +4,7 @@ from .constants import a0
 import math
 # from seqm.seqm_functions.pack import packone, unpackone
 
-def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
+def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbital_window=None):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -13,6 +13,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     :param w: 2-electron integrals
     :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
+    :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
     :returns: 
 
     """
@@ -23,16 +24,35 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
     if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    
     norb, nocc = norb_batch[0], nocc_batch[0]
     nvirt = norb - nocc
-    nov = nocc * nvirt
 
+    # Active orbital selection
+    if orbital_window is not None:
+        n_below, m_above = orbital_window
+        if n_below < 1 or m_above < 1:
+            raise ValueError("orbital_window values must be positive integers")
+        if n_below > nocc:
+            raise ValueError(f"n_below={n_below} exceeds available occupied orbitals ({nocc})")
+        if m_above > (norb - nocc):
+            raise ValueError(f"m_above={m_above} exceeds available virtual orbitals ({nvirt})")
+        occ_idx  = torch.arange(nocc - n_below, nocc)
+        virt_idx = torch.arange(nocc, nocc + m_above)
+    else:
+        occ_idx  = torch.arange(nocc)
+        virt_idx = torch.arange(nocc, norb)
+
+    nocc_a, nvirt_a = occ_idx.numel(), virt_idx.numel()
+    nov = nocc_a * nvirt_a
     if nroots > nov:
-        raise Exception(f"Maximum number of roots for this molecule is {nov}. Reduce the requested number of roots")
+        raise Exception(f"Maximum number of roots for this molecule is {nov}.")
+
+    # Energy differences
+    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
 
     # Precompute energy differences (ea_ei) and form the approximate diagonal of the Hamiltonian (approxH)
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
-    ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
     approxH = ea_ei.view(-1,nov)
     
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
@@ -53,7 +73,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
         # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
         # This fails when orbitals are degenerate and switch order
-        mol.eig_vec *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.eig_vec,mol.old_mos))).unsqueeze(1)
+        mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
 
 
     max_iter = 100 # TODO: User-defined
@@ -66,9 +86,9 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False # TODO: User-defined/fixed
 
-    C = mol.eig_vec
-    Cocc = C[:,:,:nocc]
-    Cvirt = C[:,:,nocc:norb]
+    C = mol.molecular_orbitals
+    Cocc = C[:,:,occ_idx]
+    Cvirt = C[:,:,virt_idx]
 
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
@@ -175,7 +195,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     # Post CIS analysis
     print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window)
 
     return e_val_n, amplitude_store
 
@@ -185,8 +205,8 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     nmol, nNewRoots, nov = V.shape
 
     norb = mol.norb[0]
-    nocc = mol.nocc[0]
-    nvirt = norb - nocc
+    nocc = Cocc.shape[2]
+    nvirt = Cvirt.shape[2]
 
     Via = V.view(nmol,nNewRoots, nocc, nvirt)
 
@@ -218,10 +238,10 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
                 B[:,start:end,:] = torch.einsum('bmi,brnm,bna->bria', Cocc, F0, Cvirt)*2.0
 
     A += Via*ea_ei.unsqueeze(1)
-    A = A.view(nmol, nNewRoots, -1)
+    A = A.reshape(nmol, nNewRoots, -1)
 
     if makeB:
-        B = B.view(nmol,nNewRoots, -1)
+        B = B.reshape(nmol,nNewRoots, -1)
         return  A, B
 
     return A
@@ -231,7 +251,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     """
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
-    In other words for an amplitued X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
+    In other words, for an amplitude X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
     """
     device = P_xi.device
     dtype = P_xi.dtype
@@ -251,7 +271,7 @@ def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
     #     unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
     #     for i in range(nmol) for j in range(nnewRoots)
     # ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
-    P0 = unpackone_batch(P_xi.view(nmol*nnewRoots,norb,norb), 4*nHeavy, nHydro, molsize * 4).view(nmol,nnewRoots,4*molsize,4*molsize)
+    P0 = unpackone_batch(P_xi.reshape(nmol*nnewRoots,norb,norb), 4*nHeavy, nHydro, molsize * 4).view(nmol,nnewRoots,4*molsize,4*molsize)
     del P_xi
 
     w = w_.view(nmol,npairs_per_mol,10,10)
@@ -351,8 +371,8 @@ def makeA_pi_symm_batch(mol,P0,w):
     del PA
     F.index_add_(2,maskd[idxj],sumA)
 
-    sumB = sumA
-    sumB.zero_()
+    sumB = torch.zeros_like(sumA)
+    del sumA
     PB = (Pdiag_symmetrized[:,:,idxj][...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)]*weight)#.unsqueeze(-2)
     del Pdiag_symmetrized
     sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.einsum('nrpS,npsS->nrps',PB,w) # torch.sum(PB*w[:,None,...],dim=4)
@@ -365,7 +385,8 @@ def makeA_pi_symm_batch(mol,P0,w):
     # lambda, sigma in B
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
 
-    sumK = sumB
+    sumK = torch.empty_like(sumB)
+    del sumB
 
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     #   0,     1         2       3       4         5       6      7         8        9
@@ -457,7 +478,7 @@ def getMaxSubspacesize(dtype,device,nov,nmol=1,num_big_matrices=2):
     if device == 'cpu':
         available_memory = psutil.virtual_memory().available
     elif device == 'cuda':
-        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda:0'))
+        available_memory, _ = torch.cuda.mem_get_info(device)
     else:
         raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
 
@@ -547,18 +568,27 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None):
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
+    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
 
-def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False):
+def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
 
     nocc, norb = mol.nocc[0], mol.norb[0]
-    nvirt = norb - nocc
-    C = mol.eig_vec
-    Cocc = C[:,:,:nocc]
-    Cvirt = C[:,:,nocc:norb]
+    if orbital_window is not None:
+        n_below, m_above = orbital_window
+        occ_idx  = torch.arange(nocc - n_below, nocc)
+        virt_idx = torch.arange(nocc, nocc + m_above)
+    else:
+        occ_idx  = torch.arange(nocc)
+        virt_idx = torch.arange(nocc, norb)
+
+    C = mol.molecular_orbitals
+    Cocc = C[:,:,occ_idx]
+    Cvirt = C[:,:,virt_idx]
+
+    nocc, nvirt = occ_idx.numel(), virt_idx.numel()
 
     if rpa:
         amp_ia_X = amplitudes[0].view(mol.nmol,nroots,nocc,nvirt)
@@ -636,7 +666,7 @@ def getMemUse(dtype,device,mol,nroots=1):
     if dev_type == 'cpu':
         available_memory = psutil.virtual_memory().available
     elif dev_type == 'cuda':
-        available_memory, _ = torch.cuda.mem_get_info(torch.device('cuda:0'))
+        available_memory, _ = torch.cuda.mem_get_info(device)
     else:
         raise ValueError("Unsupported device type. Use 'cpu' or 'cuda'.")
 
@@ -675,4 +705,47 @@ def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
     V[torch.arange(nmol).unsqueeze(1),torch.arange(nstart),sortedidx[:,:nstart]] = 1.0
 
     return nstart, nroots
+
+def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False,orbital_window=None):
+
+    norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
+    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
+        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    norb, nocc = norb_batch[0], nocc_batch[0]
+    if orbital_window is not None:
+        n_below, m_above = orbital_window
+        occ_idx  = torch.arange(nocc - n_below, nocc)
+        virt_idx = torch.arange(nocc, nocc + m_above)
+    else:
+        occ_idx  = torch.arange(nocc)
+        virt_idx = torch.arange(nocc, norb)
+
+    C = mol.molecular_orbitals
+    Cocc = C[:,:,occ_idx]
+    Cvirt = C[:,:,virt_idx]
+
+    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
+
+    if not rpa: #CIS: w = XAX
+        HV = matrix_vector_product_batched(mol, amplitude.unsqueeze(1), w, ea_ei, Cocc, Cvirt)
+        E_cis = torch.linalg.vecdot(amplitude,HV.squeeze(1))
+    else: # RPA
+        #  w = (X Y)(A B)(X) = X(AX+BY) + Y(BX+AY)
+        #           (B A)(Y)
+        X = amplitude[0,...]
+        Y = amplitude[1,...]
+        AX, BX= matrix_vector_product_batched(mol, X.unsqueeze(1), w, ea_ei, Cocc, Cvirt,makeB=True)
+        AY, BY= matrix_vector_product_batched(mol, Y.unsqueeze(1), w, ea_ei, Cocc, Cvirt,makeB=True)
+        E_cis = torch.linalg.vecdot(X,(AX+BY).squeeze(1)) + torch.linalg.vecdot(Y,(BX+AY).squeeze(1))
+
+    # For calculating excitation energy gradient with backprop
+    # L = E_cis.sum()
+    # L.backward(create_graph=False,retain_graph=True)
+    # force = mol.coordinates.grad.clone()
+    # with torch.no_grad(): mol.coordinates.grad.zero_()
+    # torch.set_printoptions(precision=15)
+    # print(f'E_cis is {E_cis}')
+    # print(f'Grad CIS from backprop is\n{force}')
+
+    return E_cis
 

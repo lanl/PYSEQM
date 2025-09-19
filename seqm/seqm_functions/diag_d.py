@@ -34,12 +34,13 @@ def sym_eig_truncd(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
     v: eigenvectors
     '''
 
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
 
     dtype =  x.dtype
     device = x.device
     
     if x.dim()==2:
-        e0,v = torch.symeig(packd(x, nSuperHeavy, nheavyatom, nH),eigenvectors=True,upper=True)
+        e0, v = sym_eigh(packd(x, nSuperHeavy, nheavyatom, nH))
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH+9*nSuperHeavy)] = e0
         
@@ -70,12 +71,12 @@ def sym_eig_truncd(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
             if cond[i]:
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
         try:
-            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            e0, v = sym_eigh(x0)
         except:
             if torch.isnan(x0).any():
                 print(x0)
-            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
-        
+            print("Diagonalization failed")
+            raise
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
@@ -106,11 +107,10 @@ def sym_eig_truncd(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
             if cond[i]:
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
         try:
-            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            e0, v = sym_eigh(x0)
         except:
-            if torch.isnan(x0).any():
-                print(x0)
-            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+            if torch.isnan(x0).any(): print('NaN problem\n',x0)
+            e0, v = sym_eigh(x0)
             
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
@@ -169,10 +169,11 @@ def sym_eig_trunc1d(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
     v: eigenvectors
     '''
 
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0,v = torch.symeig(packd(x, nSuperHeavy, nheavyatom, nH),eigenvectors=True,upper=True)
+        e0, V = sym_eigh(packd(x, nSuperHeavy, nheavyatom, nH))
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH+nSuperHeavy*9)] = e0
         
@@ -186,7 +187,7 @@ def sym_eig_trunc1d(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
         x = x.flatten(start_dim=0, end_dim=1)
         
         e0, v0 = list(zip(*list(map(
-                        lambda a,b,c,d: torch.symeig(packd(a,b,c,d),eigenvectors=True,upper=True),
+                        lambda a,b,c,d: sym_eigh(packd(a,b,c,d)),
                         x,nSuperHeavy,nheavyatom, nH))))
         if CHECK_DEGENERACY:
             P0 = list(map(
@@ -207,13 +208,14 @@ def sym_eig_trunc1d(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
             
         e = e.reshape(x_orig_shape[0:3])
         v0 = tuple(map(lambda a, b : torch.stack((a,b), dim=0), v0[::2], v0[1::2]))
+        V = v0
         P = P.reshape(x_orig_shape)
     
     else:#need to add large diagonal values to replace 0 padding
         #Gershgorin circle theorem estimate upper bounds of eigenvalues
 
         e0, v0 = list(zip(*list(map(
-                        lambda a,b,c,d: torch.symeig(packd(a,b,c,d),eigenvectors=True,upper=True),
+                        lambda a,b,c,d: sym_eigh(packd(a,b,c,d)),
                         x,nSuperHeavy,nheavyatom, nH))))
         if CHECK_DEGENERACY:
             P0 = list(map(
@@ -232,13 +234,19 @@ def sym_eig_trunc1d(x,nSuperHeavy,nheavyatom,nH,nocc, eig_only=False):
         for i in range(nmol):
             e[i,:norb[i]] = e0[i]
             P[i] = unpackd(P0[i], nSuperHeavy[i], nheavyatom[i], nH[i], x.shape[-1])
-    if eig_only:
-        return e, v0
 
+        norb = nheavyatom*4 + nH+9*nSuperHeavy
+        nmax = int(torch.max(norb))        # the largest “norb[i]” over all molecules
+        V = torch.zeros((nmol, nmax, nmax), dtype=dtype, device=device)
+
+        for i in range(nmol):
+            V[i, :norb[i], :norb[i]] = v0[i]
+
+    if eig_only: return e, V
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
 
-    return e,P, v0
+    return e,P, V
 
 
 

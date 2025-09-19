@@ -39,8 +39,10 @@ def calc_dipole_matrix(mol):
     dd, _ = dd_qq(qn0[isX],zetas[isX], zetap[isX])
     dd *= a0
 
-    coord = mol.coordinates.view(mol.nmol*mol.molsize,3)
-    diagonal_dipole = torch.zeros((3, mol.nmol*mol.molsize, 4, 4), dtype=dtype, device=device)
+    valid_atom = (mol.species>0).reshape(-1)
+    n_valid_atoms = mol.maskd.numel()
+    coord = mol.coordinates.reshape(mol.nmol*mol.molsize,3)[valid_atom]
+    diagonal_dipole = torch.zeros((3, n_valid_atoms, 4, 4), dtype=dtype, device=device)
     
     I = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).unsqueeze(0)  # shape (1,1,4,4)
     # Get -coord for non-H atoms and rearrange from (n_nonH, 3) to (3, n_nonH, 1, 1).

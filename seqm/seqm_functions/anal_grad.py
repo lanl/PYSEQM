@@ -1,12 +1,13 @@
 import torch
 from torch import pow
 from .constants import a0, ev
-# from .constants import sto6g_coeff, sto6g_exponent
 from .cal_par import *
-from .diat_overlap import diatom_overlap_matrix
+from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
+from .two_elec_two_center_int import rotate_with_quaternion
 from .energy import pair_nuclear_energy
 
+delta = 1e-5 # delta for finite difference calcs
 
 # @profile
 def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, nj, xij, rij, gam, parnuc, Z,
@@ -18,7 +19,7 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
     Dewar, Michael JS, and Yukio Yamaguchi. "Analytical first derivatives of the energy in MNDO." Computers & Chemistry 2.1 (1978): 25-29.
     https://doi.org/10.1016/0097-8485(78)80005-9
     """
-    if method not in {'PM3', 'AM1', 'MNDO'}:
+    if method not in {'PM3', 'AM1', 'MNDO','PM6_SP'}:
         raise Exception("Analytical gradients implented only for MNDO, AM1 and PM3 methods")
 
     # torch.set_printoptions(precision=6)
@@ -200,62 +201,30 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
     zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int)
 
-    delta = 1e-5
-    # e1b_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    # e2a_x = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    # w_x = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
-    # pair_grad = torch.zeros(rij.shape[0], 3, device=device, dtype=dtype)
-    # for coord in range(3):
-    #     # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-    #     Xij[:, coord] -= delta
-    #     rij_ = torch.norm(Xij, dim=1)
-    #     xij_ = Xij / rij_.unsqueeze(1)
-    #     rij_ = rij_ / a0
-    #     w_plus, e1b_plus, e2a_plus, rho0xi,rho0xj, _, _ = TETCI(const, idxi, idxj, ni, nj, xij_, rij_, Z, \
-    #                                     molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
-    #                                     molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
-    #                                     molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
-    #                                     molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
-    #                                     molecule.alp, molecule.chi, molecule.method)
-    #     gam_ = w_plus[:, 0, 0]
-    #     EnucAB_plus = pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij_, rho0xi, rho0xj, \
-    #                                       molecule.alp, molecule.chi, gam=gam_, method=method, parameters=parnuc)
-    #     Xij[:, coord] += 2.0 * delta
-    #     rij_ = torch.norm(Xij, dim=1)
-    #     xij_ = Xij / rij_.unsqueeze(1)
-    #     rij_ = rij_ / a0
-    #     w_minus, e1b_minus, e2a_minus, rho0xi,rho0xj, _, _ = TETCI(const, idxi, idxj, ni, nj, xij_, rij_, Z,\
-    #                                     molecule.parameters['zeta_s'], molecule.parameters['zeta_p'], molecule.parameters['zeta_d'],\
-    #                                     molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'],\
-    #                                     molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'],\
-    #                                     molecule.parameters['F0SD'], molecule.parameters['G2SD'], molecule.parameters['rho_core'],\
-    #                                     molecule.alp, molecule.chi, molecule.method)
-    #     gam_ = w_minus[:, 0, 0]
-    #     EnucAB_minus = pair_nuclear_energy(Z, const, nmol, ni, nj, idxi, idxj, rij_, rho0xi, rho0xj, \
-    #                                        molecule.alp, molecule.chi, gam=gam_, method=method, parameters=parnuc)
-    #     Xij[:, coord] -= delta
-    #
-    #     e1b_x[:, coord, ...] = (e1b_plus - e1b_minus) / (2.0 * delta)
-    #     e2a_x[:, coord, ...] = (e2a_plus - e2a_minus) / (2.0 * delta)
-    #     w_x[:, coord, ...] = (w_plus - w_minus) / (2.0 * delta)
-    #     pair_grad[:, coord] = (EnucAB_plus - EnucAB_minus) / (2.0 * delta)
-
-    # try another way of doing w_x by stacking
     w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
-    e1b_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    e2a_x_new = torch.zeros(rij.shape[0], 3, 4, 4, device=device, dtype=dtype)
-    ni_ = repeat_tensor(ni)
-    nj_ = repeat_tensor(nj)
-    Z_ = repeat_tensor(Z)
-    idxi_ = repeat_tensor(idxi)
-    idxj_ = repeat_tensor(idxj)
-    zeta_s_ = repeat_tensor(molecule.parameters['zeta_s'])
-    zeta_p_ = repeat_tensor(molecule.parameters['zeta_p'])
-    g_ss_ = repeat_tensor(molecule.parameters['g_ss'])
-    g_pp_ = repeat_tensor(molecule.parameters['g_pp'])
-    g_p2_ = repeat_tensor(molecule.parameters['g_p2'])
-    h_sp_ = repeat_tensor(molecule.parameters['h_sp'])
-    rho_core_ = repeat_tensor(molecule.parameters['rho_core'])
+    e1b_x_new, e2a_x_new = w_derivative_numerical(molecule, Xij, w_x_new)
+    pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
+
+    return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x_new, e2a_x_new, w_x_new, pair_grad,
+                                                mask, maskd, idxi, idxj)
+repeat_tensor = lambda x : torch.cat([x,x])
+
+def w_derivative_numerical(mol, Xij, w_x_new):
+    npairs = Xij.shape[0]
+    e1b_x_new = torch.zeros(mol.rij.shape[0], 3, 4, 4, device=mol.rij.device, dtype=mol.rij.dtype)
+    e2a_x_new = torch.zeros_like(e1b_x_new)
+    ni_ = repeat_tensor(mol.ni)
+    nj_ = repeat_tensor(mol.nj)
+    Z_ = repeat_tensor(mol.Z)
+    idxi_ = repeat_tensor(mol.idxi)
+    idxj_ = repeat_tensor(mol.idxj)
+    zeta_s_ = repeat_tensor(mol.parameters['zeta_s'])
+    zeta_p_ = repeat_tensor(mol.parameters['zeta_p'])
+    g_ss_ = repeat_tensor(mol.parameters['g_ss'])
+    g_pp_ = repeat_tensor(mol.parameters['g_pp'])
+    g_p2_ = repeat_tensor(mol.parameters['g_p2'])
+    h_sp_ = repeat_tensor(mol.parameters['h_sp'])
+    rho_core_ = repeat_tensor(mol.parameters['rho_core'])
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
         Xij[:, coord] -= delta
@@ -272,24 +241,16 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
         xij_ = torch.cat([xij_plus, xij_minus])
 
         # TODO: works for only s,p orbitals
-        w_, e1b_, e2a_, _, _, _, _ = TETCI(const, idxi_, idxj_, ni_, nj_, xij_, rij_, Z_, zeta_s_, zeta_p_, None, None,
+        w_, e1b_, e2a_, _, _, _, _ = TETCI(mol.const, idxi_, idxj_, ni_, nj_, xij_, rij_, Z_, zeta_s_, zeta_p_, None, None,
                                            None, None, g_ss_, g_pp_, g_p2_, h_sp_, None, None, rho_core_, None, None,
-                                           molecule.method)
+                                           mol.method)
         Xij[:, coord] -= delta
 
         w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) / (2.0 * delta)
         e1b_x_new[:, coord, ...] = (e1b_[:npairs]- e1b_[npairs:]) / (2.0 * delta)
         e2a_x_new[:, coord, ...] = (e2a_[:npairs]- e2a_[npairs:]) / (2.0 * delta)
 
-    # alpha = parnuc[0]
-    # tore = const.tore  # Charges
-    # ZAZB = tore[ni] * tore[nj]
-    # pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x_new, method, parameters=parnuc)
-    pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
-
-    return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x_new, e2a_x_new, w_x_new, pair_grad,
-                                                mask, maskd, idxi, idxj)
-repeat_tensor = lambda x : torch.cat([x,x])
+    return e1b_x_new, e2a_x_new
 
 # def overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij):
 #     if torch.any(qn_int[ni]>1):
@@ -349,8 +310,60 @@ repeat_tensor = lambda x : torch.cat([x,x])
 #     '''
 #     print(f'overlap_x from gaussians is \n{overlap_KAB_x}')
 
+def core_core_der_fd(mol,method, gam, parameters):
+    dtype = mol.rij.dtype
+    device = mol.rij.device
+    ni = mol.ni
+    nj = mol.nj
+    idxi = mol.idxi
+    idxj = mol.idxj
+    xij= mol.xij
+    rij=mol.rij
+    Xij = xij * rij.unsqueeze(1) * a0
+    npairs = Xij.shape[0]
+
+    pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
+    ni_ = repeat_tensor(ni)
+    nj_ = repeat_tensor(nj)
+    idxi_ = repeat_tensor(idxi)
+    idxj_ = repeat_tensor(idxj)
+    gss = mol.parameters['g_ss']
+    rho_0 = 0.5*ev/gss
+    rho0xi = rho_0[idxi_]
+    rho0xj = rho_0[idxj_]
+    rho_core = mol.parameters['rho_core']
+    A = (rho_core[idxi_] != 0.000)
+    B = (rho_core[idxj_] != 0.000)
+
+    rho0xi[A] =rho_core[idxi_][A]
+    rho0xj[B] =rho_core[idxj_][B]
+    alp = repeat_tensor(mol.alp)
+    chi = repeat_tensor(mol.chi)
+    gam_ = repeat_tensor(gam)
+
+
+    for coord in range(3):
+        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
+        Xij[:, coord] -= delta
+        rij_plus = torch.norm(Xij, dim=1)
+        rij_plus = rij_plus / a0
+
+        Xij[:, coord] += 2.0 * delta
+        rij_minus = torch.norm(Xij, dim=1)
+        rij_minus = rij_minus / a0
+
+        rij_ = torch.cat([rij_plus, rij_minus])
+
+        diff_save = pair_nuclear_energy(None, mol.const, mol.nmol, ni_, nj_, idxi_, idxj_, rij_, rho0xi,rho0xj, alp, chi, gam_, method=method, parameters=parameters)
+        Xij[:, coord] -= delta
+        pair_grad[:, coord] = (diff_save[:npairs] - diff_save[npairs:]) / (2.0 * delta)
+
+    return pair_grad
+
 
 def core_core_der(mol, gam, w_x, method, parameters):
+    if method =='PM6' or method =='PM6_SP' or method =='PM6_SP_STAR':
+        return core_core_der_fd(mol, method, gam, parameters)
     ni = mol.ni
     nj = mol.nj
     idxi = mol.idxi
@@ -375,7 +388,7 @@ def core_core_der(mol, gam, w_x, method, parameters):
     # For MNDO, core-core term is ZAZB*(SASA|SBSB)*g, where g=1+exp(-alpha_A*RAB)+exp(-alpha_B*RAB)
     prefactor = alpha[idxi]
     prefactor[XH] = prefactor[XH] * rija[XH] - 1.0
-    t3 = alpha[idxj] * torch.exp(-alpha[idxj] * rija)
+    t3 = alpha[idxj] * t3
     coreTerm = ZAZB * gam / rija * (prefactor * tmp + t3)
     # The derivative of the core-core term is ZAZB*(SASA|SBSB)*dg/dx + ZAZB*g*d(SASA|SBSB)/dx
     # Here we calculate the first term, i.e., ZAZB*(SASA|SBSB)*dg/dx
@@ -476,9 +489,7 @@ def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2,
 
 from .constants import overlap_cutoff
 
-
 def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int):
-    delta = 1e-5  # TODO: Make sure this is a good delta (small enough, but still doesnt cause numerical instabilities)
     # overlap_pairs = rij <= overlap_cutoff
     # di_plus = torch.zeros(Xij.shape[0], 4, 4, dtype=Xij.dtype, device=Xij.device)
     # di_minus = torch.clone(di_plus)
@@ -537,7 +548,7 @@ def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, ze
         rij_ = torch.cat([rij_plus, rij_minus])
         xij_ = torch.cat([xij_plus, xij_minus])
 
-        di_[overlap_pairs] = diatom_overlap_matrix(
+        di_[overlap_pairs] = diatom_overlap_matrix_PM6_SP(
             ni_[overlap_pairs],
             nj_[overlap_pairs],
             xij_[overlap_pairs],
@@ -752,121 +763,153 @@ def der_TETCILF(w_x_final, ni, nj, xij, Xij, r0, da0, db0, qa0, qb0, rho0a, rho0
     # But in the molecular frame we have px,py,pz which are rotations of p-sigma, p-pi, p-pi'
     # The p orbitals rotate just like the coordinate frame, so the rotation matrix is easy to express
     # We now make the rotation matrix and its derivative for the p-orbitals
-    rot = torch.zeros(r0.shape[0], 3, 3, device=device, dtype=dtype)
-    rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
 
-    rxy2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 1])
-    ryz2 = torch.square(Xij[:, 1]) + torch.square(Xij[:, 2])
-    rxz2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 2])
-    axis_tolerance = 1e-8
-    onerij = 1.0 / a0 / r0
+    # rot = torch.zeros(r0.shape[0], 3, 3, device=device, dtype=dtype)
+    # rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
+    #
+    # rxy2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 1])
+    # # ryz2 = torch.square(Xij[:, 1]) + torch.square(Xij[:, 2])
+    # # rxz2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 2])
+    # axis_tolerance = 1e-12
+    # onerij = 1.0 / a0 / r0
+    #
+    # # Xalign = ryz2 < axis_tolerance
+    # # Yalign = rxz2 < axis_tolerance
+    # Zalign = rxy2 < axis_tolerance
+    # # Noalign = ~(Xalign | Yalign | Zalign)
+    # Noalign = ~(Zalign)
+    # # if torch.any(Zalign):
+    # #     print(f"Unfortunately z-axes align for {xij.shape[0]+ ~Noalign.sum() + 1}/{xij.shape[0]} pairs. This may cause some numerical instabilities in the derivative of two-electron integrals")
+    #
+    # xij_ = -xij[Noalign, ...]
+    # rot[Noalign, 0, :] = xij_
+    # onerxy = 1.0 / torch.sqrt(rxy2[Noalign])
+    # rxy_over_rab = (torch.sqrt(rxy2) / r0)[Noalign] / a0
+    # rab_over_rxy = a0 * r0[Noalign] * onerxy
+    # rab_over_rxy_sq = torch.square(rab_over_rxy)
+    #
+    # # The (1,0) element of the rotation matrix is -Y/sqrt(X^2+Y^2)*sign(X). If X (=xi-xj) is zero then there is a discontinuity in the sign function
+    # # and hence the derivative will not exist. So I'm printing a warning that there might be numerical errors here
+    # # Similaryly the (1,1) element of the rotation matrix is abs(X/sqrt(X^2+Y^2)). Again, the derivative of abs(X) will not exist when X=0, and hence this
+    # # will lead to errors.
+    #
+    # # if torch.any(xij_[:, 0] == 0):
+    # #     print(
+    # #         "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
+    # #     )
+    #
+    # # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
+    # rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy
+    # rot[Noalign, 1, 1] = xij_[:, 0] * rab_over_rxy
+    #
+    # rot[Noalign, 2, 0] = xij_[:, 0] * xij_[:, 2] * rab_over_rxy
+    # rot[Noalign, 2, 1] = xij_[:, 1] * xij_[:, 2] * rab_over_rxy
+    # rot[Noalign, 2, 2] = -rxy_over_rab
+    #
+    # # Derivative of the rotation matrix
+    # termX = xij_[:, 0] * onerij[Noalign]
+    # termY = xij_[:, 1] * onerij[Noalign]
+    # termZ = xij_[:, 2] * onerij[Noalign]
+    # # term = Xij[Noalign,:]*onerij.unsqueeze(1)
+    # rot_der[Noalign, 0, 0, 0] = onerij[Noalign] - xij_[:, 0] * termX
+    # rot_der[Noalign, 0, 0, 1] = -xij_[:, 0] * termY
+    # rot_der[Noalign, 0, 0, 2] = -xij_[:, 0] * termZ
+    #
+    # rot_der[Noalign, 1, 0, 0] = -xij_[:, 1] * termX
+    # rot_der[Noalign, 1, 0, 1] = onerij[Noalign] - xij_[:, 1] * termY
+    # rot_der[Noalign, 1, 0, 2] = -xij_[:, 1] * termZ
+    #
+    # rot_der[Noalign, 2, 0, 0] = -xij_[:, 2] * termX
+    # rot_der[Noalign, 2, 0, 1] = -xij_[:, 2] * termY
+    # rot_der[Noalign, 2, 0, 2] = onerij[Noalign] - xij_[:, 2] * termZ
+    #
+    # rot_der[Noalign, 0, 2, 2] = -xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
+    # rot_der[Noalign, 1, 2, 2] = -xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
+    # rot_der[Noalign, 2, 2, 2] = -rot[Noalign, 2, 2] * termZ
+    #
+    # rot_der[Noalign, 0, 1, 0] = -rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
+    # rot_der[Noalign, 1, 1, 0] = -torch.square(rot[Noalign, 1, 1]) * onerxy
+    # # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
+    # # tolerance = 1e-8
+    # # assert torch.allclose(rot_der[Noalign,0,1,0],-rot_der[Noalign,1,0,0]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq,atol=tolerance)
+    # # assert torch.allclose(rot_der[Noalign,1,1,0],-rot_der[Noalign,1,0,1]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
+    # # assert torch.all(torch.abs(-rot_der[Noalign,1,0,2]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
+    #
+    # rot_der[Noalign, 0, 1, 1] = torch.square(rot[Noalign, 1, 0]) * onerxy
+    # rot_der[Noalign, 1, 1, 1] = rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
+    # # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
+    # # tolerance = 1e-8
+    # # mopacs = rot_der[Noalign,0,0,0]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq
+    # # mine = rot_der[Noalign,0,1,1]
+    # # assert torch.allclose(mine,mopacs,atol=tolerance)
+    # # assert torch.allclose(rot_der[Noalign,1,1,1],rot_der[Noalign,0,0,1]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
+    # # assert torch.all(torch.abs(rot_der[Noalign,0,0,2]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
+    #
+    # rot_der[Noalign, 0, 2, 0] = xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy + xij_[:, 0] * rot_der[
+    #     Noalign, 2, 0, 0] * rab_over_rxy + xij_[:, 0] * xij_[:, 2] * rot_der[Noalign, 0, 2, 2] * rab_over_rxy_sq
+    # rot_der[Noalign, 1, 2, 0] = -torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
+    # rot_der[Noalign, 2, 2, 0] = termX * rxy_over_rab
+    #
+    # rot_der[Noalign, 0, 2, 1] = rot_der[Noalign, 1, 2, 0]
+    # rot_der[Noalign, 1, 2, 1] = xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy + xij_[:, 1] * rot_der[
+    #     Noalign, 2, 0, 1] * rab_over_rxy + xij_[:, 1] * xij_[:, 2] * rot_der[Noalign, 1, 2, 2] * rab_over_rxy_sq
+    # rot_der[Noalign, 2, 2, 1] = termY * rxy_over_rab
+    #
+    # rot[Zalign, 0, 2] = torch.sign(-xij[Zalign, 2])
+    # rot[Zalign, 1, 1] = rot[Zalign, 0, 2]
+    # rot[Zalign, 2, 0] = 1.0
+    # # rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
+    # # rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
+    # # rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
+    # # rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
+    #
+    # # rot[Xalign, 0, 0] = torch.sign(-xij[Xalign, 0])
+    # # rot[Xalign, 1, 1] = rot[Xalign, 0, 0]
+    # # rot[Xalign, 2, 2] = 1.0
+    # # rot_der[Xalign, 1, 0, 1] = onerij[Xalign]
+    # # rot_der[Xalign, 1, 1, 0] = -onerij[Xalign]
+    # # rot_der[Xalign, 2, 0, 2] = onerij[Xalign]
+    # # rot_der[Xalign, 2, 2, 0] = -rot[Xalign, 0, 0] * onerij[Xalign]
+    #
+    # # rot[Yalign, 0, 1] = torch.sign(-xij[Yalign, 1])
+    # # rot[Yalign, 1, 0] = -rot[Yalign, 0, 1]
+    # # rot[Yalign, 2, 2] = 1.0
+    # # rot_der[Yalign, 0, 0, 0] = onerij[Yalign]
+    # # rot_der[Yalign, 0, 1, 1] = onerij[Yalign]
+    # # rot_der[Yalign, 2, 0, 2] = onerij[Yalign]
+    # # rot_der[Yalign, 2, 2, 1] = -rot[Yalign, 0, 1] * onerij[Yalign]
 
-    Xalign = ryz2 < axis_tolerance
-    Yalign = rxz2 < axis_tolerance
-    Zalign = rxy2 < axis_tolerance
-    Noalign = ~(Xalign | Yalign | Zalign)
+    # v = -xij
+    # v.requires_grad_()
+    # rot = rotate_with_quaternion(v)
+    # rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
+    # for j in range(3):
+    #     # build a batched “direction” d with 1’s in coordinate j
+    #     d = torch.zeros_like(v)
+    #     d[:, j] = 1.0
+    #
+    #     # jvp returns (r, dr) where dr = (∂r/∂v) ⋅ d, shape = (n,3,3)
+    #     _, dr = jvp(rotate_with_quaternion, (v,), (d,), create_graph=True)
+    #
+    #     # dr[i,a,b] == ∂r[i,a,b] / ∂v[i,j]
+    #     rot_der[:, j, :, :] = dr
 
-    xij_ = -xij[Noalign, ...]
-    rot[Noalign, 0, :] = xij_
-    onerxy = 1.0 / torch.sqrt(rxy2[Noalign])
-    rxy_over_rab = (torch.sqrt(rxy2) / r0)[Noalign] / a0
-    rab_over_rxy = a0 * r0[Noalign] * onerxy
-    rab_over_rxy_sq = torch.square(rab_over_rxy)
+    v = -xij
+    rot, rot_der = rotate_with_quaternion(v,calculate_gradient=True)
 
-    # The (1,0) element of the rotation matrix is -Y/sqrt(X^2+Y^2)*sign(X). If X (=xi-xj) is zero then there is a discontinuity in the sign function
-    # and hence the derivative will not exist. So I'm printing a warning that there might be numerical errors here
-    # Similaryly the (1,1) element of the rotation matrix is abs(X/sqrt(X^2+Y^2)). Again, the derivative of abs(X) will not exist when X=0, and hence this
-    # will lead to errors.
-    if (xij_[:, 0].any() == 0):
-        print(
-            "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
-        )
+    # rot_der is dR/dv. But I want dR/dx (x are components of -Xij). We have, dR_ij/dx_a = \sum_b dR_ij/dv_b * dv_b/dx_a
+    # We first need the Jacobian J, where J_ba = dv_b/dx_a. 
+    # v is -Xij/norm(Xij)
+    # J_{ba} = ∂u_b/∂v_a = (δ_ba - v_b v_a/||v||) / ||Xij||
+    I = torch.eye(3, device=device, dtype=dtype)  # (3,3)
+    J_uv = (I - v.unsqueeze(-1) * v.unsqueeze(-2)) / r0.unsqueeze(-1).unsqueeze(-1) / a0
+    rot_der = torch.einsum('nbij,nba->naij', rot_der, J_uv)  # (n,4,3)
 
-    # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
-    signcorrect = torch.sign(xij_[:, 0] + torch.finfo(dtype).eps)
-    rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy * signcorrect
-    rot[Noalign, 1, 1] = torch.abs(xij_[:, 0] * rab_over_rxy)
-
-    rot[Noalign, 2, 0] = -xij_[:, 0] * xij_[:, 2] * rab_over_rxy
-    rot[Noalign, 2, 1] = -xij_[:, 1] * xij_[:, 2] * rab_over_rxy
-    rot[Noalign, 2, 2] = rxy_over_rab
-
-    # Derivative of the rotation matrix
-    termX = xij_[:, 0] * onerij[Noalign]
-    termY = xij_[:, 1] * onerij[Noalign]
-    termZ = xij_[:, 2] * onerij[Noalign]
-    # term = Xij[Noalign,:]*onerij.unsqueeze(1)
-    rot_der[Noalign, 0, 0, 0] = onerij[Noalign] - xij_[:, 0] * termX
-    rot_der[Noalign, 0, 0, 1] = -xij_[:, 0] * termY
-    rot_der[Noalign, 0, 0, 2] = -xij_[:, 0] * termZ
-
-    rot_der[Noalign, 1, 0, 0] = -xij_[:, 1] * termX
-    rot_der[Noalign, 1, 0, 1] = onerij[Noalign] - xij_[:, 1] * termY
-    rot_der[Noalign, 1, 0, 2] = -xij_[:, 1] * termZ
-
-    rot_der[Noalign, 2, 0, 0] = -xij_[:, 2] * termX
-    rot_der[Noalign, 2, 0, 1] = -xij_[:, 2] * termY
-    rot_der[Noalign, 2, 0, 2] = onerij[Noalign] - xij_[:, 2] * termZ
-
-    rot_der[Noalign, 0, 2, 2] = xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
-    rot_der[Noalign, 1, 2, 2] = xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
-    rot_der[Noalign, 2, 2, 2] = -rot[Noalign, 2, 2] * termZ
-
-    rot_der[Noalign, 0, 1, 0] = -rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
-    rot_der[Noalign, 1, 1, 0] = -torch.square(rot[Noalign, 1, 1]) * onerxy
-    # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
-    # tolerance = 1e-8
-    # assert torch.allclose(rot_der[Noalign,0,1,0],-rot_der[Noalign,1,0,0]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # assert torch.allclose(rot_der[Noalign,1,1,0],-rot_der[Noalign,1,0,1]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # assert torch.all(torch.abs(-rot_der[Noalign,1,0,2]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-
-    rot_der[Noalign, 0:2, 1, 0] *= signcorrect.unsqueeze(1)
-
-    rot_der[Noalign, 0, 1, 1] = torch.square(rot[Noalign, 1, 0]) * onerxy
-    rot_der[Noalign, 1, 1, 1] = rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
-    # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
-    # tolerance = 1e-8
-    # mopacs = rot_der[Noalign,0,0,0]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq
-    # mine = rot_der[Noalign,0,1,1]
-    # assert torch.allclose(mine,mopacs,atol=tolerance)
-    # assert torch.allclose(rot_der[Noalign,1,1,1],rot_der[Noalign,0,0,1]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # assert torch.all(torch.abs(rot_der[Noalign,0,0,2]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-
-    rot_der[Noalign, 0:2, 1, 1] *= signcorrect.unsqueeze(1)
-
-    rot_der[Noalign, 0, 2, 0] = -xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy - xij_[:, 0] * rot_der[
-        Noalign, 2, 0, 0] * rab_over_rxy + xij_[:, 0] * xij_[:, 2] * rot_der[Noalign, 0, 2, 2] * rab_over_rxy_sq
-    rot_der[Noalign, 1, 2, 0] = torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
-    rot_der[Noalign, 2, 2, 0] = -termX * rxy_over_rab
-
-    rot_der[Noalign, 0, 2, 1] = rot_der[Noalign, 1, 2, 0]
-    rot_der[Noalign, 1, 2, 1] = -xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy - xij_[:, 1] * rot_der[
-        Noalign, 2, 0, 1] * rab_over_rxy + xij_[:, 1] * xij_[:, 2] * rot_der[Noalign, 1, 2, 2] * rab_over_rxy_sq
-    rot_der[Noalign, 2, 2, 1] = -termY * rxy_over_rab
-
-    rot[Zalign, 0, 2] = torch.sign(-xij[Zalign, 2])
-    rot[Zalign, 1, 1] = 1.0
-    rot[Zalign, 2, 0] = rot[Zalign, 0, 2]
-    rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
-    rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
-    rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
-    rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
-
-    rot[Xalign, 0, 0] = torch.sign(-xij[Xalign, 0])
-    rot[Xalign, 1, 1] = rot[Xalign, 0, 0]
-    rot[Xalign, 2, 2] = 1.0
-    rot_der[Xalign, 1, 0, 1] = onerij[Xalign]
-    rot_der[Xalign, 1, 1, 0] = -onerij[Xalign]
-    rot_der[Xalign, 2, 0, 2] = onerij[Xalign]
-    rot_der[Xalign, 2, 2, 0] = -rot[Xalign, 0, 0] * onerij[Xalign]
-
-    rot[Yalign, 0, 1] = torch.sign(-xij[Yalign, 1])
-    rot[Yalign, 1, 0] = -rot[Yalign, 0, 1]
-    rot[Yalign, 2, 2] = 1.0
-    rot_der[Yalign, 0, 0, 0] = onerij[Yalign]
-    rot_der[Yalign, 0, 1, 1] = onerij[Yalign]
-    rot_der[Yalign, 2, 0, 2] = onerij[Yalign]
-    rot_der[Yalign, 2, 2, 1] = -rot[Yalign, 0, 1] * onerij[Yalign]
+    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")
+    #
+    # print(f"rot der check zero: {torch.sum(rot_der[:,0,...]@rot.transpose(1,2)+rot@rot_der[:,0,...].transpose(1,2))}")
+    # print(f"rot der check zero: {torch.sum(rot_der[:,1,...]@rot.transpose(1,2)+rot@rot_der[:,1,...].transpose(1,2))}")
+    # print(f"rot der check zero: {torch.sum(rot_der[:,2,...]@rot.transpose(1,2)+rot@rot_der[:,2,...].transpose(1,2))}")
 
     rotXH = rot[XH, ...]
     rot = rot[XX, ...]

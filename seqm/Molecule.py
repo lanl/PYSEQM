@@ -102,8 +102,11 @@ class Molecule(torch.nn.Module):
         self.Krylov_Error = None
 
         self.analytical_gradient = None
-        self.active_state = 0
+        self.active_state = seqm_parameters.get('active_state',0)
         self.cis_amplitudes = None
+        self.cis_energies = None
+        self.molecular_orbitals = None
+        self.all_forces = None
         self.old_mos = None
         
                 

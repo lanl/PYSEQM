@@ -73,7 +73,7 @@ seqm_parameters = {
                    # 'uhf' : True,
                    # 'analytical_grad':True
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':10,'method':'rpa'},
+                   'excited_states': {'n_states':10,'method':'cis'},
                    }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -87,8 +87,8 @@ esdriver = Electronic_Structure(seqm_parameters).to(device)
 # analyt_time = molecules.const.timing["Force"]
 # molecules.const.timing["Force"] = []
 for i in range(1):
-    # esdriver(molecules,cis_nac=[True,1,2])
-    esdriver(molecules,cis_gradient=[True])
+    esdriver(molecules,cis_nac=[True,1,2])
+    # esdriver(molecules,cis_gradient=[True])
     # esdriver(molecules)
 # backprop_time = molecules.const.timing["Force"]
 # import os

@@ -59,6 +59,8 @@ setup(
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=['numpy', 'torch>=1.9'],
+    # for doing geometry optimization with geomeTRIC optimizer (best optimizer for molecular geometries)
+    extras_require={ "geomopt": [ "geometric",], },
     include_package_data=True,
     package_data={'seqm': ['params/*.csv']},
 

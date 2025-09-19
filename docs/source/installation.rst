@@ -1,52 +1,35 @@
 Installation
 ============
 
-Clone PySEQM
+Clone and Install from Source
 ------------------------------
 
-This is the recommended way to install PySEQM
+This is the recommended way to install PYSEQM
 
 .. code-block:: bash
 
       git clone https://github.com/lanl/PYSEQM.git
-
-
-.. note::
-
-   You must install PyTorch and Numpy first before installing PySEQM
+      cd PYSEQM
+      pip install .
 
 
 
 
-.. Upgrade PySEQM
-.. --------------
+Verify the Installation
+-------------------------
 
-.. If you already have PySEQM installed, you can upgrade it using:
-
-.. .. code-block:: bash
-
-..    pip install --upgrade git+https://github.com/lanl/pyseqm.git
-
-
-Test the Installation
----------------------
-
-To verify the installation, run:
+After installation, confirm that the package imports correctly:
 
 .. code-block:: bash
 
-    python -c "import torch; print('PyTorch version:', torch.__version__)"
-    python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
-    python -c "import torch; print('GPU name:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None')"
+   python -c "import seqm; print('✔ PYSEQM imported successfully')"
 
+Check GPU Support (Optional)
+----------------------------
+If you have NVIDIA CUDA–enabled hardware and installed a compatible PyTorch build, verify GPU availability:
 
-.. You can set up an environment to run PySEQM if you have Conda or Miniconda installed
+.. code-block:: bash
 
-.. .. code-block:: bash
+    python -c "import torch; print(f'PyTorch {torch.__version__} installed | CUDA available: {torch.cuda.is_available()}')"
 
-..     module load miniconda3
-..     conda create -n pyseqm-env python=3.12
-..     conda activate pyseqm-env
-..     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-..     pip install git+https://github.com/lanl/pyseqm.git
 

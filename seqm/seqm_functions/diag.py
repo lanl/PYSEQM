@@ -228,7 +228,7 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
     
     if x.dim()==2:
         print('diag: DOING 2')
-        e0, v = sym_eigh(pack(x, nheavyatom, nH))
+        e0, V = sym_eigh(pack(x, nheavyatom, nH))
         e = torch.zeros((x.shape[0]), dtype=dtype, device=device)
         e[:(nheavyatom*4+nH)] = e0
     elif x.dim()==4:#need to add large diagonal values to replace 0 padding
@@ -265,6 +265,7 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
             
         e = e.reshape(x_orig_shape[0:3])
         v0 = tuple(map(lambda a, b : torch.stack((a, b), dim=0), v0[::2], v0[1::2]))
+        V = v0
         P = P.reshape(x_orig_shape)
     else:#need to add large diagonal values to replace 0 padding
         #Gershgorin circle theorem estimate upper bounds of eigenvalues
@@ -288,10 +289,17 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
             e[i,:norb[i]] = e0[i]
             P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
 
-    if eig_only: return e, v0
+        norb = nheavyatom*4 + nH           
+        nmax = int(torch.max(norb))        # the largest “norb[i]” over all molecules
+        V = torch.zeros((nmol, nmax, nmax), dtype=dtype, device=device)
+
+        for i in range(nmol):
+            V[i, :norb[i], :norb[i]] = v0[i]
+
+    if eig_only: return e, V
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
-    return e, P, v0
+    return e, P, V
 
 
 def pytorch_symeig(A):
