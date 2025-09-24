@@ -1,7 +1,7 @@
 import torch
 from seqm.basics import *
 
-def Spherical_Pot_Force(molecule, radius, k=1, center=[0.0,0.0,0.0]):
+def Spherical_Pot_Force(molecule, radius, k=1.0, center=[0.0,0.0,0.0]):
     '''
     Spherical potential around zero-potential bubble.
     

@@ -92,11 +92,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, seqm_parameters, Temp, timestep=1.0,  output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}, *args, **kwargs):
+    def __init__(self, seqm_parameters, timestep=1.0,  output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}, *args, **kwargs):
 
         super().__init__(*args, **kwargs)
         self.seqm_parameters = seqm_parameters
-        self.Temp = Temp + 1e-7 # Having zero temperature causes Nans in the calculation
         self.timestep = timestep
         self.esdriver = esdriver(self.seqm_parameters)
         self.acc_scale = 0.009648532800137615
@@ -104,19 +103,18 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.kinetic_energy_scale = 1.0364270099032438e2
         self.output = output
 
-    def initialize_velocity(self, molecule, vel_com=True):
+    def initialize_velocity(self, molecule, Temperature, vel_com=True):
 
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
         MASS = torch.as_tensor(molecule.const.mass)
         MASS[0] = 1.0
         mass = MASS[molecule.species].unsqueeze(2)
-        scale = torch.sqrt(self.Temp/mass)*self.vel_scale
+        scale = torch.sqrt(Temperature/mass)*self.vel_scale
         molecule.velocities = torch.randn(molecule.coordinates.shape, dtype=dtype, device=device)*scale
         molecule.velocities[molecule.species==0,:] = 0.0
-        if vel_com:
+        if vel_com and Temperature > 0.0:
             #remove center of mass velocity
-            print('Initialize velocities: zero_com')
             self.zero_com(molecule)
         return molecule.velocities
 
@@ -133,18 +131,27 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         mass = molecule.const.mass[molecule.species].unsqueeze(2)
         M = torch.sum(mass,dim=1,keepdim=True)
         _, T0 = self.kinetic_energy(molecule)
+        
         with torch.no_grad():
             r_com = torch.sum(mass*molecule.coordinates,dim=1,keepdim=True)/M
             molecule.coordinates.sub_(r_com)
             v_com = torch.sum(mass*molecule.velocities,dim=1,keepdim=True)/M
             molecule.velocities.sub_(v_com)
-            L = torch.sum(mass * torch.cross(molecule.coordinates, molecule.velocities, dim=2), dim=1)
+            L = torch.sum(mass * torch.linalg.cross(molecule.coordinates, molecule.velocities, dim=2), dim=1)
             I = torch.sum(mass * torch.norm(molecule.coordinates, dim=2, keepdim=True)**2, dim=1, keepdim=True) \
                 * torch.eye(3, dtype=molecule.coordinates.dtype, device=molecule.coordinates.device).reshape(1,3,3) \
                 - torch.sum( mass.unsqueeze(3) * molecule.coordinates.unsqueeze(3) * molecule.coordinates.unsqueeze(2), dim=1)
             omega = torch.linalg.solve(I, L.unsqueeze(2))
-            molecule.velocities.add_( torch.cross(molecule.coordinates, omega.reshape(-1,1,3).repeat(1,molecule.coordinates.shape[1],1)) )
+            molecule.velocities.add_( torch.linalg.cross(molecule.coordinates, omega.reshape(-1,1,3).repeat(1,molecule.coordinates.shape[1],1)) )
+            # Rescale speeds so the kinetic energy (temperature) returns to what it was before the removal of COM velocity
             _, T1 = self.kinetic_energy(molecule)
+            bad = (~torch.isfinite(T1)) | (T1 == 0.0)
+            if bad.any():
+                idx = torch.nonzero(bad.squeeze(1), as_tuple=False).squeeze(1).tolist()
+                raise ValueError(
+                    f"Post-correction kinetic energy T1 is zero or non-finite for batch indices {idx}. "
+                    "Velocities have no remaining DOF after COM/AM removal."
+                )
             alpha = torch.sqrt(T0/T1)
             molecule.velocities.mul_(alpha.reshape(-1,1,1))
             #Lnew = torch.sum(mass * torch.cross(coordinates, velocities), dim=1)
@@ -194,9 +201,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 fn = self.output['prefix'] + "." + str(mol) + ".xyz"
                 f = open(fn,'a+')
                 if e_gap.dim()==1:
-                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol], Err[mol], time.time()))
+                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.9f}  Ep= {:12.9f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol], Err[mol], time.time()))
                 else:
-                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.6f}  Ep= {:12.6f}  E_gap= {:12.6f}/{:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], e_gap[mol,1], Err[mol], time.time()))
+                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.9f}  Ep= {:12.9f}  E_gap= {:12.6f}/{:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], e_gap[mol,1], Err[mol], time.time()))
                     
                 for atom in range(molecule.coordinates.shape[1]):
                     if molecule.species[mol,atom]>0:
@@ -347,7 +354,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     #same formula as in lammps
     """
 
-    def __init__(self, damp=1.0, *args, **kwargs):
+    def __init__(self, damp=1.0, Temp = 0.0, *args, **kwargs):
         """
         damp is damping factor in unit of time (fs)
         Temp : temperature in unit of Kelvin
@@ -360,6 +367,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         """
         
         self.damp = damp
+        self.Temp = Temp
         super().__init__(*args, **kwargs)
         #self.T = Temp
         # Fr = sqrt(2 Kb T m / (dt damp))*R(t)
@@ -415,7 +423,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, xl_bomd_params=dict(), damp=False, *args, **kwargs):
+    def __init__(self, xl_bomd_params=dict(), damp=False, Temp=0.0, *args, **kwargs):
         """
         unit for timestep is femtosecond
         """
@@ -423,6 +431,7 @@ class XL_BOMD(Molecular_Dynamics_Basic):
         self.xl_bomd_params = xl_bomd_params
 
         self.damp = damp
+        self.Temp = Temp
         self.Fr_scale = 0.09450522179973914
         super().__init__(*args, **kwargs)
         self.esdriver = esdriver(self.seqm_parameters)

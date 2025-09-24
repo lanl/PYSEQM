@@ -253,7 +253,7 @@ class EnergyXL(torch.nn.Module):
             del V, PO1, QQ, d_D, dDS, W, dW, FO1, O, MM            
             
         else:
-            sp2 = self.seqm_parameters['sp2']
+            sp2 = self.seqm_parameters.get('sp2',[False])
             if molecule.const.do_timing:
                 t0 = time.time()
             with torch.no_grad():
