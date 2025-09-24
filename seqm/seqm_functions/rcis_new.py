@@ -3,12 +3,13 @@ from .constants import a0
 import math
 from seqm.seqm_functions.pack import packone, unpackone
 from .dipole import calc_dipole_matrix
-from .rcis_batch import orthogonalize_to_current_subspace, getMaxSubspacesize, getMemUse, print_rcis_analysis
+from .rcis_batch import orthogonalize_to_current_subspace, getMaxSubspacesize, getMemUse, print_rcis_analysis, get_occ_virt
 
 def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
+       This function is called when all the molecules in the batch are NOT the same
 
     :param mol: Molecule Orbital Coefficients
     :param w: 2-electron integrals
@@ -27,21 +28,21 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     nvirt = int(torch.max(nvirt_batch))
     nov = nocc * nvirt
 
+    nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window=None, e_mo=e_mo)
     nov_batch = nocc_batch * (norb_batch-nocc_batch)
     if nroots > torch.min(nov_batch):
         raise Exception(f"Maximum number of roots for this batch of molecules is {torch.min(nov_batch)}. Reduce the requested number of roots")
 
     # Precompute energy differences (ea_ei) and form the approximate diagonal of the Hamiltonian (approxH)
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
-    ea_ei = torch.zeros(nmol,nocc,nvirt,device=device,dtype=dtype)
-    for i in range(nmol):
-        ea_ei[i,:nocc_batch[i],:nvirt_batch[i]] = e_mo[i,nocc_batch[i]:norb_batch[i]].unsqueeze(0) - e_mo[i,:nocc_batch[i]].unsqueeze(1)
     approxH = ea_ei.view(-1,nov)
     
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
 
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
+
+    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
 
     if init_amplitude_guess is None:
         occ_idx  = torch.arange(nocc, device=device).view(1, -1, 1)
@@ -68,7 +69,6 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
 
     max_iter = 100 # TODO: User-defined
-    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
     davidson_iter = 0
     vstart = torch.zeros(nmol,dtype=torch.long,device=device)
     done = torch.zeros(nmol,dtype=torch.bool,device=device)
@@ -76,12 +76,12 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False # TODO: User-defined/fixed
 
-    C = mol.molecular_orbitals
-    Cocc = torch.zeros(nmol,norb,nocc,device=device,dtype=dtype)
-    Cvirt = torch.zeros(nmol,norb,nvirt,device=device,dtype=dtype)
-    for i in range(nmol):
-        Cocc[i,:,:nocc_batch[i]] = C[i,:,:nocc_batch[i]]
-        Cvirt[i,:,:nvirt_batch[i]] = C[i,:,nocc_batch[i]:norb_batch[i]]
+    # C = mol.molecular_orbitals
+    # Cocc = torch.zeros(nmol,norb,nocc,device=device,dtype=dtype)
+    # Cvirt = torch.zeros(nmol,norb,nvirt,device=device,dtype=dtype)
+    # for i in range(nmol):
+    #     Cocc[i,:,:nocc_batch[i]] = C[i,:,:nocc_batch[i]]
+    #     Cvirt[i,:,:nvirt_batch[i]] = C[i,:,nocc_batch[i]:norb_batch[i]]
 
     e_val_n = torch.zeros(nmol,nroots_max,dtype=dtype,device=device)
     amplitude_store = torch.zeros(nmol,nroots_max,nov,dtype=dtype,device=device)
@@ -345,7 +345,8 @@ def makeA_pi_any_batched(mol,P_xi,w_,allSymmetric=False):
              .reshape(nmol,nD, 4*molsize, 4*molsize)
     del F
 
-    norb_max = torch.max(mol.norb)
+    norb_max = int(torch.max(mol.norb))
+    # Alternatively, norb_max = P_xi.shape[2]
     F0 = torch.stack([
         packone(F0[i,j], 4*nHeavy[i], nHydro[i], norb_max)
         for i in range(nmol) for j in range(nD)
@@ -522,16 +523,8 @@ def get_subspace_eig_any_batched(H,nroots,max_nroots,zero_pad,e_val_n,done,nonor
 
 def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False):
 
-    nocc_batch, norb_batch = mol.nocc, mol.norb
-    nvirt_batch = norb_batch - nocc_batch
-    norb, nocc = int(torch.max(norb_batch).item()), int(torch.max(nocc_batch).item())
-    nvirt = int(torch.max(nvirt_batch))
-    C = mol.molecular_orbitals
-    Cocc = torch.zeros(mol.nmol,norb,nocc,device=amplitudes.device,dtype=amplitudes.dtype)
-    Cvirt = torch.zeros(mol.nmol,norb,nvirt,device=amplitudes.device,dtype=amplitudes.dtype)
-    for i in range(mol.nmol):
-        Cocc[i,:,:nocc_batch[i]] = C[i,:,:nocc_batch[i]]
-        Cvirt[i,:,:nvirt_batch[i]] = C[i,:,nocc_batch[i]:norb_batch[i]]
+    nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
+    norb = Cocc.shape[1]
 
     if rpa:
         amp_ia_X = amplitudes[0].view(mol.nmol,nroots,nocc,nvirt)

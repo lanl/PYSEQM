@@ -1,94 +1,29 @@
 import torch
 from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der, core_core_der
-from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
-from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch
+from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch, make_cis_densities
 from .constants import a0
 
-def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc,rpa=False,include_ground_state=False):
+def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc,rpa=False,include_ground_state=False, orbital_window = None, calculate_dipole=False):
     """
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the 
          state for which the gradient is required has to be selected and put together into the amp tensor
     """
-    amp = mol.cis_amplitudes[...,mol.active_state-1,:]
-    device = amp.device
-    dtype = amp.dtype
-    norb = mol.norb[0]
-    nocc = mol.nocc[0]
-    nvirt = norb - nocc
-    nov = nocc*nvirt
-
-    # CIS unrelaxed density B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j 
-    C = mol.molecular_orbitals 
-    Cocc = C[:,:,:nocc]
-    Cvirt = C[:,:,nocc:norb]
-    nmol = mol.nmol
-    if rpa:
-        amp_ia_X = amp[0].view(mol.nmol,nocc,nvirt)
-        amp_ia_Y = amp[1].view(mol.nmol,nocc,nvirt)
-    else:
-        amp_ia_X = amp.view(mol.nmol,nocc,nvirt)
-
-    dens_BR = torch.empty(nmol,2,norb,norb,device=device,dtype=dtype)
-    B_virt  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_X)
-    B_occ  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_X)
-
-    dens_BR[:,0] = torch.einsum('Nmi,Nni->Nmn',B_virt,B_virt) - torch.einsum('Nmi,Nni->Nmn',B_occ,B_occ)
-
-    if rpa:
-        B_virt_Y  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_Y)
-        B_occ_Y  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_Y)
-        dens_BR[:,0] += torch.einsum('Nmi,Nni->Nmn',B_virt_Y,B_virt_Y) - torch.einsum('Nmi,Nni->Nmn',B_occ_Y,B_occ_Y)
-
-
-    # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
-    dens_BR[:,1] = torch.einsum('bmi,bia,bna->bmn',Cocc,amp_ia_X,Cvirt)
-    if rpa:
-        dens_BR[:,1] += torch.einsum('bma,bia,bni->bmn',Cvirt,amp_ia_Y,Cocc)
-
-    # Calculate z-vector
-    
-    # make RHS of the CPSCF equation:
-    BR_pi = makeA_pi_batched(mol,dens_BR,w)*2.0
-    RHS = -torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,BR_pi[:,0],Cocc)
-    RHS -= torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,BR_pi[:,1],B_virt)
-    RHS += torch.einsum('Nma,Nmn,Nni->Nai',B_occ,BR_pi[:,1],Cocc)
-    if rpa:
-        RHS -= torch.einsum('Nma,Nnm,Nni->Nai',Cvirt,BR_pi[:,1],B_virt_Y)
-        RHS += torch.einsum('Nma,Nnm,Nni->Nai',B_occ_Y,BR_pi[:,1],Cocc)
-
-    del B_occ, B_virt
-
-    # debugging:
-    RHS = RHS.transpose(1,2).reshape(nmol,nov) # RHS_ia 
-    ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
-
-    # Ad_inv_b = RHS/ea_ei
-    # x1 = make_A_times_zvector(mol,Ad_inv_b,w,e_mo)
-
-    def setup_applyA(mol, w, ea_ei, Cocc, Cvirt):
-        def applyA(z):
-            Az = make_A_times_zvector_batched(mol,z,w,ea_ei, Cocc, Cvirt)
-            return Az
-
-        return applyA
-
-    A = setup_applyA(mol,w,ea_ei,Cocc,Cvirt)
-    zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=zvec_tolerance)
-
-    z_ao = torch.einsum('Nmi,Nia,Nna->Nmn',Cocc,zvec.view(nmol,nocc,nvirt),Cvirt)
-    dens_BR[:,0] += z_ao + z_ao.transpose(1,2) # Now this contains the relaxed density
-
     molsize = mol.molsize
     nHeavy = mol.nHeavy[0]
     nHydro = mol.nHydro[0]
+    cis_densities = make_cis_densities(mol, do_transition_denisty=True,do_difference_density=True,
+                                       do_relaxed_density=True, orbital_window = orbital_window,
+                                       w=w,e_mo=e_mo,zvec_tolerance=zvec_tolerance,rpa=rpa)
+    if calculate_dipole:
+        make_cis_state_dipole(mol, cis_densities["difference_density"], cis_densities["relaxed_difference_density"], P0)
     # B0 = torch.stack([ unpackone(dens_BR[i,0], 4*nHeavy, nHydro, molsize * 4)
     #     for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
-    B0 = unpackone_batch(dens_BR[:,0],4*nHeavy, nHydro, molsize * 4)
+    B0 = unpackone_batch(cis_densities["relaxed_difference_density"],4*nHeavy, nHydro, molsize * 4)
     # R0 = torch.stack([ unpackone(dens_BR[i,1], 4*nHeavy, nHydro, molsize * 4)
     #     for i in range(nmol)]).view(nmol,molsize * 4, molsize * 4)
-    R0 = unpackone_batch(dens_BR[:,1],4*nHeavy, nHydro, molsize * 4)
+    R0 = unpackone_batch(cis_densities["transition_density"],4*nHeavy, nHydro, molsize * 4)
     
-    del dens_BR
+    del cis_densities
 
     ###############################
     # Calculate the gradient of CIS energies
@@ -96,6 +31,9 @@ def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc
     # TODO: instead of repeating the calculation of gradient of the overlap matrix and the 2-e integral matrix w_x, store it and reuse it, while calculating ground state
     # gradients. Alternately, combine ground and excited state gradients
     npairs = mol.rij.shape[0]
+    dtype = B0.dtype
+    device = B0.device
+    nmol = mol.nmol
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
     zeta = torch.cat((mol.parameters['zeta_s'].unsqueeze(1), mol.parameters['zeta_p'].unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
@@ -264,18 +202,23 @@ def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc
 
     return grad_cis
 
-def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
-    nmol  = mol.nmol
+from .rcis_batch import packone_batch, calc_dipole_matrix
+charge_on_electron = 1.60217733e-19
+speed_of_light = 2.99792458e8
+to_debye = charge_on_electron*1e-10*speed_of_light/1e-21
+debye_to_AU = 0.393456
+
+def make_cis_state_dipole(mol, difference_density, relaxed_difference_density, P0):
+    nuclear_dipole = (mol.const.tore[mol.Z].view(mol.nmol, mol.molsize, 1)*mol.coordinates).sum(dim=1)
+    dipole_mat = calc_dipole_matrix(mol) 
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
     norb = mol.norb[0]
-    nocc = mol.nocc[0]
-    nvirt = norb - nocc
+    dipole_mat_packed = packone_batch(dipole_mat.view(3*mol.nmol,4*mol.molsize,4*mol.molsize), 4*nHeavy, nHydro, norb).view(mol.nmol,3,norb,norb)
+    P = packone_batch(P0, 4*nHeavy, nHydro, norb)
 
-    Via = z.view(nmol,nocc,nvirt) 
-    P_xi = torch.einsum('Nmi,Nia,Nna->Nmn', Cocc,Via, Cvirt)
-    P_xi = P_xi + P_xi.transpose(1,2)
-    
-    F0 = makeA_pi_batched(mol,P_xi.unsqueeze(1),w,allSymmetric=True)
-    A = torch.einsum('Nmi,Nmn,Nna->Nia', Cocc, F0.squeeze(1),Cvirt)*2.0
-    A += Via*ea_ei
+    mol.dipole = (torch.einsum('Nnm,Ndnm->Nd',P,dipole_mat_packed) + nuclear_dipole)*to_debye*debye_to_AU
+    mol.cis_state_dipole = torch.einsum('Nnm,Ndnm->Nd',difference_density,dipole_mat_packed)*to_debye*debye_to_AU
+    mol.cis_state_relaxed_dipole = torch.einsum('Nnm,Ndnm->Nd',relaxed_difference_density,dipole_mat_packed)*to_debye*debye_to_AU
 
-    return A.view(nmol,-1)
+

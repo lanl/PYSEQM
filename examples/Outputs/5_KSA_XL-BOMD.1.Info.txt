@@ -2,449 +2,149 @@
 step: 1
   Orbital energies (eV):
     Occupied:
-      -21.67136 -11.87406 -11.77817
+      -21.73953 -11.87338 -11.82696
     Virtual:
-      1.59519 2.65277 5.67067 5.75196 0.      0.      0.      
-  dipole(x,y,z): 0.00084  0.006311 0.000918 
+      1.60037 2.69973 5.71983 5.7666  0.      0.      0.      
+  dipole(x,y,z): -0.001169  0.001534 -0.001145 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 6.795364447155596e-05 
+  Rank-m Krylov subspace approximation error: 6.218529372083025e-05 
 
 step: 2
   Orbital energies (eV):
     Occupied:
-      -21.66308 -11.91849 -11.71366
+      -21.80043 -11.91917 -11.81752
     Virtual:
-      1.59706 2.64115 5.63198 5.78372 0.      0.      0.      
-  dipole(x,y,z): 0.00059  0.016405 0.001825 
+      1.60169 2.73407 5.72661 5.81158 0.      0.      0.      
+  dipole(x,y,z): -0.006805  0.002634 -0.002285 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 8.470127809159024e-05 
+  Rank-m Krylov subspace approximation error: 0.000122595543301704 
 
 step: 3
   Orbital energies (eV):
     Occupied:
-      -21.69069 -11.97381 -11.66017
+      -21.89476 -11.97497 -11.81944
     Virtual:
-      1.59948 2.64972 5.61228 5.82543 0.      0.      0.      
-  dipole(x,y,z): 0.001145 0.028791 0.00272  
+      1.60149 2.78583 5.74977 5.86537 0.      0.      0.      
+  dipole(x,y,z): -0.014254  0.00307  -0.003413 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00023122206552287904 
+  Rank-m Krylov subspace approximation error: 0.00025818410831371694 
 
 step: 4
   Orbital energies (eV):
     Occupied:
-      -21.75342 -12.03533 -11.63088
+      -22.01792 -12.03348 -11.83489
     Virtual:
-      1.59797 2.67837 5.60748 5.87647 0.      0.      0.      
-  dipole(x,y,z): 0.002084 0.039211 0.003596 
+      1.60118 2.85261 5.78786 5.9273  0.      0.      0.      
+  dipole(x,y,z): -0.020774  0.002965 -0.004518 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00022168295383377627 
+  Rank-m Krylov subspace approximation error: 0.00022459026872931537 
 
 step: 5
   Orbital energies (eV):
     Occupied:
-      -21.84708 -12.09973 -11.62439
+      -22.16442 -12.09177 -11.85991
     Virtual:
-      1.59436 2.7271  5.61688 5.9376  0.      0.      0.      
-  dipole(x,y,z): 0.002923 0.045239 0.004439 
+      1.60261 2.93148 5.8387  5.99585 0.      0.      0.      
+  dipole(x,y,z): -0.024724  0.002619 -0.005589 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00027115916272935233 
+  Rank-m Krylov subspace approximation error: 0.0002421388060447265 
 
 step: 6
   Orbital energies (eV):
     Occupied:
-      -21.96699 -12.16731 -11.62859
+      -22.3296  -12.15244 -11.88862
     Virtual:
-      1.59354 2.79522 5.64267 6.00767 0.      0.      0.      
-  dipole(x,y,z): 0.003667 0.048591 0.005231 
+      1.60568 3.02017 5.89897 6.06787 0.      0.      0.      
+  dipole(x,y,z): -0.02716   0.002041 -0.006624 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00022374705136541287 
+  Rank-m Krylov subspace approximation error: 0.0002541436493035768 
 
 step: 7
   Orbital energies (eV):
     Occupied:
-      -22.10947 -12.2398  -11.63603
+      -22.50795 -12.21833 -11.91796
     Virtual:
-      1.59705 2.87907 5.68533 6.08217 0.      0.      0.      
-  dipole(x,y,z): 0.004904 0.053102 0.005975 
+      1.60892 3.1161  5.96463 6.14008 0.      0.      0.      
+  dipole(x,y,z): -0.030683  0.000812 -0.007623 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00014635661018617114 
+  Rank-m Krylov subspace approximation error: 0.000161980848078169 
 
 step: 8
   Orbital energies (eV):
     Occupied:
-      -22.27106 -12.31672 -11.65165
+      -22.69064 -12.28878 -11.94607
     Virtual:
-      1.60159 2.973   5.74077 6.15684 0.      0.      0.      
-  dipole(x,y,z): 0.007168 0.060247 0.006689 
+      1.61168 3.21513 6.03084 6.21128 0.      0.      0.      
+  dipole(x,y,z): -0.036482 -0.001412 -0.008575 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0002381574866924605 
+  Rank-m Krylov subspace approximation error: 0.00018599427887639386 
 
 step: 9
   Orbital energies (eV):
     Occupied:
-      -22.44649 -12.39506 -11.6815 
+      -22.86697 -12.36186 -11.96836
     Virtual:
-      1.60417 3.07335 5.80297 6.23069 0.      0.      0.      
-  dipole(x,y,z): 0.010315 0.067647 0.007373 
+      1.6146  3.3126  6.09144 6.2822  0.      0.      0.      
+  dipole(x,y,z): -0.04314  -0.00444  -0.009454 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00027289945886855253 
+  Rank-m Krylov subspace approximation error: 0.0003441252712612755 
 
 step: 10
   Orbital energies (eV):
     Occupied:
-      -22.62814 -12.47119 -11.72053
+      -23.02814 -12.4359  -11.97978
     Virtual:
-      1.60583 3.17891 5.86768 6.30444 0.      0.      0.      
-  dipole(x,y,z): 0.013679 0.071844 0.007992 
+      1.61802 3.40489 6.14002 6.35274 0.      0.      0.      
+  dipole(x,y,z): -0.048319 -0.007735 -0.010233 
   Electronic entropy contribution (eV): -0.0 
   Fermi occupancies:
     Occupied:
       1. 1. 1.
     Virtual:
       0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00025142216174708193 
-
-step: 1
-  Orbital energies (eV):
-    Occupied:
-      -21.67149 -11.87422 -11.77832
-    Virtual:
-      1.59512 2.65261 5.67061 5.75189 0.      0.      0.      
-  dipole(x,y,z): 0.000832 0.006312 0.000919 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 6.376173218298014e-05 
-
-step: 2
-  Orbital energies (eV):
-    Occupied:
-      -21.66305 -11.91843 -11.7136 
-    Virtual:
-      1.59711 2.64118 5.63201 5.78376 0.      0.      0.      
-  dipole(x,y,z): 0.000592 0.016404 0.001825 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 8.55863918938767e-05 
-
-step: 3
-  Orbital energies (eV):
-    Occupied:
-      -21.69056 -11.97364 -11.66002
-    Virtual:
-      1.59957 2.6499  5.61236 5.82552 0.      0.      0.      
-  dipole(x,y,z): 0.001154 0.028788 0.002718 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00022644141761284835 
-
-step: 4
-  Orbital energies (eV):
-    Occupied:
-      -21.75337 -12.03528 -11.63084
-    Virtual:
-      1.59797 2.67849 5.60751 5.8765  0.      0.      0.      
-  dipole(x,y,z): 0.002089 0.039208 0.003595 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00021830162909610755 
-
-step: 5
-  Orbital energies (eV):
-    Occupied:
-      -21.84718 -12.09984 -11.6245 
-    Virtual:
-      1.59428 2.72705 5.61684 5.93756 0.      0.      0.      
-  dipole(x,y,z): 0.002918 0.045241 0.00444  
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0002820191655961864 
-
-step: 6
-  Orbital energies (eV):
-    Occupied:
-      -21.96711 -12.16744 -11.6287 
-    Virtual:
-      1.5935  2.79507 5.64263 6.00762 0.      0.      0.      
-  dipole(x,y,z): 0.003658 0.048597 0.005233 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00022164614767278273 
-
-step: 7
-  Orbital energies (eV):
-    Occupied:
-      -22.10948 -12.23979 -11.63601
-    Virtual:
-      1.59712 2.87899 5.68535 6.08218 0.      0.      0.      
-  dipole(x,y,z): 0.004903 0.053105 0.005976 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0001430925792400356 
-
-step: 8
-  Orbital energies (eV):
-    Occupied:
-      -22.27098 -12.31662 -11.65155
-    Virtual:
-      1.60166 2.97307 5.74082 6.15689 0.      0.      0.      
-  dipole(x,y,z): 0.007176 0.060244 0.006688 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0002383623843385258 
-
-step: 9
-  Orbital energies (eV):
-    Occupied:
-      -22.44646 -12.39502 -11.68147
-    Virtual:
-      1.60413 3.07349 5.80299 6.23071 0.      0.      0.      
-  dipole(x,y,z): 0.010322 0.06764  0.007371 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00027029814057224263 
-
-step: 10
-  Orbital energies (eV):
-    Occupied:
-      -22.62821 -12.47126 -11.72059
-    Virtual:
-      1.60573 3.179   5.86766 6.30442 0.      0.      0.      
-  dipole(x,y,z): 0.013676 0.071842 0.007991 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.000247845977513961 
-
-step: 1
-  Orbital energies (eV):
-    Occupied:
-      -21.67149 -11.87422 -11.77832
-    Virtual:
-      1.59512 2.65261 5.67061 5.75189 0.      0.      0.      
-  dipole(x,y,z): 0.000832 0.006312 0.000919 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 6.376173218298014e-05 
-
-step: 2
-  Orbital energies (eV):
-    Occupied:
-      -21.66305 -11.91843 -11.7136 
-    Virtual:
-      1.59711 2.64118 5.63201 5.78376 0.      0.      0.      
-  dipole(x,y,z): 0.000592 0.016404 0.001825 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 8.55863918938767e-05 
-
-step: 3
-  Orbital energies (eV):
-    Occupied:
-      -21.69056 -11.97364 -11.66002
-    Virtual:
-      1.59957 2.6499  5.61236 5.82552 0.      0.      0.      
-  dipole(x,y,z): 0.001154 0.028788 0.002718 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00022644141761284835 
-
-step: 4
-  Orbital energies (eV):
-    Occupied:
-      -21.75337 -12.03528 -11.63084
-    Virtual:
-      1.59797 2.67849 5.60751 5.8765  0.      0.      0.      
-  dipole(x,y,z): 0.002089 0.039208 0.003595 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00021830162909610755 
-
-step: 5
-  Orbital energies (eV):
-    Occupied:
-      -21.84718 -12.09984 -11.6245 
-    Virtual:
-      1.59428 2.72705 5.61684 5.93756 0.      0.      0.      
-  dipole(x,y,z): 0.002918 0.045241 0.00444  
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0002820191655961864 
-
-step: 6
-  Orbital energies (eV):
-    Occupied:
-      -21.96711 -12.16744 -11.6287 
-    Virtual:
-      1.5935  2.79507 5.64263 6.00762 0.      0.      0.      
-  dipole(x,y,z): 0.003658 0.048597 0.005233 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00022164614767278273 
-
-step: 7
-  Orbital energies (eV):
-    Occupied:
-      -22.10948 -12.23979 -11.63601
-    Virtual:
-      1.59712 2.87899 5.68535 6.08218 0.      0.      0.      
-  dipole(x,y,z): 0.004903 0.053105 0.005976 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0001430925792400356 
-
-step: 8
-  Orbital energies (eV):
-    Occupied:
-      -22.27098 -12.31662 -11.65155
-    Virtual:
-      1.60166 2.97307 5.74082 6.15689 0.      0.      0.      
-  dipole(x,y,z): 0.007176 0.060244 0.006688 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.0002383623843385258 
-
-step: 9
-  Orbital energies (eV):
-    Occupied:
-      -22.44646 -12.39502 -11.68147
-    Virtual:
-      1.60413 3.07349 5.80299 6.23071 0.      0.      0.      
-  dipole(x,y,z): 0.010322 0.06764  0.007371 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.00027029814057224263 
-
-step: 10
-  Orbital energies (eV):
-    Occupied:
-      -22.62821 -12.47126 -11.72059
-    Virtual:
-      1.60573 3.179   5.86766 6.30442 0.      0.      0.      
-  dipole(x,y,z): 0.013676 0.071842 0.007991 
-  Electronic entropy contribution (eV): -0.0 
-  Fermi occupancies:
-    Occupied:
-      1. 1. 1.
-    Virtual:
-      0. 0. 0. 0. 0. 0. 0. 
-  Rank-m Krylov subspace approximation error: 0.000247845977513961 
+  Rank-m Krylov subspace approximation error: 0.0002633055333693116 

@@ -108,6 +108,9 @@ class Molecule(torch.nn.Module):
         self.molecular_orbitals = None
         self.all_forces = None
         self.old_mos = None
+
+        self.cis_state_unrelaxed_dipole = None
+        self.cis_state_relaxed_dipole = None
         
                 
         def get_coordinates(self):

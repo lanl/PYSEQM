@@ -515,7 +515,7 @@ class Energy(torch.nn.Module):
 
                     Eexcited = excitation_energies[:,molecule.active_state-1]
                     if molecule.const.do_timing: t0 = time.time()
-                    molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                    molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, orbital_window=orbital_window, calculate_dipole = True)
                     t1 = time.time()
                     molecule.const.timing["Force"].append(t1 - t0)
                 else:
@@ -544,7 +544,6 @@ class Energy(torch.nn.Module):
         if self.eig and not self.uhf:
             molecule.old_mos = molecule.molecular_orbitals.clone()
 
-        molecule.old_mos = molecule.eig_vec.clone()
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, molecule.Z,

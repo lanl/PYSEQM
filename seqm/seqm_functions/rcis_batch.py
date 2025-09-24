@@ -8,6 +8,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
+       This function is called when all the molecules in the batch are the same
 
     :param mol: Molecule Orbital Coefficients
     :param w: 2-electron integrals
@@ -25,31 +26,14 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
     
-    norb, nocc = norb_batch[0], nocc_batch[0]
-    nvirt = norb - nocc
+    nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window, e_mo)
 
-    # Active orbital selection
-    if orbital_window is not None:
-        n_below, m_above = orbital_window
-        if n_below < 1 or m_above < 1:
-            raise ValueError("orbital_window values must be positive integers")
-        if n_below > nocc:
-            raise ValueError(f"n_below={n_below} exceeds available occupied orbitals ({nocc})")
-        if m_above > (norb - nocc):
-            raise ValueError(f"m_above={m_above} exceeds available virtual orbitals ({nvirt})")
-        occ_idx  = torch.arange(nocc - n_below, nocc)
-        virt_idx = torch.arange(nocc, nocc + m_above)
-    else:
-        occ_idx  = torch.arange(nocc)
-        virt_idx = torch.arange(nocc, norb)
-
-    nocc_a, nvirt_a = occ_idx.numel(), virt_idx.numel()
-    nov = nocc_a * nvirt_a
+    nov = nocc* nvirt
     if nroots > nov:
         raise Exception(f"Maximum number of roots for this molecule is {nov}.")
 
     # Energy differences
-    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
+    # ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
 
     # Precompute energy differences (ea_ei) and form the approximate diagonal of the Hamiltonian (approxH)
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
@@ -60,24 +44,34 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.empty_like(V)
 
+    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
+
     if init_amplitude_guess is None:
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
     else:
-        nstart = nroots
-        if nroots>1:
-            print("WARNING: Orthogonalizing inital guess")
-            init_amplitude_guess, _ = torch.linalg.qr(init_amplitude_guess.transpose(1,2), mode='reduced')
-            V[:,:nstart,:] = init_amplitude_guess.transpose(1,2)
-        else:
-            V[:,:nstart,:] = init_amplitude_guess
-            V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
-        # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
-        # This fails when orbitals are degenerate and switch order
-        mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
+        # nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
+        make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
+        nstart = int(init_amplitude_guess.shape[1])
+        
+        # # For XL-BOMD
+        # if nroots>1:
+        #     print("WARNING: Orthogonalizing inital guess")
+        #     # init_amplitude_guess, _ = torch.linalg.qr(init_amplitude_guess.transpose(1,2), mode='reduced')
+        #     # V[:,:nstart,:] = init_amplitude_guess.transpose(1,2)
+        #
+        #     vend = torch.ones(nmol,device=device,dtype=torch.long)
+        #     V[:,0,:] = init_amplitude_guess[:,0,:]
+        #     for i in range(nmol):
+        #         vend[i] = orthogonalize_to_current_subspace(V[i], init_amplitude_guess[i,1:], vend[i], vector_tol)
+        # else:
+        #     V[:,:nstart,:] = init_amplitude_guess
+        #     V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
+        # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
+        # # This fails when orbitals are degenerate and switch order
+        # mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
 
 
     max_iter = 100 # TODO: User-defined
-    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
     davidson_iter = 0
     vstart = torch.zeros(nmol,dtype=torch.long,device=device)
     vend = torch.full((nmol,),nstart,dtype=torch.long,device=device)
@@ -86,9 +80,9 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False # TODO: User-defined/fixed
 
-    C = mol.molecular_orbitals
-    Cocc = C[:,:,occ_idx]
-    Cvirt = C[:,:,virt_idx]
+    # C = mol.molecular_orbitals
+    # Cocc = C[:,:,occ_idx]
+    # Cvirt = C[:,:,virt_idx]
 
     e_val_n = torch.empty(nmol,nroots,dtype=dtype,device=device)
     amplitude_store = torch.empty(nmol,nroots,nov,dtype=dtype,device=device)
@@ -202,9 +196,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
 
 def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # C: Molecule Orbital Coefficients
-    nmol, nNewRoots, nov = V.shape
+    nmol, nNewRoots, _ = V.shape
 
-    norb = mol.norb[0]
     nocc = Cocc.shape[2]
     nvirt = Cvirt.shape[2]
 
@@ -575,20 +568,7 @@ def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_wi
 
 def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
 
-    nocc, norb = mol.nocc[0], mol.norb[0]
-    if orbital_window is not None:
-        n_below, m_above = orbital_window
-        occ_idx  = torch.arange(nocc - n_below, nocc)
-        virt_idx = torch.arange(nocc, nocc + m_above)
-    else:
-        occ_idx  = torch.arange(nocc)
-        virt_idx = torch.arange(nocc, norb)
-
-    C = mol.molecular_orbitals
-    Cocc = C[:,:,occ_idx]
-    Cvirt = C[:,:,virt_idx]
-
-    nocc, nvirt = occ_idx.numel(), virt_idx.numel()
+    nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window)
 
     if rpa:
         amp_ia_X = amplitudes[0].view(mol.nmol,nroots,nocc,nvirt)
@@ -748,4 +728,160 @@ def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False,orbital_window=None):
     # print(f'Grad CIS from backprop is\n{force}')
 
     return E_cis
+
+def make_best_guess_from_previous_amplitudes(mol, V_old, V, nocc):
+    nroots = V_old.shape[1]
+    V_sq = (V_old*V_old).reshape(mol.nmol,nroots,nocc,-1)
+    occ_mo_overlap = mol.molecular_orbitals[:, :, :nocc].transpose(1,2) @ mol.old_mos[:, :, :nocc]
+    occ_weight = V_sq.sum(dim=(1,3))/nroots
+    occ_mo_overlap *= occ_weight.unsqueeze(1)
+    U, _, Vt = torch.linalg.svd(occ_mo_overlap)
+    rot_occ_transpose = U@Vt
+
+    virt_mo_overlap = mol.molecular_orbitals[:, :, nocc:].transpose(1,2) @ mol.old_mos[:, :, nocc:]
+    virt_weight = V_sq.sum(dim=(1,2))/nroots
+    virt_mo_overlap *= virt_weight.unsqueeze(1)
+    U, _, Vt = torch.linalg.svd(virt_mo_overlap)
+    rot_virt = (U@Vt).transpose(1,2)
+    V[:,:nroots] = torch.einsum('Nji,Nria,Nab->Nrjb', rot_occ_transpose, V_old.view(mol.nmol,nroots,nocc,-1), rot_virt).reshape(mol.nmol,nroots,-1)
+
+def get_occ_virt(mol, orbital_window=None, e_mo = None):
+    C = mol.molecular_orbitals                  # (nmol, nbasis, norb_i)
+    nocc_b, norb_b = mol.nocc, mol.norb         # (nmol,)
+    nvirt_b = norb_b - nocc_b
+    nmol, nbasis = C.shape[:2]
+    device, dtype = C.device, C.dtype
+
+    uniform = torch.all(nocc_b == nocc_b[0]) and torch.all(norb_b == norb_b[0])
+    if uniform:
+        nocc, norb = int(nocc_b[0]), int(norb_b[0])
+        if orbital_window is not None:
+            n_below, m_above = map(int, orbital_window)
+            if not (0 <= n_below <= nocc and 0 <= m_above <= norb - nocc):
+                raise ValueError("orbital_window out of bounds.")
+            occ_idx  = torch.arange(nocc - n_below, nocc, device=device)
+            virt_idx = torch.arange(nocc, nocc + m_above, device=device)
+        else:
+            occ_idx  = torch.arange(nocc, device=device)
+            virt_idx = torch.arange(nocc, norb, device=device)
+        Cocc, Cvirt = C[:, :, occ_idx], C[:, :, virt_idx]
+
+        if e_mo is not None:
+            ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
+            return occ_idx.numel(), virt_idx.numel(), Cocc, Cvirt, ea_ei
+        return occ_idx.numel(), virt_idx.numel(), Cocc, Cvirt
+
+    if orbital_window is not None:
+        raise ValueError("orbital_window requires uniform nocc/norb across the batch.")
+
+    nocc_max  = int(nocc_b.max().item())
+    nvirt_max = int(nvirt_b.max().item())
+    Cocc  = torch.zeros((nmol, nbasis, nocc_max),   device=device, dtype=dtype)
+    Cvirt = torch.zeros((nmol, nbasis, nvirt_max),  device=device, dtype=dtype)
+
+    for i in range(nmol):
+        nocc_i, norb_i = int(nocc_b[i].item()), int(norb_b[i].item())
+        Cocc[i,:,:nocc_i] = C[i,:,:nocc_i]
+        Cvirt[i,:,:nvirt_b[i]] = C[i,:,nocc_i:norb_i]
+
+    if e_mo is not None:
+        ea_ei = torch.zeros(nmol,nocc_max,nvirt_max,device=device,dtype=dtype)
+        for i in range(nmol):
+            nocc_i, norb_i = int(nocc_b[i].item()), int(norb_b[i].item())
+            ea_ei[i,:nocc_i,:nvirt_b[i]] = e_mo[i,nocc_i:norb_i].unsqueeze(0) - e_mo[i,:nocc_i].unsqueeze(1)
+        return nocc_max, nvirt_max, Cocc, Cvirt, ea_ei
+
+    return nocc_max, nvirt_max, Cocc, Cvirt
+
+def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
+    nmol  = mol.nmol
+    norb = mol.norb[0]
+    nocc = mol.nocc[0]
+    nvirt = norb - nocc
+
+    Via = z.view(nmol,nocc,nvirt) 
+    P_xi = torch.einsum('Nmi,Nia,Nna->Nmn', Cocc,Via, Cvirt)
+    P_xi = P_xi + P_xi.transpose(1,2)
+    
+    F0 = makeA_pi_batched(mol,P_xi.unsqueeze(1),w,allSymmetric=True)
+    A = torch.einsum('Nmi,Nmn,Nna->Nia', Cocc, F0.squeeze(1),Cvirt)*2.0
+    A += Via*ea_ei
+
+    return A.view(nmol,-1)
+
+from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
+def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_relaxed_density, orbital_window = None, w = None, e_mo = None, zvec_tolerance = 1e-6, rpa=False):
+    amp = mol.cis_amplitudes[...,mol.active_state-1,:]
+    device = amp.device
+    dtype = amp.dtype
+    nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window=orbital_window)
+    nmol, norb = Cocc.shape[:2]
+
+    if rpa:
+        amp_ia_X = amp[0].view(mol.nmol,nocc,nvirt)
+        amp_ia_Y = amp[1].view(mol.nmol,nocc,nvirt)
+    else:
+        amp_ia_X = amp.view(mol.nmol,nocc,nvirt)
+
+    cis_densities = {}
+    if do_transition_denisty or do_relaxed_density:
+        R = torch.empty(nmol,norb,norb,device=device,dtype=dtype)
+
+        # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
+        R = torch.einsum('bmi,bia,bna->bmn',Cocc,amp_ia_X,Cvirt)
+        if rpa:
+            R += torch.einsum('bma,bia,bni->bmn',Cvirt,amp_ia_Y,Cocc)
+        cis_densities["transition_density"] = R
+
+    if do_difference_density:
+        B = torch.empty(nmol,norb,norb,device=device,dtype=dtype)
+        B_virt  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_X)
+        B_occ  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_X)
+
+        B = torch.einsum('Nmi,Nni->Nmn',B_virt,B_virt) - torch.einsum('Nmi,Nni->Nmn',B_occ,B_occ)
+
+        if rpa:
+            B_virt_Y  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_Y)
+            B_occ_Y  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_Y)
+            B += torch.einsum('Nmi,Nni->Nmn',B_virt_Y,B_virt_Y) - torch.einsum('Nmi,Nni->Nmn',B_occ_Y,B_occ_Y)
+
+        cis_densities["difference_density"] = B
+
+        if do_relaxed_density:
+            # Calculate z-vector
+            # make RHS of the CPSCF equation:
+            B_pi = makeA_pi_batched(mol,B.unsqueeze(1),w).squeeze(1)*2.0
+            R_pi = makeA_pi_batched(mol,R.unsqueeze(1),w).squeeze(1)*2.0
+            RHS = -torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,B_pi,Cocc)
+            RHS -= torch.einsum('Nma,Nmn,Nni->Nai',Cvirt,R_pi,B_virt)
+            RHS += torch.einsum('Nma,Nmn,Nni->Nai',B_occ,R_pi,Cocc)
+            if rpa:
+                RHS -= torch.einsum('Nma,Nnm,Nni->Nai',Cvirt,R_pi,B_virt_Y)
+                RHS += torch.einsum('Nma,Nnm,Nni->Nai',B_occ_Y,R_pi,Cocc)
+
+            del B_occ, B_virt
+
+            # debugging:
+            nov = nocc*nvirt
+            RHS = RHS.transpose(1,2).reshape(nmol,nov) # RHS_ia 
+            ea_ei = e_mo[:,nocc:norb].unsqueeze(1)-e_mo[:,:nocc].unsqueeze(2)
+
+            # Ad_inv_b = RHS/ea_ei
+            # x1 = make_A_times_zvector(mol,Ad_inv_b,w,e_mo)
+
+            def setup_applyA(mol, w, ea_ei, Cocc, Cvirt):
+                def applyA(z):
+                    Az = make_A_times_zvector_batched(mol,z,w,ea_ei, Cocc, Cvirt)
+                    return Az
+
+                return applyA
+
+            A = setup_applyA(mol,w,ea_ei,Cocc,Cvirt)
+            zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=zvec_tolerance)
+
+            z_ao = torch.einsum('Nmi,Nia,Nna->Nmn',Cocc,zvec.view(nmol,nocc,nvirt),Cvirt)
+            D = B + z_ao + z_ao.transpose(1,2) # Now this contains the relaxed density
+            cis_densities["relaxed_difference_density"] = D
+
+    return cis_densities
 
