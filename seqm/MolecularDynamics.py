@@ -7,6 +7,8 @@ from .seqm_functions.G_XL_LR import G
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
 import numpy as np
 import sys
+from io import StringIO
+import h5py
 np.set_printoptions(threshold=sys.maxsize)
 
 from .tools import attach_profile_range
@@ -92,7 +94,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, seqm_parameters, timestep=1.0,  output={'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}, *args, **kwargs):
+    def __init__(self, seqm_parameters, timestep=1.0,  output=None, *args, **kwargs):
 
         super().__init__(*args, **kwargs)
         self.seqm_parameters = seqm_parameters
@@ -101,7 +103,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.acc_scale = 0.009648532800137615
         self.vel_scale = 0.9118367323190634e-3
         self.kinetic_energy_scale = 1.0364270099032438e2
-        self.output = output
+        self.output = (output or {'molid':[0], 'thermo':1, 'dump':10, 'prefix':'md'}).copy()
+
 
     def initialize_velocity(self, molecule, Temperature, vel_com=True):
 
@@ -188,49 +191,75 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if (i+1)%self.output['thermo']==0:
                 print("%6d" % (i+1), end="")
                 for mol in self.output['molid']:
-                    print(" %8.2f   %e %e %e || " % (T[mol],   Ek[mol], L[mol], L[mol]+Ek[mol]), end="")
+                    Tm  = float(T[mol].detach().cpu())
+                    Ekm = float(Ek[mol].detach().cpu())
+                    Lm  = float(L[mol].detach().cpu())
+                    print(" %8.2f   %e %e %e || " % (Tm,   Ekm, Lm, Lm+Ekm), end="")
                 print()
     
     def dump(self, i, molecule, velocities, q, T, Ek, L, forces, e_gap, Err=None, **kwargs):
         
-        if Err == None:
+        # Only dump on schedule
+        if (i + 1) % self.output['dump'] != 0:
+            return
+
+        if Err is None:
             Err=np.zeros(T.shape)
 
-        if (i+1)%self.output['dump']==0:
+        restricted = e_gap.dim()==1
+        timestamp = time.time()
+
+        for mol in self.output['molid']:
+            n_atoms = int(torch.sum(molecule.species[mol] > 0))
+            s = StringIO()
+            s.write(f"{n_atoms}\n")
+            if restricted:
+                eg = float(e_gap[mol].detach().cpu())
+                e_gap_str = f"{eg:12.6f}"
+            else:
+                eg0 = float(e_gap[mol,0].detach().cpu())
+                eg1 = float(e_gap[mol,1].detach().cpu())
+                e_gap_str = f"{eg0:12.6f}/{eg1:12.6f}"
+            Tm  = float(T[mol].detach().cpu())
+            Ekm = float(Ek[mol].detach().cpu())
+            Lm  = float(L[mol].detach().cpu())
+            Em  = float(Err[mol])
+            s.write(f"step: {i+1}  T= {Tm:12.3f}K  Ek= {Ekm:12.9f}  Ep= {Lm:12.9f}  "
+                    f"E_gap= {e_gap_str}  Err= {Em:24.16f}  time_stamp= {timestamp:.4f}\n")
+            xyz = molecule.coordinates[mol]
+            Z   = molecule.species[mol]
+            for a in range(n_atoms):
+                label = molecule.const.label[Z[a].item()]  # ensure .labels everywhere
+                x, y, z = (xyz[a,0].item(), xyz[a,1].item(), xyz[a,2].item())
+                s.write(f"{label} {x:15.5f} {y:15.5f} {z:15.5f}\n")
+            self._xyz_files[mol].write(s.getvalue())
+            
+        if 'Info_log' in kwargs:
             for mol in self.output['molid']:
-                fn = self.output['prefix'] + "." + str(mol) + ".xyz"
-                f = open(fn,'a+')
-                if e_gap.dim()==1:
-                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.9f}  Ep= {:12.9f}  E_gap= {:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol], Err[mol], time.time()))
-                else:
-                    f.write("{}\nstep: {}  T= {:12.3f}K  Ek= {:12.9f}  Ep= {:12.9f}  E_gap= {:12.6f}/{:12.6f}  Err= {:24.16f}  time_stamp= {:.4f}\n".format(torch.sum(molecule.species[mol]>0), i+1, T[mol], Ek[mol], L[mol], e_gap[mol,0], e_gap[mol,1], Err[mol], time.time()))
-                    
-                for atom in range(molecule.coordinates.shape[1]):
-                    if molecule.species[mol,atom]>0:
-                        f.write("{} {:15.5f} {:15.5f} {:15.5f}\n".format(
-                                                    molecule.const.label[molecule.species[mol,atom].item()],
-                                                    molecule.coordinates[mol,atom,0],
-                                                    molecule.coordinates[mol,atom,1],
-                                                    molecule.coordinates[mol,atom,2], 
-                                                    # velocities[mol,atom,0],
-                                                    # velocities[mol,atom,1],
-                                                    # velocities[mol,atom,2],
-                                                    # forces[mol,atom,0],
-                                                    # forces[mol,atom,1],
-                                                    # forces[mol,atom,2],
-                                                    # q[mol,atom]
-                                                    )
-                                                    )
-                f.close()
-                
-            if 'Info_log' in kwargs:
-                for mol in self.output['molid']:
-                    fn = self.output['prefix'] + "." + str(mol) + ".Info.txt"
-                    f = open(fn,'a+')
-                    f.write("\nstep: {}\n".format(i+1))
-                    for log in kwargs['Info_log']:
-                        f.write("  {}{} \n".format(log[0], log[1][mol]))
-                    f.close()
+                info_lines = StringIO()
+                info_lines.write(f"\nstep: {i+1}\n")
+                # Each entry: [label, values], where values is list-of-strings per mol
+                for label, values in kwargs['Info_log']:
+                    info_lines.write(f"  {label}{values[mol]} \n")
+                self._info_files[mol].write(info_lines.getvalue())
+
+
+    def _open_dump_files(self):
+        # 1 MB buffers; keep handles for reuse
+        bufsize = 1_048_576
+        self._xyz_files = {}
+        self._info_files = {}
+        for mol in self.output['molid']:
+            xyz_fn  = f"{self.output['prefix']}.{mol}.xyz"
+            info_fn = f"{self.output['prefix']}.{mol}.Info.txt"
+            self._xyz_files[mol]  = open(xyz_fn,  'a+', buffering=bufsize)
+            self._info_files[mol] = open(info_fn, 'a+', buffering=bufsize)
+
+    def _close_dump_files(self):
+        for d in (getattr(self, "_xyz_files", {}), getattr(self, "_info_files", {})):
+            for fh in d.values():
+                try: fh.close()
+                except: pass
                     
 
     def scale_velocities(self, i, velocities, T, scale_vel):
@@ -276,77 +305,214 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
     def run(self, molecule, steps, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], *args, **kwargs):
 
-        q0 = molecule.const.tore[molecule.species]
         E0 = None
 
-        for i in range(steps):
-            
-            start_time = time.time()
-            self.one_step(molecule, learned_parameters=learned_parameters, P=molecule.dm, *args, **kwargs)
+        h5_path     = f"{self.output['prefix']}.h5"                 # e.g. "run_001.h5" to enable
+        h5_stride   = self.output['dump']                 # write every N steps
+        excited_states_params = self.seqm_parameters.get('excited_states')
+        n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
+        write_mo    = bool(kwargs.get("h5_write_mo",  False))
 
-            with torch.no_grad():
-                if torch.is_tensor(molecule.coordinates.grad):
-                    molecule.coordinates.grad.zero_()
-                
-                if not reuse_P:
-                    molecule.dm = None
-                    molecule.cis_amplitudes = None
-                if remove_com[0]:
-                    if i%remove_com[1]==0:
-                        self.zero_com(molecule)
+        try:
+            if h5_path:
+                self._h5_open(molecule, h5_path,
+                              steps=steps, h5_stride=h5_stride,
+                              excited_states=n_roots, write_mo=write_mo)
 
-                Ek, T = self.kinetic_energy(molecule)
-                if not torch.is_tensor(E0):
-                    E0 = molecule.Hf+Ek
+            self._open_dump_files()
+
+            for i in range(steps):
                 
-                if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
-                    raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
-                
-                #scale velocities to control temperature
-                if 'scale_vel' in kwargs:
-                    # kwargs["scale_vel"] = [freq, T(target)]
-                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
-                    if flag:
-                        Ek, T = self.kinetic_energy(molecule)
-                
-                #control energy shift
-                if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                    #scale velocities to adjust kinetic energy and compenstate the energy shift
-                    Eshift = Ek + molecule.Hf - E0
-                    self.control_shift(molecule.velocities, Ek, Eshift)
+                start_time = time.time()
+                self.one_step(molecule, learned_parameters=learned_parameters, P=molecule.dm, *args, **kwargs)
+
+                with torch.no_grad():
+                    if torch.is_tensor(molecule.coordinates.grad):
+                        molecule.coordinates.grad.zero_()
+                    
+                    if not reuse_P:
+                        molecule.dm = None
+                        molecule.cis_amplitudes = None
+                    if remove_com[0]:
+                        if i%remove_com[1]==0:
+                            self.zero_com(molecule)
+
                     Ek, T = self.kinetic_energy(molecule)
-                    del Eshift
-                
-                
-                self.screen_output(i, T, Ek, molecule.Hf)
-                dump_kwargs = {}
-                if 'Info_log' in kwargs and kwargs['Info_log']:
+                    if not torch.is_tensor(E0):
+                        E0 = molecule.Hf+Ek
                     
-                    if molecule.nocc.dim() == 1:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)]],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
-
-                                                  ]
-                    else:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies alpha:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo[:,0].cpu().numpy(), 5), molecule.nocc[:,0])]],
-                            ['Orbital energies beta:\n',  ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in zip(np.round(molecule.e_mo[:,1].cpu().numpy(), 5), molecule.nocc[:,1])]],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)]],
-
-                                                  ]
-                                                  
+                    if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                        raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
                     
-                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
-            del Ek, T
-            if i%1000==0:
-                torch.cuda.empty_cache()
-            
-            if debug:
-                print(time.time() - start_time)
-
+                    #scale velocities to control temperature
+                    if 'scale_vel' in kwargs:
+                        # kwargs["scale_vel"] = [freq, T(target)]
+                        flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
+                        if flag:
+                            Ek, T = self.kinetic_energy(molecule)
+                    
+                    #control energy shift
+                    if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                        #scale velocities to adjust kinetic energy and compenstate the energy shift
+                        Eshift = Ek + molecule.Hf - E0
+                        self.control_shift(molecule.velocities, Ek, Eshift)
+                        Ek, T = self.kinetic_energy(molecule)
+                        del Eshift
+                    
+                    
+                    self.screen_output(i, T, Ek, molecule.Hf)
+                    if h5_path and ((i + 1) % h5_stride == 0):
+                        self._h5_append_step(i + 1, molecule, T, Ek, molecule.Hf, molecule.e_gap)
+                    dump_kwargs = {}
+                    if kwargs.get("Info_log"):
+                        dump_kwargs["Info_log"] = build_info_log(molecule)
+                        
+                    self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf, molecule.force, molecule.e_gap, **dump_kwargs)
+                del Ek, T
+                if i%1000==0:
+                    torch.cuda.empty_cache()
+                
+                if debug:
+                    print(time.time() - start_time)
+        finally:
+            self._close_dump_files()
+            if h5_path:
+                self._h5_close()
         return molecule.coordinates, molecule.velocities, molecule.acc
 
+    def _h5_open(self, molecule, h5_path, *, steps, h5_stride=1,
+                 excited_states=0, write_mo=False,
+                 compression="gzip", complvl=1):
+        self._h5 = h5py.File(h5_path, "w")
+        g = self._h5
+
+        # derive constants
+        B    = int(molecule.coordinates.shape[0])     # batch (molecules)
+        Nat  = int(molecule.coordinates.shape[1])
+        restricted = not bool(self.seqm_parameters.get('UHF', False))
+        Norb = int(molecule.norb.max())
+
+        Twrites = (int(steps) + int(h5_stride) - 1) // int(h5_stride)  # number of rows along time axis
+
+        # If excitations enabled, get number of excited states
+        write_excitations = excited_states > 0
+        if write_excitations:
+            R = excited_states
+
+        # convenience
+        def create(path, shape, dtype=np.float64):
+            return g.create_dataset(path, shape=shape, dtype=dtype,
+                                    chunks=True, compression=compression, compression_opts=complvl)
+
+        # metadata
+        mg = g.create_group("meta")
+        mg.attrs.update({
+            "units_E": "eV",
+            "units_dipole": "a.u.",
+            "units_coords": "Angstrom",
+            "stride": int(h5_stride),
+            "Twrites": int(Twrites),
+        })
+
+        # static (per run)
+        g.create_dataset("atoms", data=_to_np(molecule.species))
+
+        # time-major datasets with fixed shapes (Twrites, B, ...)
+        create("steps",          (Twrites,),            np.int64)
+        create("thermo/T",       (Twrites, B))
+        create("thermo/Ek",      (Twrites, B))
+        create("thermo/Ep",      (Twrites, B))
+        create("homo_lumo_gap",      (Twrites, B, 1 if restricted else 2))
+
+        # coords / vel / forces every write
+        # create("coords/x",       (Twrites, B, Nat, 3))
+        create("vel",          (Twrites, B, Nat, 3))
+        # create("forces",       (Twrites, B, Nat, 3))
+
+        # optional: excitations
+        if write_excitations:
+            create("excitation/excitation_energy",    (Twrites, B, R))
+            create("excitation/transition_dipole",  (Twrites, B, R, 3))
+            create("excitation/oscillator_strength", (Twrites, B, R))
+            create("excitation/ground_dipole", (Twrites, B,3))
+            create("excitation/active_state", (Twrites,),np.int64)
+            create("excitation/relaxed_dipole", (Twrites, B, 3))
+            create("excitation/unrelaxed_dipole", (Twrites, B, 3))
+
+        # optional: MO energies
+        if write_mo:
+            if restricted:
+                create("mo/e_orb", (Twrites, B, Norb))
+                create("mo/nocc",  (Twrites, B))
+            else:
+                create("mo/e_orb", (Twrites, B, 2, Norb))
+                create("mo/nocc",  (Twrites, B, 2))
+
+        # internal write index (0..Twrites-1)
+        self._h5_i = 0
+        self._h5_flags = {
+            "n_excited_states": excited_states,
+            "write_mo":  bool(write_mo),
+        }
+
+    def _h5_append_step(self, step_idx, molecule, T, Ek, Ep, e_gap):
+        """
+        Write into row self._h5_i; caller must ensure this is a 'write step'
+        (i.e., (step_idx % stride) == 0). No resizing here.
+        """
+        g = self._h5
+        i = self._h5_i
+
+        # basic fields
+        g["steps"][i]          = int(step_idx)
+        g["thermo/T"][i, ...]  = _to_np(T)
+        g["thermo/Ek"][i, ...] = _to_np(Ek)
+        g["thermo/Ep"][i, ...] = _to_np(Ep)
+
+        gap_np = _to_np(e_gap)
+        restricted = gap_np.ndim == 1
+        if restricted:
+            gap_np = gap_np[:, None]  # (B,1)
+        g["homo_lumo_gap"][i, ...] = gap_np
+
+        # vectors & arrays
+        # g["coords/x"][i, ...]       = _to_np(molecule.coordinates)  # (B,N,3)
+        g["vel"][i, ...]          = _to_np(molecule.velocities)
+        # g["forces/x"][i, ...]       = _to_np(molecule.force)
+
+        # optional: excitations
+        
+        R = self._h5_flags.get("n_excited_states", 0)
+        if R > 0:
+            g["excitation/excitation_energy"][i, ...]    = _to_np(molecule.cis_energies[:,:R])    # (B,R)
+            g["excitation/transition_dipole"][i, ...]  = _to_np(molecule.transition_dipole[:,:R])    # (B,R,3)
+            g["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[:,:R])  # (B,R)
+            g["excitation/active_state"][i] = int(molecule.active_state)
+            g["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole)            # (B,3)
+            g["excitation/unrelaxed_dipole"][i, ...] = _to_np(molecule.cis_state_unrelaxed_dipole)            # (B,3)
+            g["excitation/ground_dipole"][i, ...] = _to_np(molecule.dipole)            # (B,3)
+
+        # optional: MO energies (can be large)
+        if self._h5_flags.get("write_mo", False):
+            g["mo/e_orb"][i, ...] = _to_np(molecule.e_mo)   # (B,Norb) or (B,2,Norb)
+            g["mo/nocc"][i, ...]  = _to_np(molecule.nocc)   # (B,) or (B,2)
+
+        self._h5_i += 1
+        # optional: flush periodically, not every step
+        if (self._h5_i % 100) == 0: g.flush()
+
+    def _h5_close(self):
+        h = getattr(self, "_h5", None)
+        if h is not None:
+            try: h.flush()
+            finally:
+                h.close()
+                self._h5 = None
+                self._h5_i = 0
+                self._h5_flags = {}
+
+def _to_np(x):
+    return x.detach().cpu().numpy() #if hasattr(x, "detach") else (x.cpu().numpy() if hasattr(x, "cpu") else np.asarray(x))
 
 class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     """
@@ -413,9 +579,6 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
-
-
-            
             
             
 class XL_BOMD(Molecular_Dynamics_Basic):
@@ -539,72 +702,72 @@ class XL_BOMD(Molecular_Dynamics_Basic):
             P = molecule.dm.clone()
 
         E0 = None
+        h5_path     = f"{self.output['prefix']}.h5"                 # e.g. "run_001.h5" to enable
+        h5_stride   = self.output['dump']                 # write every N steps
+        excited_states_params = self.seqm_parameters.get('excited_states')
+        n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
+        write_mo    = bool(kwargs.get("h5_write_mo",  False))
 
-        for i in range(steps):
-            start_time = time.time()
+        try:
+            if h5_path:
+                self._h5_open(molecule, h5_path,
+                              steps=steps, h5_stride=h5_stride,
+                              excited_states=n_roots, write_mo=write_mo)
 
-            P, Pt = self.one_step(molecule, i, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
+            self._open_dump_files()
 
-            with torch.no_grad():
-                if torch.is_tensor(molecule.coordinates.grad):
-                    molecule.coordinates.grad.zero_()
-                
-                if remove_com[0]:
-                    if i%remove_com[1]==0:
-                        self.zero_com(molecule)
-                
-                Ek, T = self.kinetic_energy(molecule)
-                if not torch.is_tensor(E0):
-                    E0 = molecule.Hf + molecule.Electronic_entropy + Ek
-                
-                if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
-                    raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
-                
-                #scale velocities to control temperature
-                if 'scale_vel' in kwargs:
-                    # kwargs["scale_vel"] = [freq, T(target)]
-                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
-                    if flag:
-                        Ek, T = self.kinetic_energy(molecule)
-                
-                #control energy shift
-                if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                    #scale velocities to adjust kinetic energy and compenstate the energy shift
-                    Eshift = Ek + molecule.Hf + molecule.Electronic_entropy - E0
-                    self.control_shift(molecule.velocities, Ek, Eshift)
+            for i in range(steps):
+                start_time = time.time()
+
+                P, Pt = self.one_step(molecule, i, P, Pt, learned_parameters=learned_parameters, *args, **kwargs)
+
+                with torch.no_grad():
+                    if torch.is_tensor(molecule.coordinates.grad):
+                        molecule.coordinates.grad.zero_()
+                    
+                    if remove_com[0]:
+                        if i%remove_com[1]==0:
+                            self.zero_com(molecule)
+                    
                     Ek, T = self.kinetic_energy(molecule)
-                self.screen_output(i, T, Ek, molecule.Hf + molecule.Electronic_entropy)
-                dump_kwargs = {}
-                if 'Info_log' in kwargs and kwargs['Info_log']:
-                    if 'max_rank' in self.xl_bomd_params:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                          '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                          zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ],
+                    if not torch.is_tensor(E0):
+                        E0 = molecule.Hf + molecule.Electronic_entropy + Ek
+                    
+                    if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
+                        raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
+                    
+                    #scale velocities to control temperature
+                    if 'scale_vel' in kwargs:
+                        # kwargs["scale_vel"] = [freq, T(target)]
+                        flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
+                        if flag:
+                            Ek, T = self.kinetic_energy(molecule)
+                    
+                    #control energy shift
+                    if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
+                        #scale velocities to adjust kinetic energy and compenstate the energy shift
+                        Eshift = Ek + molecule.Hf + molecule.Electronic_entropy - E0
+                        self.control_shift(molecule.velocities, Ek, Eshift)
+                        Ek, T = self.kinetic_energy(molecule)
+                    self.screen_output(i, T, Ek, molecule.Hf + molecule.Electronic_entropy)
+                    if h5_path and ((i + 1) % h5_stride == 0):
+                        self._h5_append_step(i + 1, molecule, T, Ek, molecule.Hf, molecule.e_gap)
+                    dump_kwargs = {}
+                    if kwargs.get("Info_log"):
+                        dump_kwargs["Info_log"] = build_info_log(molecule)
 
-                            ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
-
-                            ['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + \
-                                                      '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                      zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
-
-                            ['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error], ]
-                    else:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                          '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                          zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ], ]
-
-                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.force,
-                          molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
-            del T, Ek, dump_kwargs
-            if i%1000==0:
-                torch.cuda.empty_cache()
-            
-            if debug:
-                print(time.time() - start_time)
+                    self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Hf + molecule.Electronic_entropy, molecule.force,
+                              molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
+                del T, Ek, dump_kwargs
+                if i%1000==0:
+                    torch.cuda.empty_cache()
+                
+                if debug:
+                    print(time.time() - start_time)
+        finally:
+            self._close_dump_files()
+            if h5_path:
+                self._h5_close()
 
         return molecule.coordinates, molecule.velocities, molecule.acc
 
@@ -915,3 +1078,58 @@ Fr unit: sqrt(Kelvin*AU/(fs^2)) ==> eV/Angstrom
 = 0.09450522179973914 eV/Angstrom
 """
 #acc ==> Angstrom/fs^2
+
+def build_info_log(molecule, xl_bomd=False):
+    # single compact helper that works for torch/np/python lists
+    to_np = lambda x: x.detach().cpu().numpy()
+
+    # --- Fetch inputs once ---
+    e = to_np(molecule.e_mo)          # MO energies (B, n_orb) or (B, 2, n_orb)
+    nocc = to_np(molecule.nocc)       # number of occupied orbitals (B,) or (B, 2)
+    dvec = to_np(molecule.d).ravel()  # dipole vector (B,3)
+
+    def fmt_vec(arr, prec):
+        return np.array2string(
+            arr,
+            separator=", ",
+            formatter={"float_kind": (lambda x: f"{x:.{prec}f}")},
+            threshold=10**6,  # switch to summary form
+            max_line_width=10**9  # keep on one logical line
+        ).strip("[]")
+
+    def format_mo_energies(e_mol, nocc):
+        nocc_i = int(nocc)
+        occ = fmt_vec(e_mol[:nocc_i], 5)
+        virt = fmt_vec(e_mol[nocc_i:], 5)
+        return f"    Occupied:\n      {occ}\n    Virtual:\n      {virt}"
+
+    info = []
+
+    
+    restricted = nocc.ndim == 1
+    if restricted:
+        # e: (B, n_orb)     nocc: (B,)
+        # For each molecule in the batch, produce one formatted string
+        entries = [format_mo_energies(e_mol, nocc_mol) for e_mol, nocc_mol in zip(e, nocc)]
+        info.append(["Orbital energies:\n", entries])
+    else:
+        # e: (B, 2, n_orb)  nocc: (B, 2)
+        e_alpha, e_beta = e[:, 0], e[:, 1]
+        n_alpha, n_beta = nocc[:, 0], nocc[:, 1]
+
+        entries_a = [format_mo_energies(e_mol, nocc_mol) for e_mol, nocc_mol in zip(e_alpha, n_alpha)]
+        entries_b = [format_mo_energies(e_mol, nocc_mol) for e_mol, nocc_mol in zip(e_beta,  n_beta)]
+
+        info.append(["Orbital energies alpha:\n", entries_a])
+        info.append(["Orbital energies beta:\n",  entries_b])
+
+    info.append(["dipole(x,y,z): ", [f"{v:.6f}" for v in dvec]])
+
+    if xl_bomd:
+        info.append(['Electronic entropy contribution (eV): ', molecule.Electronic_entropy])
+        info.append(['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + \
+                                  '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
+                                  zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ])
+        info.append(['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error])
+
+    return info

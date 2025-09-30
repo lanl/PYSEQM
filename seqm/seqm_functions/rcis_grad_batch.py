@@ -218,7 +218,7 @@ def make_cis_state_dipole(mol, difference_density, relaxed_difference_density, P
     P = packone_batch(P0, 4*nHeavy, nHydro, norb)
 
     mol.dipole = (torch.einsum('Nnm,Ndnm->Nd',P,dipole_mat_packed) + nuclear_dipole)*to_debye*debye_to_AU
-    mol.cis_state_dipole = torch.einsum('Nnm,Ndnm->Nd',difference_density,dipole_mat_packed)*to_debye*debye_to_AU
+    mol.cis_state_unrelaxed_dipole = torch.einsum('Nnm,Ndnm->Nd',difference_density,dipole_mat_packed)*to_debye*debye_to_AU
     mol.cis_state_relaxed_dipole = torch.einsum('Nnm,Ndnm->Nd',relaxed_difference_density,dipole_mat_packed)*to_debye*debye_to_AU
 
 

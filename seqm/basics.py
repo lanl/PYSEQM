@@ -339,6 +339,8 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
+        if self.uhf and self.excited_states is not None:
+            raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
         """

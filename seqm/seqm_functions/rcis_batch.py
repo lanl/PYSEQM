@@ -565,6 +565,8 @@ def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_wi
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    if mol.active_state > 0:
+        mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
 def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
 

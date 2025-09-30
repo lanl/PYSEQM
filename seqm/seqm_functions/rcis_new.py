@@ -196,6 +196,8 @@ def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    if mol.active_state > 0:
+        mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
 def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # C: Molecule Orbital Coefficients

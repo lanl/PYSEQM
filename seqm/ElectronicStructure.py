@@ -69,7 +69,7 @@ class Electronic_Structure(torch.nn.Module):
                 else:
                     molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
 
-                molecule.d = self.dipole(molecule.q, molecule.coordinates)
+            molecule.d = self.dipole(molecule.q, molecule.coordinates)
  
             
 

@@ -109,6 +109,8 @@ class Molecule(torch.nn.Module):
         self.all_forces = None
         self.old_mos = None
 
+        self.transition_dipole = None
+        self.oscillator_strength = None
         self.cis_state_unrelaxed_dipole = None
         self.cis_state_relaxed_dipole = None
         
