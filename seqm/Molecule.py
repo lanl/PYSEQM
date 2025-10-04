@@ -72,10 +72,15 @@ class Molecule(torch.nn.Module):
         
         self.parameters['Kbeta'] = self.parameters.get('Kbeta', None)
 
-        MASS = torch.as_tensor(self.const.mass)
-        # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
-        MASS[0] = 1.0
-        self.mass = MASS[self.species].unsqueeze(2)
+        # MASS = torch.as_tensor(self.const.mass)
+        # # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
+        # MASS[0] = 1.0
+        non_zero_species = self.species != 0
+        self.num_atoms = (torch.sum(non_zero_species, dim=1)).to(coordinates.dtype).to(coordinates.device)
+
+        self.mass = self.const.mass[self.species].unsqueeze(2)
+        self.mass_inverse = torch.zeros_like(self.mass)
+        self.mass_inverse[non_zero_species] = 1.0/self.mass[non_zero_species] 
         
         self.force = None
         self.velocities = None

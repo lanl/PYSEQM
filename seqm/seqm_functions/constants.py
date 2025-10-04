@@ -207,7 +207,7 @@ class Constants(torch.nn.Module):
         self.gppc   = torch.nn.Parameter(gppc,   requires_grad=False)
         self.eheat  = torch.nn.Parameter(eheat/ev_kcalpmol,  requires_grad=False)
         self.mass   = torch.nn.Parameter(mass,   requires_grad=False)
-        self.do_timing = True
+        self.do_timing = False
         if self.do_timing:
             self.timing = {"Hcore + STO Integrals" : [],
                            "SCF"                   : [],

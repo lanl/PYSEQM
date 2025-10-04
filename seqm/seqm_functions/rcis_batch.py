@@ -188,7 +188,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     # print("")
 
     # Post CIS analysis
-    print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
+    # print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
     rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window)
 
     return e_val_n, amplitude_store
@@ -564,7 +564,7 @@ def print_memory_usage(step_description, device=0):
 def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None):
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
-    print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    # print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     if mol.active_state > 0:
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 

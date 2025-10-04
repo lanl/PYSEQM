@@ -77,7 +77,8 @@ class Parser(torch.nn.Module):
         super().__init__()
         self.outercutoff = seqm_parameters.get('pair_outer_cutoff',1e10)
         if seqm_parameters.get('elements') is None:
-            raise RuntimeError("Please instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class")
+            raise RuntimeError("Please instantiate a Molecule object before instantiating an object of Electronic_structure or Molecular_Dynamics class."
+                               "Alternately, provide a list called of unique elements in the input molecules under the 'elements' key in seqm_parameters")
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
         self.hipnn_automatic_doublet = seqm_parameters.get('HIPNN_automatic_doublet', False)
@@ -518,8 +519,9 @@ class Energy(torch.nn.Module):
                     Eexcited = excitation_energies[:,molecule.active_state-1]
                     if molecule.const.do_timing: t0 = time.time()
                     molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, orbital_window=orbital_window, calculate_dipole = True)
-                    t1 = time.time()
-                    molecule.const.timing["Force"].append(t1 - t0)
+                    if molecule.const.do_timing:
+                        t1 = time.time()
+                        molecule.const.timing["Force"].append(t1 - t0)
                 else:
                     if all_same_mols:
                         Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa',orbital_window=orbital_window)
