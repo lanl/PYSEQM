@@ -204,14 +204,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def screen_output(self, i, T, Ek, L):
         if i==0:
             print("Step,    Temp,    E(kinetic),  E(potential),  E(total)")
-        else:
-            print("%6d" % (i+1), end="")
-            for mol in self.output['molid']:
-                Tm  = float(T[mol].detach().cpu())
-                Ekm = float(Ek[mol].detach().cpu())
-                Lm  = float(L[mol].detach().cpu())
-                print(" %8.2f   %e %e %e || " % (Tm,   Ekm, Lm, Lm+Ekm), end="")
-            print()
+        print("%6d" % (i+1), end="")
+        for mol in self.output['molid']:
+            Tm  = float(T[mol].detach().cpu())
+            Ekm = float(Ek[mol].detach().cpu())
+            Lm  = float(L[mol].detach().cpu())
+            print(" %8.2f   %e %e %e || " % (Tm,   Ekm, Lm, Lm+Ekm), end="")
+        print()
     
     def dump(self, i, molecule, velocities, q, T, Ek, L, forces, e_gap, Err=None, **kwargs):
         
@@ -641,14 +640,13 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
     perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
     separate get force, run one step, and run n steps is to make it easier to implement thermostats
     """
-    def __init__(self, langevin_damp=None, xl_bomd_params=dict(), *args, **kwargs):
+    def __init__(self, damp=None, xl_bomd_params=dict(), *args, **kwargs):
         """
         unit for timestep is femtosecond
         """
         self.k = xl_bomd_params['k']
         self.xl_bomd_params = xl_bomd_params
-        super().__init__(*args, **kwargs)
-        self.damp = langevin_damp
+        super().__init__(damp, *args, **kwargs)
         self.esdriver = esdriver(self.seqm_parameters)
         #check Niklasson et al JCP 130, 214109 (2009)
         #coeff: kappa, alpha, c0, c1, ..., c9
@@ -734,7 +732,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
     def run(self, molecule, steps, learned_parameters=dict(), Pt=None, remove_com=None, *args, **kwargs):
         
-        self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
+        self.initialize(molecule,remove_com=remove_com,learned_parameters=learned_parameters, *args, **kwargs)
         with torch.no_grad():
             if not torch.is_tensor(Pt):
                 Pt = molecule.dm.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
@@ -831,10 +829,6 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
 
 class KSA_XL_BOMD(XL_BOMD):
-    """
-    perform basic moleculer dynamics with verlocity_verlet algorithm, and in NVE ensemble
-    separate get force, run one step, and run n steps is to make it easier to implement thermostats
-    """
     # def __init__(self, *args, **kwargs):
     #     """
     #     unit for timestep is femtosecond
