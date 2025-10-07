@@ -185,20 +185,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def calc_temperature(self, kinetic_energy):
         return kinetic_energy * self.temperature_scale /(0.5*self.n_dof)
     
-    @staticmethod
-    def atomic_charges(P, n_orbital=4):
-        """
-        get atomic charge based on single-particle density matrix P
-        n_orbital : number of orbitals for each atom, default is 4
-        """
-        n_molecule = P.shape[0]
-        n_atom = P.shape[1]//n_orbital
-        q = P.diagonal(dim1=1,dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(axis=2)
-        return q
-    
-    @staticmethod
-    def dipole(q, coordinates):
-        return torch.sum(q.unsqueeze(2)*coordinates, axis=1)
 
     
     def screen_output(self, i, T, Ek, L):
@@ -224,23 +210,30 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         restricted = e_gap.dim()==1
         timestamp = time.time()
 
+    
+        # Et_= (Ek+L).detach().cpu()
+        # dipole_ = molecule.relaxed_dipole.detach().cpu() if molecule.relaxed_dipole is not None 
+
         for mol in self.output['molid']:
             n_atoms = int(torch.sum(molecule.species[mol] > 0))
             s = StringIO()
             s.write(f"{n_atoms}\n")
-            if restricted:
-                eg = float(e_gap[mol].detach().cpu())
-                e_gap_str = f"{eg:12.6f}"
-            else:
-                eg0 = float(e_gap[mol,0].detach().cpu())
-                eg1 = float(e_gap[mol,1].detach().cpu())
-                e_gap_str = f"{eg0:12.6f}/{eg1:12.6f}"
-            Tm  = float(T[mol].detach().cpu())
-            Ekm = float(Ek[mol].detach().cpu())
-            Lm  = float(L[mol].detach().cpu())
-            Em  = float(Err[mol])
-            s.write(f"step: {i+1}  T= {Tm:12.3f}K  Ek= {Ekm:12.9f}  Ep= {Lm:12.9f}  "
-                    f"E_gap= {e_gap_str}  Err= {Em:24.16f}  time_stamp= {timestamp:.4f}\n")
+
+            # if restricted:
+            #     eg = float(e_gap[mol].detach().cpu())
+            #     e_gap_str = f"{eg:12.6f}"
+            # else:
+            #     eg0 = float(e_gap[mol,0].detach().cpu())
+            #     eg1 = float(e_gap[mol,1].detach().cpu())
+            #     e_gap_str = f"{eg0:12.6f}/{eg1:12.6f}"
+            # Tm  = float(T[mol].detach().cpu())
+            # Ekm = float(Ek[mol].detach().cpu())
+            # Lm  = float(L[mol].detach().cpu())
+            # Em  = float(Err[mol])
+            # s.write(f"step: {i+1}  T= {Tm:12.3f}K  Ek= {Ekm:12.9f}  Ep= {Lm:12.9f}  "
+            #         f"E_gap= {e_gap_str}  Err= {Em:24.16f}  time_stamp= {timestamp:.4f}\n")
+            
+            s.write(f"step: {i+1}  {Et_mol:12.9f}  \n")
             xyz = molecule.coordinates[mol]
             Z   = molecule.species[mol]
             for a in range(n_atoms):
@@ -487,10 +480,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             create("excitation/excitation_energy",    (Twrites, B, R))
             create("excitation/transition_dipole",  (Twrites, B, R, 3))
             create("excitation/oscillator_strength", (Twrites, B, R))
-            create("excitation/ground_dipole", (Twrites, B,3))
             create("excitation/active_state", (Twrites,),np.int64)
             create("excitation/relaxed_dipole", (Twrites, B, 3))
             create("excitation/unrelaxed_dipole", (Twrites, B, 3))
+            create("properties/ground_dipole", (Twrites, B,3))
 
         # optional: MO energies
         if write_mo:
@@ -538,7 +531,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             g["excitation/active_state"][i] = int(molecule.active_state)
             g["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole)            # (B,3)
             g["excitation/unrelaxed_dipole"][i, ...] = _to_np(molecule.cis_state_unrelaxed_dipole)            # (B,3)
-            g["excitation/ground_dipole"][i, ...] = _to_np(molecule.dipole)            # (B,3)
+            g["properties/ground_dipole"][i, ...] = _to_np(molecule.dipole)            # (B,3)
 
 
         # optional: MO energies (can be large)
@@ -674,6 +667,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         tmp[0] += (2.0 - cc*self.kappa)
         tmp[1] -= 1.0
         self.coeff = torch.nn.Parameter(tmp.repeat(2), requires_grad=False)
+        self.add_spherical_potential = False # Spherical force to prevent atoms from flying off?
 
     def set_dof(self,molecule,constraints=0.0):
         # For langevin thermostat dont reduce degrees of freedom even if centre of mass momentum is zeroed out 
@@ -683,6 +677,15 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             constraints = 0.0
 
         self.n_dof = 3.0*molecule.num_atoms - constraints
+
+    def propagate_P(self, P, Pt, cindx, molecule):
+        # eq. 22 in https://doi.org/10.1063/1.3148075
+        #### Scaling delta function. Use eq with c if stability problems occur.
+        # P(n+1) = coeff_D * [ c*D(n) + (1-c)*P(n) ] + sum_j coeff[j] * Pt[j]
+        c = 0.9
+        P = self.coeff_D * ( c * molecule.dm + (1.0 - c) * P )  \
+            + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
+
     
     def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
@@ -706,15 +709,17 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             #Pt (2,3,4,5,0,1), step=6n+2
             cindx = step%self.m
             # eq. 22 in https://doi.org/10.1063/1.3148075
+            self.propagate_P(P,Pt,cindx,molecule)
             
-            #### Scaling delta function. Use eq with c if stability problems occur.
-            c = 0.9
-            P = self.coeff_D*c*molecule.dm + self.coeff_D*(1-c)*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            
-            #P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
             Pt[(self.m-1-cindx)] = P
     
         self.esdriver(molecule, learned_parameters=learned_parameters, xl_bomd_params = self.xl_bomd_params, P0=P, dm_prop='XL-BOMD', *args, **kwargs)
+
+        if self.add_spherical_potential:
+            with torch.no_grad():
+                dE, dF = Spherical_Pot_Force(molecule, radius=14.85, k=0.1)
+                molecule.Etot  = molecule.Etot  + dE
+                molecule.force = molecule.force + dF
         
         with torch.no_grad():
             molecule.acc = molecule.force*molecule.mass_inverse*self.acc_scale
@@ -829,67 +834,13 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
 
 class KSA_XL_BOMD(XL_BOMD):
-    # def __init__(self, *args, **kwargs):
-    #     """
-    #     unit for timestep is femtosecond
-    #     """
-    #     super().__init__(*args, **kwargs)
+    def __init__(self, damp=None, xl_bomd_params=dict(), *args, **kwargs):
+        super().__init__(damp, xl_bomd_params, *args, **kwargs)
+        self.add_spherical_potential = True # Spherical force to prevent atoms from flying off?
 
-    #@attach_profile_range("KSA_XL_BOMD_ONESTEP")
-    def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
-        #cindx: show in Pt, which is the latest P 
-        dt = self.timestep
-        if molecule.const.do_timing:
-            t0 = time.time()
-
-        if self.damp:
-            self.apply_langevin_thermostat(molecule)
-
-        with torch.no_grad():
-            # leapfrog velocity Verlet
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            molecule.coordinates.add_(molecule.velocities*dt)
-            
-            cindx = step%self.m
-            # eq. 22 in https://doi.org/10.1063/1.3148075
-            P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            Pt[(self.m-1-cindx)] = P
-
-
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop='XL-BOMD', *args, **kwargs)
-        
-        spherical_pot = True ########################################################################################==========
-        if spherical_pot:
-            with torch.no_grad():
-                spherical_pot_E, spherical_pot_force = Spherical_Pot_Force(molecule, 14.85, k=0.1)
-                molecule.Etot += spherical_pot_E
-                molecule.force = molecule.force + spherical_pot_force
-
-        with torch.no_grad():
-            molecule.acc = molecule.force*molecule.mass_inverse*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-
-        if self.damp:
-            self.apply_langevin_thermostat(molecule)
-
-        if molecule.const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt
-
-class ESMD(Molecular_Dynamics_Basic):
-    def __init__(self, *args, **kwargs):
-        """
-        unit for timestep is femtosecond
-        """
-        super().__init__(*args, **kwargs)
-
-    def run(self, molecule, steps, active_state, learned_parameters=dict(), reuse_P=True, remove_com=[False,1000], *args, **kwargs):
-        molecule.active_state = active_state
-        super().run(molecule=molecule,steps=steps,learned_parameters=learned_parameters, reuse_P=reuse_P, remove_com=remove_com, *args, **kwargs)
-
+    def propagate_P(self, P, Pt, cindx, molecule):
+        P = self.coeff_D * (molecule.dP2dt2 + P) \
+                + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
 
 class XL_ESMD(XL_BOMD):
     def __init__(self, *args, **kwargs):
@@ -1006,7 +957,7 @@ class XL_ESMD(XL_BOMD):
                             ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
                                                           '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
                                                           zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ],
+                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.dipole.cpu().numpy(), 6)] ],
 
                             ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
 
@@ -1020,7 +971,7 @@ class XL_ESMD(XL_BOMD):
                             ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
                                                           '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
                                                           zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.d.cpu().numpy(), 6)] ], ]
+                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.dipole.cpu().numpy(), 6)] ], ]
 
                 self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Etot + molecule.Electronic_entropy, molecule.force,
                           molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
@@ -1137,7 +1088,7 @@ def build_info_log(molecule, xl_bomd=False):
     # --- Fetch inputs once ---
     e = to_np(molecule.e_mo)          # MO energies (B, n_orb) or (B, 2, n_orb)
     nocc = to_np(molecule.nocc)       # number of occupied orbitals (B,) or (B, 2)
-    dvec = to_np(molecule.d).ravel()  # dipole vector (B,3)
+    dvec = to_np(molecule.dipole)     # dipole vector (B,3)
 
     def fmt_vec(arr, prec):
         return np.array2string(

@@ -88,7 +88,6 @@ class Molecule(torch.nn.Module):
         
         self.dm = None
         self.q = None
-        self.d = None
         
         self.Hf = None
         self.Etot = None

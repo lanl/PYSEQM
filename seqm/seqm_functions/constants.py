@@ -9,6 +9,11 @@ a0 = 0.529167 # used in amber and nexmd
 #a0=0.5291772109
 ev_kcalpmol = 23.061  # 1 eV = 23.061 kcal/mol
 
+charge_on_electron = 1.60217733e-19
+speed_of_light = 2.99792458e8
+to_debye = charge_on_electron*1e-10*speed_of_light/1e-21
+debye_to_AU = 0.393456
+
 """
 in mopac the cutoff for overlap is 10 Angstrom
 Atomic units is used here
