@@ -111,6 +111,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
 
     def initialize_velocity(self, molecule, vel_com=True):
+                
+        # check if the MD object is on the correct device
+        if self.esdriver.conservative_force.energy.packpar.p.device != molecule.coordinates.device:
+            raise RuntimeError(f"Please move the MD object (on {self.esdriver.conservative_force.energy.packpar.p.device}) to the same device as the molecule object (on {molecule.coordinates.device})")
+
         if molecule.velocities is not None:
             return molecule.velocities
 
@@ -609,15 +614,15 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
         self.n_dof = 3.0*molecule.num_atoms
 
     def apply_langevin_thermostat(self,molecule):
-        dt = self.timestep
-        s    = -dt / self.damp                 # = -γ dt
-        c1 = torch.exp(torch.as_tensor(0.5*s,dtype=molecule.coordinates.dtype, device=molecule.coordinates.device))
+        # dt = self.timestep
+        # s    = -dt / self.damp                 # = -γ dt
+        # c1 = torch.exp(torch.as_tensor(0.5*s,dtype=molecule.coordinates.dtype, device=molecule.coordinates.device))
         # 1 - e^{-γ dt} (stable)
-        one_me = -torch.expm1(torch.as_tensor(s,dtype=molecule.coordinates.dtype, device=molecule.coordinates.device))
-        c2 = torch.sqrt(one_me*self.Temp*molecule.mass_inverse)*self.vel_scale
+        # one_me = -torch.expm1(torch.as_tensor(s,dtype=molecule.coordinates.dtype, device=molecule.coordinates.device))
+        # c2 = torch.sqrt(one_me*self.Temp*molecule.mass_inverse)*self.vel_scale
         with torch.no_grad():
-            molecule.velocities.mul_(c1)
-            molecule.velocities.add_(c2 * torch.randn_like(molecule.velocities))
+            molecule.velocities.mul_(self.langevin_c1)
+            molecule.velocities.add_(self.langevin_c2 * torch.randn_like(molecule.velocities))
 
     def one_step(self, molecule, learned_parameters=dict(), *args, **kwargs):
         dt = self.timestep
@@ -642,6 +647,18 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
                 torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["MD"].append(t1-t0)
+
+    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+
+        dt = self.timestep
+        # s = -γ dt
+        s = torch.as_tensor(-dt / self.damp,dtype=molecule.coordinates.dtype, device=molecule.coordinates.device)
+        # c1 = exp{-γ dt/2}
+        self.langevin_c1 = torch.exp(0.5*s)
+        # c2 = 1 - c1^2 = 1 - e^{-γ dt}
+        one_me = -torch.expm1(s)
+        self.langevin_c2 = torch.sqrt(one_me*self.Temp*molecule.mass_inverse)*self.vel_scale
+        return super().initialize(molecule, remove_com, learned_parameters, *args, **kwargs)
             
             
 class XL_BOMD(Molecular_Dynamics_Langevin):
@@ -1079,6 +1096,7 @@ kb*T/m: 1 Kelvin/ AU = 1.0/1.160451812e4 * 1.602176565e-19 / 1.66053906660e-27 *
 = 1.0/1.160451812e4 * 1.602176565e-19 / 1.66053906660e-27 * 1.0e-10 Angstrom^2/fs^2
 = 1.0/1.160451812 * 1.602176565 / 1.6605390666 * 1.0e-6 Angstrom^2/fs^2
 = 0.8314462264063073e-6 Angstrom^2/fs^2
+kb = 0.8314462264063073e-6 a.m.u. Angstrom^2/fs^2/K
 
 sqrt(Kelvin/ AU) = 0.9118367323190634e-3 Angstrom/fs
 
