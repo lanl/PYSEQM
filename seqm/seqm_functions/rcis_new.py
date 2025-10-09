@@ -187,15 +187,19 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print("")
 
     # Post CIS analysis
-    print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
+    if mol.verbose:
+        print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
     rcis_analysis(mol,e_val_n,amplitude_store,nroots)
 
     return e_val_n, amplitude_store
 
 def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
+    if not (mol.verbose or (mol.active_state>0)):
+        return 
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
-    print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    if mol.verbose:
+        print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     if mol.active_state > 0:
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 

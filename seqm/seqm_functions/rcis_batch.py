@@ -562,9 +562,12 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
 def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None):
+    if not (mol.verbose or (mol.active_state>0)):
+        return 
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
-    # print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    if mol.verbose:
+        print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     if mol.active_state > 0:
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 

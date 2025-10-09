@@ -117,7 +117,7 @@ def get_error(Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, E
 def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[0, 0.5], unrestricted=False, backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[0, 0.5], unrestricted=False, backward=False, verbose=True):
     """
     alpha : mixing parameters, alpha=0.0, directly take the new density matrix
     backward is for testing purpose, default is False
@@ -175,7 +175,8 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             
         if Nnot == 0: 
-            print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+            if verbose:
+                print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             break
     return P, notconverged
@@ -184,7 +185,7 @@ def scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
 def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1, 0.0, 0.0, 1], unrestricted=False, backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], scf_converger=[1, 0.0, 0.0, 1], unrestricted=False, backward=False, verbose=True):
     """
     adaptive mixing algorithm, see cnvg.f
     """
@@ -262,7 +263,8 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
         if debug: print("scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         i, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
         if Nnot==0:
-            print("scf direct steps: {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+            if verbose:
+                print("scf direct steps: {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         i, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
 
@@ -322,7 +324,8 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
             k = k + 1
             if k >= MAX_ITER: return P, notconverged
         else:
-            print("scf direct+adaptive steps  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+            if verbose:
+                print("scf direct+adaptive steps  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
                         k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
 
@@ -330,7 +333,7 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
 def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=[False], backward=False, verbose=True):
 
     """
     adaptive mixing algorithm, see cnvg.f
@@ -551,15 +554,16 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 FOCK.zero_()
 
         else:
-            # print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-            #         k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+            if verbose:
+                print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                    k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
 
         
 def scf_forward3(M, w, W_pm6, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy, nOccMO, \
                 nmol, molsize, \
-                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, xl_bomd_params, backward=False):
+                maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, xl_bomd_params, backward=False,verbose=False):
     """
     DM scf optimization using KSA
     $$$ probably, not properly optimized for batches. 
@@ -652,6 +656,9 @@ def scf_forward3(M, w, W_pm6, gss, gpp, gsp, gp2, hsp, \
 
             if COUNTER >= MAX_ITER: return P, notconverged
         else:
+            if verbose: 
+                print("scf KSA step     : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f}".format(
+                        COUNTER, torch.argmax(err), max_err, torch.argmax(dm_err), max_dm_err), " | N not converged:", Nnot)
             return P, notconverged
         
 
@@ -833,7 +840,7 @@ class SCF(torch.autograd.Function):
                 M, w, W, gss, gpp, gsp, gp2, hsp, \
                 nHydro, nHeavy, nSuperHeavy,  nOccMO, \
                 nmol, molsize, \
-                maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
+                maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD,verbose):
         
         SCF.scf_backward_eps = eps # set the convergence tolerance for backprop the same as the scf tolerance
         SCF.themethod = themethod
@@ -842,27 +849,27 @@ class SCF(torch.autograd.Function):
             P, notconverged =  scf_forward0(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                nHydro, nHeavy, nSuperHeavy, nOccMO, \
                                nmol, molsize, \
-                               maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger,unrestricted=unrestricted )
+                               maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger,unrestricted=unrestricted, verbose=verbose )
         elif SCF.converger[0] == 3: # KSA
             if unrestricted:
                 raise NotImplementedError("scf_converger = [3] (KSA) not yet implemented for unrestricted calculations. Set UHF = False")
             P, notconverged =      scf_forward3(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                    nHydro, nHeavy, nSuperHeavy, nOccMO, \
                                    nmol, molsize, \
-                                   maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, SCF.converger[1])
+                                   maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, SCF.converger[1], verbose=verbose)
         else:
             if SCF.converger[0] == 1: # adaptive mixing
                 P, notconverged = scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
                                             nHydro, nHeavy, nSuperHeavy, nOccMO, \
                                             nmol, molsize, \
-                                            maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger,unrestricted=unrestricted)
+                                            maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, scf_converger=SCF.converger,unrestricted=unrestricted, verbose=verbose)
             elif SCF.converger[0] == 2: # adaptive mixing, then pulay
                 if unrestricted:
                     raise NotImplementedError("scf_converger = [2] (Pulay DIIS) not yet implemented for unrestricted calculations. Set UHF = False")
                 P, notconverged = scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                            nHydro, nHeavy, nSuperHeavy, nOccMO, \
                            nmol, molsize, \
-                           maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2)
+                           maskd, mask, idxi, idxj, P, eps, themethod, zetas, zetap, zetad, Z, F0SD, G2SD, sp2=SCF.sp2, verbose=verbose)
 
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
         ctx.save_for_backward(P, M, w, W, gss, gpp, gsp, gp2, hsp, \
@@ -1002,7 +1009,7 @@ class SCF(torch.autograd.Function):
                grads[8], None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
-               None, None, None, None, None, None, None, None, None
+               None, None, None, None, None, None, None, None, None, None
         
     
 
@@ -1014,7 +1021,7 @@ class SCF0(SCF):
                None, None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
-               None, None, None, None, None, None, None, None, None
+               None, None, None, None, None, None, None, None, None, None
 
 
 def scf_loop(molecule, \
@@ -1076,6 +1083,8 @@ def scf_loop(molecule, \
     #scf_backward == 2, directly backward through scf loop
     #             can't reuse P, so put P=None and initial P above
     #"""
+    verbose = molecule.verbose
+
     if scf_backward == 2:
         if sp2[0]:
             warnings.warn('SP2 is not used for direct backpropagation through scf loop')
@@ -1084,12 +1093,12 @@ def scf_loop(molecule, \
             Pconv, notconverged =  scf_forward0  (M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
                      molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                      nmol, molecule.molsize, \
-                     molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, scf_converger=scf_converger, unrestricted=unrestricted, backward=True)
+                     molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, scf_converger=scf_converger, unrestricted=unrestricted, backward=True, verbose=verbose)
         elif scf_converger[0] == 1:
             Pconv, notconverged =  scf_forward1(  M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
                      molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                      nmol, molecule.molsize, \
-                     molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, scf_converger = scf_converger, backward=True, unrestricted = unrestricted)
+                     molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2, scf_converger = scf_converger, backward=True, unrestricted = unrestricted, verbose=verbose)
         elif scf_converger[0] == 2:
             if unrestricted:
                 raise NotImplementedError("scf_converger = [2] (Pulay DIIS) not yet implemented for unrestricted calculations. Set UHF = False")
@@ -1097,7 +1106,7 @@ def scf_loop(molecule, \
                 Pconv, notconverged =  scf_forward2(  M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
                          molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                          nmol, molecule.molsize, \
-                         molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2,backward=True)
+                         molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], sp2=sp2,backward=True, verbose=verbose)
         else:
             raise ValueError("""For direct backpropagation through scf,
                                 must set scf_converger=[0, alpha] or [1,...] or [2]\n""")
@@ -1114,7 +1123,7 @@ def scf_loop(molecule, \
             Pconv, notconverged = scfapply(M, w, W, molecule.parameters['g_ss'], molecule.parameters['g_pp'], molecule.parameters['g_sp'], molecule.parameters['g_p2'], molecule.parameters['h_sp'], \
                 molecule.nHydro, molecule.nHeavy, molecule.nSuperHeavy, molecule.nocc, \
                 nmol, molecule.molsize, \
-                molecule.maskd, molecule.mask, molecule.atom_molid, molecule.pair_molid, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'] )
+                molecule.maskd, molecule.mask, molecule.atom_molid, molecule.pair_molid, molecule.idxi, molecule.idxj, P, eps, molecule.method, molecule.parameters['s_orb_exp_tail'], molecule.parameters['p_orb_exp_tail'], molecule.parameters['d_orb_exp_tail'], molecule.Z, molecule.parameters['F0SD'], molecule.parameters['G2SD'], verbose )
 
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()

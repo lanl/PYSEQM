@@ -473,7 +473,8 @@ class Energy(torch.nn.Module):
                 molecule.const.timing["Force"].append(t1 - t0)
 
         # Calculate ground state molecular dipole
-        calc_ground_dipole(molecule,P)
+        if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
+            calc_ground_dipole(molecule,P)
 
         if molecule.active_state > 0 and self.excited_states is None:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")

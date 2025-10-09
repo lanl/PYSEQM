@@ -1,9 +1,8 @@
 import torch
-from .basics import *
 import time
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
-from .basics import Parser
-from .seqm_functions.G_XL_LR import G
+from seqm.basics import Force
+# from .seqm_functions.G_XL_LR import G
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
 import numpy as np
 import sys
@@ -11,7 +10,7 @@ from io import StringIO
 import h5py
 np.set_printoptions(threshold=sys.maxsize)
 
-from .tools import attach_profile_range
+# from .tools import attach_profile_range
 #not finished
 
 debug = False
@@ -51,7 +50,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
         nmol = molecule.coordinates.shape[0]
-        molecule.coordinates.requires_grad_(True)
+        molecule.verbose = False
         Lold = torch.zeros(nmol,dtype=dtype,device=device)
         print("Step,  Max_Force,      Etot(eV),     dE(eV)")
         for i in range(self.max_evl):
@@ -185,8 +184,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def calc_temperature(self, kinetic_energy):
         return kinetic_energy * self.temperature_scale /(0.5*self.n_dof)
     
-
-    
     def screen_output(self, i, T, Ek, L):
         if i==0:
             print("Step,    Temp,    E(kinetic),  E(potential),  E(total)")
@@ -199,20 +196,15 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         print()
     
     def dump(self, i, molecule, velocities, q, T, Ek, L, forces, e_gap, Err=None, **kwargs):
-        
-        # # Only dump on schedule
-        # if (i + 1) % self.output['dump'] != 0:
-        #     return
-
         if Err is None:
             Err=np.zeros(T.shape)
 
-        restricted = e_gap.dim()==1
-        timestamp = time.time()
+        # restricted = e_gap.dim()==1
+        # timestamp = time.time()
 
     
-        # Et_= (Ek+L).detach().cpu()
-        # dipole_ = molecule.relaxed_dipole.detach().cpu() if molecule.relaxed_dipole is not None 
+        Et_ = (Ek+L).detach().cpu()
+        # dipole_ = molecule.dipole.detach().cpu()
 
         for mol in self.output['molid']:
             n_atoms = int(torch.sum(molecule.species[mol] > 0))
@@ -233,7 +225,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             # s.write(f"step: {i+1}  T= {Tm:12.3f}K  Ek= {Ekm:12.9f}  Ep= {Lm:12.9f}  "
             #         f"E_gap= {e_gap_str}  Err= {Em:24.16f}  time_stamp= {timestamp:.4f}\n")
             
-            s.write(f"step: {i+1}  {Et_mol:12.9f}  \n")
+            Et_mol = float(Et_[mol])
+            s.write(f"step: {i+1}  E_total = {Et_mol:12.9f}  \n")
+
             xyz = molecule.coordinates[mol]
             Z   = molecule.species[mol]
             for a in range(n_atoms):
@@ -242,34 +236,35 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 s.write(f"{label} {x:15.5f} {y:15.5f} {z:15.5f}\n")
             self._xyz_files[mol].write(s.getvalue())
             
-        if 'Info_log' in kwargs:
-            for mol in self.output['molid']:
-                info_lines = StringIO()
-                info_lines.write(f"\nstep: {i+1}\n")
-                # Each entry: [label, values], where values is list-of-strings per mol
-                for label, values in kwargs['Info_log']:
-                    info_lines.write(f"  {label}{values[mol]} \n")
-                self._info_files[mol].write(info_lines.getvalue())
-
+        # if 'Info_log' in kwargs:
+        #     for mol in self.output['molid']:
+        #         info_lines = StringIO()
+        #         info_lines.write(f"\nstep: {i+1}\n")
+        #         # Each entry: [label, values], where values is list-of-strings per mol
+        #         for label, values in kwargs['Info_log']:
+        #             info_lines.write(f"  {label}{values[mol]} \n")
+        #         self._info_files[mol].write(info_lines.getvalue())
 
     def _open_dump_files(self):
         # 1 MB buffers; keep handles for reuse
         bufsize = 1_048_576
         self._xyz_files = {}
-        self._info_files = {}
+        # self._info_files = {}
         for mol in self.output['molid']:
             xyz_fn  = f"{self.output['prefix']}.{mol}.xyz"
-            info_fn = f"{self.output['prefix']}.{mol}.Info.txt"
             self._xyz_files[mol]  = open(xyz_fn,  'a+', buffering=bufsize)
-            self._info_files[mol] = open(info_fn, 'a+', buffering=bufsize)
+            # info_fn = f"{self.output['prefix']}.{mol}.Info.txt"
+            # self._info_files[mol] = open(info_fn, 'a+', buffering=bufsize)
 
     def _close_dump_files(self):
-        for d in (getattr(self, "_xyz_files", {}), getattr(self, "_info_files", {})):
+        # for d in (getattr(self, "_xyz_files", {}), getattr(self, "_info_files", {})):
+        for d in (getattr(self, "_xyz_files", {}),):
             for fh in d.values():
-                try: fh.close()
-                except: pass
+                try:
+                    fh.close()
+                except:
+                    pass
                     
-
     def scale_velocities(self, i, velocities, T, scale_vel):
         #freq, T0 = scale_vel
         if (i)%scale_vel[0]==0:
@@ -305,6 +300,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.n_dof = 3.0*molecule.num_atoms - constraints
 
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+        molecule.verbose = False # Dont print SCF and CIS/RPA results
         self.do_remove_com = remove_com is not None
         constraints = 0.0
         # remove_com is a tuple of (mode,stride), where mode='linear' or 'angular'
@@ -355,16 +351,21 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         try:
             if do_dump:
-                h5_path     = f"{self.output['prefix']}.h5"                 # e.g. "run_001.h5" to enable
-                excited_states_params = self.seqm_parameters.get('excited_states')
-                n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
-                write_mo    = bool(kwargs.get("h5_write_mo",  False))
-                self._h5_open(molecule, h5_path,
-                              steps=steps, h5_stride=dump_steps,
-                              excited_states=n_roots, write_mo=write_mo)
-
                 self._open_dump_files()
 
+                h5_prefix = f"{self.output['prefix']}"  # we'll write {prefix}.{mol}.h5
+                excited_states_params = self.seqm_parameters.get('excited_states')
+                n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
+                write_mo = bool(kwargs.get("h5_write_mo", False))
+
+                # open one file per mol
+                self._h5_open(
+                    molecule, h5_prefix,
+                    steps=steps, h5_stride=dump_steps,
+                    excited_states=n_roots, write_mo=write_mo
+                )
+
+                self._open_dump_files()
             for i in range(steps):
                 
                 # start_time = time.time()
@@ -409,8 +410,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     if do_dump and ((i + 1) % dump_steps == 0):
                         self._h5_append_step(i + 1, molecule, T, Ek, molecule.Etot, molecule.e_gap)
                         dump_kwargs = {}
-                        if kwargs.get("Info_log"):
-                            dump_kwargs["Info_log"] = build_info_log(molecule)
+                        # if kwargs.get("Info_log"):
+                        #     dump_kwargs["Info_log"] = build_info_log(molecule)
                         
                         self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Etot, molecule.force, molecule.e_gap, **dump_kwargs)
 
@@ -427,139 +428,154 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 
         return molecule.coordinates, molecule.velocities, molecule.acc
 
-    def _h5_open(self, molecule, h5_path, *, steps, h5_stride=1,
-                 excited_states=0, write_mo=False,
-                 compression="gzip", complvl=1):
-        self._h5 = h5py.File(h5_path, "w")
-        g = self._h5
+    def _h5_open(self, molecule, h5_prefix, *, steps, h5_stride=1,
+             excited_states=0, write_mo=False,
+             compression="gzip", complvl=1):
+        """
+        Open one HDF5 file per molecule. Files go to f"{h5_prefix}.{mol}.h5".
+        """
+        self._h5_handles = {}
+        self._h5_i = {}          # per-mol write row
+        self._h5_flags = {}      # per-mol flags (e.g., Norb, R)
+        self._h5_stride = int(h5_stride)
 
-        # derive constants
-        B    = int(molecule.coordinates.shape[0])     # batch (molecules)
-        Nat  = int(molecule.coordinates.shape[1])
+        # derive constants that depend on the whole batch
+        Twrites = (int(steps) + int(h5_stride) - 1) // int(h5_stride)
         restricted = not bool(self.seqm_parameters.get('UHF', False))
-        Norb = int(molecule.norb.max())
 
-        Twrites = (int(steps) + int(h5_stride) - 1) // int(h5_stride)  # number of rows along time axis
-
-        # If excitations enabled, get number of excited states
-        write_excitations = excited_states > 0
-        if write_excitations:
-            R = excited_states
-
-        # convenience
-        def create(path, shape, dtype=np.float64):
+        def create_row_chunked(g, path, shape, dtype=np.float64):
+            # chunked along the time axis for fast appends
+            chunks = (1,) + tuple(shape[1:])
             return g.create_dataset(path, shape=shape, dtype=dtype,
-                                    chunks=True, compression=compression, compression_opts=complvl)
+                                    chunks=chunks, compression=compression, compression_opts=complvl)
 
-        # metadata
-        mg = g.create_group("meta")
-        mg.attrs.update({
-            "units_E": "eV",
-            "units_dipole": "a.u.",
-            "units_coords": "Angstrom",
-            "stride": int(h5_stride),
-            "Twrites": int(Twrites),
-        })
+        for mol in self.output['molid']:
+            # Per-molecule sizes
+            Nat_mol  = int(torch.sum(molecule.species[mol] > 0))
+            Norb_mol = int(molecule.norb[mol])
+            R        = int(excited_states)
+            active_slice = slice(0, Nat_mol)
 
-        # static (per run)
-        g.create_dataset("atoms", data=_to_np(molecule.species))
+            h5_path = f"{h5_prefix}.{mol}.h5"
+            h5 = h5py.File(h5_path, "w")
+            self._h5_handles[mol] = h5
+            self._h5_i[mol] = 0
+            self._h5_flags[mol] = {
+                "n_excited_states": R,
+                "write_mo": bool(write_mo),
+                "restricted": restricted,
+                "Norb": Norb_mol,
+                "Nat": Nat_mol,
+                "active_slice": active_slice,
+                "Twrites": Twrites,
+            }
 
-        # time-major datasets with fixed shapes (Twrites, B, ...)
-        create("steps",          (Twrites,),            np.int64)
-        create("thermo/T",       (Twrites, B))
-        create("thermo/Ek",      (Twrites, B))
-        create("thermo/Ep",      (Twrites, B))
+            g = h5
 
-        # coords / vel / forces every write
-        # create("coords/x",       (Twrites, B, Nat, 3))
-        create("vel",          (Twrites, B, Nat, 3))
-        create("forces",       (Twrites, B, Nat, 3))
+            # ---- meta
+            mg = g.create_group("meta")
+            mg.attrs.update({
+                "units_E": "eV",
+                "units_dipole": "a.u.",
+                "units_coords": "Angstrom",
+                "stride": int(h5_stride),
+                "Twrites": int(Twrites),
+                "mol_index": int(mol),
+            })
 
-        # optional: excitations
-        if write_excitations:
-            create("excitation/excitation_energy",    (Twrites, B, R))
-            create("excitation/transition_dipole",  (Twrites, B, R, 3))
-            create("excitation/oscillator_strength", (Twrites, B, R))
-            create("excitation/active_state", (Twrites,),np.int64)
-            create("excitation/relaxed_dipole", (Twrites, B, 3))
-            create("excitation/unrelaxed_dipole", (Twrites, B, 3))
-            create("properties/ground_dipole", (Twrites, B,3))
+            # ---- static (per run / per mol)
+            # store only this molecule's atoms
+            g.create_dataset("atoms", data=_to_np(molecule.species[mol,active_slice]))
 
-        # optional: MO energies
-        if write_mo:
-            if restricted:
-                create("mo/e_orb", (Twrites, B, Norb))
-                create("mo/nocc",  (Twrites, B))
-            else:
-                create("mo/e_orb", (Twrites, B, 2, Norb))
-                create("mo/nocc",  (Twrites, B, 2))
-            create("homo_lumo_gap",      (Twrites, B, 1 if restricted else 2))
+            # ---- time-major datasets (no batch dim)
+            create_row_chunked(g, "steps",     (Twrites,),      np.int64)
+            create_row_chunked(g, "thermo/T",  (Twrites,))
+            create_row_chunked(g, "thermo/Ek", (Twrites,))
+            create_row_chunked(g, "thermo/Ep", (Twrites,))
 
-        # internal write index (0..Twrites-1)
-        self._h5_i = 0
-        self._h5_flags = {
-            "n_excited_states": excited_states,
-            "write_mo":  bool(write_mo),
-        }
+            # coordinates/vel/forces per write (coords optional in your code)
+            create_row_chunked(g, "coordinates",   (Twrites, Nat_mol, 3))
+            create_row_chunked(g, "velocities",       (Twrites, Nat_mol, 3))
+            create_row_chunked(g, "forces",    (Twrites, Nat_mol, 3))
+
+            create_row_chunked(g, "properties/ground_dipole",       (Twrites, 3))
+            # ---- optional: excitations
+            if R > 0:
+                g.create_dataset("active_state", data= int(molecule.active_state))
+                create_row_chunked(g, "excitation/excitation_energy",   (Twrites, R))
+                create_row_chunked(g, "excitation/transition_dipole",   (Twrites, R, 3))
+                create_row_chunked(g, "excitation/oscillator_strength", (Twrites, R))
+                create_row_chunked(g, "excitation/active_state",        (Twrites,), np.int64)
+                create_row_chunked(g, "excitation/relaxed_dipole",      (Twrites, 3))
+                create_row_chunked(g, "excitation/unrelaxed_dipole",    (Twrites, 3))
+
+            # ---- optional: MO energies
+            if write_mo:
+                if restricted:
+                    create_row_chunked(g, "mo/e_orb", (Twrites, Norb_mol))
+                    g.create_dataset("mo/nocc", data=int(molecule.nocc[mol]))
+                    create_row_chunked(g, "homo_lumo_gap", (Twrites, 1))
+                else:
+                    create_row_chunked(g, "mo/e_orb", (Twrites, 2, Norb_mol))
+                    g.create_dataset("mo/nocc", data=_to_np(molecule.nocc[mol]))
+                    create_row_chunked(g, "homo_lumo_gap", (Twrites, 2))
 
     def _h5_append_step(self, step_idx, molecule, T, Ek, Ep, e_gap):
-        """
-        Write into row self._h5_i; caller must ensure this is a 'write step'
-        (i.e., (step_idx % stride) == 0). No resizing here.
-        """
-        g = self._h5
-        i = self._h5_i
+        for mol in self.output['molid']:
+            g = self._h5_handles[mol]
+            i = self._h5_i[mol]
+            flags = self._h5_flags[mol]
+            S = flags["active_slice"]   # slice(0, Nat_mol)
 
-        # basic fields
-        g["steps"][i]          = int(step_idx)
-        g["thermo/T"][i, ...]  = _to_np(T)
-        g["thermo/Ek"][i, ...] = _to_np(Ek)
-        g["thermo/Ep"][i, ...] = _to_np(Ep)
+            # scalars
+            g["steps"][i]     = int(step_idx)
+            g["thermo/T"][i]  = float(T[mol].detach().cpu())
+            g["thermo/Ek"][i] = float(Ek[mol].detach().cpu())
+            g["thermo/Ep"][i] = float(Ep[mol].detach().cpu())
 
-        # vectors & arrays
-        # g["coords/x"][i, ...]       = _to_np(molecule.coordinates)  # (B,N,3)
-        g["vel"][i, ...]          = _to_np(molecule.velocities)
-        g["forces"][i, ...]       = _to_np(molecule.force)
+            # vectors — write ONLY active atoms, avoid padded zeros
+            g["coordinates"][i, ...] = _to_np(molecule.coordinates[mol, S, :])
+            g["velocities"][i, ...]    = _to_np(molecule.velocities[mol, S, :])
+            g["forces"][i, ...] = _to_np(molecule.force[mol, S, :])
 
-        # optional: excitations
-        
-        R = self._h5_flags.get("n_excited_states", 0)
-        if R > 0:
-            g["excitation/excitation_energy"][i, ...]    = _to_np(molecule.cis_energies[:,:R])    # (B,R)
-            g["excitation/transition_dipole"][i, ...]  = _to_np(molecule.transition_dipole[:,:R])    # (B,R,3)
-            g["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[:,:R])  # (B,R)
-            g["excitation/active_state"][i] = int(molecule.active_state)
-            g["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole)            # (B,3)
-            g["excitation/unrelaxed_dipole"][i, ...] = _to_np(molecule.cis_state_unrelaxed_dipole)            # (B,3)
-            g["properties/ground_dipole"][i, ...] = _to_np(molecule.dipole)            # (B,3)
+            g["properties/ground_dipole"][i, ...]       = _to_np(molecule.dipole[mol])
+            # optional: excitations
+            R = flags["n_excited_states"]
+            if R > 0:
+                g["excitation/excitation_energy"][i, ...]   = _to_np(molecule.cis_energies[mol, :R])
+                g["excitation/transition_dipole"][i, ...]   = _to_np(molecule.transition_dipole[mol, :R])
+                g["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[mol, :R])
+                g["excitation/relaxed_dipole"][i, ...]      = _to_np(molecule.cis_state_relaxed_dipole[mol])
+                g["excitation/unrelaxed_dipole"][i, ...]    = _to_np(molecule.cis_state_unrelaxed_dipole[mol])
 
+            # optional: MO (slice per-mol Norb; respects restricted/unrestricted)
+            if flags.get("write_mo", False):
+                Norb = flags["Norb"]
+                if flags["restricted"]:
+                    g["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :Norb])
+                    gap_np = _to_np(e_gap[mol][None])  # (1,)
+                    g["homo_lumo_gap"][i, ...] = gap_np[:, None]
+                else:
+                    g["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :, :Norb])
+                    g["homo_lumo_gap"][i, ...] = _to_np(e_gap[mol])  # (2,)
 
-        # optional: MO energies (can be large)
-        if self._h5_flags.get("write_mo", False):
-            g["mo/e_orb"][i, ...] = _to_np(molecule.e_mo)   # (B,Norb) or (B,2,Norb)
-            g["mo/nocc"][i, ...]  = _to_np(molecule.nocc)   # (B,) or (B,2)
-            gap_np = _to_np(e_gap)
-            restricted = gap_np.ndim == 1
-            if restricted:
-                gap_np = gap_np[:, None]  # (B,1)
-            g["homo_lumo_gap"][i, ...] = gap_np
-
-        self._h5_i += 1
-        # optional: flush periodically, not every step
-        if (self._h5_i % 100) == 0: g.flush()
+            self._h5_i[mol] = i + 1
+            if (self._h5_i[mol] % 100) == 0:
+                g.flush()
 
     def _h5_close(self):
-        h = getattr(self, "_h5", None)
-        if h is not None:
-            try: h.flush()
+        # close all per-molecule files
+        for h in getattr(self, "_h5_handles", {}).values():
+            try:
+                h.flush()
             finally:
                 h.close()
-                self._h5 = None
-                self._h5_i = 0
-                self._h5_flags = {}
+        self._h5_handles = {}
+        self._h5_i = {}
+        self._h5_flags = {}
 
 def _to_np(x):
-    return x.detach().cpu().numpy() #if hasattr(x, "detach") else (x.cpu().numpy() if hasattr(x, "cpu") else np.asarray(x))
+    return x.detach().cpu().numpy()
 
 class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     """
@@ -686,7 +702,6 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         P = self.coeff_D * ( c * molecule.dm + (1.0 - c) * P )  \
             + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
 
-    
     def one_step(self, molecule, step, P, Pt, learned_parameters=dict(), *args, **kwargs):
         #cindx: show in Pt, which is the latest P 
         dt = self.timestep
@@ -763,13 +778,19 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
         try:
             if do_dump:
-                h5_path     = f"{self.output['prefix']}.h5"                 # e.g. "run_001.h5" to enable
+                self._open_dump_files()
+
+                h5_prefix = f"{self.output['prefix']}"  # we'll write {prefix}.{mol}.h5
                 excited_states_params = self.seqm_parameters.get('excited_states')
                 n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
-                write_mo    = bool(kwargs.get("h5_write_mo",  False))
-                self._h5_open(molecule, h5_path,
-                              steps=steps, h5_stride=dump_steps,
-                              excited_states=n_roots, write_mo=write_mo)
+                write_mo = bool(kwargs.get("h5_write_mo", False))
+
+                # open one file per mol
+                self._h5_open(
+                    molecule, h5_prefix,
+                    steps=steps, h5_stride=dump_steps,
+                    excited_states=n_roots, write_mo=write_mo
+                )
 
                 self._open_dump_files()
 
@@ -812,8 +833,8 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                     if do_dump and ((i + 1) % dump_steps == 0):
                         self._h5_append_step(i + 1, molecule, T, Ek, molecule.Etot + molecule.Electronic_entropy, molecule.e_gap)
                         dump_kwargs = {}
-                        if kwargs.get("Info_log"):
-                            dump_kwargs["Info_log"] = build_info_log(molecule)
+                        # if kwargs.get("Info_log"):
+                        #     dump_kwargs["Info_log"] = build_info_log(molecule)
 
                         self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Etot + molecule.Electronic_entropy, molecule.force,
                                   molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
@@ -1082,13 +1103,10 @@ Fr unit: sqrt(Kelvin*AU/(fs^2)) ==> eV/Angstrom
 #acc ==> Angstrom/fs^2
 
 def build_info_log(molecule, xl_bomd=False):
-    # single compact helper that works for torch/np/python lists
-    to_np = lambda x: x.detach().cpu().numpy()
-
     # --- Fetch inputs once ---
-    e = to_np(molecule.e_mo)          # MO energies (B, n_orb) or (B, 2, n_orb)
-    nocc = to_np(molecule.nocc)       # number of occupied orbitals (B,) or (B, 2)
-    dvec = to_np(molecule.dipole)     # dipole vector (B,3)
+    e = _to_np(molecule.e_mo)          # MO energies (B, n_orb) or (B, 2, n_orb)
+    nocc = _to_np(molecule.nocc)       # number of occupied orbitals (B,) or (B, 2)
+    dvec = _to_np(molecule.dipole)     # dipole vector (B,3)
 
     def fmt_vec(arr, prec):
         return np.array2string(
@@ -1125,7 +1143,7 @@ def build_info_log(molecule, xl_bomd=False):
         info.append(["Orbital energies alpha:\n", entries_a])
         info.append(["Orbital energies beta:\n",  entries_b])
 
-    info.append(["dipole(x,y,z): ", [f"{v:.6f}" for v in dvec]])
+    info.append(["dipole(x,y,z): ", [fmt_vec(dvec[i],6) for i in range(molecule.nmol)] ])
 
     if xl_bomd:
         info.append(['Electronic entropy contribution (eV): ', molecule.Electronic_entropy])

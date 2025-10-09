@@ -99,6 +99,8 @@ class Molecule(torch.nn.Module):
         
         self.charge = None
         self.dipole = None
+
+        self.verbose = True
         
         self.Electronic_entropy = None
         self.Fermi_occ = None

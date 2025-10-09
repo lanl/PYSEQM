@@ -72,20 +72,10 @@ elements = [0]+sorted(set(species.reshape(-1).tolist()))
 
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
-                   'scf_eps' : 1.0e-12,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
+                   'scf_eps' : 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
                    'scf_converger' : [2,0.0], # converger used for scf loop
-                                         # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
-                                         # [1], adaptive mixing
-                                         # [2], adaptive mixing, then pulay
-                   'sp2' : [False, 1.0e-5],  # whether to use sp2 algorithm in scf loop,
-                                            #[True, eps] or [False], eps for SP2 conve criteria
-                   'elements' : elements, #[0,1,6,8],
-                   'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
-                   'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
-                   'eig' : True,
+                   'elements': elements,
                    'excited_states': {'n_states':4,'tolerance':1e-6,'method':'cis'},
-                   # 'cis_tolerance' : 1e-8,
                    }
 
 delta = 1e-5
@@ -104,4 +94,12 @@ for atom in range(natoms):
 
         fd_gradient[atom, x] = (energy_plus-energy_minus)/(2.0*delta)
 torch.set_printoptions(precision=15)
+
+seqm_parameters["active_state"] = 1
+mol = Molecule(const,seqm_parameters,mol_coord.unsqueeze(0),species)
+esdriver = Electronic_Structure(seqm_parameters)
+esdriver(mol)
 print(f'The finite difference gradient of the quantity is:\n{fd_gradient}')
+print(f'The analytical gradient of the quantity is:\n{-mol.force}')
+print(f"Diff:{mol.force+fd_gradient}")
+
