@@ -49,8 +49,8 @@ seqm_parameters = {
    'scf_eps': 1.0e-8,
    'scf_converger': [0,0.2],
    # 'UHF': True,
-   # 'excited_states': {'n_states':3},
-   # 'active_state': 1,
+   'excited_states': {'n_states':3},
+   'active_state': 1,
 }
 
 # timestep = 1.0
@@ -59,9 +59,16 @@ timestep = 0.5
 output = {
 # 'molid': [0,1],
 'molid': [0],
-'thermo': 1,
-'dump': 1,
-'prefix': f'./examples/Outputs/vik_esmd.step_{timestep:.1f}'
+'prefix': f'./examples/Outputs/vik_esmd.step_{timestep:.1f}',
+'print_every': 1,
+"xyz": {
+    "every": 1    # write .xyz file every N steps; 0 disables
+    },
+"h5": {
+    "data_every": 1,      # write T/Ek/Ep, excitations, MO, etc.; 0 disables
+    "dynamics_vectors_every": 1,   # write vel/forces/coords; 0 disables
+    "write_mo": False,
+    },
 }
 
 torch.manual_seed(42)
@@ -73,14 +80,7 @@ md = Molecular_Dynamics_Langevin( damp=50.0, seqm_parameters=seqm_parameters,
                                            output=output).to(device)
 xl_bomd_params={'k':6}
 
-md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
-              seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
+# md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
+#               seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
 # md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=300.0, timestep=timestep, output=output).to(device)
-# molecule.velocities = torch.tensor([[[-20.9603, -0.5334,  0.4491], 
-#                                     [-21.2032, -0.2912, -1.8145],
-#                                     [ 20.0957, -2.0413,  7.2473],
-#                                     [ 20.4869, 13.9784,  7.2473],
-#                                     ]],device=device)*1e-3
-# _ = md.run(molecule, 1000, remove_com=('angular',10))
-_ = md.run(molecule, 20, remove_com=('angular', 1), Info_log=True, h5_write_mo=True)
-# _ = md.run(molecule, 10,Info_log=True)
+_ = md.run(molecule, 20, remove_com=('angular', 1))
