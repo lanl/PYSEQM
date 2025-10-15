@@ -92,7 +92,7 @@ def geomeTRIC_optimization(
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpf = os.path.join(tmpdir, str(uuid.uuid4()))
 
-        result = run_optimizer(customengine=engine, input=tmpf, **run_kwargs)
+        result = run_optimizer(customengine=engine, input=tmpf, qccnv=True, **run_kwargs) # use Q-Chem like convergence
 
     with open('optimized.xyz','w') as f:
         f.write("\n".join(result.write_xyz(selection=[-1]))) # Write the geometry at the last step of optimization as the optimized geometry

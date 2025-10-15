@@ -40,7 +40,7 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
 
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
-    HV = torch.empty_like(V)
+    HV = torch.clone(V)
 
     vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
 

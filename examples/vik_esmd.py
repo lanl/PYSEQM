@@ -54,7 +54,7 @@ seqm_parameters = {
 }
 
 # timestep = 1.0
-timestep = 0.5
+timestep = 0.4
 
 output = {
 # 'molid': [0,1],
@@ -75,12 +75,12 @@ torch.manual_seed(42)
 molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
 from seqm.MolecularDynamics import Molecular_Dynamics_Langevin, XL_BOMD
 
-md = Molecular_Dynamics_Langevin( damp=50.0, seqm_parameters=seqm_parameters,
-                                           Temp=300.0, timestep=timestep,
-                                           output=output).to(device)
+# md = Molecular_Dynamics_Langevin( damp=50.0, seqm_parameters=seqm_parameters,
+#                                            Temp=300.0, timestep=timestep,
+#                                            output=output).to(device)
 xl_bomd_params={'k':6}
 
-# md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
-#               seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
-# md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=300.0, timestep=timestep, output=output).to(device)
-_ = md.run(molecule, 20, remove_com=('angular', 1))
+md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
+              seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
+# md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=400.0, timestep=timestep, output=output).to(device)
+_ = md.run(molecule, 20, remove_com=('angular', 1),reuse_P=True)

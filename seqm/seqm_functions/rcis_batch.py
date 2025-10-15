@@ -42,7 +42,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     maxSubspacesize = getMaxSubspacesize(dtype,device,nov,nmol=nmol) # TODO: User-defined
 
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
-    HV = torch.empty_like(V)
+    HV = torch.clone(V)
 
     vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
 
@@ -188,7 +188,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     # print("")
 
     # Post CIS analysis
-    # print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
+    if mol.verbose:
+        print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
     rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window)
 
     return e_val_n, amplitude_store
@@ -830,8 +831,6 @@ def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_rela
 
     cis_densities = {}
     if do_transition_denisty or do_relaxed_density:
-        R = torch.empty(nmol,norb,norb,device=device,dtype=dtype)
-
         # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a 
         R = torch.einsum('bmi,bia,bna->bmn',Cocc,amp_ia_X,Cvirt)
         if rpa:
@@ -839,7 +838,6 @@ def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_rela
         cis_densities["transition_density"] = R
 
     if do_difference_density:
-        B = torch.empty(nmol,norb,norb,device=device,dtype=dtype)
         B_virt  = torch.einsum('Nma,Nia->Nmi',Cvirt,amp_ia_X)
         B_occ  = torch.einsum('Nmi,Nia->Nma',Cocc,amp_ia_X)
 

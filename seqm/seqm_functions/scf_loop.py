@@ -398,6 +398,9 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                         k, torch.argmax(err), torch.max(err), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             k = k + 1
         else:
+            if verbose:
+                print("scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
     
     
@@ -446,6 +449,9 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
             k = k + 1
         else:
+            if verbose:
+                print("scf adaptive step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
     #del Pold, Pnew
 
@@ -504,7 +510,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                     # calculate the condition-number to see if EVEC is ill-conditioned and hence DIIS needs to be reset
                     cond =  torch.amax(absvals,dim=-1) / torch.amin(absvals,dim=-1)#.clamp(min=1e-15)
                     reset_diis = torch.any(cond > 1e7)
-                    valid_eigs = absvals > 1e-15 
+                    valid_eigs = absvals > 1e-13 
                     inv_eig = torch.zeros_like(L)
                     inv_eig[valid_eigs] = L[valid_eigs].reciprocal()
                     coeff = -torch.einsum('bki,bi,bi', Q[:, :cFock, :],inv_eig,Q[:,-1,:])  # (b', cFock)
@@ -555,8 +561,8 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
         else:
             if verbose:
-                print("scf pulay step   : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                    k, torch.argmax(err), torch.max(err.abs()), torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
+                print("scf pulay diis   : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
+                        k, torch.argmax(abs(err)), Eelec_new[torch.argmax(abs(err))], torch.argmax(abs(err)), err[torch.argmax(abs(err))], torch.argmax(dm_err), max_dm_err, torch.argmax(dm_element_err), max_dm_element_err), " | N not converged:", Nnot)
             return P, notconverged
 
         
