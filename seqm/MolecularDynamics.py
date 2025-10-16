@@ -548,7 +548,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 # MO (optional)
                 if write_mo:
                     if restricted:
-                        create_row_chunked(gd, "mo/e_orb",        (Tw_data, Norb_mol))
+                        # create_row_chunked(gd, "mo/e_orb",        (Tw_data, Norb_mol))
                         create_row_chunked(gd, "mo/homo_lumo_gap",   (Tw_data, 1))
                         gd.create_dataset("mo/nocc", data=int(molecule.nocc[mol].item()))
                     else:
@@ -593,11 +593,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if flags.get("write_mo", False):
                 Norb = flags["Norb"]
                 if flags["restricted"]:
-                    gd["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :Norb])
-                    gd["homo_lumo_gap"][i, ...] = _to_np(e_gap[mol][None, None])  # (1,1)
+                    # gd["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :Norb])
+                    gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol,None])  # (1,1)
                 else:
                     gd["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :, :Norb])
-                    gd["homo_lumo_gap"][i, ...] = _to_np(e_gap[mol])  # (2,)
+                    gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol])  # (2,)
 
             self._h5_i_data[mol] = i + 1
             if (self._h5_i_data[mol] % 100) == 0:
