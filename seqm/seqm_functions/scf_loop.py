@@ -229,7 +229,7 @@ def adaptive_mix(k, P_prev, P_cur, Pold2_diag, unrestricted):
 
     # --- Renormalize Σ diag to match Σ cur_diag  ---
     SUM0 = diag_cur.sum(dim=1)                                   # [B]
-    di = diag_new.clone()                                        # [B, nbas]
+    di = diag_new
     full_di_occ = di.new_full((), occ_number)
     for _ in range(20):
         SUM2 = di.sum(dim=1)                        # sum of *current* di

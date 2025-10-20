@@ -995,7 +995,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 class KSA_XL_BOMD(XL_BOMD):
     def __init__(self, damp=None, xl_bomd_params=dict(), *args, **kwargs):
         super().__init__(damp, xl_bomd_params, *args, **kwargs)
-        self.add_spherical_potential = True # Spherical force to prevent atoms from flying off?
+        self.add_spherical_potential = False # Spherical force to prevent atoms from flying off?
 
     def propagate_P(self, P, Pt, cindx, molecule):
         P_new = self.coeff_D * (molecule.dP2dt2 + P) \
