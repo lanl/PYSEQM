@@ -115,38 +115,37 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.remove_com_angular    = False
 
     def _normalize_output(self):
-        o = self.output
+        o = self.output or {}
 
         # For backward compatibility
         if "thermo" in o and "print_every" not in o:
-            o["print_every"] = int(o["thermo"])
+            o["print every"] = int(o["thermo"])
         if "dump" in o:
             dump = int(o["dump"])
-            o.setdefault("xyz", {}).setdefault("every", dump)
-            o.setdefault("h5",  {}).setdefault("data_every", dump)
-            o["h5"].setdefault("dynamics_vectors_every", dump)
+            o.setdefault("xyz", dump)
+            o.setdefault("h5",  {}).setdefault("data", dump)
 
         # Defaults
         o.setdefault("molid", [0])
-        o.setdefault("print_every", 1)
+        o.setdefault("print every", 1)
         o.setdefault("prefix", "md")
-        o.setdefault("xyz", {})
         o.setdefault("h5",  {})
 
-        # XYZ cadence only
-        o["xyz"].setdefault("every", 0)
+        # XYZ cadence
+        o.setdefault("xyz", 0)
+        self._print_every = int(o["print every"])
+        self._xyz_every   = int(o["xyz"])
 
-        # HDF5 cadences + toggles
-        o["h5"].setdefault("data_every",    10)   # scalars/properties cadence
-        o["h5"].setdefault("dynamics_vectors_every", 10)   # vel/force/(coords) cadence
-        o["h5"].setdefault("write_mo",      False)
-
-        # Cache
-        self._print_every       = int(o["print_every"])
-        self._xyz_every         = int(o["xyz"]["every"])
-        self._h5_data_every     = int(o["h5"]["data_every"])
-        self._h5_vectors_every  = int(o["h5"]["dynamics_vectors_every"])
-        self._h5_write_mo       = bool(o["h5"]["write_mo"])
+        # HDF5: intuitive cadences (numbers mean "every N steps"; 0 = off)
+        h5 = o["h5"]
+        self._cadence = {
+            "coordinates": int(h5.get("coordinates", 0)),
+            "velocities":  int(h5.get("velocities",  0)),
+            "forces":      int(h5.get("forces",      0)),
+        }
+        self._any_vectors   = any(self._cadence.values())
+        self._h5_data_every = int(h5.get("data", 0))            # scalars/thermo cadence; 0 = off
+        self._h5_write_mo   = bool(h5.get("write_mo", False))
 
     def initialize_velocity(self, molecule, vel_com=True):
                 
@@ -218,7 +217,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             molecule.velocities.mul_(alpha.reshape(-1,1,1))
 
             del r_com, v_com
-
 
     def kinetic_energy(self, molecule):
         Ek = torch.sum(0.5*molecule.mass*molecule.velocities**2,dim=(1,2))*self.kinetic_energy_scale
@@ -309,8 +307,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     fh.close()
                 except:
                     pass
-
-
                     
     def scale_velocities(self, i, velocities, T, scale_vel):
         #freq, T0 = scale_vel
@@ -392,7 +388,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         do_screen = (self._print_every > 0)
         do_xyz    = (self._xyz_every > 0)
-        do_h5     = (self._h5_data_every > 0) or (self._h5_vectors_every > 0)
+        do_h5     = (self._h5_data_every > 0) or self._any_vectors
 
         try:
             if do_h5:
@@ -404,7 +400,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     molecule, h5_prefix,
                     steps=steps,
                     data_stride=self._h5_data_every,
-                    vectors_stride=self._h5_vectors_every,
                     excited_states=n_roots,
                     write_mo=self._h5_write_mo,
                 )
@@ -455,7 +450,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     if do_h5:
                         if self._h5_data_every > 0 and ((i+1) % self._h5_data_every == 0):
                             self._h5_append_data_step(i+1, molecule, T, Ek, molecule.Etot, molecule.e_gap)
-                        if self._h5_vectors_every > 0 and ((i+1) % self._h5_vectors_every == 0):
+                        if self._any_vectors:
                             self._h5_append_vectors_step(i+1, molecule)
 
                     if do_xyz and ((i+1) % self._xyz_every == 0):
@@ -479,7 +474,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         return molecule.coordinates, molecule.velocities, molecule.acc
 
     def _h5_open(self, molecule, h5_prefix, *, steps,
-                 data_stride=1, vectors_stride=1,
+                 data_stride=1,
                  excited_states=0, write_mo=False,
                  compression="gzip", complvl=4):
 
@@ -488,8 +483,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self._h5_i_vec  = {}
         self._h5_flags  = {}
 
-        Tw_data = (int(steps) + int(data_stride)   - 1) // int(data_stride)   if data_stride   > 0 else 0
-        Tw_vec  = (int(steps) + int(vectors_stride)- 1) // int(vectors_stride) if vectors_stride> 0 else 0
+        def n_timepoints(stride):
+            s = int(stride)
+            return (int(steps) + s - 1) // s if s > 0 else 0
+
+        Tw_data = n_timepoints(int(data_stride))
+        Tw_vec  = {k: n_timepoints(v) for k, v in self._cadence.items()}
+
         restricted = not bool(self.seqm_parameters.get('UHF', False))
 
         def create_row_chunked(g, path, shape, dtype=np.float64):
@@ -507,8 +507,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             _rotate_existing(h5_path)
             h5 = h5py.File(h5_path, "w")
             self._h5_handles[mol] = h5
-            self._h5_i_data[mol] = 0
-            self._h5_i_vec[mol]  = 0
+            self._h5_i_data[mol]  = 0
+            self._h5_i_vec[mol]   = {"coordinates": 0, "velocities": 0, "forces": 0}
 
             self._h5_flags[mol] = {
                 "restricted": restricted,
@@ -518,9 +518,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "n_excited_states": R,
                 "write_mo": bool(write_mo),
                 "Tw_data": int(Tw_data),
-                "Tw_vec": int(Tw_vec),
-                "stride_data": int(data_stride),
-                "stride_vec": int(vectors_stride),
+                "Tw_vec": {k: int(v) for k, v in Tw_vec.items()},
+                "stride": dict(self._cadence),         # cadence per stream
             }
 
             # Store atoms (active only)
@@ -552,17 +551,21 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                         create_row_chunked(gd, "mo/homo_lumo_gap",   (Tw_data, 1))
                         gd.create_dataset("mo/nocc", data=int(molecule.nocc[mol].item()))
                     else:
-                        create_row_chunked(gd, "mo/e_orb",        (Tw_data, 2, Norb_mol))
+                        # create_row_chunked(gd, "mo/e_orb",        (Tw_data, 2, Norb_mol))
                         create_row_chunked(gd, "mo/homo_lumo_gap",   (Tw_data, 2))
                         gd.create_dataset("mo/nocc", data=_to_np(molecule.nocc[mol]))
 
             # ---- /vectors group (vel/forces[/coords])
-            if Tw_vec > 0:
-                gv = h5.create_group("dynamics_vectors")
-                create_row_chunked(gv, "steps",   (Tw_vec,), np.int64)
-                create_row_chunked(gv, "velocities",     (Tw_vec, Nat_mol, 3))
-                create_row_chunked(gv, "forces",  (Tw_vec, Nat_mol, 3))
-                create_row_chunked(gv, "coordinates", (Tw_vec, Nat_mol, 3))
+            def make_stream_group(name, Tlen):
+                if Tlen <= 0: 
+                    return
+                g = h5.create_group(name)                # "/coordinates", "/velocities", "/forces"
+                create_row_chunked(g, "steps",  (Tlen,), np.int64)
+                create_row_chunked(g, "values", (Tlen, Nat_mol, 3))
+
+            make_stream_group("coordinates", Tw_vec["coordinates"])
+            make_stream_group("velocities",  Tw_vec["velocities"])
+            make_stream_group("forces",      Tw_vec["forces"])
 
     def _h5_append_data_step(self, step_idx, molecule, T, Ek, Ep, e_gap):
         for mol in self.output['molid']:
@@ -605,24 +608,32 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
     def _h5_append_vectors_step(self, step_idx, molecule):
         for mol in self.output['molid']:
-            h5 = self._h5_handles[mol]
-            i  = self._h5_i_vec[mol]
-            if i is None: 
-                continue
-            flags = self._h5_flags[mol]
-            if flags["Tw_vec"] == 0:
-                continue
+            h5    = self._h5_handles[mol]
+            f     = self._h5_flags[mol]
+            S     = f["active_slice"]
+            stride, Tw, i_vec = f["stride"], f["Tw_vec"], self._h5_i_vec[mol]
 
-            gv = h5["dynamics_vectors"]
-            S  = flags["active_slice"]
+            tensors = {
+                "coordinates": molecule.coordinates[mol, S, :],
+                "velocities":  molecule.velocities[mol,  S, :],
+                "forces":      molecule.force[mol,       S, :],
+            }
 
-            gv["steps"][i]  = int(step_idx)
-            gv["velocities"][i, ...]    = _to_np(molecule.velocities[mol, S, :])
-            gv["forces"][i, ...] = _to_np(molecule.force[mol, S, :])
-            gv["coordinates"][i, ...] = _to_np(molecule.coordinates[mol, S, :])
+            did_write = False
+            for name, arr in tensors.items():
+                k = stride[name]
+                if k <= 0 or (step_idx % k):
+                    continue
+                i = i_vec[name]
+                if i >= Tw[name]:
+                    continue
+                g = h5[name]
+                g["steps"][i]  = int(step_idx)
+                g["values"][i] = _to_np(arr)
+                i_vec[name] = i + 1
+                did_write = did_write or (i_vec[name] % 100 == 0)
 
-            self._h5_i_vec[mol] = i + 1
-            if (self._h5_i_vec[mol] % 100) == 0:
+            if did_write:
                 h5.flush()
 
     def _h5_close(self):
@@ -864,7 +875,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             molecule.const.timing["MD"].append(t1-t0)
         return P, Pt, es_amp, es_amp_t
 
-    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, es_amp_t=None, remove_com=None, scf_eps=1e-4, es_eps=1e-3, *args, **kwargs):
+    def run(self, molecule, steps, learned_parameters=dict(), Pt=None, es_amp_t=None, remove_com=None, scf_eps=5e-4, es_eps=5e-3, *args, **kwargs):
         
         self.initialize(molecule,remove_com=remove_com,learned_parameters=learned_parameters, *args, **kwargs)
         if molecule.active_state > 0:
@@ -908,7 +919,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
         do_screen = (self._print_every > 0)
         do_xyz    = (self._xyz_every > 0)
-        do_h5     = (self._h5_data_every > 0) or (self._h5_vectors_every > 0)
+        do_h5     = (self._h5_data_every > 0) or self._any_vectors
 
         try:
             if do_h5:
@@ -920,7 +931,6 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                     molecule, h5_prefix,
                     steps=steps,
                     data_stride=self._h5_data_every,
-                    vectors_stride=self._h5_vectors_every,
                     excited_states=n_roots,
                     write_mo=self._h5_write_mo,
                 )
@@ -963,10 +973,11 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
                     if do_screen and ((i+1) % self._print_every == 0):
                         self.screen_output(i, T, Ek, molecule.Etot + molecule.Electronic_entropy)
+
                     if do_h5:
                         if self._h5_data_every > 0 and ((i+1) % self._h5_data_every == 0):
                             self._h5_append_data_step(i+1, molecule, T, Ek, molecule.Etot + molecule.Electronic_entropy, molecule.e_gap)
-                        if self._h5_vectors_every > 0 and ((i+1) % self._h5_vectors_every == 0):
+                        if self._any_vectors:
                             self._h5_append_vectors_step(i+1, molecule)
 
                     if do_xyz and ((i+1) % self._xyz_every == 0):
@@ -990,8 +1001,6 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
         return molecule.coordinates, molecule.velocities, molecule.acc
 
-
-
 class KSA_XL_BOMD(XL_BOMD):
     def __init__(self, damp=None, xl_bomd_params=dict(), *args, **kwargs):
         super().__init__(damp, xl_bomd_params, *args, **kwargs)
@@ -1001,202 +1010,6 @@ class KSA_XL_BOMD(XL_BOMD):
         P_new = self.coeff_D * (molecule.dP2dt2 + P) \
                 + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
         return P_new
-
-class XL_ESMD(XL_BOMD):
-    def __init__(self, *args, **kwargs):
-        """
-        unit for timestep is femtosecond
-        """
-        super().__init__(*args, **kwargs)
-
-    def one_step(self, molecule, step, P, Pt, amp, amp_t, ground_state_SCF=True, learned_parameters=dict(), *args, **kwargs):
-        #cindx: show in Pt, which is the latest P 
-        dt = self.timestep
-        if molecule.const.do_timing:
-            t0 = time.time()
-
-        with torch.no_grad():
-            # leapfrog velocity Verlet
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            molecule.coordinates.add_(molecule.velocities*dt)                
-
-            #cindx = step%self.m
-            #e.g k=5, m=6
-            #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
-            #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
-            #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
-            #Pt (2,3,4,5,0,1), step=6n+2
-            cindx = step%self.m
-            # eq. 22 in https://doi.org/10.1063/1.3148075
-            
-            #### Scaling delta function. Use eq with c if stability problems occur.
-            c = 0.9
-            P = self.coeff_D*c*molecule.dm + self.coeff_D*(1-c)*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            amp = self.coeff_D*c*molecule.cis_amplitudes + self.coeff_D*(1-c)*amp + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*amp_t, dim=0)
-            
-            #P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            Pt[(self.m-1-cindx)] = P
-            amp_t[(self.m-1-cindx)] = amp
-    
-        calc_type = 'SCF' if ground_state_SCF else 'XL-BOMD'
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop=calc_type, cis_amp=amp, *args, **kwargs)
-        molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
-
-        if self.damp:
-            #print('DAMPING')
-            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
-            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
-                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
-            molecule.force += Ff+Fr
-            molecule.force[molecule.species==0,:] = 0.0
-        
-        with torch.no_grad():
-            molecule.acc = molecule.force*molecule.mass_inverse*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-        if molecule.const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt, amp, amp_t
-
-    def run(self, molecule, steps, active_state, ground_state_SCF = True, learned_parameters=dict(), Pt=None, amp_t=None, xi_t=None, remove_com=[False,1000], *args, **kwargs):
-        
-        molecule.active_state = active_state
-        self.initialize(molecule, learned_parameters=learned_parameters, *args, **kwargs)
-        with torch.no_grad():
-            if not torch.is_tensor(Pt):
-                Pt = molecule.dm.unsqueeze(0).expand((self.m,)+molecule.dm.shape).clone()
-                if 'max_rank' in self.xl_bomd_params:
-                    molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
-            P = molecule.dm.clone()
-            if not torch.is_tensor(amp_t):
-                amp_t = molecule.cis_amplitudes.unsqueeze(0).expand((self.m,)+molecule.cis_amplitudes.shape).clone()
-            amp = molecule.cis_amplitudes.clone()
-
-        E0 = None
-
-        for i in range(steps):
-            start_time = time.time()
-
-            P, Pt, amp, amp_t = self.one_step(molecule, i, P, Pt, amp, amp_t, learned_parameters=learned_parameters, ground_state_SCF=ground_state_SCF, *args, **kwargs)
-
-            with torch.no_grad():
-                if torch.is_tensor(molecule.coordinates.grad):
-                    molecule.coordinates.grad.zero_()
-                
-                if remove_com[0]:
-                    if i%remove_com[1]==0:
-                        self.zero_com(molecule)
-                
-                Ek, T = self.kinetic_energy(molecule)
-                if not torch.is_tensor(E0):
-                    E0 = molecule.Etot + molecule.Electronic_entropy + Ek
-                
-                if 'scale_vel' in kwargs and 'control_energy_shift' in kwargs:
-                    raise ValueError("Can't scale velocities to fix temperature and fix energy shift at same time")
-                
-                #scale velocities to control temperature
-                if 'scale_vel' in kwargs:
-                    # kwargs["scale_vel"] = [freq, T(target)]
-                    flag = self.scale_velocities(i, molecule.velocities, T, kwargs["scale_vel"])
-                    if flag:
-                        Ek, T = self.kinetic_energy(molecule)
-                
-                #control energy shift
-                if 'control_energy_shift' in kwargs and kwargs['control_energy_shift']:
-                    #scale velocities to adjust kinetic energy and compenstate the energy shift
-                    Eshift = Ek + molecule.Etot + molecule.Electronic_entropy - E0
-                    self.control_shift(molecule.velocities, Ek, Eshift)
-                    Ek, T = self.kinetic_energy(molecule)
-                self.screen_output(i, T, Ek, molecule.Etot + molecule.Electronic_entropy)
-                dump_kwargs = {}
-                if 'Info_log' in kwargs and kwargs['Info_log']:
-                    if 'max_rank' in self.xl_bomd_params:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                          '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                          zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.dipole.cpu().numpy(), 6)] ],
-
-                            ['Electronic entropy contribution (eV): ', molecule.Electronic_entropy],
-
-                            ['Fermi occupancies:\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') + \
-                                                      '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                      zip(np.round(molecule.Fermi_occ.cpu().numpy(), 6), molecule.nocc)] ],
-
-                            ['Rank-m Krylov subspace approximation error: ', molecule.Krylov_Error], ]
-                    else:
-                        dump_kwargs['Info_log'] = [
-                            ['Orbital energies (eV):\n', ['    Occupied:\n      ' + str(x[0: i])[1:-1].replace('\n', '\n     ') +\
-                                                          '\n    Virtual:\n      ' + str(x[i:])[1:-1].replace('\n', '\n     ') for x, i in \
-                                                          zip(np.round(molecule.e_mo.cpu().numpy(), 5), molecule.nocc)] ],
-                            ['dipole(x,y,z): ', [str(x)[1:-1] for x in np.round(molecule.dipole.cpu().numpy(), 6)] ], ]
-
-                self.dump(i, molecule, molecule.velocities, molecule.q, T, Ek, molecule.Etot + molecule.Electronic_entropy, molecule.force,
-                          molecule.e_gap, molecule.Krylov_Error, **dump_kwargs)
-            del T, Ek, dump_kwargs
-            if i%1000==0:
-                torch.cuda.empty_cache()
-            
-            if debug:
-                print(time.time() - start_time)
-
-        return molecule.coordinates, molecule.velocities, molecule.acc
-
-class KSA_XL_ESMD(XL_ESMD):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def one_step(self, molecule, step, P, Pt, amp, amp_t, learned_parameters=dict(), *args, **kwargs):
-        #cindx: show in Pt, which is the latest P 
-        dt = self.timestep
-        if molecule.const.do_timing:
-            t0 = time.time()
-
-        with torch.no_grad():
-            # leapfrog velocity Verlet
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-            molecule.coordinates.add_(molecule.velocities*dt)                
-
-            #cindx = step%self.m
-            #e.g k=5, m=6
-            #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
-            #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
-            #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
-            #Pt (2,3,4,5,0,1), step=6n+2
-            cindx = step%self.m
-            # eq. 22 in https://doi.org/10.1063/1.3148075
-            
-            #### Scaling delta function. Use eq with c if stability problems occur.
-            c = 0.9
-            P = self.coeff_D*molecule.dP2dt2 + self.coeff_D*P + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            amp = self.coeff_D*c*molecule.cis_amplitudes + self.coeff_D*(1-c)*amp + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*amp_t, dim=0)
-            
-            #P = self.coeff_D*molecule.dm + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
-            Pt[(self.m-1-cindx)] = P
-            amp_t[(self.m-1-cindx)] = amp
-    
-        self.esdriver(molecule, learned_parameters=learned_parameters, P0=P, xl_bomd_params=self.xl_bomd_params, dm_prop='XL-BOMD', cis_amp=amp, *args, **kwargs)
-        molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
-
-        if self.damp:
-            #print('DAMPING')
-            Ff = -molecule.mass * molecule.velocities / self.damp / self.acc_scale
-            Fr = self.Fr_scale * torch.sqrt(2.0*self.Temp*molecule.mass/self.timestep/self.damp)*torch.randn(molecule.force.shape,
-                                                                                                             dtype=molecule.force.dtype, device=molecule.force.device)
-            molecule.force += Ff+Fr
-            molecule.force[molecule.species==0,:] = 0.0
-        
-        with torch.no_grad():
-            molecule.acc = molecule.force/molecule.mass*self.acc_scale
-            molecule.velocities.add_(0.5*molecule.acc*dt)
-        if molecule.const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            molecule.const.timing["MD"].append(t1-t0)
-        return P, Pt, amp, amp_t
 
 """
 1 eV = 1.602176565e-19 J

@@ -47,7 +47,7 @@ const = Constants().to(device)
 seqm_parameters = {
    'method': 'AM1',
    'scf_eps': 1.0e-8,
-   'scf_converger': [0,0.2],
+   'scf_converger': [1],
    # 'UHF': True,
    'excited_states': {'n_states':3},
    'active_state': 1,
@@ -60,13 +60,11 @@ output = {
 # 'molid': [0,1],
 'molid': [0],
 'prefix': f'./examples/Outputs/vik_esmd.step_{timestep:.1f}',
-'print_every': 1,
-"xyz": {
-    "every": 1    # write .xyz file every N steps; 0 disables
-    },
+'print every': 1,
+"xyz": 1,
 "h5": {
-    "data_every": 1,      # write T/Ek/Ep, excitations, MO, etc.; 0 disables
-    "dynamics_vectors_every": 1,   # write vel/forces/coords; 0 disables
+    "data": 1,      # write T/Ek/Ep, excitations, MO, etc.; 0 disables
+    "velocities": 1,   # write vel/forces/coords; 0 disables
     "write_mo": True,
     },
 }
@@ -83,4 +81,4 @@ xl_bomd_params={'k':6}
 # md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
 #               seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
 md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=400.0, timestep=timestep, output=output).to(device)
-_ = md.run(molecule, 20, remove_com=('angular', 1),reuse_P=True)
+_ = md.run(molecule, 5, remove_com=None,reuse_P=False)

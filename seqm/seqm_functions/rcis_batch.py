@@ -50,6 +50,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
     else:
         # nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
+        # V[:,:nroots] = init_amplitude_guess
         make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
         nstart = int(init_amplitude_guess.shape[1])
         
@@ -567,8 +568,8 @@ def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_wi
         return 
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
-    if mol.verbose:
-        print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    # if mol.verbose:
+    #     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     if mol.active_state > 0:
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 

@@ -56,7 +56,7 @@ const = Constants().to(device)
 seqm_parameters = {
                    'method' : 'MNDO',  # AM1, MNDO, PM#
                    'scf_eps' : 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
-                   'scf_converger' : [2,0.3], # converger used for scf loop
+                   'scf_converger' : [1], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
