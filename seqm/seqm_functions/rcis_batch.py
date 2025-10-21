@@ -46,7 +46,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
 
     vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
     vector_tol = min(vector_tol,1e-7)
-    print(vector_tol)
 
     if init_amplitude_guess is None:
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
