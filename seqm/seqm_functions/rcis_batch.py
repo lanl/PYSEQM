@@ -45,6 +45,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     HV = torch.clone(V)
 
     vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
+    vector_tol = min(vector_tol,1e-7)
+    print(vector_tol)
 
     if init_amplitude_guess is None:
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
@@ -568,8 +570,8 @@ def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_wi
         return 
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
-    # if mol.verbose:
-    #     print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+    if mol.verbose:
+        print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     if mol.active_state > 0:
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
@@ -819,8 +821,6 @@ def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_relaxed_density, orbital_window = None, w = None, e_mo = None, zvec_tolerance = 1e-6, rpa=False):
     amp = mol.cis_amplitudes[...,mol.active_state-1,:]
-    device = amp.device
-    dtype = amp.dtype
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window=orbital_window)
     nmol, norb = Cocc.shape[:2]
 
@@ -881,7 +881,7 @@ def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_rela
                 return applyA
 
             A = setup_applyA(mol,w,ea_ei,Cocc,Cvirt)
-            zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=zvec_tolerance)
+            zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=min(zvec_tolerance,1e-5))
 
             z_ao = torch.einsum('Nmi,Nia,Nna->Nmn',Cocc,zvec.view(nmol,nocc,nvirt),Cvirt)
             D = B + z_ao + z_ao.transpose(1,2) # Now this contains the relaxed density
