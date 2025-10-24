@@ -1,5 +1,4 @@
 import os
-import random
 import sys
 import tempfile
 import time
@@ -402,7 +401,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """Advance one MD step. Basic uses the standard one_step signature."""
         return self.one_step(molecule, learned_parameters=learned_parameters, **kwargs)
 
-    def run(self, molecule, steps, learned_parameters=dict(), reuse_P=True, remove_com=None, *args, **kwargs):
+    def run(self, molecule, steps, learned_parameters=dict(), reuse_P=True, remove_com=None, seed=None, *args, **kwargs):
+        
+        if seed is not None:
+            torch.manual_seed(int(seed))
+            torch.cuda.manual_seed_all(int(seed))
 
         # if doing XL-BOMD reuse_P has to be True
         if getattr(self,"k",None) is not None:
@@ -770,6 +773,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         ckpt = {
             # run-level
             "MD_type": self.__class__.__name__,
+            "device": molecule.coordinates.device,
             "step_done": int(step_done),
             "steps": int(steps),
             "reuse_P": bool(reuse_P),
@@ -784,8 +788,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             "rng": {
                 "torch_cpu": torch.random.get_rng_state(),
                 "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
-                "numpy": np.random.get_state(),
-                "python": random.getstate(),
             },
             "molecules": {
                 "species": _tensor_cpu(molecule.species),
@@ -818,22 +820,20 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 pass
 
     @staticmethod
-    def run_from_checkpoint(path: str, device):
+    def run_from_checkpoint(path: str, device=None):
         """Load restart and reconstruct Molecule + MD objects."""
         ckpt = torch.load(path, map_location="cpu",weights_only=False)
         # rehydrate RNGs first (optional; or do after constructing objects)
         torch.random.set_rng_state(ckpt["rng"]["torch_cpu"])
         if torch.cuda.is_available() and ckpt["rng"]["torch_cuda"] is not None:
             torch.cuda.set_rng_state_all(ckpt["rng"]["torch_cuda"])
-        np.random.set_state(ckpt["rng"]["numpy"])
-        random.setstate(ckpt["rng"]["python"])
 
         # rebuild objects
         from seqm.Molecule import Molecule
 
         torch.set_default_dtype(ckpt["molecules"]["coordinates"].dtype)
         if device is None:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            device = ckpt["device"]
         const = ckpt["molecules"]["constants"].to(device)
 
         molecule = Molecule(const, ckpt["seqm_parameters"], ckpt["molecules"]["coordinates"].to(device),
