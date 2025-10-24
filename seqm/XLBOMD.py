@@ -37,6 +37,7 @@ from .seqm_functions.canon_dm_prt import Canon_DM_PRT
 from .seqm_functions.hcore import hcore
 from .seqm_functions.diag import sym_eig_trunc
 from .seqm_functions.pack import *
+from .seqm_functions.dipole import calc_ground_dipole
 from .basics import Force
 from torch.autograd import grad
 import time
@@ -324,6 +325,10 @@ class EnergyXL(torch.nn.Module):
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy_xl(D,P,F,Hcore)
+
+        # Calculate ground state molecular dipole
+        if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
+            calc_ground_dipole(molecule,D)
 
         if self.excited_states is not None:
             if molecule.active_state<1:
