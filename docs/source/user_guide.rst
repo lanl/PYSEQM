@@ -22,4 +22,5 @@ User Guide
    excited_states
    bomd
    Feature-XLBOMD
+   excited_bomd
    geometry_optimization

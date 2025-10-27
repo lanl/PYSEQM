@@ -1,22 +1,27 @@
-import torch
-from .seqm_functions.scf_loop import scf_loop
-from .seqm_functions.energy import *
-from .seqm_functions.parameters import params, PWCCT
-from torch.autograd import grad
-from .seqm_functions.constants import ev
-from .seqm_functions.pack import pack
-from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
-from .seqm_functions.rcis_batch import rcis_batch, calc_cis_energy
-from .seqm_functions.rcis_new import rcis_any_batch, calc_cis_energy_any_batch
-from .seqm_functions.rcis_grad_batch import rcis_grad_batch
-from .seqm_functions.nac import calc_nac
-from .seqm_functions.rpa import rpa
-from .seqm_functions.normal_modes import normal_modes
-from .seqm_functions.dipole import calc_ground_dipole
-
+import copy
 import os
 import time
-import copy
+
+import torch
+
+from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
+from .seqm_functions.constants import ev
+from .seqm_functions.dipole import calc_ground_dipole
+from .seqm_functions.energy import (
+    elec_energy,
+    elec_energy_isolated_atom,
+    heat_formation,
+    pair_nuclear_energy,
+    total_energy,
+)
+from .seqm_functions.nac import calc_nac
+from .seqm_functions.normal_modes import normal_modes
+from .seqm_functions.parameters import PWCCT, params
+from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch
+from .seqm_functions.rcis_grad_batch import rcis_grad_batch
+from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
+from .seqm_functions.rpa import rpa
+from .seqm_functions.scf_loop import scf_loop
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -47,7 +52,7 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                        'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
                       ],
-               
+
                 'PM6_SP':['U_ss', 'U_pp', 'zeta_s', 'zeta_p',  'beta_s', 'beta_p',
                           's_orb_exp_tail', 'p_orb_exp_tail',
                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'F0SD', 'G2SD','rho_core',
@@ -56,7 +61,7 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                        'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
                       ],
-                      
+
                 'PM6_SP_STAR':['U_ss', 'U_pp', 'zeta_s', 'zeta_p',  'beta_s', 'beta_p',
                           's_orb_exp_tail', 'p_orb_exp_tail',
                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'F0SD', 'G2SD','rho_core',
@@ -94,7 +99,6 @@ class Parser(torch.nn.Module):
         do_large_tensors: option to skip computation of idxi, idxj, ni, nj, rij, xij. For SEDACS only.
         """
         device = molecule.coordinates.device
-        dtype = molecule.coordinates.dtype
 
         nmol, molsize = molecule.species.shape
         nonblank = molecule.species>0
@@ -117,7 +121,7 @@ class Parser(torch.nn.Module):
         n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64) # number of valence electrons, N*|e|
         if torch.is_tensor(molecule.tot_charge):
             n_charge -= molecule.tot_charge.reshape(-1).type(torch.int64)
-        
+
         if self.uhf:
             nocc_alpha = n_charge/2. + (molecule.mult-1)/2.
             nocc_beta = n_charge/2. - (molecule.mult-1)/2.
@@ -131,7 +135,7 @@ class Parser(torch.nn.Module):
                     nocc_alpha[nocc_alpha%1 != 0] += 0.5
                     nocc_beta[nocc_beta%1 != 0] -= 0.5
                     #print('hipnn_automatic_doublet flag is True. Molecules with odd number of electrons are treated as doublets.\n')
-                    
+
                     #print('alpha beta',nocc_alpha, '\n', nocc_beta, '\n')
             nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)
             nocc = nocc.type(torch.int64)
@@ -139,14 +143,14 @@ class Parser(torch.nn.Module):
             nocc = n_charge//2
             if ((n_charge%2)==1).any():
                 raise ValueError("RHF setting requires closed shell systems (even number of electrons)")
-        
-        
-        
+
+
+
         t1 = (torch.arange(molsize,dtype=torch.int64,device=device)*(molsize+1)).reshape((1,-1))
         t2 = (torch.arange(nmol,dtype=torch.int64,device=device)*molsize**2).reshape((-1,1))
         maskd = (t1+t2).reshape(-1)[real_atoms]
 
-        
+
 
         if do_large_tensors:
             atom_molid = torch.arange(nmol, device=device,dtype=torch.int64).unsqueeze(1).expand(-1,molsize).reshape(-1)[nonblank.reshape(-1)>0]
@@ -165,9 +169,9 @@ class Parser(torch.nn.Module):
             paircoord_raw = (molecule.coordinates.unsqueeze(1)-molecule.coordinates.unsqueeze(2)).reshape(-1,3)
             pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
             close_pairs = pairdist_sq < self.outercutoff**2
-            
+
             pairs = (pair_first < pair_second) * nonblank_pairs * close_pairs
-            
+
             paircoord = paircoord_raw[pairs]
             pairdist = torch.sqrt(pairdist_sq[pairs])
             rij = pairdist * molecule.const.length_conversion_factor
@@ -239,7 +243,7 @@ class Pack_Parameters(torch.nn.Module):
         self.nrp = len(self.required_list)
         self.p = params(method=self.method, elements=self.elements,root_dir=self.filedir,
                  parameters=self.required_list)
-        
+
         self.alpha,self.chi = PWCCT(method=self.method, elements=self.elements,root_dir=self.filedir,
                  parameters=self.required_list)
 
@@ -260,11 +264,11 @@ class Hamiltonian(torch.nn.Module):
         Constructor
         """
         super().__init__()
-        
+
         # If we are calculating excited states with CIS, then SCF convergence should be at least 1e-2 smaller than
         # CIS tolerance. Here I check for that
         if seqm_parameters.get('excited_states') is not None: # If excited_states are requested in the input
-            # Get the cis_tolerance. If cis_tolerance was not in the seqm_parameters, then set it 
+            # Get the cis_tolerance. If cis_tolerance was not in the seqm_parameters, then set it
             # to the default value here
             excited_options = seqm_parameters.get('excited_states')
             if not isinstance(excited_options,dict):
@@ -353,7 +357,7 @@ class Energy(torch.nn.Module):
         molecule.nSuperHeavy, molecule.nHeavy, molecule.nHydro, molecule.nocc, \
         molecule.Z, molecule.maskd, molecule.atom_molid, \
         molecule.mask, molecule.pair_molid, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.xij, molecule.rij = self.parser(molecule, self.method, *args, **kwargs)
-        
+
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
             molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(self.packpar(molecule.Z, learned_params = adict)   )
@@ -364,7 +368,7 @@ class Energy(torch.nn.Module):
         if(molecule.method == 'PM6'):
             molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1), molecule.parameters['beta_d'].unsqueeze(1)),dim=1)
         else:
-            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1)),dim=1)        
+            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1)),dim=1)
             molecule.parameters['zeta_d'] = torch.zeros_like(molecule.parameters['zeta_s'])
             molecule.parameters['s_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
             molecule.parameters['p_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
@@ -375,13 +379,13 @@ class Energy(torch.nn.Module):
             molecule.parameters['G2SD'] = torch.zeros_like(molecule.parameters['U_ss'])
             molecule.parameters['rho_core'] = torch.zeros_like(molecule.parameters['U_ss'])
 
-        
+
         molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
-        
+
         F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
-        
-        
+
+
         if self.eig:
             if self.uhf:
                 if 0 in molecule.nocc:
@@ -397,9 +401,9 @@ class Energy(torch.nn.Module):
                 e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
         else:
             e_gap = None
-        
+
         molecule.molecular_orbitals = molecular_orbitals
-        
+
         #nuclear energy
         alpha = molecule.parameters['alpha']
         if self.method=='MNDO':
@@ -440,14 +444,14 @@ class Energy(torch.nn.Module):
             gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b)**2)
         else:
             gam = w[...,0,0]
-        
+
         EnucAB = pair_nuclear_energy(molecule.Z, molecule.const, molecule.nmol, molecule.ni, molecule.nj, molecule.idxi, molecule.idxj, molecule.rij, \
                                      rho0xi,rho0xj,molecule.alp, molecule.chi, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
-        
+
         do_analytical_gradient = self.seqm_parameters.get('analytical_gradient',[False])
         if do_analytical_gradient[0] and molecule.active_state==0:
-            # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so 
+            # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so
             # we can save on memory since the compuational graph doesn't have to be stored.
             beta = molecule.parameters['beta']
             if molecule.const.do_timing: t0 = time.time()
@@ -466,7 +470,7 @@ class Energy(torch.nn.Module):
                               zetas=molecule.parameters['zeta_s'], zetap=molecule.parameters['zeta_p'], gss=molecule.parameters['g_ss'],
                               gpp=molecule.parameters['g_pp'], gp2=molecule.parameters['g_p2'], hsp=molecule.parameters['h_sp'],
                               beta=beta, ri=ri, riXH=riXH,)
-                    
+
             if molecule.const.do_timing:
                 if torch.cuda.is_available(): torch.cuda.synchronize()
                 t1 = time.time()
@@ -503,6 +507,7 @@ class Energy(torch.nn.Module):
 
 
                 molecule.cis_amplitudes = exc_amps
+                molecule.cis_energies = excitation_energies
 
                 if molecule.const.do_timing:
                     if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -515,7 +520,6 @@ class Energy(torch.nn.Module):
                     calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
 
             if molecule.active_state>0:
-                molecule.cis_energies = excitation_energies
 
                 if do_analytical_gradient[0]:
                     if not all_same_mols:
@@ -530,11 +534,11 @@ class Energy(torch.nn.Module):
                 else:
                     if all_same_mols:
                         Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa',orbital_window=orbital_window)
-                    else: 
+                    else:
                         Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
             if self.seqm_parameters.get('do_all_forces',False):
-                init_active_state = molecule.active_state 
+                init_active_state = molecule.active_state
                 if not do_analytical_gradient[0]:
                     raise Exception("when asking for calculating all gradients of excited states ask for analytical gradients")
                 if not all_same_mols:
@@ -585,7 +589,7 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
     def forward(self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs):
-        
+
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
         do_analytical_gradient = self.seqm_parameters.get('analytical_gradient', [False])
 
@@ -604,7 +608,7 @@ class Force(torch.nn.Module):
             if self.seqm_parameters.get('scf_backward', 0) != 2:
                 raise Exception("You have requested for normal mode calculation but scf_backward has not been set to 2 in your input seqm_parameters")
             normal_modes(molecule,Hf)
-        
+
         if self.eig:
             e = e.detach()
             e_gap = e_gap.detach()
@@ -625,7 +629,7 @@ class Force(torch.nn.Module):
                 if torch.cuda.is_available(): torch.cuda.synchronize()
                 t1 = time.time()
                 molecule.const.timing["Force"].append(t1 - t0)
-            #force = -gradients[0] 
+            #force = -gradients[0]
             if self.create_graph:
                 force = -molecule.coordinates.grad.clone()
                 with torch.no_grad(): molecule.coordinates.grad.zero_()

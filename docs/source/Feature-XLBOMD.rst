@@ -1,7 +1,7 @@
 Extended Lagrangian Born Oppenheimer Molecular Dynamics (XL-BOMD)
 =================================================================
 
-Extended Lagrangian Born–Oppenheimer Molecular Dynamics (XL-BOMD) improves upon traditional Born–Oppenheimer Molecular Dynamics (BOMD) by introducing auxiliary dynamical variables that track the electronic density matrix in a harmonic potential. This reduces the need for fully converged self-consistent field (SCF) calculations at each time step.
+Extended Lagrangian Born–Oppenheimer Molecular Dynamics (XL-BOMD) improves upon traditional Born–Oppenheimer Molecular Dynamics (BOMD) by introducing auxiliary dynamical variables that track the electronic density matrix in a harmonic potential. This eliminates the need for fully converged self-consistent field (SCF) calculations at each time step.
 
 The method enables energy-conserving dynamics even with relaxed SCF convergence, significantly lowering computational cost while maintaining stability. XL-BOMD is particularly effective for long-time simulations and large molecular systems.
 
@@ -83,31 +83,22 @@ The extra parameters you can specify for XL-BOMD drivers are:
   The dictionary that specifes the parameters for XL-BOMD dynamics, as described above.
 
 - **damp** (`float`)  
-  If you want to run Langevin dynamics, then specify the damping constant `damp` in fs. Langevin dynamics is turned off by default.
+  If you want to run Langevin dynamics for thermostatting, then specify the damping constant `damp` in fs. Langevin dynamics is turned off by default.
 
 Running an XL-BOMD Simulation
 ------------------------------
-After creating your MD driver, initialize velocities and run:
+After creating your MD driver run:
 
 .. code-block:: python
-
-   # Initialize Maxwell–Boltzmann velocities
-   md_xl.initialize_velocity(molecule)
-   # or for KSA:
-   md_ksa.initialize_velocity(molecule)
 
    # Run N steps
    _ = md_xl.run(
        molecule,
        n_steps=1000,
-       remove_com=[True, 1],
-       Info_log=True
    )
    # or
    _ = md_ksa.run(
        molecule,
        n_steps=1000,
-       remove_com=[True, 1],
-       Info_log=True
    )
 
