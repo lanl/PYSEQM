@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import time
+from datetime import datetime
 from io import StringIO
 
 import h5py
@@ -122,6 +123,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.n_dof = None  # number of degrees of freedom
         self.remove_com_linear = False
         self.remove_com_angular = False
+        self.start_time = None
 
     def _normalize_output(self):
         o = self.output or {}
@@ -402,7 +404,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         return self.one_step(molecule, learned_parameters=learned_parameters, **kwargs)
 
     def run(self, molecule, steps, learned_parameters=dict(), reuse_P=True, remove_com=None, seed=None, *args, **kwargs):
-        
+        self.start_time = datetime.now() 
+        print(f"MD run began at {self.start_time}",flush=True)
         if seed is not None:
             torch.manual_seed(int(seed))
             torch.cuda.manual_seed_all(int(seed))
@@ -521,6 +524,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if do_h5:
                 self._h5_close()
 
+        now = datetime.now()
+        print(f"MD run ended at {now}")
+        print(f"Time elapsed since the beginning of MD run: {now-self.start_time}",flush=True)
         return molecule.coordinates, molecule.velocities, molecule.acc
 
     def _h5_open(self,
@@ -805,6 +811,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "Pt": _tensor_cpu(self._xl_ctx["Pt"]),
                 "es_amp_t": _tensor_cpu(self._xl_ctx.get("es_amp_t"))
             }
+            ckpt["dP2dt2"] = _tensor_cpu(molecule.dP2dt2) 
 
         # atomic write
         tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_ckpt_", suffix=".pt")
@@ -818,6 +825,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     os.remove(tmp_path)
             except:
                 pass
+        now = datetime.now()
+        print(f"Saved checkpoint at {now}")
+        print(f"Time elapsed since the beginning of MD run: {now-self.start_time}",flush=True)
 
     @staticmethod
     def run_from_checkpoint(path: str, device=None):
@@ -849,6 +859,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if molecule.cis_amplitudes is not None:
                 molecule.cis_amplitudes = molecule.cis_amplitudes.to(device)
                 molecule.old_mos = ckpt["molecules"]["old_mos"].to(device)
+            dP2dt2 = ckpt.get("dP2dt2")
+            if dP2dt2 is not None:
+                molecule.dP2dt2 = dP2dt2.to(device)
 
         Temp = ckpt["Temp"]
         seqm_parameters = ckpt["seqm_parameters"]

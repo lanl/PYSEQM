@@ -67,6 +67,7 @@ output = {
     "velocities": 1,   # write vel/forces/coords; 0 disables
     "write_mo": True,
     },
+"checkpoint every": 2,
 }
 
 torch.manual_seed(42)
