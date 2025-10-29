@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import time
+import math
 from datetime import datetime
 from io import StringIO
 
@@ -1115,7 +1116,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                                                    mode="reduced")  # Q: (b, m, n), R_: (b, n, n)
                 # If any diagonal of R_ is ~0 in a batch, some input row was zero → fail that batch.
                 diag = torch.abs(torch.diagonal(R_, dim1=-2, dim2=-1))  # (b, n)
-                bad = (diag < 1e-8).any(dim=-1)  # (b,)
+                bad = (diag < self.vec_eps*math.sqrt(es_amp.shape[-1])).any(dim=-1)  # (b,)
                 if bad.any():
                     idx = torch.nonzero(bad, as_tuple=False).flatten().tolist()
                     raise ValueError(f"Rank-deficient/zero vector detected in batch indices {idx}.")
@@ -1201,8 +1202,16 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             self.move_on_excited_state = True
 
         if self.move_on_excited_state:
-            scf_eps = self.xl_bomd_params.get("scf_eps", 5e-4)
-            es_eps = self.xl_bomd_params.get("es_eps", 5e-3)
+            scf_eps = self.xl_bomd_params.get("scf_eps", 1e-4)
+            es_eps = self.xl_bomd_params.get("es_eps", 1e-3)
+            dtype = molecule.coordinates.dtype
+            if dtype==torch.float32:
+                    self.vec_eps = 5.0e-5
+            elif dtype==torch.float64:
+                    self.vec_eps = 1.0e-8
+            else:
+                raise RuntimeError("Set dtype to float64 or float32")
+
             if 'max_rank' in self.xl_bomd_params:
                 raise ValueError("KSA-XL-BOMD does not yet work for excited state dynamics")
             self.do_scf = True

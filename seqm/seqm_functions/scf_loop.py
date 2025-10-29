@@ -78,7 +78,7 @@ def make_Pnew_factory(method, sp2, molsize,
         else:
             if scf_converger and "T_el" in scf_converger:
                 core_step =  lambda F, nsh, nh, nhy, nOcc: Fermi_Q(F, scf_converger[3], nOcc, nh, nhy, 8.61739e-5,
-                               False, OccErrThrs=1e-9)[0]
+                               False)[0]
             else:
                 core_step = lambda F, nsh, nh, nhy, nOcc: sym_eig_trunc(F, nh, nhy, nOcc)[1]
 
@@ -243,7 +243,7 @@ def adaptive_mix(k, P_prev, P_cur, Pold2_diag, unrestricted):
             break
 
         # scale first, then clamp/split full vs partial 
-        scaled = di.mul(SUM3.view(-1,1)).add_(1.0e-20).clamp_(min=0.0)
+        scaled = di.mul(SUM3.view(-1,1)).clamp_(min=0.0)
         new_full = scaled > occ_number
         di = torch.where(new_full, full_di_occ, scaled)
 
@@ -520,6 +520,15 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
     diis_error = torch.empty_like(Eelec).fill_(torch.finfo(dtype).max)
 
     reset_diis = False
+    if dtype==torch.float64:
+        eval_eps = 1e-13
+        clamp_eps = 1e-15
+    elif dtype==torch.float32:
+        eval_eps = 1e-5
+        clamp_eps = 1e-7
+    else:
+        raise RuntimeError
+
     while (1):
 
         if Nnot>0:
@@ -538,7 +547,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                 with torch.no_grad():
                     EVEC = EMAT[notconverged,:(cFock+1),:(cFock+1)]
                     # EVEC += EVEC.tril(-1).transpose(1,2) # no need to symmetrize because torch.linalg.eigh uses only the lower triangle
-                    denom = EVEC[:, counter, counter].clamp(1.0e-15)
+                    denom = EVEC[:, counter, counter].clamp(clamp_eps)
                     EVEC[:,:cFock,:cFock] /= denom.view(-1,1,1)
 
                     # Calculate the pseudo-inverse to get the DIIS mixing coeffients
@@ -547,7 +556,7 @@ def scf_forward2(M, w, W, gss, gpp, gsp, gp2, hsp, \
                     # calculate the condition-number to see if EVEC is ill-conditioned and hence DIIS needs to be reset
                     cond =  torch.amax(absvals,dim=-1) / torch.amin(absvals,dim=-1)#.clamp(min=1e-15)
                     reset_diis = torch.any(cond > 1e7)
-                    valid_eigs = absvals > 1e-13 
+                    valid_eigs = absvals > eval_eps
                     inv_eig = torch.zeros_like(L)
                     inv_eig[valid_eigs] = L[valid_eigs].reciprocal()
                     coeff = -torch.einsum('bki,bi,bi', Q[:, :cFock, :],inv_eig,Q[:,-1,:])  # (b', cFock)
@@ -707,7 +716,7 @@ def scf_forward3(M, w, W_pm6, gss, gpp, gsp, gp2, hsp, \
 
 SCF_BACKWARD_ANDERSON_MAXITER = 200      # sufficient for all test cases
 SCF_BACKWARD_ANDERSON_HISTSIZE = 3      # seems reasonable, but TODO!
-SCF_BACKWARD_LAMBDA_MIN   = 1e-8          # floor for λ
+SCF_BACKWARD_LAMBDA_MIN   = 1e-6          # floor for λ
 SCF_BACKWARD_BETA0        = 0.20          # mixing for the first 3 steps
 SCF_BACKWARD_BETA         = 0.95          # mixing afterwards
 def fixed_point_anderson(fp_fun, u0, tol, lam=1e-3, 

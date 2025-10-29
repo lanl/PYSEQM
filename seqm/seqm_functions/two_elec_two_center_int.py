@@ -1500,7 +1500,12 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     q_raw = torch.cat((u, w_.unsqueeze(-1)), dim=-1)
 
     # Handle the antipodal case (v ≈ -k) by picking a 180° flip about z-axis
-    eps = 1e-7
+    if w_.dtype==torch.float32:
+            eps = 5.0e-4
+    elif w_.dtype==torch.float64:
+            eps = 1.0e-7
+    else:
+        raise RuntimeError("Set dtype to float64 or float32")
     mask = torch.abs(w_) < eps
     base_q = v.new_tensor([0.0, 0.0, 1.0, 0.0])
     q_raw = torch.where(mask.unsqueeze(-1), base_q, q_raw)

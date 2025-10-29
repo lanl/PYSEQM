@@ -42,7 +42,7 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.clone(V)
 
-    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
+    vector_tol = root_tol*0.01*torch.sqrt(nov_batch) # Vectors whose norm is smaller than this will be discarded
 
     if init_amplitude_guess is None:
         occ_idx  = torch.arange(nocc, device=device).view(1, -1, 1)
@@ -159,7 +159,7 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             vstart[i] = vend[i]
             # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function. 
             # This means changes inside the function will directly modify 'V[i]'
-            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
+            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol[i])
             if vend[i] - vstart[i] == 0:
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]
@@ -568,7 +568,7 @@ def make_guess_any_batch(ea_ei,nroots,maxSubspacesize,V,nmol,nov_batch):
         nov_i = int(nov_batch[i].item())
         k = min(nroots, nov_i)
         # include all states degenerate with the last chosen one
-        while k < nov_i and torch.abs(sorted_ediff[i, k] - sorted_ediff[i, k - 1]) < 1e-5:
+        while k < nov_i and torch.abs(sorted_ediff[i, k] - sorted_ediff[i, k - 1]) < 1e-4:
             k += 1
         nroots_per_mol[i] = k
         if k > nroots:

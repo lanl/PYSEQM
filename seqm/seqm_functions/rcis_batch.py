@@ -44,8 +44,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     V = torch.zeros(nmol,maxSubspacesize,nov,device=device,dtype=dtype)
     HV = torch.clone(V)
 
-    vector_tol = root_tol*0.05 # Vectors whose norm is smaller than this will be discarded
-    vector_tol = min(vector_tol,1e-7)
+    vector_tol = root_tol*0.01*math.sqrt(nov) # Vectors whose norm is smaller than this will be discarded
 
     if init_amplitude_guess is None:
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
@@ -55,19 +54,6 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
         make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
         nstart = int(init_amplitude_guess.shape[1])
         
-        # # For XL-BOMD
-        # if nroots>1:
-        #     print("WARNING: Orthogonalizing inital guess")
-        #     # init_amplitude_guess, _ = torch.linalg.qr(init_amplitude_guess.transpose(1,2), mode='reduced')
-        #     # V[:,:nstart,:] = init_amplitude_guess.transpose(1,2)
-        #
-        #     vend = torch.ones(nmol,device=device,dtype=torch.long)
-        #     V[:,0,:] = init_amplitude_guess[:,0,:]
-        #     for i in range(nmol):
-        #         vend[i] = orthogonalize_to_current_subspace(V[i], init_amplitude_guess[i,1:], vend[i], vector_tol)
-        # else:
-        #     V[:,:nstart,:] = init_amplitude_guess
-        #     V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
         # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
         # # This fails when orbitals are degenerate and switch order
         # mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
@@ -680,7 +666,7 @@ def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
 
     nroots_expand = nroots
     # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
-    while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-5):
+    while nroots_expand < len(sorted_ediff[0]) and torch.all((sorted_ediff[:,nroots_expand] - sorted_ediff[:,nroots_expand-1]) < 1e-4):
         nroots_expand += 1
     if nroots_expand > nroots:
         print(f"Increasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies")
@@ -880,7 +866,7 @@ def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_rela
                 return applyA
 
             A = setup_applyA(mol,w,ea_ei,Cocc,Cvirt)
-            zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=min(zvec_tolerance,1e-5))
+            zvec = conjugate_gradient_batch(A,RHS,ea_ei.view(nmol,nocc*nvirt),tol=zvec_tolerance)
 
             z_ao = torch.einsum('Nmi,Nia,Nna->Nmn',Cocc,zvec.view(nmol,nocc,nvirt),Cvirt)
             D = B + z_ao + z_ao.transpose(1,2) # Now this contains the relaxed density
@@ -888,3 +874,91 @@ def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_rela
 
     return cis_densities
 
+# Function to verify the linearization of energy (w.r.t. density, transition density) for XL-BOMD
+def cis_energy_from_transition_density(mol,F,R,w,D,Hcore):
+    F0 = makeA_pi_batched(mol,R.unsqueeze(1),w).squeeze(1)*2.0
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
+    norb = mol.norb[0]
+    F_ = packone_batch(F, 4*nHeavy, nHydro, norb).squeeze(1)
+
+    F0 -= (F_@R - R@F_) 
+    E = (R*F0).sum(dim=(1,2))
+    print(f"CIS Energy is {E}")
+
+    import matplotlib.pyplot as plt
+    from seqm.seqm_functions.energy import elec_energy_xl, elec_energy
+    ground = False
+    # ground = False
+    norm = True
+    err = []
+    molecule = mol
+    from seqm.seqm_functions.hcore import hcore
+    M, *rest = hcore(molecule)
+    W = torch.tensor([0], device=molecule.nocc.device)
+    from seqm.seqm_functions.fock import fock
+    ener = []
+    scale = 1e-5
+    if ground:
+        noise = torch.randn_like(D)
+    else:
+        noise = torch.randn_like(R)
+    for i in range(0,100,5):
+        if ground:
+            P = D+noise*scale*i
+            F_ = fock(molecule.nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, w, W, \
+                     molecule.parameters['g_ss'],
+                     molecule.parameters['g_pp'],
+                     molecule.parameters['g_sp'],
+                     molecule.parameters['g_p2'],
+                     molecule.parameters['h_sp'],
+                     molecule.method,
+                     molecule.parameters['s_orb_exp_tail'],
+                     molecule.parameters['p_orb_exp_tail'],
+                     molecule.parameters['d_orb_exp_tail'],
+                     molecule.Z,
+                     molecule.parameters['F0SD'],
+                     molecule.parameters['G2SD'])
+
+
+            Ei = elec_energy_xl(D,P,F_,Hcore)
+            if i==0:
+                print(f"XL E is {Ei[0].item()}\nActual E is{elec_energy(D, F, Hcore)[0].item()} ")
+        elif norm:
+            Q = R+noise*scale*i
+            Ei = ((Q*(2.0*R-Q)).sum(dim=(1,2)))
+            print(f"Norm is {Ei[0].item()}")
+        else:
+            Q = R+noise*scale*i
+            Ei = linearlized_cis_energy(mol,F,R,Q,w)
+        err.append(i)
+        ener.append(Ei[0].item())
+    
+    import numpy as np
+    x = np.array(err)
+    y = np.array(ener)
+    k = np.polyfit(x, y, 2)
+    print(f"Fit is {k}")
+    p = np.poly1d(k)
+    plt.plot(err,ener,".-",label="data")
+    plt.plot(x,p(x),label="fit")
+    plt.legend()
+    plt.show()
+
+def linearlized_cis_energy(mol,F,R,Q,w):
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
+    norb = mol.norb[0]
+    F_ = packone_batch(F, 4*nHeavy, nHydro, norb).squeeze(1)
+
+    F1 = -(F_@R - R@F_) 
+    E1 = (R*F1).sum(dim=(1,2))
+
+    G = makeA_pi_batched(mol,Q.unsqueeze(1),w).squeeze(1)*2.0
+    E2 = (R*G).sum(dim=(1,2))
+    E2alt = ((2.0*R-Q)*G).sum(dim=(1,2))
+
+    E = E1 + E2alt
+
+    print(f"CIS Energy is {E}")
+    return E

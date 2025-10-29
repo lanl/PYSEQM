@@ -38,9 +38,11 @@ def conjugate_gradient_batch(
     p = z.clone()                      # search direction
     rs_old = torch.sum(r * z, dim=sum_dims)  # [B]
 
-    # mask of active (not yet converged) systems
-    active = torch.norm(r,dim=sum_dims) >= tol
+    # # mask of active (not yet converged) systems
+    # active = torch.norm(r,dim=sum_dims) >= tol
+    active = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims) >= tol
     alpha_dtype = rs_old.dtype
+    minclamp = 1e-20 if alpha_dtype==torch.float64 else 1e-10
 
     for i in range(max_iter):
         if not active.any():
@@ -48,7 +50,7 @@ def conjugate_gradient_batch(
 
         Ap = A(p)  # [B, D1…Dk]
         denom = torch.sum(p * Ap, dim=sum_dims)         # [B]
-        alpha = rs_old / denom.clamp(min=1e-20)         # [B]
+        alpha = rs_old / denom.clamp(min=minclamp)         # [B]
         # zero‐out for converged
         alpha = alpha * active.to(alpha_dtype)
 
@@ -60,7 +62,8 @@ def conjugate_gradient_batch(
         r = r - alpha_exp * Ap
 
         # check convergence
-        r_norm = torch.norm(r, dim=sum_dims)
+        # r_norm = torch.norm(r, dim=sum_dims)
+        r_norm = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims)
         newly_conv = r_norm < tol
         active = active & (~newly_conv)
 
@@ -72,7 +75,7 @@ def conjugate_gradient_batch(
 
         # update direction
         rs_new = torch.sum(r * z, dim=sum_dims)
-        beta = rs_new / rs_old.clamp(min=1e-20)
+        beta = rs_new / rs_old.clamp(min=minclamp)
         beta = beta * active.to(beta.dtype)
         beta_exp = beta.view(batch_size, *([1] * (b.dim() - 1)))
 

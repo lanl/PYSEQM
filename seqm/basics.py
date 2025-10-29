@@ -17,7 +17,7 @@ from .seqm_functions.energy import (
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.normal_modes import normal_modes
 from .seqm_functions.parameters import PWCCT, params
-from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch
+from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch, cis_energy_from_transition_density, make_cis_densities
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
@@ -503,11 +503,13 @@ class Energy(torch.nn.Module):
                     if method == 'cis':
                         excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:
-                        raise NotImplementedError
-
-
+                        raise NotImplementedError("RPA for non-uniform batch not yet available")
                 molecule.cis_amplitudes = exc_amps
                 molecule.cis_energies = excitation_energies
+
+                # # Verify some stuff for excited state XL-BOMD
+                # tmp = make_cis_densities(molecule, True, False, False)
+                # cis_energy_from_transition_density(molecule,F,tmp["transition_density"],w,P,Hcore)
 
                 if molecule.const.do_timing:
                     if torch.cuda.is_available(): torch.cuda.synchronize()

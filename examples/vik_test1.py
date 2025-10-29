@@ -68,9 +68,9 @@ seqm_parameters = {
                    # 'eig' : True,
                    # 'uhf' : True,
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   # 'excited_states': {'n_states':1},
-                   # 'scf_backward': 2,
-                   # 'active_state': 1,
+                   'excited_states': {'n_states':3, 'method':'cis'},
+                #    'scf_backward': 2,
+                   'active_state': 2,
                    # 'analytical_gradient':[True]
                    }
 
@@ -92,11 +92,11 @@ esdriver(molecules)
 # import os
 # import numpy as np
 # print(f'{os.path.basename(__file__)} {np.average(backprop_time)} {np.average(analyt_time)})')
-print(f'Force is\n{molecules.force}')
-
-print(' Total Energy (eV):\n', molecules.Etot)
-print(f"Dipoles\n{molecules.dipole}")
-print(f"Charges:\n{molecules.q}")
+# print(f'Force is\n{molecules.force}')
+#
+# print(' Total Energy (eV):\n', molecules.Etot)
+# print(f"Dipoles\n{molecules.dipole}")
+# print(f"Charges:\n{molecules.q}")
 # print('\n Electronic Energy (eV): ', molecules.Eelec)
 # print('\n Nuclear Energy (eV):\n', molecules.Enuc)
 # print('\n Heat of Formation (ev):\n', molecules.Hf)
