@@ -1202,8 +1202,8 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             self.move_on_excited_state = True
 
         if self.move_on_excited_state:
-            scf_eps = self.xl_bomd_params.get("scf_eps", 1e-4)
-            es_eps = self.xl_bomd_params.get("es_eps", 1e-3)
+            scf_eps = self.xl_bomd_params.get("scf_eps", 1e-5)
+            es_eps = self.xl_bomd_params.get("es_eps", 5e-4)
             dtype = molecule.coordinates.dtype
             if dtype==torch.float32:
                     self.vec_eps = 5.0e-5

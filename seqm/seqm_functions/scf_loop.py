@@ -192,10 +192,9 @@ def compute_fac(Pnew_diag, P_diag, Pold_diag):
     FAC[valid] = torch.sqrt(num[valid] / den[valid])
     return FAC
 
-def adaptive_mix(k, P_prev, P_cur, Pold2_diag, unrestricted):
+def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted):
     # We treat each molecule separately (different active sizes)
-    scf_iteration = k + 1  # Fortran is 1-based; MOD(scf_iteration-1,3)
-    is_third = (k % 3 == 0)
+    is_third = (scf_iteration % 3 == 0)
     # DAMP per Fortran
     DAMP = 0.05 if scf_iteration > 4 else 1.0e10
 
@@ -289,7 +288,7 @@ def scf_forward1(M, w, W, gss, gpp, gsp, gp2, hsp, \
 
 
 
-    for k in range(MAX_ITER + 1):
+    for k in range(1,MAX_ITER + 1):
         # Build current density from current Fock
         Pnew[notconverged] = make_Pnew(F[notconverged],
                                        nSuperHeavy[notconverged],
