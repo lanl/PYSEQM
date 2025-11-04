@@ -1203,7 +1203,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
         if self.move_on_excited_state:
             scf_eps = self.xl_bomd_params.setdefault("scf_eps", 1e-5)
-            es_eps = self.xl_bomd_params.setdefault("es_eps", 5e-4)
+            es_eps = self.xl_bomd_params.setdefault("es_eps", 1e-4)
             dtype = molecule.coordinates.dtype
             if dtype==torch.float32:
                     self.vec_eps = 5.0e-5
@@ -1256,6 +1256,131 @@ class KSA_XL_BOMD(XL_BOMD):
                 + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*Pt, dim=0)
         return P_new
 
+class XL_ESMD(XL_BOMD):
+    def one_step(self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=dict(), *args, **kwargs):
+        #cindx: show in Pt, which is the latest P
+        dt = self.timestep
+        if molecule.const.do_timing:
+            t0 = time.time()
+
+        if self.damp:
+            self.apply_langevin_thermostat(molecule)
+
+        with torch.no_grad():
+            # leapfrog velocity Verlet
+            molecule.velocities.add_(0.5 * molecule.acc * dt)
+            molecule.coordinates.add_(molecule.velocities * dt)
+
+            #cindx = step%self.m
+            #e.g k=5, m=6
+            #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
+            #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
+            #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
+            #Pt (2,3,4,5,0,1), step=6n+2
+            cindx = step % self.m
+            # eq. 22 in https://doi.org/10.1063/1.3148075
+            P = self.propagate_P(P, Pt, cindx, molecule)
+            Pt[(self.m - 1 - cindx)] = P
+
+            if molecule.active_state > 0:
+                es_amp = self.propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
+                es_amp_t[(self.m - 1 - cindx)] = es_amp
+
+                # Orthonormalize the propagated excited state amplitudes
+                # TODO: Will not work the same for RPA
+                es_amp_ortho, R_ = torch.linalg.qr(es_amp.transpose(-2, -1),
+                                                   mode="reduced")  # Q: (b, m, n), R_: (b, n, n)
+                # If any diagonal of R_ is ~0 in a batch, some input row was zero → fail that batch.
+                diag = torch.abs(torch.diagonal(R_, dim1=-2, dim2=-1))  # (b, n)
+                bad = (diag < self.vec_eps*math.sqrt(es_amp.shape[-1])).any(dim=-1)  # (b,)
+                if bad.any():
+                    idx = torch.nonzero(bad, as_tuple=False).flatten().tolist()
+                    raise ValueError(f"Rank-deficient/zero vector detected in batch indices {idx}.")
+                es_amp_ortho = es_amp_ortho.transpose(-2, -1)
+
+                # n_roots = molecule.cis_amplitudes.shape[1]
+                # es_amp_ortho = es_amp.clone()
+                # # Normalize the first CIS amplitude
+                # es_amp_ortho[:,0] /=  torch.linalg.vector_norm(es_amp_ortho[:,0],dim=1,keepdim=True)
+                # if  n_roots > 1: # if more than one root, orthonormalize them
+                #     for i in range(molecule.nmol):
+                #         n_new = orthogonalize_to_current_subspace(es_amp_ortho[i], es_amp[i,1:], 1, tol=1e-8)
+                #         if n_new < n_roots:
+                #             raise RuntimeError("Some roots were lost while orthogonalizing, cannot proceed")
+            else:
+                es_amp_ortho = es_amp  # will be set to None
+
+            if self.do_scf:
+                calc_type = 'SCF'
+
+                # Purify with McWeeny polynomial since P may not be idempotent
+                # 3P^2 - 2P^3
+                # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
+                # TODO: Make it work for unrestricted P
+                P2 = P @ P
+                P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
+
+            else:
+                P0 = P
+                calc_type = 'XL-BOMD'
+
+        self.esdriver(molecule,
+                      learned_parameters=learned_parameters,
+                      xl_bomd_params=self.xl_bomd_params,
+                      P0=P0,
+                      cis_amp=es_amp_ortho,
+                      dm_prop=calc_type,
+                      *args,
+                      **kwargs)
+
+        if self.add_spherical_potential:
+            with torch.no_grad():
+                dE, dF = Spherical_Pot_Force(molecule, radius=14.85, k=0.1)
+                molecule.Etot = molecule.Etot + dE
+                molecule.force = molecule.force + dF
+
+        with torch.no_grad():
+            molecule.acc = molecule.force * molecule.mass_inverse * self.acc_scale
+            molecule.velocities.add_(0.5 * molecule.acc * dt)
+
+        if self.damp:
+            self.apply_langevin_thermostat(molecule)
+
+        if molecule.const.do_timing:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            t1 = time.time()
+            molecule.const.timing["MD"].append(t1 - t0)
+        return P, Pt, es_amp, es_amp_t
+
+    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+        super().initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs)
+
+        molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
+        if self.esdriver.conservative_force.energy.excited_states['method'].lower() == "rpa":
+            raise ValueError(
+                "XL-BOMD with excited states not tested for RPA. "
+                "Currently only works for CIS. "
+                "Will have to change one_step function to make it work for RPA."
+            )
+
+        if self.step_offset > 0:
+            # resuming: expect caller/loader to have restored dm / cis_amplitudes
+            return
+
+        # Set up P/Pt (and es_amp/es_amp_t if on excited state) for a fresh run (not resuming)
+        with torch.no_grad():
+            P = molecule.dm.clone()
+            Pt = molecule.dm.unsqueeze(0).expand((self.m, ) + molecule.dm.shape).clone()
+            if 'max_rank' in self.xl_bomd_params:
+                molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
+            ctx = {"P": P, "Pt": Pt}
+            if self.move_on_excited_state:
+                es_amp = molecule.cis_amplitudes.clone()
+                es_amp_t = molecule.cis_amplitudes.unsqueeze(0).expand((self.m, ) +
+                                                                       molecule.cis_amplitudes.shape).clone()
+                ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)
+            self._xl_ctx = ctx
 
 """
 1 eV = 1.602176565e-19 J

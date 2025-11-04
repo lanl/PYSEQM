@@ -418,7 +418,7 @@ def elec_energy_excited_xl(mol,X,Xbar):
     G = torch.einsum('bmi,brmn,bna->bria', Cocc, G_ao, Cvirt).view_as(Xbar)*2.0
     
     # Get X, omega from Xbar
-    X = solve_for_amplitude_omega(Xbar,ea_ei,G)
+    X, omega = solve_for_amplitude_omega(Xbar,ea_ei,G)
 
     E1 = (X*X*ea_ei).sum(dim=1)
     E2 = ((2.0*X-Xbar)*G).sum(dim=1)
@@ -430,7 +430,7 @@ def elec_energy_excited_xl(mol,X,Xbar):
 
 def solve_for_amplitude_omega(Xbar,ea_ei,G):
     """
-    Computes (M^{-1}) @ E = [x1; x2] for
+    Computes (M^{-1}) @ E = [X; omega] for
         M = [[A, B],
              [C, D]]
     with A = diag(ea_ei), B = neg_Xbar (i.e., -Xbar),
@@ -470,11 +470,9 @@ def solve_for_amplitude_omega(Xbar,ea_ei,G):
     rhs2 = L - 2.0 * (Xbar * Ainv_G).sum(dim=1)
 
     # Solve for x2 (scalar), then x1 (n-vector)
-    x2 = rhs2 * S_inv
+    omega = rhs2 * S_inv
 
     # x1 = A^{-1} (G - B x2) = A^{-1} (G - (-X) x2) = A^{-1} (G + X * x2)
-    x1 = (G + Xbar * x2.unsqueeze(-1)) * invA_diag  # (b, n)
+    X = (G + Xbar * omega.unsqueeze(-1)) * invA_diag  # (b, n)
 
-    # y = [x1; x2] along the last dim -> (b, n+1)
-    y = torch.cat([x1, x2.unsqueeze(-1)], dim=1)
-    return y
+    return X, omega
