@@ -557,8 +557,7 @@ def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_wi
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
     if mol.verbose:
         print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
-    if mol.active_state > 0:
-        mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
+    mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
 def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
 
@@ -801,7 +800,7 @@ def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
     A = torch.einsum('Nmi,Nmn,Nna->Nia', Cocc, F0.squeeze(1),Cvirt)*2.0
     A += Via*ea_ei
 
-    return A.view(nmol,-1)
+    return A.reshape(nmol,-1)
 
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_relaxed_density, orbital_window = None, w = None, e_mo = None, zvec_tolerance = 1e-6, rpa=False):

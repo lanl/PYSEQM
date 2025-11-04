@@ -287,7 +287,7 @@ class Hamiltonian(torch.nn.Module):
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
         self.eig = seqm_parameters.get('eig', True)
         self.scf_backward = seqm_parameters.get('scf_backward', 0)
-        scf_back_eps = seqm_parameters.get('scf_backward_eps', 1e-2)
+        scf_back_eps = seqm_parameters.get('scf_backward_eps', seqm_parameters['scf_eps'])
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(scf_back_eps), requires_grad=False)
         # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
         # 1: use recursive formula go back through SCF loop

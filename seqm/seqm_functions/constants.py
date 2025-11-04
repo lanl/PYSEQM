@@ -26,7 +26,7 @@ class Constants(torch.nn.Module):
     Constants used in seqm
     """
 
-    def __init__(self, length_conversion_factor=(1.0/a0), energy_conversion_factor=1.0):
+    def __init__(self, do_timing=False, length_conversion_factor=(1.0/a0), energy_conversion_factor=1.0):
         """
         Constructor
         length_conversion_factor : atomic unit is used for length inside seqm
@@ -212,7 +212,7 @@ class Constants(torch.nn.Module):
         self.gppc   = torch.nn.Parameter(gppc,   requires_grad=False)
         self.eheat  = torch.nn.Parameter(eheat/ev_kcalpmol,  requires_grad=False)
         self.mass   = torch.nn.Parameter(mass,   requires_grad=False)
-        self.do_timing = False
+        self.do_timing = do_timing
         if self.do_timing:
             self.timing = {"Hcore + STO Integrals" : [],
                            "SCF"                   : [],
