@@ -22,6 +22,7 @@ from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
+from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -570,6 +571,8 @@ class Energy(torch.nn.Module):
                                          gp2=molecule.parameters['g_p2'],
                                          hsp=molecule.parameters['h_sp'])
             Etot += Eexcited
+            if self.seqm_parameters.get("dispersion",False) and self.method == "AM1":
+                Etot += dispersion_am1_fs1(molecule,P)
             Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:
