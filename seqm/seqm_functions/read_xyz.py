@@ -30,7 +30,7 @@ def read_xyz(files, sort=True):
             data[i, 0] = int(a) if numeric else _element_dict[a]
             data[i, 1:4] = list(map(float, xyz))
         if sort: # sort such than atoms are ordered in decreasing atomic numbers
-            data = data[data[:,0].argsort()[::-1]]
+            data = data[data[:,0].argsort(kind='stable')[::-1]]
         mols.append(data)
     # pad out
     M = len(mols)
