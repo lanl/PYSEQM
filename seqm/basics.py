@@ -550,10 +550,14 @@ class Energy(torch.nn.Module):
                 molecule.cis_energies = excitation_energies
                 nroots = self.excited_states['n_states']
                 molecule.all_forces = torch.empty(molecule.nmol,nroots+1,molecule.molsize,3)
+                molecule.all_cis_relaxed_diploles = torch.empty(molecule.nmol,nroots,3)
+                molecule.all_cis_unrelaxed_diploles = torch.empty(molecule.nmol,nroots,3)
                 molecule.all_forces[:,0,...] = -molecule.analytical_gradient
                 for i in range(1,nroots+1):
                     molecule.active_state = i
-                    molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                    molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, calculate_dipole=True)
+                    molecule.all_cis_relaxed_diploles[:,i-1,...] = molecule.cis_state_relaxed_dipole
+                    molecule.all_cis_unrelaxed_diploles[:,i-1,...] = molecule.cis_state_unrelaxed_dipole
                 molecule.active_state = init_active_state
 
 

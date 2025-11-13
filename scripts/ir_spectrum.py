@@ -95,7 +95,7 @@ def spectrum_from_time_series(X, dt, window, exp_width_cm, zp_factor):
     freq = np.fft.rfftfreq(Xw.shape[0], d=dt)  # au^-1
     return freq, S
 
-def ir_from_dipoles(M, dt, use_derivative, window, exp_width_cm, zp_factor, max_wn):
+def ir_from_dipoles(M, dt, use_derivative, window, exp_width_cm, zp_factor, min_wn, max_wn):
     M = detrend_linear(M, dt)
     if use_derivative:
         Mdot = np.gradient(M, dt, axis=0)
@@ -105,7 +105,7 @@ def ir_from_dipoles(M, dt, use_derivative, window, exp_width_cm, zp_factor, max_
         S *= (2*np.pi*freq)**2
 
     wn = freq / (au_to_fs * c_cm_fs)
-    mask = (wn >= 0) & (wn <= max_wn)
+    mask = (wn >= min_wn) & (wn <= max_wn)
     I = S[mask]; I /= I.max() if I.max() > 0 else 1.0
     return wn[mask], I
 
@@ -143,7 +143,7 @@ def remove_com(V, masses):
     com = (V * masses[None,:,None]).sum(axis=1) / msum
     return V - com[:,None,:]
 
-def vdos_from_vel(V, dt, masses, window, exp_width_cm, zp_factor, max_wn, mass_weight, remove_com_flag):
+def vdos_from_vel(V, dt, masses, window, exp_width_cm, zp_factor, min_wn, max_wn, mass_weight, remove_com_flag):
     if remove_com_flag:
         V = remove_com(V, masses)
     T, N, _ = V.shape
@@ -161,7 +161,7 @@ def vdos_from_vel(V, dt, masses, window, exp_width_cm, zp_factor, max_wn, mass_w
     S = S / ENBW * (dt / T)
     freq = np.fft.rfftfreq(wV.shape[0], d=dt)
     wn = freq / (au_to_fs * c_cm_fs)
-    mask = (wn >= 0) & (wn <= max_wn)
+    mask = (wn >= min_wn) & (wn <= max_wn)
     I = S[mask]; I /= I.max() if I.max() > 0 else 1.0
     return wn[mask], I
 
@@ -195,6 +195,7 @@ def main():
     ap.add_argument("--dt", type=float, required=True, help="Time step value")
     ap.add_argument("--dt-units", choices=["fs","au"], default="au", help="Units for --dt")
     ap.add_argument("--max-wn", type=float, default=800.0, help="Max wavenumber (cm^-1)")
+    ap.add_argument("--min-wn", type=float, default=0.0, help="Min wavenumber (cm^-1)")
     ap.add_argument("--window", choices=["exp","hann","rect"], default="exp", help="Window type")
     ap.add_argument("--exp-width", type=float, default=5.0, help="Exponential window width (cm^-1)")
     ap.add_argument("--zp", type=float, default=4.0, help="Zero-padding factor (>=1)")
@@ -233,7 +234,7 @@ def main():
         if args.skip:
             M = M[args.skip:]
         M *= unit_dip_to_au(args.dip_units)
-        wn, I = ir_from_dipoles(M, dt_au, args.use_deriv, args.window, args.exp_width, args.zp, args.max_wn)
+        wn, I = ir_from_dipoles(M, dt_au, args.use_deriv, args.window, args.exp_width, args.zp, args.min_wn, args.max_wn)
         np.savetxt(f"{args.out_prefix}ir_from_dipole_cm-1.dat", np.c_[wn, I])
         spectra.append(("IR (dipole)", wn, I))
 
@@ -246,7 +247,7 @@ def main():
         V *= unit_vel_to_au(args.vel_units)
         masses = masses_from_elems(elems)
         wn_v, I_v = vdos_from_vel(V, dt_au, masses, args.window, args.exp_width, args.zp,
-                                  args.max_wn, args.mass_weight, not args.no_remove_com)
+                                  args.min_wn, args.max_wn, args.mass_weight, not args.no_remove_com)
         np.savetxt(f"{args.out_prefix}vdos_cm-1.dat", np.c_[wn_v, I_v])
         spectra.append(("VDOS (vel)", wn_v, I_v))
 
@@ -260,14 +261,14 @@ def main():
             plt.figure()
             plt.plot(wn, I, lw=1.2)
             plt.xlabel("Wavenumber (cm$^{-1}$)")
-            plt.ylabel("Intensity (arb. units)")
+            plt.ylabel("Intensity")
             plt.title(label)
-            plt.xlim(0, max(wn) if len(wn) else args.max_wn)
+            plt.xlim(min(wn), max(wn) if len(wn) else args.max_wn)
             plt.tight_layout()
             if args.plot == "show":
                 plt.show()
             else:
-                plt.savefig(args.plot, dpi=200)
+                plt.savefig(args.plot, dpi=600)
                 plt.close()
 
 if __name__ == "__main__":
