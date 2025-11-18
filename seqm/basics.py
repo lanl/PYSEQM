@@ -346,6 +346,7 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
+        self.excited_states["make_best_guess"] = True
         if self.uhf and self.excited_states is not None:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
@@ -494,7 +495,7 @@ class Energy(torch.nn.Module):
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis' or method == 'tda':
-                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window)
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol, best_guess_from_prev=self.excited_states["make_best_guess"], init_amplitude_guess=cis_amp,orbital_window=orbital_window)
                     elif method == 'rpa':
                         excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:

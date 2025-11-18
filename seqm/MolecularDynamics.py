@@ -416,6 +416,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             reuse_P = True
 
         self.initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs)
+        if not reuse_P:
+            molecule.dm = None
+            molecule.cis_amplitudes = None
 
         E0 = None
 
@@ -1224,6 +1227,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                 torch.nn.Parameter(torch.as_tensor(scf_eps), requires_grad=False)
             self.esdriver.conservative_force.energy.excited_states['tolerance'] = es_eps
             molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
+            self.esdriver.conservative_force.energy.excited_states['make_best_guess'] = False
             if self.esdriver.conservative_force.energy.excited_states['method'].lower() == "rpa":
                 raise ValueError(
                     "XL-BOMD with excited states not tested for RPA. "

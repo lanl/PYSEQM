@@ -4,7 +4,7 @@ from .constants import a0
 import math
 # from seqm.seqm_functions.pack import packone, unpackone
 
-def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbital_window=None):
+def rcis_batch(mol, w, e_mo, nroots, root_tol, best_guess_from_prev=True, init_amplitude_guess=None, orbital_window=None):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -14,6 +14,8 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     :param w: 2-electron integrals
     :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
+    :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, and fix the descrepancy b/w 
+                                 molecular orbital signs from previous and this step. Leave it alone when doing XL-ESMD
     :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
     :returns: 
 
@@ -49,9 +51,10 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     if init_amplitude_guess is None:
         nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
     else:
-        # nstart, nroots = make_guess(approxH,nroots,maxSubspacesize,V,nmol,nov)
-        # V[:,:nroots] = init_amplitude_guess
-        make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
+        if best_guess_from_prev:
+            make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
+        else:
+            V[:,:nroots] = init_amplitude_guess
         nstart = int(init_amplitude_guess.shape[1])
         
         # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
