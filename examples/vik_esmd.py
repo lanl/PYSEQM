@@ -60,14 +60,14 @@ output = {
 # 'molid': [0,1],
 'molid': [0],
 'prefix': f'./examples/Outputs/vik_esmd.step_{timestep:.1f}',
-'print every': 1,
+'print every': 0,
 "xyz": 1,
 "h5": {
     "data": 1,      # write T/Ek/Ep, excitations, MO, etc.; 0 disables
     "velocities": 1,   # write vel/forces/coords; 0 disables
     "write_mo": True,
     },
-"checkpoint every": 2,
+"checkpoint every": 100,
 }
 
 torch.manual_seed(42)
@@ -82,4 +82,4 @@ xl_bomd_params={'k':6}
 # md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
 #               seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
 md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=400.0, timestep=timestep, output=output).to(device)
-_ = md.run(molecule, 5, remove_com=None,reuse_P=False)
+_ = md.run(molecule, 30, remove_com=None,reuse_P=True)

@@ -1286,30 +1286,6 @@ class XL_ESMD(XL_BOMD):
                 es_amp = self.propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
                 es_amp_t[(self.m - 1 - cindx)] = es_amp
 
-                # Orthonormalize the propagated excited state amplitudes
-                # TODO: Will not work the same for RPA
-                es_amp_ortho, R_ = torch.linalg.qr(es_amp.transpose(-2, -1),
-                                                   mode="reduced")  # Q: (b, m, n), R_: (b, n, n)
-                # If any diagonal of R_ is ~0 in a batch, some input row was zero → fail that batch.
-                diag = torch.abs(torch.diagonal(R_, dim1=-2, dim2=-1))  # (b, n)
-                bad = (diag < self.vec_eps*math.sqrt(es_amp.shape[-1])).any(dim=-1)  # (b,)
-                if bad.any():
-                    idx = torch.nonzero(bad, as_tuple=False).flatten().tolist()
-                    raise ValueError(f"Rank-deficient/zero vector detected in batch indices {idx}.")
-                es_amp_ortho = es_amp_ortho.transpose(-2, -1)
-
-                # n_roots = molecule.cis_amplitudes.shape[1]
-                # es_amp_ortho = es_amp.clone()
-                # # Normalize the first CIS amplitude
-                # es_amp_ortho[:,0] /=  torch.linalg.vector_norm(es_amp_ortho[:,0],dim=1,keepdim=True)
-                # if  n_roots > 1: # if more than one root, orthonormalize them
-                #     for i in range(molecule.nmol):
-                #         n_new = orthogonalize_to_current_subspace(es_amp_ortho[i], es_amp[i,1:], 1, tol=1e-8)
-                #         if n_new < n_roots:
-                #             raise RuntimeError("Some roots were lost while orthogonalizing, cannot proceed")
-            else:
-                es_amp_ortho = es_amp  # will be set to None
-
             if self.do_scf:
                 calc_type = 'SCF'
 
@@ -1321,6 +1297,7 @@ class XL_ESMD(XL_BOMD):
                 P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
 
             else:
+                raise Exception("You need to do SCF")
                 P0 = P
                 calc_type = 'XL-BOMD'
 

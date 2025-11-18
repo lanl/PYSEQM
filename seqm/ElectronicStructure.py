@@ -1,5 +1,5 @@
 import torch
-from .basics import *
+from .basics import Force
 import time
 from seqm.XLBOMD import ForceXL
 #from seqm.XLBOMD_LR import ForceXL as ForceXL_lr
