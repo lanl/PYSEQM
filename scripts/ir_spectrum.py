@@ -257,12 +257,27 @@ def main():
     # Optional plotting
     if args.plot:
         import matplotlib.pyplot as plt
+        plt.rcParams.update({
+            'font.family': 'sans-serif',
+            'font.sans-serif': ['Arial'],
+            "savefig.dpi": 600,
+            'font.size':       20,
+            'axes.titlesize':  20,
+            'axes.labelsize':  20,
+            'xtick.labelsize': 18,
+            'ytick.labelsize': 18,
+            'legend.fontsize': 18,
+            'legend.title_fontsize': 18,
+            'lines.markersize': 10.0
+        })
+
         for label, wn, I in spectra:
             plt.figure()
             plt.plot(wn, I, lw=1.2)
             plt.xlabel("Wavenumber (cm$^{-1}$)")
             plt.ylabel("Intensity")
             plt.title(label)
+            plt.ylim(0.0,1.1)
             plt.xlim(min(wn), max(wn) if len(wn) else args.max_wn)
             plt.tight_layout()
             if args.plot == "show":

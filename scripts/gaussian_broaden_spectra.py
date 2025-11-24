@@ -18,13 +18,14 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({
     'font.family': 'sans-serif',
     'font.sans-serif': ['Arial'],
-    'font.size':       18,
-    'axes.titlesize':  18,
-    'axes.labelsize':  18,
-    'xtick.labelsize': 16,
-    'ytick.labelsize': 16,
-    'legend.fontsize': 16,
-    'legend.title_fontsize': 16,
+    "savefig.dpi": 600,
+    'font.size':       20,
+    'axes.titlesize':  20,
+    'axes.labelsize':  20,
+    'xtick.labelsize': 18,
+    'ytick.labelsize': 18,
+    'legend.fontsize': 18,
+    'legend.title_fontsize': 18,
     'lines.markersize': 10.0
 })
 
@@ -72,12 +73,15 @@ def smart_loadtxt(path, xcol=0, ycol=1):
     idx = np.argsort(x)
     return x[idx], y[idx]
 
-def broaden(x_sticks, y_sticks, x_grid, sigma):
+def broaden(x_sticks, y_sticks, x_grid, sigma, emission=False):
     """Sum of Gaussians (unit-area kernels scaled by y_sticks) over a grid."""
     X = x_grid[:, None]
     mu = x_sticks[None, :]
     G = np.exp(-0.5 * ((X - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
-    return (G * y_sticks[None, :]).sum(axis=1)
+    weights = y_sticks[None, :]
+    if emission:
+        weights *= mu**2
+    return (G * weights).sum(axis=1)
 
 def _sigma_from_args(g_sigma, g_fwhm, local_sigma, local_fwhm, label):
     """Resolve sigma (eV) for a curve using local overrides then global."""
@@ -214,7 +218,7 @@ def main():
     if args.absfile:
         Yg_abs_E = broaden(xs_abs, ys_abs, Eg, sigma_abs)
     if args.emfile:
-        Yg_em_E  = broaden(xs_em,  ys_em,  Eg, sigma_em)
+        Yg_em_E  = broaden(xs_em,  ys_em,  Eg, sigma_em,emission=True)
 
     # Prepare axis conversion and plotting arrays
     if args.axis == "eV":
@@ -300,6 +304,7 @@ def main():
 
     plt.xlabel(xlabel)
     plt.xlim([Xplot[0], Xplot[-1]])
+    plt.ylim(0.0,1.05)
     plt.ylabel("Intensity " + "(normalized)" )
     if args.absfile and args.emfile:
         default_title = "Absorption and Emission (Gaussian broadened)"
@@ -308,6 +313,7 @@ def main():
     else:
         default_title = "Emission (Gaussian broadened)"
     plt.title(args.title if args.title is not None else default_title)
+    # plt.legend(bbox_to_anchor=(0.4,0.73))
     plt.legend()
     plt.tight_layout()
 
