@@ -416,6 +416,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             reuse_P = True
 
         self.initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs)
+        if not reuse_P:
+            molecule.dm = None
+            molecule.cis_amplitudes = None
 
         E0 = None
 
@@ -556,6 +559,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         restricted = not bool(self.seqm_parameters.get('UHF', False))
 
+        # if doing excited state gradients with autograd, then relaxed_dipole is not calculated
+        self._h5_save_relaxed_dipole = excited_states > 0 and molecule.seqm_parameters.get('scf_backward',0) == 0
+
         def create_row_chunked(g, path, shape, dtype=np.float64):
             chunks = (1, ) + tuple(shape[1:])
             return g.create_dataset(path,
@@ -648,12 +654,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
                 # excitations (optional)
                 if R > 0:
+                    gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
                     create_row_chunked(gd, "excitation/excitation_energy", (Tw_data, R))
                     create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
                     create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
-                    create_row_chunked(gd, "excitation/relaxed_dipole", (Tw_data, 3))
-                    create_row_chunked(gd, "excitation/unrelaxed_dipole", (Tw_data, 3))
-                    gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
+                    if self._h5_save_relaxed_dipole:
+                        create_row_chunked(gd, "excitation/unrelaxed_dipole", (Tw_data, 3))
+                        create_row_chunked(gd, "excitation/relaxed_dipole", (Tw_data, 3))
 
                 # MO (optional)
                 if write_mo:
@@ -701,8 +708,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 gd["excitation/excitation_energy"][i, ...] = _to_np(molecule.cis_energies[mol, :R])
                 gd["excitation/transition_dipole"][i, ...] = _to_np(molecule.transition_dipole[mol, :R])
                 gd["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[mol, :R])
-                gd["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole[mol])
-                gd["excitation/unrelaxed_dipole"][i, ...] = _to_np(molecule.cis_state_unrelaxed_dipole[mol])
+                if self._h5_save_relaxed_dipole:
+                    gd["excitation/unrelaxed_dipole"][i, ...] = _to_np(molecule.cis_state_unrelaxed_dipole[mol])
+                    gd["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole[mol])
 
             if flags.get("write_mo", False):
                 Norb = flags["Norb"]
@@ -1219,6 +1227,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                 torch.nn.Parameter(torch.as_tensor(scf_eps), requires_grad=False)
             self.esdriver.conservative_force.energy.excited_states['tolerance'] = es_eps
             molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
+            self.esdriver.conservative_force.energy.excited_states['make_best_guess'] = False
             if self.esdriver.conservative_force.energy.excited_states['method'].lower() == "rpa":
                 raise ValueError(
                     "XL-BOMD with excited states not tested for RPA. "

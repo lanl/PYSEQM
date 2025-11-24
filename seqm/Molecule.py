@@ -112,7 +112,11 @@ class Molecule(torch.nn.Module):
         self.cis_amplitudes = None
         self.cis_energies = None
         self.molecular_orbitals = None
+
         self.all_forces = None
+        self.all_cis_relaxed_diploles = None
+        self.all_cis_unrelaxed_diploles = None
+
         self.old_mos = None
 
         self.transition_dipole = None

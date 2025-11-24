@@ -79,7 +79,7 @@ from seqm.MolecularDynamics import Molecular_Dynamics_Langevin, XL_BOMD
 #                                            output=output).to(device)
 xl_bomd_params={'k':6}
 
-# md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
-#               seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
-md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=400.0, timestep=timestep, output=output).to(device)
-_ = md.run(molecule, 30, remove_com=None,reuse_P=True)
+md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
+              seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
+# md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=400.0, timestep=timestep, output=output).to(device)
+_ = md.run(molecule, 5, remove_com=None,reuse_P=False)

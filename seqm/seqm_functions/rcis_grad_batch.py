@@ -2,6 +2,7 @@ import torch
 from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der, core_core_der
 from seqm.seqm_functions.rcis_batch import makeA_pi_batched, unpackone_batch, make_cis_densities
 from .constants import a0
+from .dispersion_am1_fs1 import dEdisp_dr
 
 def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc,rpa=False,include_ground_state=False, orbital_window = None, calculate_dipole=False):
     """
@@ -47,6 +48,8 @@ def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc
     P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     if include_ground_state:
         pair_grad = core_core_der(mol, gam, w_x, method, parnuc)
+        if mol.seqm_parameters.get("dispersion",False) and method == "AM1":
+            pair_grad += dEdisp_dr(mol)
         B += 0.5*P
         # Typically you add ground state density to excited state density if you want to include gradient of ground state energy in the gradient of excited state energy.
         # But there is a factor of 2 when contracting excited state density with two-electron gradient matrix (not sure why), but not for ground state density. 

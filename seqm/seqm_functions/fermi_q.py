@@ -7,66 +7,65 @@ def Fermi_Q(H0,T, Nocc, nHeavy, nHydro, kB, scf_backward):
     '''
     Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent
     '''
-    #print('Doing Fermi_Q.')
+    max_iter = 64
     if H0.dtype == torch.float64:
-        occ_tol=1e-9,
-        entropy_eps=1e-14,
+        occ_tol = 1e-9
+        entropy_eps = 1e-14
+        tiny = 1e-30
     elif H0.dtype == torch.float32:
-        occ_tol=1e-5,
-        entropy_eps=1e-7,
+        occ_tol = 1e-5
+        entropy_eps = 1e-7
+        tiny = 1e-20
     else:
-        raise RuntimeError
+        raise RuntimeError("H0 must be float32 or float64")
 
-    N = max(H0.shape)
-    Fe_vec = torch.zeros(N,dtype=H0.dtype,device=H0.device)
+    device, dtype = H0.device, H0.dtype
 
     if scf_backward>=1:
         e, QQ = sym_eig_trunc1(H0,nHeavy, nHydro, Nocc, eig_only=True)
     else:
         e, QQ = sym_eig_trunc( H0,nHeavy, nHydro, Nocc, eig_only=True)
 
-    e = e[:,0:QQ.shape[-1]]
-    mu0 = torch.zeros(e.shape)
-    mu0 = (e.gather(1, Nocc.unsqueeze(0).T-1) + e.gather(1, Nocc.unsqueeze(0).T))/2
-    OccErr = torch.ones(Nocc.shape)
-    OccErr_mask = OccErr > occ_tol
+
+    # [B, M] eigenvalues (trim to match eigenvectors count)
+    n_states = QQ.shape[-1]
+    e = e[..., :n_states]
+
     beta = 1./(kB*T) # Temp in Kelvin
     norb = nHeavy*4+nHydro
 
-    Occ_mask =  torch.zeros(e.shape, device=H0.device, dtype=H0.dtype)
+    mu = (e.gather(1, Nocc.unsqueeze(0).T-1) + e.gather(1, Nocc.unsqueeze(0).T))/2
 
-    while True in OccErr_mask:
-        Occ = torch.zeros(Nocc.shape, device=H0.device, dtype=H0.dtype)
-        # Occ_I = 1/(torch.exp(beta*(e-mu0)) +1.0)
-        Occ_I = torch.sigmoid(-beta*(e-mu0))
+    # Build per-molecule orbital mask (valid columns per molecule)
+    ar = torch.arange(n_states, device=device).unsqueeze(0)                # [1,M]
+    Occ_mask_bool = ar < norb.unsqueeze(1)                                  # [B,M]
+    Occ_mask = Occ_mask_bool.to(dtype)                                      # [B,M], matches original dtype
 
-        # $$$
-        for i,j in zip(range(0,len(Occ_mask)), norb.unsqueeze(0).T):
-            Occ_mask[i,0:j]=1
+    # Newton iterations for μ so that sum_i f_i(μ) == Nocc
+    Fe_vec = None
+    Nocc_f = Nocc.to(dtype)                                                # [B], for arithmetic
+    for _ in range(max_iter):
+        Fe_raw = torch.sigmoid(-beta * (e - mu))                            # [B,M]
+        Fe_vec = Fe_raw * Occ_mask                                          # apply mask once
+        Occ_sum = Fe_vec.sum(dim=1)                                         # [B]
+        dOcc = (beta * Fe_vec * (1.0 - Fe_vec)).sum(dim=1).clamp_min(tiny)  # [B]
 
-        Occ_mask = Occ_mask.clone()
+        err = (Nocc_f - Occ_sum).abs()
+        if bool((err <= occ_tol).all()):
+            break
 
-        Occ_I = Occ_I*Occ_mask
-        Fe_vec = Occ_I
-        Occ = Occ + Occ_I.sum(1)
-        dOcc = (beta*Occ_I*(1.0 - Occ_I)).sum(1)
-        OccErr = torch.abs(Nocc-Occ)
-        OccErr_mask = OccErr > occ_tol
-        indices_of_high_errors = torch.nonzero(OccErr_mask)
-        if True in OccErr_mask:
-            mu0[indices_of_high_errors] += ((Nocc-Occ)/dOcc).unsqueeze(0).T[indices_of_high_errors]
+        delta = (Nocc_f - Occ_sum) / dOcc                                  # [B]
+        mu = mu + delta.unsqueeze(1)                                        # [B,1]
 
-    X  = QQ * Fe_vec.unsqueeze(1)
-    D0 = X @ QQ.transpose(1, 2)
-    D0 = 2*unpack(D0, nHeavy, nHydro, H0.shape[-1]) # bring to block form
-    S = torch.zeros(Nocc.shape, device=H0.device, dtype=H0.dtype)
-    S_temp =  - kB*(Fe_vec*torch.log(Fe_vec) + (1-Fe_vec)*torch.log(1-Fe_vec) )
+    # Density matrix D0 (then unpack to block form), same semantics as original
+    X = QQ * Fe_vec.unsqueeze(1)                                            # [B,norb_full,M]
+    D0 = X @ QQ.transpose(1, 2)                                             # [B,norb_full,norb_full]
+    D0 = 2.0 * unpack(D0, nHeavy.to(torch.long), nHydro.to(torch.long), H0.shape[-1])
 
-    mask_S = (Fe_vec > entropy_eps) & ((1.0-Fe_vec) > entropy_eps)
+    # Entropy: only where eps < f < 1-eps; avoid log(0)
+    mask_S = (Fe_vec > entropy_eps) & ((1.0 - Fe_vec) > entropy_eps)        # [B,M]
+    p_safe = Fe_vec.masked_fill(~mask_S, 0.5)
+    S_terms = -kB * (p_safe * torch.log(p_safe) + (1.0 - p_safe) * torch.log(1.0 - p_safe))
+    S = (S_terms * mask_S.to(dtype)).sum(dim=1)                              # [B]
 
-    # $$$
-    for i,j in zip(range(0,len(S)), mask_S):
-        S[i] = S_temp[i, j].sum()
-    # print('mu:', mu0, 'S_elec:', S_temp)
-
-    return D0, S, QQ, e, Fe_vec, mu0, Occ_mask
+    return D0, S, QQ, e, Fe_vec, mu, Occ_mask

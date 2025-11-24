@@ -1,11 +1,12 @@
 import torch
 from torch import pow
 from .constants import a0, ev
-from .cal_par import *
+from .cal_par import dd_qq, additive_term_rho1, additive_term_rho2
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .two_elec_two_center_int import rotate_with_quaternion
 from .energy import pair_nuclear_energy
+from .dispersion_am1_fs1 import dEdisp_dr
 
 delta = 1e-5 # delta for finite difference calcs
 
@@ -45,8 +46,6 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
     # Core-core repulsion derivatives
     # First, derivative of g_AB
     tore = const.tore  # Charges
-    alpha = parnuc[0]
-    ZAZB = tore[ni] * tore[nj]
 
     # Two-center repulsion integral derivatives
     # Core-valence integral derivatives e1b_x and e2a_x also calculated as byproducts
@@ -58,6 +57,8 @@ def scf_analytic_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, i
     # pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
     # pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters=parnuc)
     pair_grad = core_core_der(molecule, gam, w_x, method, parnuc)
+    if molecule.seqm_parameters.get("dispersion",False) and method == "AM1":
+        pair_grad += dEdisp_dr(molecule)
     return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad,
                                                 mask, maskd, idxi, idxj)
 
@@ -204,6 +205,8 @@ def scf_grad(P0, molecule, const, method, mask, maskd, molsize, idxi, idxj, ni, 
     w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
     e1b_x_new, e2a_x_new = w_derivative_numerical(molecule, Xij, w_x_new)
     pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
+    if molecule.seqm_parameters.get("dispersion",False) and method == "AM1":
+        pair_grad += dEdisp_dr(molecule)
 
     return contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e1b_x_new, e2a_x_new, w_x_new, pair_grad,
                                                 mask, maskd, idxi, idxj)

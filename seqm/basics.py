@@ -22,6 +22,7 @@ from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
+from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -287,7 +288,7 @@ class Hamiltonian(torch.nn.Module):
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
         self.eig = seqm_parameters.get('eig', True)
         self.scf_backward = seqm_parameters.get('scf_backward', 0)
-        scf_back_eps = seqm_parameters.get('scf_backward_eps', 1e-2)
+        scf_back_eps = seqm_parameters.get('scf_backward_eps', seqm_parameters['scf_eps'])
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(scf_back_eps), requires_grad=False)
         # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
         # 1: use recursive formula go back through SCF loop
@@ -345,6 +346,7 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
+        self.excited_states["make_best_guess"] = True
         if self.uhf and self.excited_states is not None:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
@@ -493,7 +495,7 @@ class Energy(torch.nn.Module):
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis' or method == 'tda':
-                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window)
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol, best_guess_from_prev=self.excited_states["make_best_guess"], init_amplitude_guess=cis_amp,orbital_window=orbital_window)
                     elif method == 'rpa':
                         excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:
@@ -549,10 +551,14 @@ class Energy(torch.nn.Module):
                 molecule.cis_energies = excitation_energies
                 nroots = self.excited_states['n_states']
                 molecule.all_forces = torch.empty(molecule.nmol,nroots+1,molecule.molsize,3)
+                molecule.all_cis_relaxed_diploles = torch.empty(molecule.nmol,nroots,3)
+                molecule.all_cis_unrelaxed_diploles = torch.empty(molecule.nmol,nroots,3)
                 molecule.all_forces[:,0,...] = -molecule.analytical_gradient
                 for i in range(1,nroots+1):
                     molecule.active_state = i
-                    molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True)
+                    molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, calculate_dipole=True)
+                    molecule.all_cis_relaxed_diploles[:,i-1,...] = molecule.cis_state_relaxed_dipole
+                    molecule.all_cis_unrelaxed_diploles[:,i-1,...] = molecule.cis_state_unrelaxed_dipole
                 molecule.active_state = init_active_state
 
 
@@ -570,6 +576,8 @@ class Energy(torch.nn.Module):
                                          gp2=molecule.parameters['g_p2'],
                                          hsp=molecule.parameters['h_sp'])
             Etot += Eexcited
+            if self.seqm_parameters.get("dispersion",False) and self.method == "AM1":
+                Etot += dispersion_am1_fs1(molecule,P)
             Hf, Eiso_sum = heat_formation(molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
         else:

@@ -1,4 +1,3 @@
-from numpy import int64
 import torch
 from seqm.seqm_functions.constants import Constants
 from seqm.Molecule import Molecule
