@@ -16,7 +16,7 @@ else:
 ### create molecule object:
 species = torch.as_tensor([[8,6,1,1],
                            [8,6,1,1],
-                           [8,8,6,0]
+                           # [8,8,6,0]
                            ], # zero-padding for batching
                           dtype=torch.int64, device=device)
 
@@ -33,12 +33,12 @@ coordinates = torch.tensor([
                                [1.82,    0.94,    0.00],
                                [1.81,   -0.93,    -0.20]
                               ],
-                              [
-                               [0.00,    0.00,    0.00],
-                               [1.23,    0.00,    0.00],
-                               [1.82,    0.94,    0.00],
-                               [0.0,0.0,0.0]            # zero-padding for batching
-                              ]
+                              # [
+                              #  [0.00,    0.00,    0.00],
+                              #  [1.23,    0.00,    0.00],
+                              #  [1.82,    0.94,    0.00],
+                              #  [0.0,0.0,0.0]            # zero-padding for batching
+                              # ]
                             ], device=device)
 
 const = Constants().to(device)
@@ -56,7 +56,8 @@ seqm_parameters = {
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
                    # 'excited_states': {'n_states':3,'method':'cis','orbital_window':(2,2)},
-                   # 'excited_states': {'n_states':3,'method':'cis'},
+                   'excited_states': {'n_states':3,'method':'cis'},
+                   'do_all_nac': True,
                    # 'active_state': 1,
                    # 'scf_backward': 1,
                    # 'analytical_gradient':[True],
@@ -91,3 +92,5 @@ print('\n Electronic Energy (eV): ', molecules.Eelec)
 print(f"Ground dipole is \n{molecules.dipole}")
 print(f"CIS dipole is \n{molecules.cis_state_unrelaxed_dipole}")
 print(f"CIS relaxed dipole is \n{molecules.cis_state_relaxed_dipole}")
+print(f"All NAC\n{molecules.all_nac}")
+print(f"All NAC\n{molecules.all_nac.shape}")

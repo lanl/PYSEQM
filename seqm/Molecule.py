@@ -114,6 +114,7 @@ class Molecule(torch.nn.Module):
         self.molecular_orbitals = None
 
         self.all_forces = None
+        self.all_nac = None
         self.all_cis_relaxed_diploles = None
         self.all_cis_unrelaxed_diploles = None
 

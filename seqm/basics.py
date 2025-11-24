@@ -518,8 +518,7 @@ class Energy(torch.nn.Module):
                     t1 = time.time()
                     molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
-
-                cis_nac = kwargs.get('cis_nac',[False])
+                cis_nac = kwargs.get('cis_nac',[False]) 
                 if cis_nac[0]:
                     calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
 
@@ -541,26 +540,38 @@ class Energy(torch.nn.Module):
                     else:
                         Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 
-            if self.seqm_parameters.get('do_all_forces',False):
-                init_active_state = molecule.active_state
-                if not do_analytical_gradient[0]:
-                    raise Exception("when asking for calculating all gradients of excited states ask for analytical gradients")
-                if not all_same_mols:
-                    raise NotImplementedError
+            with torch.no_grad():
+                if self.seqm_parameters.get('do_all_forces',False):
+                    init_active_state = molecule.active_state
+                    if not do_analytical_gradient[0]:
+                        raise Exception("when asking for calculating all gradients of excited states ask for analytical gradients")
+                    if not all_same_mols:
+                        raise NotImplementedError
 
-                molecule.cis_energies = excitation_energies
-                nroots = self.excited_states['n_states']
-                molecule.all_forces = torch.empty(molecule.nmol,nroots+1,molecule.molsize,3)
-                molecule.all_cis_relaxed_diploles = torch.empty(molecule.nmol,nroots,3)
-                molecule.all_cis_unrelaxed_diploles = torch.empty(molecule.nmol,nroots,3)
-                molecule.all_forces[:,0,...] = -molecule.analytical_gradient
-                for i in range(1,nroots+1):
-                    molecule.active_state = i
-                    molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, calculate_dipole=True)
-                    molecule.all_cis_relaxed_diploles[:,i-1,...] = molecule.cis_state_relaxed_dipole
-                    molecule.all_cis_unrelaxed_diploles[:,i-1,...] = molecule.cis_state_unrelaxed_dipole
-                molecule.active_state = init_active_state
+                    molecule.cis_energies = excitation_energies
+                    nroots = self.excited_states['n_states']
+                    molecule.all_forces = torch.empty(molecule.nmol,nroots+1,molecule.molsize,3)
+                    molecule.all_cis_relaxed_diploles = torch.empty(molecule.nmol,nroots,3)
+                    molecule.all_cis_unrelaxed_diploles = torch.empty(molecule.nmol,nroots,3)
+                    molecule.all_forces[:,0,...] = -molecule.analytical_gradient
+                    for i in range(1,nroots+1):
+                        molecule.active_state = i
+                        molecule.all_forces[:,i,...] = -rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, calculate_dipole=True)
+                        molecule.all_cis_relaxed_diploles[:,i-1,...] = molecule.cis_state_relaxed_dipole
+                        molecule.all_cis_unrelaxed_diploles[:,i-1,...] = molecule.cis_state_unrelaxed_dipole
+                    molecule.active_state = init_active_state
 
+                if self.seqm_parameters.get('do_all_nac',False):
+                    nroots = self.excited_states['n_states']
+                    import itertools
+                    pairs = list(itertools.combinations(range(1, nroots + 1), 2))
+                    b,m = molecule.species.shape
+                    molecule.all_nac = torch.empty(len(pairs),b,m,3,dtype=w.dtype,device=w.device)
+                    for k, (i, j) in enumerate(pairs):
+                        molecule.all_nac[k] = calc_nac(
+                            molecule, exc_amps, excitation_energies, P, ri, riXH, i, j,
+                            rpa=(method == 'rpa')
+                        )
 
         if self.eig and not self.uhf:
             molecule.old_mos = molecule.molecular_orbitals.clone()
