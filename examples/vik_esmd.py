@@ -5,6 +5,7 @@ from seqm.MolecularDynamics import Molecular_Dynamics_Basic
 
 torch.set_default_dtype(torch.float64)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 
 
 species = torch.as_tensor([[8,6,1,1],
@@ -28,9 +29,9 @@ coordinates = torch.tensor([
                               ],
                            ], device=device)
 one = False
-# one = True
+one = True
 if one:
-    species = torch.as_tensor([[8,8,6],
+    species = torch.as_tensor([[8,6,1,1],
                                ],
                             dtype=torch.int64, device=device)
 
@@ -39,6 +40,7 @@ if one:
                                   [0.00,    0.00,    0.00],
                                   [1.21,    0.00,    0.00],
                                   [1.62,    0.94,    0.00],
+                                  [1.82,   -0.84,    0.00]
                                   ],
                                ], device=device)
 
@@ -67,7 +69,7 @@ output = {
     "velocities": 1,   # write vel/forces/coords; 0 disables
     "write_mo": True,
     },
-"checkpoint every": 2,
+"checkpoint every": 200,
 }
 
 torch.manual_seed(42)
@@ -79,7 +81,7 @@ from seqm.MolecularDynamics import Molecular_Dynamics_Langevin, XL_BOMD
 #                                            output=output).to(device)
 xl_bomd_params={'k':6}
 
-md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = 400.0,
-              seqm_parameters=seqm_parameters, timestep=0.4, output=output).to(device)
-# md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=400.0, timestep=timestep, output=output).to(device)
-_ = md.run(molecule, 5, remove_com=None,reuse_P=False)
+temp=0.0
+md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = temp, seqm_parameters=seqm_parameters, timestep=timestep, output=output).to(device)
+# md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=temp, timestep=timestep, output=output).to(device)
+_ = md.run(molecule, 20, remove_com=None,reuse_P=False)
