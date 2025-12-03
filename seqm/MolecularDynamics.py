@@ -12,7 +12,7 @@ import torch
 
 from seqm.basics import Force
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
-from seqm.seqm_functions.rcis_batch import orthogonalize_to_current_subspace
+from seqm.seqm_functions.rcis_batch import orthogonalize_to_current_subspace, make_cis_densities
 
 # from .seqm_functions.G_XL_LR import G
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
@@ -163,12 +163,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def initialize_velocity(self, molecule, vel_com=True):
 
         # check if the MD object is on the correct device
-        if self.esdriver.conservative_force.energy.packpar.p.device != molecule.coordinates.device:
+        md_dev = self.esdriver.conservative_force.energy.packpar.p.device
+        mol_dev = molecule.coordinates.device
+        if md_dev != mol_dev:
             raise RuntimeError(
-                f"Please move the MD object (on {self.esdriver.conservative_force.energy.packpar.p.device}) to the same device"
-                "as the molecule object (on {molecule.coordinates.device})")
+                f"Please move the MD object (on {md_dev}) to the same device as the molecule object (on {mol_dev})")
 
-        if molecule.velocities is not None:
+        if torch.is_tensor(molecule.velocities):
             return molecule.velocities
 
         Temperature = self.Temp
@@ -364,7 +365,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.n_dof = 3.0 * molecule.num_atoms - constraints
 
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
-        molecule.verbose = False  # Dont print SCF and CIS/RPA results
+        # molecule.verbose = False  # Dont print SCF and CIS/RPA results
         self.do_remove_com = remove_com is not None
         constraints = 0.0
         # remove_com is a tuple of (mode,stride), where mode='linear' or 'angular'
@@ -443,7 +444,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if do_h5:
                 h5_prefix = f"{self.output['prefix']}"
                 excited_states_params = self.seqm_parameters.get('excited_states')
-                n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
+                n_roots = excited_states_params["n_states"] if excited_states_params else 0
 
                 self._h5_open(
                     molecule,
@@ -812,7 +813,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "dm": _tensor_cpu(molecule.dm) if reuse_P else None,
                 "cis_amplitudes": _tensor_cpu(molecule.cis_amplitudes) if reuse_P else None,
                 "constants": molecule.const,
-                "old_mos": _tensor_cpu(molecule.old_mos) if molecule.cis_amplitudes is not None else None,
+                "old_mos": _tensor_cpu(molecule.old_mos),
             }
         }
         if hasattr(self, "m"):  # XL-BOMD and KSA-XL-BOMD
@@ -865,7 +866,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             molecule.force = ckpt["molecules"]["forces"].to(device)
             molecule.dm = ckpt["molecules"]["dm"].to(device) if reuse_P else None
             molecule.cis_amplitudes = ckpt["molecules"]["cis_amplitudes"]
-            if molecule.cis_amplitudes is not None:
+            if isinstance(molecule.cis_amplitudes, torch.Tensor):
                 molecule.cis_amplitudes = molecule.cis_amplitudes.to(device)
                 molecule.old_mos = ckpt["molecules"]["old_mos"].to(device)
             dP2dt2 = ckpt.get("dP2dt2")
@@ -921,7 +922,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             xl_m = ckpt["xl_bomd_params"]['k'] + 1
             cindx = (ckpt["step_done"] - 1) % xl_m # subtract one because step_done is advanced by one step
             P = Pt[(xl_m - 1 - cindx)].clone()
-            if es_amp_t is not None:
+            if  isinstance(es_amp_t, torch.Tensor):
                 es_amp_t = es_amp_t.to(device)
                 es_amp = es_amp_t[(xl_m - 1 - cindx)].clone()
             else:
@@ -940,7 +941,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     molecular dynamics with langevin thermostat
     """
 
-    def __init__(self, damp=1.0, *args, **kwargs):
+    def __init__(self, damp=50.0, *args, **kwargs):
         """
         damp is damping factor in unit of time (fs)
         Temp : temperature in unit of Kelvin
@@ -1085,8 +1086,8 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
     def propagate_excited_state(self, es_amp, es_amp_t, cindx, molecule):
         c = 0.95
-        es_new = self.coeff_D * ( c * molecule.cis_amplitudes + (1.0 - c) * es_amp )  \
-            + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1)*es_amp_t, dim=0)
+        es_new = self.coeff_D * ( c * molecule.transition_density_matrices + (1.0 - c) * es_amp )  \
+            + torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1,1)*es_amp_t, dim=0)
         return es_new
 
     def one_step(self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=dict(), *args, **kwargs):
@@ -1117,18 +1118,19 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             if molecule.active_state > 0:
                 es_amp = self.propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
                 es_amp_t[(self.m - 1 - cindx)] = es_amp
+                es_amp_ortho = es_amp
 
-                # Orthonormalize the propagated excited state amplitudes
-                # TODO: Will not work the same for RPA
-                es_amp_ortho, R_ = torch.linalg.qr(es_amp.transpose(-2, -1),
-                                                   mode="reduced")  # Q: (b, m, n), R_: (b, n, n)
-                # If any diagonal of R_ is ~0 in a batch, some input row was zero → fail that batch.
-                diag = torch.abs(torch.diagonal(R_, dim1=-2, dim2=-1))  # (b, n)
-                bad = (diag < self.vec_eps*math.sqrt(es_amp.shape[-1])).any(dim=-1)  # (b,)
-                if bad.any():
-                    idx = torch.nonzero(bad, as_tuple=False).flatten().tolist()
-                    raise ValueError(f"Rank-deficient/zero vector detected in batch indices {idx}.")
-                es_amp_ortho = es_amp_ortho.transpose(-2, -1)
+                # # Orthonormalize the propagated excited state amplitudes
+                # # TODO: Will not work the same for RPA
+                # es_amp_ortho, R_ = torch.linalg.qr(es_amp.transpose(-2, -1),
+                #                                    mode="reduced")  # Q: (b, m, n), R_: (b, n, n)
+                # # If any diagonal of R_ is ~0 in a batch, some input row was zero → fail that batch.
+                # diag = torch.abs(torch.diagonal(R_, dim1=-2, dim2=-1))  # (b, n)
+                # bad = (diag < self.vec_eps*math.sqrt(es_amp.shape[-1])).any(dim=-1)  # (b,)
+                # if bad.any():
+                #     idx = torch.nonzero(bad, as_tuple=False).flatten().tolist()
+                #     raise ValueError(f"Rank-deficient/zero vector detected in batch indices {idx}.")
+                # es_amp_ortho = es_amp_ortho.transpose(-2, -1)
 
                 # n_roots = molecule.cis_amplitudes.shape[1]
                 # es_amp_ortho = es_amp.clone()
@@ -1204,12 +1206,14 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                                                 **kwargs)
         self._xl_ctx.update(P=P, Pt=Pt, es_amp=es_amp, es_amp_t=es_amp_t)
 
-    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
-        super().initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs)
+    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), do_xl_esmd=False, *args, **kwargs):
         if molecule.active_state > 0:
             self.move_on_excited_state = True
+            self.esdriver.conservative_force.energy.excited_states['save_tdm'] = True
 
-        if self.move_on_excited_state:
+        super().initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs)
+
+        if self.move_on_excited_state and not do_xl_esmd:
             scf_eps = self.xl_bomd_params.setdefault("scf_eps", 1e-5)
             es_eps = self.xl_bomd_params.setdefault("es_eps", 1e-4)
             dtype = molecule.coordinates.dtype
@@ -1246,10 +1250,14 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             if 'max_rank' in self.xl_bomd_params:
                 molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
             ctx = {"P": P, "Pt": Pt}
+
+            # for xl-esmd since we propagate the transition_density for only the active state, save only that
+            if do_xl_esmd:
+                molecule.transition_density_matrices = molecule.transition_density_matrices[:,molecule.active_state].unsqueeze(1)
+
             if self.move_on_excited_state:
-                es_amp = molecule.cis_amplitudes.clone()
-                es_amp_t = molecule.cis_amplitudes.unsqueeze(0).expand((self.m, ) +
-                                                                       molecule.cis_amplitudes.shape).clone()
+                es_amp = molecule.transition_density_matrices.clone()
+                es_amp_t = es_amp.unsqueeze(0).expand((self.m, ) + es_amp.shape).clone()
                 ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)
             self._xl_ctx = ctx
 
@@ -1291,33 +1299,29 @@ class XL_ESMD(XL_BOMD):
             P = self.propagate_P(P, Pt, cindx, molecule)
             Pt[(self.m - 1 - cindx)] = P
 
-            if molecule.active_state > 0:
-                es_amp = self.propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
-                es_amp_t[(self.m - 1 - cindx)] = es_amp
+            es_amp = self.propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
+            es_amp_t[(self.m - 1 - cindx)] = es_amp
 
-            if self.do_scf:
-                calc_type = 'SCF'
+            # Purify with McWeeny polynomial since P may not be idempotent
+            # 3P^2 - 2P^3
+            # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
+            # TODO: Make it work for unrestricted P
+            P2 = P @ P
+            P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
 
-                # Purify with McWeeny polynomial since P may not be idempotent
-                # 3P^2 - 2P^3
-                # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
-                # TODO: Make it work for unrestricted P
-                P2 = P @ P
-                P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
-
-            else:
-                raise Exception("You need to do SCF")
-                P0 = P
-                calc_type = 'XL-BOMD'
-
+        self.esdriver.conservative_force.energy.xlesmd_transition_density = es_amp
+        active_state = molecule.active_state
+        molecule.active_state = 0
         self.esdriver(molecule,
                       learned_parameters=learned_parameters,
                       xl_bomd_params=self.xl_bomd_params,
                       P0=P0,
-                      cis_amp=es_amp_ortho,
-                      dm_prop=calc_type,
+                      cis_amp=None,
+                      dm_prop='SCF',
+                      save_w=True,
                       *args,
                       **kwargs)
+        molecule.active_state = active_state
 
         if self.add_spherical_potential:
             with torch.no_grad():
@@ -1340,33 +1344,11 @@ class XL_ESMD(XL_BOMD):
         return P, Pt, es_amp, es_amp_t
 
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
-        super().initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs)
+        super().initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, do_xl_esmd=True, *args, **kwargs)
 
         molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
-        if self.esdriver.conservative_force.energy.excited_states['method'].lower() == "rpa":
-            raise ValueError(
-                "XL-BOMD with excited states not tested for RPA. "
-                "Currently only works for CIS. "
-                "Will have to change one_step function to make it work for RPA."
-            )
-
-        if self.step_offset > 0:
-            # resuming: expect caller/loader to have restored dm / cis_amplitudes
-            return
-
-        # Set up P/Pt (and es_amp/es_amp_t if on excited state) for a fresh run (not resuming)
-        with torch.no_grad():
-            P = molecule.dm.clone()
-            Pt = molecule.dm.unsqueeze(0).expand((self.m, ) + molecule.dm.shape).clone()
-            if 'max_rank' in self.xl_bomd_params:
-                molecule.dP2dt2 = torch.zeros(molecule.dm.shape, dtype=molecule.dm.dtype, device=molecule.dm.device)
-            ctx = {"P": P, "Pt": Pt}
-            if self.move_on_excited_state:
-                es_amp = molecule.cis_amplitudes.clone()
-                es_amp_t = molecule.cis_amplitudes.unsqueeze(0).expand((self.m, ) +
-                                                                       molecule.cis_amplitudes.shape).clone()
-                ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)
-            self._xl_ctx = ctx
+        # Keep the transition_density_matrix of the active state only
+        self.esdriver.conservative_force.energy.excited_states = None
 
 """
 1 eV = 1.602176565e-19 J

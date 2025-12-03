@@ -23,6 +23,7 @@ from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
+from .seqm_functions.XLESMD import elec_energy_excited_xl
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -266,19 +267,25 @@ class Hamiltonian(torch.nn.Module):
         """
         super().__init__()
 
-        # If we are calculating excited states with CIS, then SCF convergence should be at least 1e-2 smaller than
+        # If we are calculating excited states, set defaults here.
+        # SCF convergence should be at least 1e-1 smaller than
         # CIS tolerance. Here I check for that
-        if seqm_parameters.get('excited_states') is not None: # If excited_states are requested in the input
-            # Get the cis_tolerance. If cis_tolerance was not in the seqm_parameters, then set it
-            # to the default value here
-            excited_options = seqm_parameters.get('excited_states')
-            if not isinstance(excited_options,dict):
-                raise Exception("Invalid format for excited_states. Expected input like  'excited_states': {'method': 'rpa', 'n_states': 3, 'tolerance' : 1e-6}")
-            excited_options['tolerance'] = excited_options.get('tolerance',1e-6)
-            excited_options['method'] = excited_options.get('method','cis').lower()
+        excited_options = seqm_parameters.get('excited_states')
+        if excited_options:
+            if not isinstance(excited_options, dict):
+                raise Exception(
+                    "Invalid format for excited_states. Expected input like "
+                    "'excited_states': {'method': 'rpa', 'n_states': 3, 'tolerance': 1e-6}"
+                )
+            if "n_states" not in excited_options:
+                raise ValueError("Specify the number of excited states to calculate")
+
+            excited_options['tolerance'] = excited_options.get('tolerance', 1e-6)
+            excited_options['method'] = excited_options.get('method', 'cis').lower()
+
             cis_tol = excited_options['tolerance']
-            if seqm_parameters['scf_eps'] > 1e-1*cis_tol:
-                seqm_parameters['scf_eps'] = 1e-1*cis_tol
+            if seqm_parameters['scf_eps'] > 1e-1 * cis_tol:
+                seqm_parameters['scf_eps'] = 1e-1 * cis_tol
 
         #put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         #be used to restart jobs
@@ -346,8 +353,10 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
-        self.excited_states["make_best_guess"] = True
-        if self.uhf and self.excited_states is not None:
+        if self.excited_states:
+            self.excited_states["make_best_guess"] = True
+            self.excited_states["save_tdm"] = False
+        if self.uhf and self.excited_states:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
@@ -387,6 +396,9 @@ class Energy(torch.nn.Module):
         F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
 
+        # ugly tweak for XL-ESMD
+        if kwargs.get('save_w',False):
+            molecule.w = w
 
         if self.eig:
             if self.uhf:
@@ -482,11 +494,11 @@ class Energy(torch.nn.Module):
         if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
             calc_ground_dipole(molecule,P)
 
-        if molecule.active_state > 0 and self.excited_states is None:
+        if molecule.active_state > 0 and not self.excited_states:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
         Eexcited = 0.0
-        if self.excited_states is not None:
+        if self.excited_states:
             all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
@@ -495,7 +507,10 @@ class Energy(torch.nn.Module):
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis' or method == 'tda':
-                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol, best_guess_from_prev=self.excited_states["make_best_guess"], init_amplitude_guess=cis_amp,orbital_window=orbital_window)
+                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol, 
+                                                                   best_guess_from_prev=self.excited_states["make_best_guess"], 
+                                                                   init_amplitude_guess=cis_amp, orbital_window=orbital_window,
+                                                                   save_tdm=self.excited_states["save_tdm"])
                     elif method == 'rpa':
                         excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:
@@ -561,8 +576,11 @@ class Energy(torch.nn.Module):
                     molecule.all_cis_unrelaxed_diploles[:,i-1,...] = molecule.cis_state_unrelaxed_dipole
                 molecule.active_state = init_active_state
 
+        # If doing XL-ESMD, get XL-ESMD energy, transition density
+        if isinstance(getattr(self,"xlesmd_transition_density",None),torch.Tensor):
+            Eexcited, molecule.transition_density_matrices= elec_energy_excited_xl(molecule,self.xlesmd_transition_density,w,e)
 
-        if self.eig and not self.uhf:
+        if self.eig and not self.uhf and self.excited_states and self.excited_states["make_best_guess"]:
             molecule.old_mos = molecule.molecular_orbitals.clone()
 
         if all_terms:
@@ -634,7 +652,7 @@ class Force(torch.nn.Module):
             #gv = [coordinates]
             #gradients  = grad(L, gv,create_graph=self.create_graph)
             #torch.save(D.detach(), 'gs_1_P_py.pt')
-            L.backward(create_graph=self.create_graph)
+            L.backward(retain_graph=self.create_graph)
             if molecule.const.do_timing:
                 if torch.cuda.is_available(): torch.cuda.synchronize()
                 t1 = time.time()

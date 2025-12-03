@@ -4,7 +4,7 @@ from .constants import a0
 import math
 # from seqm.seqm_functions.pack import packone, unpackone
 
-def rcis_batch(mol, w, e_mo, nroots, root_tol, best_guess_from_prev=True, init_amplitude_guess=None, orbital_window=None):
+def rcis_batch(mol, w, e_mo, nroots, root_tol, best_guess_from_prev=True, init_amplitude_guess=None, orbital_window=None, save_tdm=False):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -16,6 +16,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, best_guess_from_prev=True, init_a
     :param nroots: Number of CIS states requested
     :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, and fix the descrepancy b/w 
                                  molecular orbital signs from previous and this step. Leave it alone when doing XL-ESMD
+    :param save_tdm: save transition density matrices; this option will be used for XL-ESMD
     :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
     :returns: 
 
@@ -54,8 +55,19 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, best_guess_from_prev=True, init_a
         if best_guess_from_prev:
             make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
         else:
-            V[:,:nroots] = init_amplitude_guess
-        nstart = int(init_amplitude_guess.shape[1])
+            if init_amplitude_guess.shape[-1] == norb_batch[0]:  # initial amplitude guess provided in AO basis, i.e. transition density matrices
+                V[:,:nroots] = torch.einsum('bmi,brmn,bna->bria', Cocc,init_amplitude_guess, Cvirt).flatten(start_dim=-2)
+                # need to orthonormalize, use the orthonormalization procedure below
+                # Normalize first vector
+                V[:,0] /= torch.linalg.vector_norm(V[:,0],dim=1,keepdim=True)
+                if nroots > 1:
+                    for i in range(nmol):
+                        n_new = orthogonalize_to_current_subspace(V[i], V[i,1:nroots], 1, vector_tol)
+                        if n_new < nroots:
+                            raise RuntimeError("Some roots were lost while orthogonalizing, cannot proceed")
+            else: # initial amplitude guess provided in MO basis, assume orthonormalized
+                V[:,:nroots] = init_amplitude_guess
+        nstart = nroots
         
         # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
         # # This fails when orbitals are degenerate and switch order
@@ -181,7 +193,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, best_guess_from_prev=True, init_a
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window, save_tdm=save_tdm)
 
     return e_val_n, amplitude_store
 
@@ -553,16 +565,16 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None, save_tdm=False):
     if not (mol.verbose or (mol.active_state>0)):
         return 
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
+    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window,save_tdm)
     if mol.verbose:
         print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
-def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
+def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None, save_tdm=False):
 
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window)
 
@@ -583,6 +595,8 @@ def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat
     if rpa:
         R += torch.einsum('bma,bria,bni->brmn',Cvirt,amp_ia_Y,Cocc)
 
+    if save_tdm:
+        mol.transition_density_matrices = R.clone()
     # Transition dipole in AU as calculated in NEXMD
     transition_dipole = torch.einsum('brmn,bdmn->brd',R,dipole_mat_packed)*math.sqrt(2.0)/a0
     hartree = 27.2113962 # value used in NEXMD
