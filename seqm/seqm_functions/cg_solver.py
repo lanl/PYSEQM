@@ -27,12 +27,14 @@ def conjugate_gradient_batch(
     batch_size = b.shape[0]
     # dims to sum over when computing inner‐products / norms:
     sum_dims = tuple(range(1, b.dim()))
+    expand_shape = (batch_size,) + (1,) * (b.dim() - 1) 
 
     # 1) init
     x = torch.zeros_like(b)
     r = b.clone()                      # residual
     if M_diag is not None:
-        z = r / M_diag                 # preconditioned residual
+        M_inv = 1.0 / M_diag
+        z = r * M_inv                  # preconditioned residual
     else:
         z = r                          # no preconditioner
     p = z.clone()                      # search direction
@@ -40,7 +42,8 @@ def conjugate_gradient_batch(
 
     # # mask of active (not yet converged) systems
     # active = torch.norm(r,dim=sum_dims) >= tol
-    active = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims) >= tol
+    r_norm = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims)
+    active = r_norm >= tol                           # [B] bool mask
     alpha_dtype = rs_old.dtype
     minclamp = 1e-20 if alpha_dtype==torch.float64 else 1e-10
 
@@ -55,7 +58,7 @@ def conjugate_gradient_batch(
         alpha = alpha * active.to(alpha_dtype)
 
         # reshape alpha to broadcast over [D1…Dk]:
-        alpha_exp = alpha.view(batch_size, *([1] * (b.dim() - 1)))
+        alpha_exp = alpha.view(expand_shape)
 
         # 4) update solution & residuals
         x = x + alpha_exp * p
@@ -64,12 +67,11 @@ def conjugate_gradient_batch(
         # check convergence
         # r_norm = torch.norm(r, dim=sum_dims)
         r_norm = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims)
-        newly_conv = r_norm < tol
-        active = active & (~newly_conv)
+        active = r_norm >= tol
 
         # precondition
         if M_diag is not None:
-            z = r / M_diag
+            z = r * M_inv
         else:
             z = r
 
@@ -77,13 +79,14 @@ def conjugate_gradient_batch(
         rs_new = torch.sum(r * z, dim=sum_dims)
         beta = rs_new / rs_old.clamp(min=minclamp)
         beta = beta * active.to(beta.dtype)
-        beta_exp = beta.view(batch_size, *([1] * (b.dim() - 1)))
+        beta_exp = beta.view(expand_shape)
 
         p = z + beta_exp * p
         rs_old = rs_new
 
         # if i % 1 == 0 or i == max_iter - 1:
         #     print(f"Iteration {i:3}: Residual norms = {r_norm}")
+
     if torch.any(active): raise RuntimeError(f"Conjugate gradient did not converge in {max_iter} steps (resid={r_norm})")
 
 # Example Usage

@@ -1,5 +1,10 @@
 import torch
 
+# SP2 convergence thresholds for different precisions
+SP2_EPS_FLOAT32 = 1.0e-2  # float32 is harder to converge, use relaxed threshold
+SP2_EPS_FLOAT64_MAX = 1.0e-3
+SP2_EPS_FLOAT64_MIN = 1.0e-7
+
 def SP2(a, nocc, eps=1.0e-4, factor=2.0):
     #print(a.shape)
     # a: batch of fock matrixes, don't need to be truncated
@@ -12,16 +17,16 @@ def SP2(a, nocc, eps=1.0e-4, factor=2.0):
     if flag:
         #float32, harder to converge to a smaller eps, for this one set eps=1.0e-2, and break when no more improvement
         #use critiria to check there is no more improvement
-        if eps<1.0e-2:
-            eps=1.0e-2
+        if eps < SP2_EPS_FLOAT32:
+            eps = SP2_EPS_FLOAT32
     else:
         #float64, if use above critiria, the error will keep going down and take lots of iteration to reach no more improvement
         #so put eps as a small one like 1.0e-4, to recude the number of iterations
         #use critiria to check the err of current and last iterations both <= eps
-        if eps>1.0e-3:
-            eps=1.0e-3
-        elif eps<1.0e-7:
-            eps=1.0e-7
+        if eps > SP2_EPS_FLOAT64_MAX:
+            eps = SP2_EPS_FLOAT64_MAX
+        elif eps < SP2_EPS_FLOAT64_MIN:
+            eps = SP2_EPS_FLOAT64_MIN
     noccd = nocc.type(dtype)
 
     N, D, _ = a.shape

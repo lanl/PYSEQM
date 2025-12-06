@@ -1,4 +1,6 @@
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
 from .rcis_batch import get_occ_virt, makeA_pi_batched
 
 def elec_energy_excited_xl(mol,R,w,e_mo):
@@ -81,3 +83,87 @@ def solve_exactly_X_omega(eaei):
     # exactly solve instead of solve_for_amplitude_omega
     pass
 
+def sample_noisy_R_energy(mol, R, w, e_mo, n_steps=50, noise_scale=1e-5, cumulative=False, seed=None, return_data=False, plot=True, fit_order=2):
+	"""
+	Generate noisy copies Rbar of R, compute total energy for each, and plot |R-Rbar| vs E.
+
+	Args:
+		mol: molecule object expected by elec_energy_excited_xl
+		R: torch.Tensor, original transition-density tensor (same shape used by elec_energy_excited_xl)
+		w, e_mo: arguments forwarded to elec_energy_excited_xl
+		n_steps: number of noisy samples
+		noise_scale: standard deviation of Gaussian noise added to R (absolute scale)
+		cumulative: if True, noise is added cumulatively (Rbar <- Rbar + noise). If False, noise is added to original R each sample.
+		seed: optional int seed for reproducibility
+		return_data: if True, returns (deltas, energies)
+		plot: if True, plots |R-Rbar| vs E using matplotlib
+		fit_order: polynomial order to fit to (deltas, energies) for plotting (default 2)
+
+	Returns:
+		None or (deltas, energies) if return_data=True
+	"""
+	if seed is not None:
+		torch.manual_seed(seed)
+		np.random.seed(seed)
+
+	# Work with detached copies to avoid grads / side-effects
+	R = R.clone().detach()
+	Rbar = R.clone().detach()
+	deltas = []
+	energies = []
+	Rbase = torch.randn_like(R)
+	for i in range(n_steps):
+		noise = i*noise_scale * Rbase
+		if cumulative:
+			Rbar = Rbar + noise
+		else:
+			Rbar = R + noise
+
+		with torch.no_grad():
+			E, _ = elec_energy_excited_xl(mol, Rbar, w, e_mo)
+
+		# Reduce E to a scalar for plotting: mean across batch if batched
+		if torch.is_tensor(E):
+			energy_scalar = float(E.mean().item())
+		else:
+			energy_scalar = float(np.asarray(E).mean())
+
+		delta = float(torch.linalg.norm(R - Rbar).item())
+
+		deltas.append(delta)
+		energies.append(energy_scalar)
+		# print(f"Step {i+1}/{n_steps}: |R-Rbar| = {delta:.6e}, E = {energy_scalar:.6e}")
+
+	if plot:
+		plt.figure()
+		plt.plot(deltas, energies, marker='o', linestyle='-', label='data')
+		plt.xlabel('|R - Rbar| (transition density error)')
+		plt.ylabel('E')
+		plt.title('Energy vs Error in transition density')
+
+		# Fit an n-th order polynomial if there are enough points
+		try:
+			if len(deltas) > fit_order:
+				x = np.array(deltas)
+				y = np.array(energies)
+				# compute polynomial coefficients (highest degree first)
+				coeffs = np.polyfit(x, y, fit_order)
+				print("Fitted polynomial coefficients (highest degree first):", coeffs)
+				p = np.poly1d(coeffs)
+				# sort for a smooth curve
+				idx = np.argsort(x)
+				xs = x[idx]
+				ys = p(xs)
+				plt.plot(xs, ys, color='red', linestyle='--', label=f'polynomial fit (order={fit_order})')
+				plt.legend()
+		except Exception:
+			# don't fail plotting if fit fails; still show raw data
+			pass
+
+		plt.grid(True)
+		plt.show()
+
+	exit()
+
+	if return_data:
+		return deltas, energies

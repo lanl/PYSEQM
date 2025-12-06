@@ -50,8 +50,11 @@ def normal_modes(molecule, energy):
     H = torch.zeros((num_coords, num_coords), dtype=dtype, device=device)
 
     # === 2) Build Hessian by differentiating each component of grad1_flat ===
-    # Note: create_graph=False here since we don’t need third derivatives.
+    # Note: create_graph=False here since we don't need third derivatives.
     # retain_graph=True is required until the last iteration; 
+    # PERFORMANCE NOTE: This loop is O(3N) autograd calls, which scales poorly for large molecules.
+    # I could not make better approaches work like using torch.autograd.functional.hessian() or
+    # using JAX with jax.hessian().
     for i in range(num_coords):
         # ∂(grad1_flat[i]) / ∂ coords  ⇒ shape (N_atoms, 3)
         grad2_i = torch.autograd.grad(grad1_flat[i], coords, retain_graph=True)[0]
@@ -104,40 +107,3 @@ def normal_modes(molecule, energy):
         print(f"  Mode {i:3d}: {freq:12.6f}")
 
     return frequencies_cm1, vib_modes
-
-    if molecule.nmol > 1:
-        raise Exception("Hessian and Normal mode calculation currently not available for a batch of more than one molecule. Please input only one molecule")
-
-    y = energy.sum()               # To get scalar energy
-    grad_y = torch.autograd.grad(y, molecule.coordinates, create_graph=True)[0]
-    n = molecule.coordinates.numel() # 3N
-    H = torch.zeros(n, n, dtype=molecule.coordinates.dtype, device=molecule.coordinates.device)
-
-    flat_grad = grad_y.reshape(-1)   # shape (n,)
-
-    for i in range(n):
-        # ∂(grad_y[i]) / ∂ coords  ⇒ a vector of length n
-        grad2_i = torch.autograd.grad(flat_grad[i], molecule.coordinates, retain_graph=True)[0]
-        H[i, :] = grad2_i.reshape(-1)
-
-    masses = molecule.const.mass[molecule.species].squeeze()
-    N = masses.shape[0]
-    assert H.shape == (3*N, 3*N), "Hessian shape mismatch"
-
-    # Build 3N mass vector (mass for each Cartesian coordinate)
-    mass_vector = masses.repeat_interleave(3)  # shape: (3N,)
-
-    # Construct mass-weighted Hessian
-    mass_sqrt = torch.sqrt(mass_vector)
-    H_mass_weighted = H / (mass_sqrt[:, None] * mass_sqrt[None, :])
-
-    # Diagonalize
-    eigvals, modes = torch.linalg.eigh(H_mass_weighted)
-    
-    factor = 521.470898  # sqrt(eV/Å²/amu) to cm⁻¹
-
-    # Take only positive eigenvalues (filter out small/negative numerical artifacts)
-    eigvals_clipped = torch.clamp(eigvals, min=0.0)
-    frequencies_cm1 = factor * torch.sqrt(eigvals_clipped[6:]) # eliminate 6 lowest modes, of which 3 are translations and 3 are rotations
-
-    print(f"Frequencies are:\n{frequencies_cm1}")

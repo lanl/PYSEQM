@@ -949,6 +949,7 @@ def cis_energy_from_transition_density(mol,F,R,w,D,Hcore):
             Ei = linearlized_cis_energy(mol,F,R,Q,w)
         err.append(i)
         ener.append(Ei[0].item())
+    exit()
     
     import numpy as np
     x = np.array(err)

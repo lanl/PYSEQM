@@ -132,7 +132,7 @@ def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj,
               .view(nmol, molsize, molsize, nbf, nbf)
               .transpose(2,3)
               .reshape(nmol, nrs, nrs))
-    # symmetrize upper triangle since only the lower triangle of F has been built so far
+    # symmetrize lower triangle since only the upper triangle of F has been built so far
     F_full += F_full.triu(1).transpose(1,2)
     return F_full
 

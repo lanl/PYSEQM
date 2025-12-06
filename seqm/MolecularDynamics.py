@@ -122,7 +122,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self._normalize_output()
 
         self.n_dof = None  # number of degrees of freedom
-        self.remove_com_linear = False
         self.remove_com_angular = False
         self.start_time = None
 
@@ -168,6 +167,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if md_dev != mol_dev:
             raise RuntimeError(
                 f"Please move the MD object (on {md_dev}) to the same device as the molecule object (on {mol_dev})")
+        if self.n_dof is None:
+            raise RuntimeError(
+                "n_dof is not set. Call `initialize(molecule, ...)` or `set_dof(molecule, ...)` "
+                "before initializing velocities."
+            )
 
         if torch.is_tensor(molecule.velocities):
             return molecule.velocities
@@ -324,14 +328,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 except:
                     pass
 
-    def scale_velocities(self, i, velocities, T, scale_vel):
-        #freq, T0 = scale_vel
-        if (i) % scale_vel[0] == 0:
-            alpha = torch.sqrt(scale_vel[1] / T)
-            velocities.mul_(alpha.reshape(-1, 1, 1))
-            return True
-        return False
-
     def control_shift(self, velocities, Ek, Eshift):
         alpha = torch.sqrt((Ek - Eshift) / Ek)
         alpha[~torch.isfinite(alpha)] = 0.0
@@ -365,7 +361,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.n_dof = 3.0 * molecule.num_atoms - constraints
 
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
-        # molecule.verbose = False  # Dont print SCF and CIS/RPA results
+        molecule.verbose = False  # Dont print SCF and CIS/RPA results
         self.do_remove_com = remove_com is not None
         constraints = 0.0
         # remove_com is a tuple of (mode,stride), where mode='linear' or 'angular'
@@ -377,7 +373,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 raise ValueError(f"Invalid COM motion removal mode '{mode}'. "
                                  "Expected 'linear' or 'angular'. "
                                  "Usage: remove_com=('linear', N) or ('angular', N).")
-            self.remove_com_linear = True
             self.remove_com_angular = (mode == "angular")
             constraints = 6.0 if self.remove_com_angular else 3.0  # TODO: check if the molecule is linear
 
@@ -719,7 +714,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     # gd["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :Norb])
                     gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol, None])  # (1,1)
                 else:
-                    gd["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :, :Norb])
+                    # gd["mo/e_orb"][i, ...] = _to_np(molecule.e_mo[mol, :, :Norb])
                     gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol])  # (2,)
 
             self._h5_i_data[mol] = i + 1
@@ -1253,7 +1248,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
             # for xl-esmd since we propagate the transition_density for only the active state, save only that
             if do_xl_esmd:
-                molecule.transition_density_matrices = molecule.transition_density_matrices[:,molecule.active_state].unsqueeze(1)
+                molecule.transition_density_matrices = molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1)
 
             if self.move_on_excited_state:
                 es_amp = molecule.transition_density_matrices.clone()
@@ -1310,18 +1305,17 @@ class XL_ESMD(XL_BOMD):
             P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
 
         self.esdriver.conservative_force.energy.xlesmd_transition_density = es_amp
-        active_state = molecule.active_state
-        molecule.active_state = 0
+        # active_state = molecule.active_state
+        # molecule.active_state = 0
         self.esdriver(molecule,
                       learned_parameters=learned_parameters,
                       xl_bomd_params=self.xl_bomd_params,
                       P0=P0,
                       cis_amp=None,
                       dm_prop='SCF',
-                      save_w=True,
                       *args,
                       **kwargs)
-        molecule.active_state = active_state
+        # molecule.active_state = active_state
 
         if self.add_spherical_potential:
             with torch.no_grad():
@@ -1347,7 +1341,6 @@ class XL_ESMD(XL_BOMD):
         super().initialize(molecule, remove_com=remove_com, learned_parameters=learned_parameters, do_xl_esmd=True, *args, **kwargs)
 
         molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
-        # Keep the transition_density_matrix of the active state only
         self.esdriver.conservative_force.energy.excited_states = None
 
 """

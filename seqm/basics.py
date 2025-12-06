@@ -23,7 +23,7 @@ from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
-from .seqm_functions.XLESMD import elec_energy_excited_xl
+from .seqm_functions.XLESMD import elec_energy_excited_xl, sample_noisy_R_energy
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -494,7 +494,10 @@ class Energy(torch.nn.Module):
         if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
             calc_ground_dipole(molecule,P)
 
-        if molecule.active_state > 0 and not self.excited_states:
+        # Check if doing XL-ESMD
+        xlesmd = isinstance(getattr(self,"xlesmd_transition_density",None),torch.Tensor)
+
+        if molecule.active_state > 0 and not self.excited_states and not xlesmd:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
         Eexcited = 0.0
@@ -576,8 +579,11 @@ class Energy(torch.nn.Module):
                     molecule.all_cis_unrelaxed_diploles[:,i-1,...] = molecule.cis_state_unrelaxed_dipole
                 molecule.active_state = init_active_state
 
+        # # Debug XL-ESMD
+        # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
+
         # If doing XL-ESMD, get XL-ESMD energy, transition density
-        if isinstance(getattr(self,"xlesmd_transition_density",None),torch.Tensor):
+        if xlesmd:
             Eexcited, molecule.transition_density_matrices= elec_energy_excited_xl(molecule,self.xlesmd_transition_density,w,e)
 
         if self.eig and not self.uhf and self.excited_states and self.excited_states["make_best_guess"]:

@@ -16,6 +16,10 @@ DEGEN_EIGENSOLVER = True
 DEGEN_THRESHOLD = torch.finfo(torch.float).eps ** 0.6
 # threshold below which to consider eigenpairs degenerate
 
+# Padded orbital eigenvalue shift parameters
+PADDING_EIGENSHIFT_START_FACTOR = 1.0
+PADDING_EIGENSHIFT_INCREMENT = 0.005  # dx increment for eigenvalue shifts
+
 
 def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
     #x single Fock matrix
@@ -135,8 +139,8 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         norb = nheavyatom*4+nH
         pnorb = size - norb
         nn = torch.max(pnorb).item()
-        dx = 0.005
-        mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
+        dx = PADDING_EIGENSHIFT_INCREMENT
+        mutipler = torch.arange(PADDING_EIGENSHIFT_START_FACTOR+dx, PADDING_EIGENSHIFT_START_FACTOR+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
         ind = torch.arange(size, dtype=torch.int64, device=device)
         cond = pnorb>0
         for i in range(nmol):
@@ -144,9 +148,11 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
         try:
             e0, v = sym_eigh(x0)
-        except:
-            if torch.isnan(x0).any(): print(x0)
-            e0, v = sym_eigh(x0)
+        except RuntimeError as e:
+            if torch.isnan(x0).any():
+                raise RuntimeError(f"sym_eigh failed with NaN in input matrix") from e
+            else:
+                raise RuntimeError(f"sym_eigh failed: {e}") from e
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
@@ -167,8 +173,8 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         norb = nheavyatom*4+nH
         pnorb = size - norb
         nn = torch.max(pnorb).item()
-        dx = 0.005
-        mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
+        dx = PADDING_EIGENSHIFT_INCREMENT
+        mutipler = torch.arange(PADDING_EIGENSHIFT_START_FACTOR+dx, PADDING_EIGENSHIFT_START_FACTOR+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
         ind = torch.arange(size, dtype=torch.int64, device=device)
         cond = pnorb>0
         for i in range(nmol):
@@ -176,9 +182,11 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
         try:
             e0, v = sym_eigh(x0)
-        except:
-            if torch.isnan(x0).any(): print('NaN problem\n',x0)
-            e0, v = sym_eigh(x0)
+        except RuntimeError as e:
+            if torch.isnan(x0).any():
+                raise RuntimeError(f"sym_eigh failed with NaN in input: {e}") from e
+            else:
+                raise RuntimeError(f"sym_eigh failed: {e}") from e
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
