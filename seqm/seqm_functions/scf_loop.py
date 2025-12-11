@@ -1040,7 +1040,6 @@ class SCF(torch.autograd.Function):
                 u_init = torch.zeros_like(Pin)  
                 u = fixed_point_anderson(affine_eq, u_init, backward_eps*10)
                 u = fixed_point_picard(affine_eq, u, backward_eps)
-                print(f"converged backward to {backward_eps}")
                 # u = fixed_point_picard(affine_eq, u_init,backward_eps)
                 # def A_matvec(u): return u - agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
                 # u = conjugate_gradient_batch(A_matvec,grad_P,tol=backward_eps*100)

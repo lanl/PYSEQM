@@ -8,13 +8,17 @@ def elec_energy_excited_xl(mol,R,w,e_mo):
     # R = mol.transition_density_matrices
     nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window=None, e_mo=e_mo)
     # R = torch.einsum('bmi,bia,bna->bmn', Cocc,Xbar.view(-1,nocc,nvirt), Cvirt)
-    Xbar = torch.einsum('bmi,brmn,bna->bria', Cocc,R, Cvirt).reshape(-1,nocc*nvirt)
-    G_ao = makeA_pi_batched(mol,R,w)
+    with torch.no_grad():
+        Xbar = torch.einsum('bmi,brmn,bna->bria', Cocc,R, Cvirt)#.reshape(-1,nocc*nvirt)
+    R_ = torch.einsum('bmi,bria,bna->brmn', Cocc,Xbar, Cvirt)
+    Xbar = Xbar.view(-1,nocc*nvirt)
+    G_ao = makeA_pi_batched(mol,R_,w)
     G = torch.einsum('bmi,brmn,bna->bria', Cocc, G_ao, Cvirt).view_as(Xbar)*2.0
     
     # Get X, omega from Xbar
     ea_ei = ea_ei.view_as(Xbar)
-    X, omega = solve_for_amplitude_omega(Xbar,ea_ei,G)
+    with torch.no_grad():
+	    X, omega = solve_for_amplitude_omega(Xbar,ea_ei,G)
     # X = Xbar
     # omega = 0.0
 
