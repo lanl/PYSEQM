@@ -7,6 +7,7 @@ from datetime import datetime
 from io import StringIO
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
+from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
 
 import h5py
 import numpy as np
@@ -38,6 +39,7 @@ class OutputConfig:
     checkpoint_every: int = 100
     xyz_every: int = 0
     h5_config: Dict[str, Any] = field(default_factory=dict)
+    h5_vectors_every: Optional[int] = None
     
     @classmethod
     def from_dict(cls, config: Optional[Dict] = None) -> 'OutputConfig':
@@ -52,6 +54,13 @@ class OutputConfig:
             dump = int(config["dump"])
             config.setdefault("xyz", dump)
             config.setdefault("h5", {}).setdefault("data", dump)
+            
+        wanted_vectors = {"coordinates", "velocities", "forces"}
+        vals = [
+            v for k, v in config['h5'].items()
+            if k in wanted_vectors and isinstance(v, int) and v > 0
+        ]
+        vectors_every = min(vals, default=None) 
         
         return cls(
             molid=config.get("molid", [0]),
@@ -59,7 +68,8 @@ class OutputConfig:
             print_every=int(config.get("print every", 1)),
             checkpoint_every=int(config.get("checkpoint every", 100)),
             xyz_every=int(config.get("xyz", 0)),
-            h5_config=config.get("h5", {})
+            h5_config=config.get("h5", {}),
+            h5_vectors_every=vectors_every
         )
     
     def get_h5_cadence(self) -> Dict[str, int]:
@@ -97,6 +107,7 @@ class HDF5Writer:
         self._write_mo = output_config.get_h5_write_mo()
         self._write_tdm = output_config.get_h5_write_tdm()
         self._save_relaxed_dipole = False
+        self._is_xl_esmd = False  # Flag to track XL_ESMD mode
     
     @staticmethod
     def _n_timepoints(steps: int, stride: int) -> int:
@@ -114,8 +125,9 @@ class HDF5Writer:
         )
     
     def open(self, molecule, prefix: str, steps: int, excited_states: int = 0,
-             resume: bool = False, step_offset: int = 0):
+             resume: bool = False, step_offset: int = 0, is_xl_esmd: bool = False):
         """Open HDF5 files for writing."""
+        self._is_xl_esmd = is_xl_esmd
         Tw_data = self._n_timepoints(steps, self._data_every)
         Tw_vec = {k: self._n_timepoints(steps, v) for k, v in self._cadence.items()}
         Tw_tdm = self._n_timepoints(steps, self._write_tdm)
@@ -128,7 +140,9 @@ class HDF5Writer:
             h5_path = f"{prefix}.{mol}.h5"
             Nat_mol = int(torch.sum(molecule.species[mol] > 0))
             Norb_mol = int(molecule.norb[mol])
-            R = int(excited_states) if excited_states > 0 else 0
+            R_orig = int(excited_states) if excited_states > 0 else 0
+            # For XL_ESMD, store only 1 root for all excited state properties (active state only)
+            R = 1 if (is_xl_esmd and R_orig > 0) else R_orig
             
             self.flags[mol] = {
                 "restricted": restricted,
@@ -212,6 +226,7 @@ class HDF5Writer:
             
             if R > 0:
                 gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
+                # R is already 1 for XL_ESMD, so all excited state datasets use R
                 self._create_row_chunked(gd, "excitation/excitation_energy", (Tw_data, R))
                 self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
                 self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
@@ -258,6 +273,8 @@ class HDF5Writer:
             
             R = flags["n_excited_states"]
             if R > 0:
+                # For XL_ESMD, R=1 and molecule.transition_density_matrices has shape (nmol, 1, Norb, Norb)
+                # All excited state properties are stored for only the active state
                 gd["excitation/excitation_energy"][i, ...] = _to_np(molecule.cis_energies[mol, :R])
                 gd["excitation/transition_dipole"][i, ...] = _to_np(molecule.transition_dipole[mol, :R])
                 gd["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[mol, :R])
@@ -574,8 +591,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """Calculate temperature from kinetic energy."""
         return kinetic_energy * CONSTANTS.TEMPERATURE_SCALE / (0.5 * self.n_dof)
     
-    def _screen_output(self, step: int, T, Ek, V):
-        """Print thermodynamic data to screen."""
+    def _output_to_screen(self, step: int, T, Ek, V):
+        """Print MD data to screen."""
         if step == 0:
             print("Step,    Temp,    E(kinetic),  E(potential),  E(total)")
         print(f"{step+1:6d}", end="")
@@ -625,18 +642,22 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         molecule.verbose = False # Dont print SCF and CIS/RPA results
         self.do_remove_com = remove_com is not None
         constraints = 0.0
-        
+        # remove_com is a tuple of (mode,stride), where mode='linear' or 'angular'
+        # and stride is the number of steps after which com motion is removed
         if self.do_remove_com:
             mode, self.remove_com_stride = remove_com
             mode = str(mode).lower().strip()
             if mode not in ("linear", "angular"):
-                raise ValueError(f"Invalid COM removal mode '{mode}'. Use 'linear' or 'angular'.")
+                raise ValueError(f"Invalid COM motion removal mode '{mode}'. "
+                                 "Expected 'linear' or 'angular'. "
+                                 "Usage: remove_com=('linear', N) or ('angular', N).")
             self.remove_com_angular = (mode == "angular")
-            constraints = 6.0 if self.remove_com_angular else 3.0
-        
+            constraints = 6.0 if self.remove_com_angular else 3.0  # TODO: check if the molecule is linear
+
         self.set_dof(molecule, constraints)
         self.initialize_velocity(molecule)
-        
+
+        # Calculate accelearation at t=0
         if not torch.is_tensor(molecule.force):
             self.esdriver(molecule, learned_parameters=learned_parameters, 
                          P0=molecule.dm, cis_amp=molecule.cis_amplitudes, *args, **kwargs)
@@ -690,10 +711,12 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if do_h5:
                 excited_states_params = self.seqm_parameters.get('excited_states')
                 n_roots = excited_states_params["n_states"] if excited_states_params else 0
+                # Check if this is XL_ESMD
+                is_xl_esmd = isinstance(self, XL_ESMD)
                 self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters)
                 self._h5_writer.open(molecule, self.output_config.prefix, steps, 
                                     n_roots, resume=(self.step_offset > 0), 
-                                    step_offset=self.step_offset)
+                                    step_offset=self.step_offset, is_xl_esmd=is_xl_esmd)
             
             if do_xyz:
                 self._xyz_writer = XYZWriter(self.output_config, self.step_offset)
@@ -718,7 +741,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     V = self._thermo_potential(molecule)
                     if E0 is None:
                         E0 = V + Ek
-                    
+
+                    # if scaling velocities to control temperature
                     if do_scale_vel and ((i + 1) % scale_freq == 0):
                         alpha = torch.sqrt(torch.clamp(T_target / T, min=0.0))
                         molecule.velocities.mul_(alpha.reshape(-1, 1, 1))
@@ -726,6 +750,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                         T = self._calc_temperature(Ek)
                     
                     if do_energy_shift:
+                        #scale velocities to adjust kinetic energy and compenstate the energy shift
                         Eshift = Ek + V - E0
                         alpha = torch.sqrt((Ek - Eshift) / Ek)
                         alpha[~torch.isfinite(alpha)] = 0.0
@@ -734,13 +759,14 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                         T = self._calc_temperature(Ek)
                     
                     if do_screen and ((i + 1) % self.output_config.print_every == 0):
-                        self._screen_output(i, T, Ek, V)
+                        self._output_to_screen(i, T, Ek, V)
                     
                     if do_h5:
                         if (self.output_config.get_h5_data_every() > 0 and 
                             (i + 1) % self.output_config.get_h5_data_every() == 0):
                             self._h5_writer.append_data(i + 1, molecule, T, Ek, V, molecule.e_gap)
-                        if any(self.output_config.get_h5_cadence().values()):
+                        if (self.output_config.h5_vectors_every and 
+                            (i + 1) % self.output_config.h5_vectors_every == 0): 
                             self._h5_writer.append_vectors(i + 1, molecule)
                     
                     if do_xyz and ((i + 1) % self.output_config.xyz_every == 0):
@@ -763,7 +789,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         
         now = datetime.now()
         print(f"MD run ended at {now}")
-        print(f"Time elapsed: {now - self.start_time}", flush=True)
+        print(f"Time elapsed since the beginning of MD run: {now-self.start_time}",flush=True)
         return molecule.coordinates, molecule.velocities, molecule.acc
     
     def _flush_all(self):
@@ -831,8 +857,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         
         now = datetime.now()
         print(f"Saved checkpoint at {now}")
-        print(f"Time elapsed: {now - self.start_time}", flush=True)
-    
+        print(f"Time elapsed since the beginning of MD run: {now-self.start_time}",flush=True)
+
     @staticmethod
     def run_from_checkpoint(path: str, device=None):
         """Load and resume from checkpoint."""
@@ -841,7 +867,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         torch.random.set_rng_state(ckpt["rng"]["torch_cpu"])
         if torch.cuda.is_available() and ckpt["rng"]["torch_cuda"]:
             torch.cuda.set_rng_state_all(ckpt["rng"]["torch_cuda"])
-        
+
+        # rebuild objects
         from seqm.Molecule import Molecule
         
         torch.set_default_dtype(ckpt["molecules"]["coordinates"].dtype)
@@ -896,7 +923,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             Pt = xl["Pt"].to(device)
             es_amp_t = xl.get("es_amp_t")
             xl_m = ckpt["xl_bomd_params"]['k'] + 1
-            cindx = (ckpt["step_done"] - 1) % xl_m
+            cindx = (ckpt["step_done"] - 1) % xl_m # subtract one because step_done is advanced by one step
             P = Pt[(xl_m - 1 - cindx)].clone()
             es_amp = None
             if isinstance(es_amp_t, torch.Tensor):
@@ -917,11 +944,22 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     """MD with Langevin thermostat."""
     
     def __init__(self, damp=50.0, *args, **kwargs):
+        """
+        damp is damping factor in unit of time (fs)
+        Temp : temperature in unit of Kelvin
+
+        Integration scheme for Langevin dynamics is from 
+        Bussi, G., & Parrinello, M. (2007). Accurate sampling using Langevin dynamics. Physical Review E, 75(5), 056707.
+        DOI: https://doi.org/10.1103/PhysRevE.75.056707
+        """
+
         self.damp = damp
         super().__init__(*args, **kwargs)
     
     def set_dof(self, molecule, constraints=0.0):
-        """Langevin: use all 3N DOF."""
+        # For langevin thermostat dont reduce degrees of freedom even if centre of mass momentum is zeroed out
+        # because the thermostat gives energy into all 3N degrees of freedom
+        # See: https://nwchemgit.github.io/Special_AWCforum/st/id2509/Langevin_thermostat_for_Gaussian....html
         self.n_dof = 3.0 * molecule.num_atoms
     
     def _apply_langevin_thermostat(self, molecule):
@@ -959,9 +997,11 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
         if self.damp is not None:
             dt = self.timestep
-            s = torch.as_tensor(-dt / self.damp, dtype=molecule.coordinates.dtype, 
-                               device=molecule.coordinates.device)
+            # s = -γ dt
+            s = torch.as_tensor(-dt / self.damp, dtype=molecule.coordinates.dtype, device=molecule.coordinates.device)
+            # c1 = exp{-γ dt/2}
             self.langevin_c1 = torch.exp(0.5 * s)
+            # c2 = 1 - c1^2 = 1 - e^{-γ dt}
             one_me = -torch.expm1(s)
             self.langevin_c2 = torch.sqrt(one_me * self.Temp * molecule.mass_inverse) * CONSTANTS.VEL_SCALE
         return super().initialize(molecule, remove_com, learned_parameters, *args, **kwargs)
@@ -974,7 +1014,8 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         self.k = xl_bomd_params['k']
         self.xl_bomd_params = xl_bomd_params
         super().__init__(damp, *args, **kwargs)
-        
+        #check Niklasson et al JCP 130, 214109 (2009)
+        #coeff: kappa, alpha, c0, c1, ..., c9
         self.coeffs = {
             3: [1.69, 150e-3, -2.0, 3.0, 0.0, -1.0],
             4: [1.75, 57e-3, -3.0, 6.0, -2.0, -2.0, 1.0],
@@ -990,12 +1031,17 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         self.alpha = self.coeffs[self.k][1]
         cc = 1.00
         tmp = torch.as_tensor(self.coeffs[self.k][2:]) * self.alpha
+        #P(n+1) = 2*P(n) - P(n-1) + cc*kappa*(D(n)-P(n)) + alpha*(c0*P(n) + c1*P(n-1) + ... ck*P(n-k))
+        #       =  cc*kappa*D(n)
+        #        + (2 - cc*kappa + alpha*c0)*P(n)
+        #        + (alpha*c1 - 1) * P(n-1)
+        #        + alpha*c2*P(n-2)
+        #        + ...
         self.coeff_D = cc * self.kappa
         tmp[0] += (2.0 - cc * self.kappa)
         tmp[1] -= 1.0
         self.coeff = torch.nn.Parameter(tmp.repeat(2), requires_grad=False)
-        
-        self.add_spherical_potential = False
+        self.add_spherical_potential = False  # Spherical force to prevent atoms from flying off beyond a certain radius
         self.do_scf = False
         self.move_on_excited_state = False
     
@@ -1006,13 +1052,16 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
     
     def _propagate_P(self, P, Pt, cindx, molecule):
         """Propagate density matrix."""
+        # eq. 22 in https://doi.org/10.1063/1.3148075
+        #### Scaling delta function. Use eq with c if stability problems occur.
+        # P(n+1) = coeff_D * [ c*D(n) + (1-c)*P(n) ] + sum_j coeff[j] * Pt[j]
         c = 0.95
         P_new = (self.coeff_D * (c * molecule.dm + (1.0 - c) * P) + 
                 torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1) * Pt, dim=0))
         return P_new
     
     def _propagate_excited_state(self, es_amp, es_amp_t, cindx, molecule):
-        """Propagate excited state amplitudes."""
+        """Propagate excited state transition density matrices."""
         c = 0.95
         es_new = (self.coeff_D * (c * molecule.transition_density_matrices + (1.0 - c) * es_amp) +
                  torch.sum(self.coeff[cindx:(cindx+self.m)].reshape(-1,1,1,1,1) * es_amp_t, dim=0))
@@ -1032,7 +1081,14 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             molecule.velocities.add_(0.5 * molecule.acc * dt)
             molecule.coordinates.add_(molecule.velocities * dt)
             
+            #cindx = step%self.m
+            #e.g k=5, m=6
+            #coeff: c0, c1, c2, c3, c4, c5, c0, c1, c2, c3, c4, c5
+            #Pt (0,1,2,3,4,5), step=6n  , cindx = 0, coeff[0:6]
+            #Pt (1,2,3,4,5,0), step=6n+1, cindx = 1, coeff[1:7]
+            #Pt (2,3,4,5,0,1), step=6n+2
             cindx = step % self.m
+            # eq. 22 in https://doi.org/10.1063/1.3148075
             P = self._propagate_P(P, Pt, cindx, molecule)
             Pt[(self.m - 1 - cindx)] = P
             
@@ -1041,12 +1097,18 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                 es_amp_t[(self.m - 1 - cindx)] = es_amp
                 es_amp_ortho = es_amp
             else:
-                es_amp_ortho = es_amp
-            
+                es_amp_ortho = es_amp  # will be set to None
+
             if self.do_scf:
+                calc_type = 'SCF'
+
+                # Purify with McWeeny polynomial since P may not be idempotent
+                # 3P^2 - 2P^3
+                # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
+                # TODO: Make it work for unrestricted P
                 P2 = P @ P
                 P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
-                calc_type = 'SCF'
+
             else:
                 P0 = P
                 calc_type = 'XL-BOMD'
@@ -1055,6 +1117,11 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                      xl_bomd_params=self.xl_bomd_params, P0=P0, cis_amp=es_amp_ortho,
                      dm_prop=calc_type, *args, **kwargs)
         
+        if self.add_spherical_potential:  # don't do this unless necessary
+            with torch.no_grad():
+                dE, dF = Spherical_Pot_Force(molecule, radius=14.85, k=0.1)
+                molecule.Etot = molecule.Etot + dE
+                molecule.force = molecule.force + dF
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
             molecule.velocities.add_(0.5 * molecule.acc * dt)
@@ -1070,9 +1137,11 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         return P, Pt, es_amp, es_amp_t
     
     def _thermo_potential(self, molecule):
+        # XL-BOMD potential energy includes Electronic_entropy (why?)
         return molecule.Etot + molecule.Electronic_entropy
     
     def _do_integrator_step(self, i, molecule, learned_parameters, **kwargs):
+        # Expect self._xl_ctx holding P, Pt, es_amp, es_amp_t initialized in initialize()
         P, Pt = self._xl_ctx["P"], self._xl_ctx["Pt"]
         es_amp, es_amp_t = self._xl_ctx.get("es_amp"), self._xl_ctx.get("es_amp_t")
         P, Pt, es_amp, es_amp_t = self.one_step(molecule, i, P, Pt, es_amp, es_amp_t,
@@ -1091,7 +1160,14 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         if self.move_on_excited_state and not do_xl_esmd:
             scf_eps = self.xl_bomd_params.setdefault("scf_eps", 1e-5)
             es_eps = self.xl_bomd_params.setdefault("es_eps", 1e-4)
-            
+            dtype = molecule.coordinates.dtype
+            if dtype==torch.float32:
+                    self.vec_eps = 5.0e-5
+            elif dtype==torch.float64:
+                    self.vec_eps = 1.0e-8
+            else:
+                raise RuntimeError("Set dtype to float64 or float32")
+
             if 'max_rank' in self.xl_bomd_params:
                 raise ValueError("KSA-XL-BOMD not supported for excited state dynamics")
             
@@ -1102,8 +1178,15 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], 
                                                      device=molecule.coordinates.device)
             self.esdriver.conservative_force.energy.excited_states['make_best_guess'] = False
-        
+            if self.esdriver.conservative_force.energy.excited_states['method'].lower() == "rpa":
+                raise ValueError(
+                    "XL-BOMD with excited states not tested for RPA. "
+                    "Currently only works for CIS. "
+                    "Will have to change one_step function to make it work for RPA."
+                )
+
         if self.step_offset > 0:
+            # resuming: expect caller/loader to have restored dm / cis_amplitudes
             return
         
         with torch.no_grad():
@@ -1112,7 +1195,8 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             if 'max_rank' in self.xl_bomd_params:
                 molecule.dP2dt2 = torch.zeros_like(molecule.dm)
             ctx = {"P": P, "Pt": Pt}
-            
+
+            # for xl-esmd since we propagate the transition_density for only the active state, save only that
             if do_xl_esmd:
                 molecule.transition_density_matrices = molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1)
             
@@ -1158,7 +1242,11 @@ class XL_ESMD(XL_BOMD):
             
             es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
             es_amp_t[(self.m - 1 - cindx)] = es_amp
-            
+
+            # Purify with McWeeny polynomial since P may not be idempotent
+            # 3P^2 - 2P^3
+            # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
+            # TODO: Make it work for unrestricted P
             P2 = P @ P
             P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
         
@@ -1188,6 +1276,46 @@ class XL_ESMD(XL_BOMD):
                                                  device=molecule.coordinates.device)
         self.esdriver.conservative_force.energy.excited_states = None
 
+"""
+1 eV = 1.602176565e-19 J
+1 Angstrom = 1.0e-10 m
+1 eV/Angstrom = 1.602176565e-09 N
+1 AU = 1.66053906660e-27 kg
+1 femtosecond = 1.0e-15 second
+1 Angstrom/fs = 1.0e5 m/s
+
+# accelaration scale
+1 eV/Angstroms / (grams/mol) = 1.602176565e-09 N / 1.66053906660e-27 kg
+ = 1.602176565e-09/1.66053906660e-27 m/s^2 = 1.602176565e-09/1.66053906660e-27 * 1.0e-20 Angstrom/fs^2
+ = 1.602176565/1.66053906660*0.01 Angstrom/fs^2 = 0.009648532800137615 Angstrom/fs^2
+
+1 eV = 1.160451812e4 Kelvin
+
+# vel_scale = sqrt(kb*T/m)
+kb*T/m: 1 Kelvin/ AU = 1.0/1.160451812e4 * 1.602176565e-19 / 1.66053906660e-27 * m^2/s^2
+= 1.0/1.160451812e4 * 1.602176565e-19 / 1.66053906660e-27 * 1.0e-10 Angstrom^2/fs^2
+= 1.0/1.160451812 * 1.602176565 / 1.6605390666 * 1.0e-6 Angstrom^2/fs^2
+= 0.8314462264063073e-6 Angstrom^2/fs^2
+kb = 0.8314462264063073e-6 a.m.u. Angstrom^2/fs^2/K
+
+sqrt(Kelvin/ AU) = 0.9118367323190634e-3 Angstrom/fs
+
+# kinetic energy scale
+AU*(Angstrom/fs)^2 = 1.66053906660e-27 kg * 1.0e10 m^2/s^2 = 1.66053906660e-17 J
+= 1.66053906660e-17/1.602176565e-19 eV = 1.0364270099032438e2 eV
+
+# random force scale
+random force unit coversion
+Fr = sqrt(2 Kb T m / (dt damp))*R(t)
+Fr unit: sqrt(Kelvin*AU/(fs^2)) ==> eV/Angstrom
+1 sqrt(Kelvin*AU/(fs^2)) = sqrt(1.0/1.160451812e4 eV * 1.66053906660e-27 kg)/fs
+= sqrt(1.0/1.160451812e4 * 1.602176565e-19 J * 1.66053906660e-27 kg)/fs
+= sqrt(1.0/1.160451812e4 * 1.602176565e-19 * 1.66053906660e-27)/1.0e-15 kg*m/s^2
+= sqrt(1.0/1.160451812e4 * 1.602176565e-19 * 1.66053906660e-27)/1.0e-15 /1.602176565e-19 / 1.0e10  eV/Angstrom
+= sqrt(1.0/1.160451812e4 / 1.602176565 * 1.66053906660) * 0.1 eV/Angstrom
+= 0.09450522179973914 eV/Angstrom
+"""
+#acc ==> Angstrom/fs^2
 
 def _rotate_existing(path, start=1, max_tries=99, error_on_max=True):
     """Rotate existing file to .bak.N"""
