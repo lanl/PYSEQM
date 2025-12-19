@@ -3,6 +3,7 @@ from seqm.seqm_functions.constants import Constants
 from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
 from seqm.geometryOptimization import geomeTRIC_optimization
+from seqm.seqm_functions.read_xyz import read_xyz
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -33,6 +34,10 @@ coordinates = torch.tensor([
                                [ -32.654911 ,   8.872607 ,   9.123019]
                               ],
                            ], device=device)
+
+species, coordinates = read_xyz(['./methane.xyz'])
+species = torch.as_tensor(species,dtype=torch.int64,device=device)
+coordinates = torch.as_tensor(coordinates, device=device)
 
 const = Constants().to(device)
 

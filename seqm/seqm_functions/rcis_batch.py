@@ -696,11 +696,15 @@ def make_guess(ea_ei,nroots,maxSubspacesize,V,nmol,nov):
 
     return nstart, nroots
 
-def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False,orbital_window=None):
-
+def calc_cis_energy(mol, w, e_mo, amplitude,F,P,rpa=False,orbital_window=None):
     norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
     if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    
+    # for near-degenerate use the formulation where E_cis is expressed in atomic orbital basis only
+    if ((e_mo[:, 1:] - e_mo[:, :-1]) < 1e-4).any(dim=1):
+        return calc_cis_energy_from_density(mol,w,F,P,amplitude,rpa,orbital_window)
+
     norb, nocc = norb_batch[0], nocc_batch[0]
     if orbital_window is not None:
         n_below, m_above = orbital_window
@@ -709,12 +713,12 @@ def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False,orbital_window=None):
     else:
         occ_idx  = torch.arange(nocc)
         virt_idx = torch.arange(nocc, norb)
+    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
 
     C = mol.molecular_orbitals
     Cocc = C[:,:,occ_idx]
     Cvirt = C[:,:,virt_idx]
 
-    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
 
     if not rpa: #CIS: w = XAX
         HV = matrix_vector_product_batched(mol, amplitude.unsqueeze(1), w, ea_ei, Cocc, Cvirt)
@@ -736,6 +740,28 @@ def calc_cis_energy(mol, w, e_mo, amplitude,rpa=False,orbital_window=None):
     # torch.set_printoptions(precision=15)
     # print(f'E_cis is {E_cis}')
     # print(f'Grad CIS from backprop is\n{force}')
+
+    return E_cis
+
+def calc_cis_energy_from_density(mol,w,F,P,amplitude,rpa=False,orbital_window=None):
+    nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window=orbital_window)
+    with torch.no_grad():
+        R = torch.einsum('bmi,bia,bna->bmn',Cocc,amplitude.view(-1,nocc,nvirt),Cvirt)
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
+    norb = mol.norb[0]
+    D = packone_batch(P, 4*nHeavy, nHydro, norb)
+    Q = torch.eye(D.shape[1],dtype=D.dtype,device=D.device).unsqueeze(0)-D
+
+    R = D@R@Q/2.0
+    F0 = makeA_pi_batched(mol,R.unsqueeze(1),w).squeeze(1)*2.0
+    F_ = packone_batch(F, 4*nHeavy, nHydro, norb)
+    F0 += (R@F_ - F_@R) 
+    F0 = D@F0@Q/2.0
+    E_cis = (R*F0).sum(dim=(1,2))
+
+    if rpa:
+        raise NotImplementedError
 
     return E_cis
 

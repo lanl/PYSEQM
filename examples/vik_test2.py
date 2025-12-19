@@ -54,10 +54,10 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    #'parameter_file_dir' : '../seqm/params/', # file directory for other required parameters
                    # 'do_scf_grad':[True, 'analytical'],  # [Want to calc SCF gradients:True/False, Which type: 'analytical,numerical']
-                   'excited_states': {'n_states':3,'method':'cis','orbital_window':(2,2)},
-                   # 'excited_states': {'n_states':3,'method':'cis'},
-                   # 'active_state': 1,
-                   # 'scf_backward': 1,
+                   # 'excited_states': {'n_states':3,'method':'cis','orbital_window':(2,2)},
+                   'excited_states': {'n_states':3,'method':'cis'},
+                   'active_state': 1,
+                   'scf_backward': 1,
                    # 'analytical_gradient':[True],
                    # 'cis_tolerance' : 1e-8,
                    }
@@ -80,7 +80,7 @@ esdriver(molecules)
 # analytic_grad = molecules.ground_analytical_gradient
 # esdriver(molecules)
 force = molecules.force
-# print(f'Force is\n{force}')
+print(f'Force is\n{force}')
 # print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force-force_analy))}')
 # # if analytic_grad is not None:
 # #     print(f'Diff b/w analytical_grad and backprop is {torch.sum(torch.abs(force+analytic_grad))}')

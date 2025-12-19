@@ -17,7 +17,7 @@ from .seqm_functions.energy import (
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.normal_modes import normal_modes
 from .seqm_functions.parameters import PWCCT, params
-from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch, cis_energy_from_transition_density, make_cis_densities
+from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch, cis_energy_from_transition_density, make_cis_densities, calc_cis_energy_from_density
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
@@ -354,8 +354,8 @@ class Energy(torch.nn.Module):
         self.eig = seqm_parameters.get('eig', True)
         self.excited_states = seqm_parameters.get('excited_states')
         if self.excited_states:
-            self.excited_states["make_best_guess"] = True
-            self.excited_states["save_tdm"] = False
+            self.excited_states.setdefault("make_best_guess",True)
+            self.excited_states.setdefault("save_tdm",False)
         if self.uhf and self.excited_states:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
@@ -555,7 +555,7 @@ class Energy(torch.nn.Module):
                         molecule.const.timing["Force"].append(t1 - t0)
                 else:
                     if all_same_mols:
-                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa',orbital_window=orbital_window)
+                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],F,P,rpa=method=='rpa',orbital_window=orbital_window)
                     else:
                         Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
 

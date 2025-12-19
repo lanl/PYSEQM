@@ -1493,7 +1493,10 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     k[:,0] = 1.0
 
     # Compute the quaternion components
-    u = torch.cross(v, k, dim=-1)              # axis = v × k
+    # u = torch.cross(v, k, dim=-1)              # axis = v × k
+    u = torch.zeros_like(v)
+    u[:,1] = v[:,2]
+    u[:,2] = -v[:,1]
     w_ = 1.0 + v[..., 0]                         # scalar part
 
     # Raw quaternion (u_x, u_y, u_z, w_)
@@ -1507,8 +1510,9 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     else:
         raise RuntimeError("Set dtype to float64 or float32")
     mask = torch.abs(w_) < eps
-    base_q = v.new_tensor([0.0, 0.0, 1.0, 0.0])
-    q_raw = torch.where(mask.unsqueeze(-1), base_q, q_raw)
+    # base_q = v.new_tensor([0.0, 0.0, 1.0, 0.0])
+    # q_raw = torch.where(mask.unsqueeze(-1), base_q, q_raw)
+    q_raw[mask] = torch.tensor([0.0, 0.0, 1.0, 0.0],device=device,dtype=dtype)#.unsqueeze(0)
 
     # Normalize quaternion
     N = torch.norm(q_raw, dim=-1, keepdim=True)
@@ -1517,17 +1521,17 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     # Unpack quaternion components
     qx, qy, qz, qw = q.unbind(-1)
 
-    # Build the 3×3 rotation matrix
+    # Build the 3×3 rotation matrix, ignore qx since it is always zero
     rot = torch.empty((n, 3, 3), device=device, dtype=dtype)
     rot[..., 0, 0] = 1 - 2 * (qy*qy + qz*qz)
-    rot[..., 0, 1] = 2 * (qx*qy - qz*qw)
-    rot[..., 0, 2] = 2 * (qx*qz + qy*qw)
-    rot[..., 1, 0] = 2 * (qx*qy + qz*qw)
-    rot[..., 1, 1] = 1 - 2 * (qx*qx + qz*qz)
-    rot[..., 1, 2] = 2 * (qy*qz - qx*qw)
-    rot[..., 2, 0] = 2 * (qx*qz - qy*qw)
-    rot[..., 2, 1] = 2 * (qy*qz + qx*qw)
-    rot[..., 2, 2] = 1 - 2 * (qx*qz + qy*qy)
+    rot[..., 0, 1] = -2 * (qz*qw)
+    rot[..., 0, 2] = 2 * (qy*qw)
+    rot[..., 1, 0] = 2 * (qz*qw)
+    rot[..., 1, 1] = 1 - 2 * (qz*qz)
+    rot[..., 1, 2] = 2 * (qy*qz)
+    rot[..., 2, 0] = -2 * (qy*qw)
+    rot[..., 2, 1] = 2 * (qy*qz)
+    rot[..., 2, 2] = 1 - 2 * (qy*qy)
 
     # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")
 
@@ -1559,46 +1563,46 @@ def rotate_with_quaternion(v,calculate_gradient=False):
 
     # R[0,1] = 2(xy – z w)
     dr_dq[:, 0, 1, 0] =  2 * qy
-    dr_dq[:, 0, 1, 1] =  2 * qx
+    # dr_dq[:, 0, 1, 1] =  2 * qx
     dr_dq[:, 0, 1, 2] = -2 * qw
     dr_dq[:, 0, 1, 3] = -2 * qz
 
     # R[0,2] = 2(xz + y w)
     dr_dq[:, 0, 2, 0] = 2 * qz
     dr_dq[:, 0, 2, 1] = 2 * qw
-    dr_dq[:, 0, 2, 2] = 2 * qx
+    # dr_dq[:, 0, 2, 2] = 2 * qx
     dr_dq[:, 0, 2, 3] = 2 * qy
 
     # R[1,0] = 2(xy + z w)
     dr_dq[:, 1, 0, 0] = 2 * qy
-    dr_dq[:, 1, 0, 1] = 2 * qx
+    # dr_dq[:, 1, 0, 1] = 2 * qx
     dr_dq[:, 1, 0, 2] = 2 * qw
     dr_dq[:, 1, 0, 3] = 2 * qz
 
     # R[1,1] = 1 – 2(x²+z²)
-    dr_dq[:, 1, 1, 0] = -4 * qx
+    # dr_dq[:, 1, 1, 0] = -4 * qx
     dr_dq[:, 1, 1, 2] = -4 * qz
 
     # R[1,2] = 2(yz – x w)
     dr_dq[:, 1, 2, 0] = -2 * qw
     dr_dq[:, 1, 2, 1] = 2 * qz
     dr_dq[:, 1, 2, 2] = 2 * qy
-    dr_dq[:, 1, 2, 3] = -2 * qx
+    # dr_dq[:, 1, 2, 3] = -2 * qx
 
     # R[2,0] = 2(xz – y w)
     dr_dq[:, 2, 0, 0] = 2 * qz
     dr_dq[:, 2, 0, 1] = -2 * qw
-    dr_dq[:, 2, 0, 2] = 2 * qx
+    # dr_dq[:, 2, 0, 2] = 2 * qx
     dr_dq[:, 2, 0, 3] = -2 * qy
 
     # R[2,1] = 2(yz + x w)
     dr_dq[:, 2, 1, 0] = 2 * qw
     dr_dq[:, 2, 1, 1] = 2 * qz
     dr_dq[:, 2, 1, 2] = 2 * qy
-    dr_dq[:, 2, 1, 3] = 2 * qx
+    # dr_dq[:, 2, 1, 3] = 2 * qx
 
     # R[2,2] = 1 – 2(x²+y²)
-    dr_dq[:, 2, 2, 0] = -4 * qx
+    # dr_dq[:, 2, 2, 0] = -4 * qx
     dr_dq[:, 2, 2, 1] = -4 * qy
 
     # --- 5) chain‐rule: ∂R/∂v = ∂R/∂q ⋅ ∂q/∂v  → shape (n,3,3,3) ---

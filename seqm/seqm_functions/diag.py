@@ -338,7 +338,7 @@ class degen_symeig(torch.autograd.Function):
     1/Δᵢⱼ is set to zero so that gradients through those degenerate
     eigenspaces are dropped. Concretely:
 
-    ∂L =  V diag(∂L/∂Λ) Vᵀ + V (Δ⁻¹ ∘ (Vᵀ ∂L/∂V)) Vᵀ
+    ∂L =  V diag(∂L/∂Λ) Vᵀ + V (Δ⁻¹ ∘ (Vᵀ ∂L/∂V))_sym Vᵀ
 
     where “∘” is elementwise, Δ⁻¹_{ii}=0, and Δ⁻¹_{ij}=1/(λᵢ−λⱼ).
 
@@ -358,20 +358,30 @@ class degen_symeig(torch.autograd.Function):
     def backward(ctx, grad_eival, grad_eivec):
         eival, eivec = ctx.saved_tensors
         eivecT = eivec.transpose(-2, -1).conj()
-        if grad_eivec is None: return torch.zeros_like(eivec)
-        delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
-        # remove parallel and degenerate part of eigenvector deriv
-        idx = torch.abs(delta) <= DEGEN_THRESHOLD
-        delta[idx] = torch.inf
-        delta_inv = delta.pow(-1)
-        dC_proj = delta_inv * torch.matmul(eivecT, grad_eivec)
+        if grad_eivec is not None:
 
-        # transform eigenvector and eigenvalue parts to A, sum up
-        CdCCT = torch.matmul(eivec, torch.matmul(dC_proj, eivecT))
-        CdLCT = torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
-        dA = CdLCT + CdCCT
-        # symmetrize for increased stability
+            delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
+            # remove parallel and degenerate part of eigenvector deriv
+
+            # idx = torch.abs(delta) <= DEGEN_THRESHOLD
+            # delta[idx] = torch.inf
+            # delta_inv = delta.pow(-1)
+
+            idx = torch.abs(delta) > DEGEN_THRESHOLD
+            delta_inv = torch.zeros_like(delta)
+            delta_inv[idx] = delta[idx].reciprocal() 
+
+            dC_proj = delta_inv * torch.matmul(eivecT, grad_eivec)
+
+            CdCCT = torch.matmul(eivec, torch.matmul(dC_proj, eivecT))
+        else:
+            CdCCT = torch.zeros_like(eivec)
+
+        dA = CdCCT
+
+        if grad_eival is not None:
+            CdLCT = torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
+            dA = dA + CdLCT
+
         dA = (dA + dA.transpose(-2, -1).conj()) * 0.5
         return dA
-        
-
