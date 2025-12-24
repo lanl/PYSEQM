@@ -44,6 +44,7 @@ import time
 from .seqm_functions.rcis_batch import rcis_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.rpa import rpa
+from .seqm_functions.XLESMD import elec_energy_excited_xl
 
 from .tools import attach_profile_range
 
@@ -161,7 +162,8 @@ class EnergyXL(torch.nn.Module):
 
             Temp = xl_bomd_params['T_el']
             kB = 8.61739e-5 # eV/K, kB = 6.33366256e-6 Ry/K, kB = 3.166811429e-6 Ha/K, #kB = 3.166811429e-6 #Ha/K
-            with torch.no_grad():
+            # with torch.no_grad():
+            with torch.set_grad_enabled(self.excited_states is not None): # no grad tracking unless doing excited states
                 D,S_Ent,QQ,e,Fe_occ,mu0, Occ_mask = Fermi_Q(F, Temp, molecule.nocc, molecule.nHeavy, molecule.nHydro, kB, scf_backward = self.scf_backward) # Fermi operator expansion, eigenapirs [QQ,e], and entropy S_Ent
                 if self.excited_states: # we are doing excited states MD, can't have fractional occupation
                     # Occ_mask: (nmols, norbs), nocc: (nmols,) integer tensor with 0 ≤ nocc[i] ≤ norbs
@@ -175,7 +177,7 @@ class EnergyXL(torch.nn.Module):
                     if not Occ_mask[mask].eq(1.0).all().item():
                         raise ValueError(f"Expected first nocc[i] elements of each row of Occ_mask to be 1.0, "
                                          f"but found mismatches in Occ_mask[mask].")
-                    molecule.eig_vec = QQ.clone() # save molecular orbitals
+                    molecule.molecular_orbitals = QQ.clone() # save molecular orbitals
 
                 EEnt = -2.*Temp*S_Ent
                 lumo = molecule.nocc.unsqueeze(0).T
@@ -185,15 +187,17 @@ class EnergyXL(torch.nn.Module):
                 Rank = xl_bomd_params['max_rank']
                 K0 = 1.0
                 dDS = K0*(D - P) # tr2  #W0 = K0*(DS - X) from J. Chem. Theory Comput. 2020, 16, 6, 3628–3640, alg 3
+                dDS_norm = torch.linalg.norm(dDS, ord='fro', dim=(1,2))
 
                 #  Rank-m Kernel approximation of dP2dt2 %%%-
                 V = torch.zeros((D.shape[0], D.shape[1], D.shape[2], Rank), dtype=D.dtype, device=D.device)
                 W = torch.zeros((D.shape[0], D.shape[1], D.shape[2], Rank), dtype=D.dtype, device=D.device)
                 dW = dDS # tr2
                 k = -1
-                Error = torch.tensor([10], dtype=D.dtype, device=D.device)
+                Error = torch.full((D.shape[0],), 10.0, dtype=D.dtype, device=D.device)
+                err_threshold = xl_bomd_params['err_threshold']
 
-                while k < Rank-1 and torch.max(Error) > xl_bomd_params['err_threshold']:
+                while k < Rank-1 and torch.max(Error) > err_threshold:
                 #while k < Rank-1:
                     k = k + 1
                     V[:,:,:,k] = dW
@@ -203,7 +207,9 @@ class EnergyXL(torch.nn.Module):
                         ### if not symmetric use this:
                         ### V[:,:,:,k] = V[:,:,:,k] - (V[:,:,:,k].transpose(1,2)@V[:,:,:,j]).diagonal(offset=0, dim1=-2, dim2=-1).sum(dim=-1).view(-1, 1, 1)*V[:,:,:,j]
                         V[:,:,:,k] = V[:,:,:,k] -  torch.sum(V[:,:,:,k].transpose(1,2)*V[:,:,:,j], dim=(1,2)).view(-1, 1, 1) * V[:,:,:,j]
-                    V[:,:,:,k] = V[:,:,:,k]/torch.linalg.norm(V[:,:,:,k], ord='fro', dim=(1,2)).view(-1, 1, 1)
+                    Vk = V[:,:,:,k]
+                    Vk = Vk / torch.linalg.norm(Vk, ord='fro', dim=(1,2), keepdim=True)
+                    V[:,:,:,k] = Vk
 
                     d_D = V[:,:,:,k]
                     
@@ -228,46 +234,38 @@ class EnergyXL(torch.nn.Module):
                     dW = W[:,:,:,k]
                     Rank_m = k+1
 
-                    O = torch.zeros((D.shape[0], Rank_m, Rank_m), dtype=D.dtype, device=D.device)   
-                    for I in range(0,Rank_m):
-                        for J in range(I,Rank_m):
-                            O[:,I,J] = torch.sum(W[:,:,:,I].transpose(1,2)*W[:,:,:,J], dim=(1,2))
-                            O[:,J,I] = O[:,I,J]
+                    Wk = W[:,:,:, :Rank_m]
+                    Wk_T = Wk.transpose(1,2)
+                    O = torch.einsum("bijr,bijq->brq", Wk_T, Wk)
+                    rhs = torch.einsum("bijr,bij->br", Wk_T, dDS)
+                    alpha = torch.linalg.solve(O, rhs.unsqueeze(-1)).squeeze(-1)
+                    IdentRes = torch.einsum("bijr,br->bij", Wk, alpha)
+                    Error = torch.linalg.norm(IdentRes - dDS, ord='fro', dim=(1,2)) / dDS_norm
 
-                    MM = torch.inverse(O)
+                Wk = W[:,:,:, :Rank_m]
+                Vk = V[:,:,:, :Rank_m]
+                Wk_T = Wk.transpose(1,2)
+                O = torch.einsum("bijr,bijq->brq", Wk_T, Wk)
+                rhs = torch.einsum("bijr,bij->br", Wk_T, dDS)
+                alpha = torch.linalg.solve(O, rhs.unsqueeze(-1)).squeeze(-1)
+                dP2dt2 = -torch.einsum("bijr,br->bij", Vk, alpha)
 
-                    IdentRes = torch.zeros(D.shape, dtype=D.dtype, device=D.device)
-                    for I in range(0,Rank_m):
-                        for J in range(0,Rank_m):
-                            IdentRes = IdentRes + \
-                                MM[:,I,J].view(-1, 1, 1) * torch.sum(W[:,:,:,J].transpose(1,2)*dDS, dim=(1,2)).view(-1, 1, 1) * W[:,:,:,I]            
-                    Error = torch.linalg.norm(IdentRes - dDS, ord='fro', dim=(1,2))/torch.linalg.norm(dDS, ord='fro', dim=(1,2))
-
-                dP2dt2 = torch.zeros(D.shape, dtype=D.dtype, device=D.device)
-
-                # $$$ room for optimization
-                for I in range(0,Rank_m):
-                    for J in range(0,Rank_m):
-                        dP2dt2 = dP2dt2 - \
-                            MM[:,I,J].view(-1, 1, 1) * torch.sum(W[:,:,:,J].transpose(1,2)*dDS, dim=(1,2)).view(-1, 1, 1) * V[:,:,:,I]
-
-            del V, PO1, QQ, d_D, dDS, W, dW, FO1, O, MM            
+            del V, PO1, QQ, d_D, dDS, W, dW, FO1, O            
             
         else:
             sp2 = self.seqm_parameters.get('sp2',[False])
             if molecule.const.do_timing:
                 t0 = time.time()
-            with torch.no_grad():
+            # with torch.no_grad():
+            with torch.set_grad_enabled(self.excited_states is not None): # no grad tracking unless doing excited states
                 if sp2[0]:
                     D = unpack(SP2(pack(F, molecule.nHeavy, molecule.nHydro), molecule.nocc, sp2[1]), molecule.nHeavy, molecule.nHydro, F.shape[-1])
                     e_gap = torch.zeros(molecule.species.shape[0],1)
                     e = torch.zeros(molecule.species.shape[0], molecule.molecule.nocc)
                 else:
-                    e, D, v = sym_eig_trunc(F,molecule.nHeavy, molecule.nHydro, molecule.nocc)#[0:2]
-                    molecule.eig_vec = v
+                    e, D, molecule.molecular_orbitals = sym_eig_trunc(F,molecule.nHeavy, molecule.nHydro, molecule.nocc)#[0:2]
                     lumo = molecule.nocc.unsqueeze(0).T
                     e_gap = (e.gather(1, lumo) - e.gather(1, lumo-1)).reshape(-1)
-                    #print('adfdfa',F, '\nfg', sym_eig_trunc(F,nHeavy, nHydro, nocc))
                     
             EEnt = torch.zeros(molecule.species.shape[0], device=molecule.coordinates.device)
             dP2dt2 = None
@@ -328,31 +326,33 @@ class EnergyXL(torch.nn.Module):
 
         # Calculate ground state molecular dipole
         if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
-            calc_ground_dipole(molecule,D)
+            with torch.no_grad():
+                calc_ground_dipole(molecule,D)
 
         if self.excited_states:
             if molecule.active_state<1:
                 raise Exception("You have asked for excited states XL-MD, but you haven't specified the active state")
-            cis_tol = self.excited_states['tolerance']
+            # cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
             with torch.no_grad():
                 if molecule.const.do_timing: t0 = time.time()
                 if method == 'cis':
-                    excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    Eexcited, molecule.transition_density_matrices= elec_energy_excited_xl(molecule,cis_amp,w,e)
+                    # excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                 elif method == 'rpa':
-                    excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                    raise NotImplementedError
+                    # excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                 else:
                     raise Exception("Excited state method has to be CIS or RPA")
-
-                molecule.cis_amplitudes = exc_amps
 
                 if molecule.const.do_timing:
                     if torch.cuda.is_available(): torch.cuda.synchronize()
                     t1 = time.time()
                     molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
-                Eelec += excitation_energies[:,molecule.active_state-1]
-                molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=False)
+                # Eelec += excitation_energies[:,molecule.active_state-1]
+                # molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=False)
+            Eelec += Eexcited
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid,EnucAB, Eelec)
@@ -404,8 +404,7 @@ class ForceXL(torch.nn.Module):
             force = -molecule.coordinates.grad.detach()
             molecule.coordinates.grad.zero_()
         del EnucAB, L
-        if molecule.active_state > 0:
-            force += -molecule.analytical_gradient
+        # if molecule.active_state > 0:
+        #     force += -molecule.analytical_gradient
 
         return force.detach(), D.detach(), Hf, Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, EEnt, dP2dt2, Error, Fe_occ
-

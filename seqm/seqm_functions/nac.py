@@ -136,6 +136,8 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2,rpa=False):
     # Define the gradient tensor
     nac_cis = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
+    # idxi/idxj are assumed to already index the full (nmol*molsize) layout; if padding is present,
+    # map packed real-atom indices back to full indices as in anal_grad.contract_ao_derivatives_with_density.
     nac_cis.index_add_(0, mol.idxi, pair_grad)
     nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
     

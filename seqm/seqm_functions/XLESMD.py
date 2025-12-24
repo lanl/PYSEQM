@@ -30,7 +30,8 @@ def elec_energy_excited_xl(mol,R,w,e_mo):
     # print(f"CIS Energy is {E.item()}, omega is {omega}, norm of X difference is {torch.linalg.vector_norm(X-Xbar)}")
     # print(mol.cis_energies[0,0].item())
     # exit()
-    X_AO = torch.einsum('bmi,bia,bna->bmn', Cocc, X.view(-1,nocc,nvirt), Cvirt).unsqueeze(1)  # convert it back to the shape of brmn
+    with torch.no_grad():
+        X_AO = torch.einsum('bmi,bia,bna->bmn', Cocc, X.view(-1,nocc,nvirt), Cvirt).unsqueeze(1)  # convert it back to the shape of brmn
     return E, X_AO
 
 def solve_for_amplitude_omega(Xbar,ea_ei,G):
@@ -82,10 +83,6 @@ def solve_for_amplitude_omega(Xbar,ea_ei,G):
     X = (-G + Xbar * omega.unsqueeze(-1)) * invA_diag  # (b, n)
 
     return X, omega
-
-def solve_exactly_X_omega(eaei):
-    # exactly solve instead of solve_for_amplitude_omega
-    pass
 
 def sample_noisy_R_energy(mol, R, w, e_mo, n_steps=50, noise_scale=1e-5, cumulative=False, seed=None, return_data=False, plot=True, fit_order=2):
 	"""

@@ -195,6 +195,8 @@ def rcis_grad_batch(mol, w, e_mo, riXH, ri, P0, zvec_tolerance,gam,method,parnuc
     # Define the gradient tensor
     grad_cis = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
+    # idxi/idxj are assumed to already index the full (nmol*molsize) layout; if padding is present,
+    # map packed real-atom indices back to full indices as in anal_grad.contract_ao_derivatives_with_density.
     grad_cis.index_add_(0, mol.idxi, pair_grad)
     grad_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
 
@@ -217,5 +219,4 @@ def make_cis_state_dipole(mol, difference_density, relaxed_difference_density, P
 
     mol.cis_state_unrelaxed_dipole = torch.einsum('Nnm,Ndnm->Nd',difference_density,dipole_mat_packed)*to_debye*debye_to_AU + mol.dipole
     mol.cis_state_relaxed_dipole = torch.einsum('Nnm,Ndnm->Nd',relaxed_difference_density,dipole_mat_packed)*to_debye*debye_to_AU + mol.dipole
-
 

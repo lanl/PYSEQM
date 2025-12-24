@@ -702,7 +702,7 @@ def calc_cis_energy(mol, w, e_mo, amplitude,F,P,rpa=False,orbital_window=None):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
     
     # for near-degenerate use the formulation where E_cis is expressed in atomic orbital basis only
-    if ((e_mo[:, 1:] - e_mo[:, :-1]) < 1e-4).any(dim=1):
+    if ((e_mo[:, 1:] - e_mo[:, :-1]) < 1e-4).any() and not rpa:
         return calc_cis_energy_from_density(mol,w,F,P,amplitude,rpa,orbital_window)
 
     norb, nocc = norb_batch[0], nocc_batch[0]
@@ -750,14 +750,14 @@ def calc_cis_energy_from_density(mol,w,F,P,amplitude,rpa=False,orbital_window=No
     nHeavy = mol.nHeavy[0]
     nHydro = mol.nHydro[0]
     norb = mol.norb[0]
-    D = packone_batch(P, 4*nHeavy, nHydro, norb)
-    Q = torch.eye(D.shape[1],dtype=D.dtype,device=D.device).unsqueeze(0)-D
+    D = packone_batch(P, 4*nHeavy, nHydro, norb)  # occ subspace projector/density matrix
+    Q = torch.eye(D.shape[1],dtype=D.dtype,device=D.device).unsqueeze(0)-D #virtual subspace projector
 
-    R = D@R@Q/2.0
+    R = D@R@Q/2.0  # project to occ-virt subspace
     F0 = makeA_pi_batched(mol,R.unsqueeze(1),w).squeeze(1)*2.0
     F_ = packone_batch(F, 4*nHeavy, nHydro, norb)
     F0 += (R@F_ - F_@R) 
-    F0 = D@F0@Q/2.0
+    F0 = D@F0@Q/2.0  # project to occ-virt subspace
     E_cis = (R*F0).sum(dim=(1,2))
 
     if rpa:

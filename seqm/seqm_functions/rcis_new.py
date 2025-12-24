@@ -52,21 +52,9 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
         ediffs = ea_ei.clone().reshape(nmol, nov)
         ediffs.masked_fill_(~valid.view(nmol, nov), float('inf'))
-        vend, nroots_per_mol, nroots_max = make_guess_any_batch(ediffs,nroots,maxSubspacesize,V,nmol,nov_batch)
+        vend, nroots_per_mol, nroots_target, nroots_max = make_guess_any_batch(ediffs,nroots,maxSubspacesize,V,nmol,nov_batch)
     else:
         raise NotImplementedError
-        nstart = nroots
-        if nroots>1:
-            print("WARNING: Orthogonalizing inital guess")
-            init_amplitude_guess, _ = torch.linalg.qr(init_amplitude_guess.transpose(1,2), mode='reduced')
-            V[:,:nstart,:] = init_amplitude_guess.transpose(1,2)
-        else:
-            V[:,:nstart,:] = init_amplitude_guess
-            V[:,:nstart,:] /= V[:,:nstart,:].norm(dim=2) 
-        # fix signs of the Molecular Orbitals by looking at the MOs from the previous step. 
-        # This fails when orbitals are degenerate and switch order
-        mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
-
 
     max_iter = 100 # TODO: User-defined
     davidson_iter = 0
@@ -75,13 +63,6 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False # TODO: User-defined/fixed
-
-    # C = mol.molecular_orbitals
-    # Cocc = torch.zeros(nmol,norb,nocc,device=device,dtype=dtype)
-    # Cvirt = torch.zeros(nmol,norb,nvirt,device=device,dtype=dtype)
-    # for i in range(nmol):
-    #     Cocc[i,:,:nocc_batch[i]] = C[i,:,:nocc_batch[i]]
-    #     Cvirt[i,:,:nvirt_batch[i]] = C[i,:,nocc_batch[i]:norb_batch[i]]
 
     e_val_n = torch.zeros(nmol,nroots_max,dtype=dtype,device=device)
     amplitude_store = torch.zeros(nmol,nroots_max,nov,dtype=dtype,device=device)
@@ -92,6 +73,8 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print("-" * len(header))
     # print(header)
     # print("-" * len(header))
+    root_idx = torch.arange(nroots_max, device=device).unsqueeze(0)  # (1, k_max)
+    active_root_mask = root_idx < nroots_target.unsqueeze(1)         # (nmol, k_max)
 
     while davidson_iter <= max_iter: # Davidson loop
 
@@ -119,14 +102,15 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
         # Diagonalize the subspace hamiltonian
         zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
-        e_vec_n = get_subspace_eig_any_batched(H, nroots_per_mol,nroots_max, zero_pad, e_val_n, done, nonorthogonal)
+        e_vec_n = get_subspace_eig_any_batched(H, nroots_target,nroots_max, zero_pad, e_val_n, done, nonorthogonal)
 
         # Compute CIS amplitudes and the residual
         amplitudes = torch.einsum('bvr,bvo->bro',e_vec_n,V[:,:vend_max,:])
         residual = torch.einsum('bvr,bvo->bro',e_vec_n, HV[:,:vend_max,:]) - amplitudes*e_val_n.unsqueeze(2)
         # resid_norm = torch.norm(residual,dim=2)
+
         resid_norm = torch.linalg.vector_norm(residual,dim=2,ord=torch.inf)
-        roots_not_converged = resid_norm > root_tol
+        roots_not_converged = (resid_norm > root_tol) & active_root_mask
 
         # Mark molecules with all roots converged and store amplitudes
         mol_converged = roots_not_converged.sum(dim=1) == 0
@@ -143,11 +127,15 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
                 raise Exception("Insufficient memory to perform even a single iteration of subspace expansion")
 
             V[collapse_mask] = 0
-            V[collapse_mask,:nroots,:] = amplitudes[collapse_mask]
-            HV[collapse_mask,:nroots,:] = torch.einsum('bvr,bvo->bro',e_vec_n[collapse_mask], HV[collapse_mask,:vend_max,:]) 
-            HV[collapse_mask,nroots:] = 0
+
+            idxs = torch.nonzero(collapse_mask, as_tuple=False).squeeze(1)
+            for i in idxs:
+                ki = int(nroots_target[i].item())
+                V[i, :ki, :] = amplitudes[i, :ki, :]
+                HV[i, :ki, :] = torch.einsum('vr,vo->ro', e_vec_n[i, :, :ki], HV[i, :vend_max, :])
+                HV[i, ki:, :].zero_()
+                vend[i] = ki
             vstart[collapse_mask] = 0
-            vend[collapse_mask] = nroots
             n_collapses[collapse_mask] += 1
 
         # Orthogonalize the residual vectors for molecules
@@ -189,15 +177,15 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots_target)
 
     return e_val_n, amplitude_store
 
-def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots_target,rpa=False):
     if not (mol.verbose or (mol.active_state>0)):
         return 
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
+    transition_dipole, oscillator_strength =  calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots_target,dipole_mat,rpa)
     if mol.verbose:
         print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
     if mol.active_state > 0:
@@ -250,7 +238,7 @@ def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False
 
 
 def makeA_pi_any_batched(mol,P_xi,w_,allSymmetric=False):
-    """
+    r"""
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
     In other words, for an amplitude X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
@@ -527,16 +515,17 @@ def get_subspace_eig_any_batched(H,nroots,max_nroots,zero_pad,e_val_n,done,nonor
             e_vec_n[mol_idx, :, :k]   = r_evec[j, :, s : s + k]
         return e_vec_n
 
-def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False):
+def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots_target,dipole_mat,rpa=False):
 
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
     norb = Cocc.shape[1]
+    nroots_max = excitation_energies.shape[1]
 
     if rpa:
-        amp_ia_X = amplitudes[0].view(mol.nmol,nroots,nocc,nvirt)
-        amp_ia_Y = amplitudes[1].view(mol.nmol,nroots,nocc,nvirt)
+        amp_ia_X = amplitudes[0].view(mol.nmol,nroots_max,nocc,nvirt)
+        amp_ia_Y = amplitudes[1].view(mol.nmol,nroots_max,nocc,nvirt)
     else:
-        amp_ia_X = amplitudes.view(mol.nmol,nroots,nocc,nvirt)
+        amp_ia_X = amplitudes.view(mol.nmol,nroots_max,nocc,nvirt)
 
     nHeavy = mol.nHeavy
     nHydro = mol.nHydro
@@ -555,6 +544,13 @@ def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,
     transition_dipole = torch.einsum('brmn,bdmn->brd',R,dipole_mat_packed)*math.sqrt(2.0)/a0
     hartree = 27.2113962 # value used in NEXMD
     oscillator_strength = 2.0/3.0*excitation_energies/hartree*torch.square(transition_dipole).sum(dim=2)
+
+    root_idx = torch.arange(nroots_max, device=excitation_energies.device).unsqueeze(0)
+    active_root_mask = root_idx < nroots_target.unsqueeze(1)  # (nmol, k_max)
+
+    # Mask out inactive states
+    transition_dipole = transition_dipole * active_root_mask.unsqueeze(2)
+    oscillator_strength = oscillator_strength * active_root_mask
     return transition_dipole, oscillator_strength
 
 
@@ -592,7 +588,7 @@ def make_guess_any_batch(ea_ei,nroots,maxSubspacesize,V,nmol,nov_batch):
         k = int(nstart_per_mol[i].item())
         V[i, torch.arange(k, device=V.device), sortedidx[i, :k]] = 1.0
 
-    return nstart_per_mol, nroots_per_mol, int(nroots_per_mol.max().item())
+    return nstart_per_mol, nroots_per_mol, nroots_eff, int(nroots_per_mol.max().item())
 
 def calc_cis_energy_any_batch(mol, w, e_mo, amplitude,rpa=False):
 
@@ -624,14 +620,4 @@ def calc_cis_energy_any_batch(mol, w, e_mo, amplitude,rpa=False):
         AY, BY= matrix_vector_product_any_batched(mol, Y.unsqueeze(1), w, ea_ei, Cocc, Cvirt,makeB=True)
         E_cis = torch.linalg.vecdot(X,(AX+BY).squeeze(1)) + torch.linalg.vecdot(Y,(BX+AY).squeeze(1))
 
-    # For calculating excitation energy gradient with backprop
-    # L = E_cis.sum()
-    # L.backward(create_graph=False,retain_graph=True)
-    # force = mol.coordinates.grad.clone()
-    # with torch.no_grad(): mol.coordinates.grad.zero_()
-    # torch.set_printoptions(precision=15)
-    # print(f'E_cis is {E_cis}')
-    # print(f'Grad CIS from backprop is\n{force}')
-
     return E_cis
-

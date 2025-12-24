@@ -356,6 +356,7 @@ class Energy(torch.nn.Module):
         if self.excited_states:
             self.excited_states.setdefault("make_best_guess",True)
             self.excited_states.setdefault("save_tdm",False)
+        self.xlesmd = False
         if self.uhf and self.excited_states:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
@@ -494,10 +495,7 @@ class Energy(torch.nn.Module):
         if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
             calc_ground_dipole(molecule,P)
 
-        # Check if doing XL-ESMD
-        xlesmd = isinstance(getattr(self,"xlesmd_transition_density",None),torch.Tensor)
-
-        if molecule.active_state > 0 and not self.excited_states and not xlesmd:
+        if molecule.active_state > 0 and not self.excited_states and not self.xlesmd:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
         Eexcited = 0.0
@@ -583,8 +581,8 @@ class Energy(torch.nn.Module):
         # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
 
         # If doing XL-ESMD, get XL-ESMD energy, transition density
-        if xlesmd:
-            Eexcited, molecule.transition_density_matrices= elec_energy_excited_xl(molecule,self.xlesmd_transition_density,w,e)
+        if self.xlesmd:
+            Eexcited, molecule.transition_density_matrices= elec_energy_excited_xl(molecule,cis_amp,w,e)
 
         if self.eig and not self.uhf and self.excited_states and self.excited_states["make_best_guess"]:
             molecule.old_mos = molecule.molecular_orbitals.clone()

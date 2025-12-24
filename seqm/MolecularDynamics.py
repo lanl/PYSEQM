@@ -1250,13 +1250,15 @@ class XL_ESMD(XL_BOMD):
             # 3P^2 - 2P^3
             # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
             # TODO: Make it work for unrestricted P
-            P2 = P @ P
-            P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
+            # P2 = P @ P
+            # P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
+            P0 = P
         
-        self.esdriver.conservative_force.energy.xlesmd_transition_density = es_amp
+        # dm_prop = 'SCF'
+        dm_prop = 'XL-BOMD'
         self.esdriver(molecule, learned_parameters=learned_parameters,
-                     xl_bomd_params=self.xl_bomd_params, P0=P0, cis_amp=None,
-                     dm_prop='SCF', *args, **kwargs)
+                     xl_bomd_params=self.xl_bomd_params, P0=P0, cis_amp=es_amp,
+                     dm_prop=dm_prop, *args, **kwargs)
         
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
@@ -1278,6 +1280,7 @@ class XL_ESMD(XL_BOMD):
         molecule.Electronic_entropy = torch.zeros(molecule.species.shape[0], 
                                                  device=molecule.coordinates.device)
         self.esdriver.conservative_force.energy.excited_states = None
+        self.esdriver.conservative_force.energy.xlesmd = True
 
 """
 1 eV = 1.602176565e-19 J

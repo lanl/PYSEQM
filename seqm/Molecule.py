@@ -23,10 +23,10 @@ class Molecule(torch.nn.Module):
         self.coordinates = torch.nn.Parameter(coordinates)
         self.coordinates.requires_grad_(do_large_tensors)
         if not torch.is_tensor(charges):
-            charges = charges * torch.ones(coordinates.size()[0], device=coordinates.device)
+            charges = charges * torch.ones(coordinates.shape[0], device=coordinates.device)
         self.tot_charge = charges
         if not torch.is_tensor(mult):
-            mult = mult * torch.ones(coordinates.size()[0], device=coordinates.device)
+            mult = mult * torch.ones(coordinates.shape[0], device=coordinates.device)
         self.mult = mult
         
         # Previously 'elements' was a user input list of unique elements in the input molecules.
@@ -96,6 +96,7 @@ class Molecule(torch.nn.Module):
         self.Eiso = None
         self.e_mo = None #
         self.e_gap = None #
+        self.molecular_orbitals = None
         
         self.charge = None
         self.dipole = None
@@ -111,7 +112,6 @@ class Molecule(torch.nn.Module):
         self.active_state = seqm_parameters.get('active_state',0)
         self.cis_amplitudes = None
         self.cis_energies = None
-        self.molecular_orbitals = None
         self.transition_density_matrices = None
 
         self.all_forces = None

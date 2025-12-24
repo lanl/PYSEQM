@@ -165,8 +165,10 @@ def contract_ao_derivatives_with_density(P0, molecule, molsize, overlap_KAB_x, e
     # Define the gradient tensor
     grad = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
 
-    grad.index_add_(0, idxi, pair_grad)
-    grad.index_add_(0, idxj, pair_grad, alpha=-1.0)
+    # idxi/idxj are packed indices over real atoms; map them back to full atom indices.
+    real_atoms = torch.arange(nmol * molsize, device=device, dtype=torch.int64)[molecule.species.reshape(-1) > 0]
+    grad.index_add_(0, real_atoms[idxi], pair_grad)
+    grad.index_add_(0, real_atoms[idxj], pair_grad, alpha=-1.0)
 
     # print(f'Analytical SCF gradient is:\n{grad.view(nmol,molsize,3)}')
     grad = grad.view(nmol, molsize, 3)
