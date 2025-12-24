@@ -413,7 +413,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
     """
 
     def __init__(self, seqm_parameters, alpha=0.01, force_tol=1.0e-4, max_evl=1000):
-        """
+        r"""
         Constructor
         alpha : steepest descent mixing paramters, coordinates_new =  coordinates_old + alpha*force
         force_tol : force tolerance, stop criteria when all force components are less then this

@@ -245,7 +245,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
 
 
 def makeA_pi_batched(mol,P_xi,w_,allSymmetric=False):
-    """
+    r"""
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
     In other words, for an amplitude X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
@@ -639,7 +639,7 @@ def print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strengt
         print("")
 
 def getMemUse(dtype,device,mol,nroots=1):
-    """
+    r"""
     Estimate the peak memory usage while calculating  \sum_ia (ia||jb)V_ia 
     (contracting the roots with the two-e integrals) 
     We approximate the largest intermediate allocations (P, F, PA, PB, suma, sumA etc. in makeA_pi_symm_batch()) 

@@ -170,7 +170,7 @@ def test_md_basic_single(tmp_path, device, methane_molecule_data):
     md = Molecular_Dynamics_Basic(
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -194,7 +194,7 @@ def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data):
     md = Molecular_Dynamics_Basic(
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -266,7 +266,7 @@ def test_md_xl_bomd_single(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -292,7 +292,7 @@ def test_md_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -323,7 +323,7 @@ def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -354,7 +354,7 @@ def test_md_ksa_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -385,7 +385,7 @@ def test_md_ksa_xl_bomd_batch_mixed(tmp_path, device, batch_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -411,7 +411,7 @@ def test_md_excited_basic_batch(tmp_path, device, methanal_batch_data):
     md = Molecular_Dynamics_Basic(
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
@@ -463,7 +463,7 @@ def test_md_excited_xl_bomd_batch(tmp_path, device, methanal_batch_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=300.0,
+        Temp=0.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
