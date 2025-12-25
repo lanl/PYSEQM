@@ -24,17 +24,17 @@ def methane_xyz_path(repo_root):
     return repo_root / "tests" / "data" / "methane.xyz"
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def methane_molecule_data(methane_xyz_path, device):
     torch.set_default_dtype(torch.float64)
     torch.manual_seed(0)
     species, coordinates = read_xyz([os.fspath(methane_xyz_path)])
     species = torch.as_tensor(species, dtype=torch.int64, device=device)
     coordinates = torch.as_tensor(coordinates, dtype=torch.float64, device=device)
-    return species, coordinates
+    return species.clone(), coordinates.clone()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def batch_molecule_data(repo_root, device):
     torch.set_default_dtype(torch.float64)
     torch.manual_seed(0)
@@ -45,10 +45,10 @@ def batch_molecule_data(repo_root, device):
     species, coordinates = read_xyz([os.fspath(p) for p in paths])
     species = torch.as_tensor(species, dtype=torch.int64, device=device)
     coordinates = torch.as_tensor(coordinates, dtype=torch.float64, device=device)
-    return species, coordinates
+    return species.clone(), coordinates.clone()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def methanal_batch_data(repo_root, device):
     torch.set_default_dtype(torch.float64)
     torch.manual_seed(0)
@@ -60,10 +60,10 @@ def methanal_batch_data(repo_root, device):
     species, coordinates = read_xyz([os.fspath(p) for p in paths])
     species = torch.as_tensor(species, dtype=torch.int64, device=device)
     coordinates = torch.as_tensor(coordinates, dtype=torch.float64, device=device)
-    return species, coordinates
+    return species.clone(), coordinates.clone()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def excited_mixed_batch_data(repo_root, device):
     torch.set_default_dtype(torch.float64)
     torch.manual_seed(0)
@@ -75,4 +75,4 @@ def excited_mixed_batch_data(repo_root, device):
     species, coordinates = read_xyz([os.fspath(p) for p in paths])
     species = torch.as_tensor(species, dtype=torch.int64, device=device)
     coordinates = torch.as_tensor(coordinates, dtype=torch.float64, device=device)
-    return species, coordinates
+    return species.clone(), coordinates.clone()

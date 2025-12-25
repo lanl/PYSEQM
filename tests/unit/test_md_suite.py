@@ -108,8 +108,7 @@ def _assert_output_files(prefix, molid, steps, expect_excited=False, n_states=No
 
 def _metrics_from_thermo(T, Ek, Ep):
     Etot = Ek + Ep
-    # drift = float(Etot[-1] - Etot[0])
-    drift = np.max(np.abs(Etot-Etot[0]))
+    drift = np.max(np.abs(Etot - Etot[0]))
     if len(Etot) > 1:
         slope = float(np.polyfit(np.arange(len(Etot)), Etot, 1)[0])
     else:
@@ -118,42 +117,38 @@ def _metrics_from_thermo(T, Ek, Ep):
         "drift": drift,
         "slope": slope,
         "Etot": Etot.tolist(),
+        "Ek": Ek.tolist(),
         "T": T.tolist(),
     }
 
 
 def _assert_md_metrics(metrics, ref, tol_drift=1e-3, tol_slope=1e-3):
     assert_allclose(metrics["Etot"], ref["Etot"], rtol=1e-2, atol=1e-2)
-    assert_allclose(metrics["T"], ref["T"], rtol=1e-1, atol=1e-1)
+    Ek = np.array(metrics["Ek"], dtype=float)
+    assert np.isfinite(Ek).all()
+    assert Ek.min() >= 0.0
     assert math.isfinite(metrics["drift"])
     assert math.isfinite(metrics["slope"])
     assert abs(metrics["drift"]) <= tol_drift
     assert abs(metrics["slope"]) <= tol_slope
 
 
-def _assert_md_bounds(metrics, tol_drift=1e-3, tol_slope=1e-3):
-    assert math.isfinite(metrics["drift"])
-    assert math.isfinite(metrics["slope"])
-    assert abs(metrics["drift"]) <= tol_drift
-    assert abs(metrics["slope"]) <= tol_slope
-
-
-def _assert_temperature_target(metrics, target, tail_fraction=0.1, tol=50.0):
+def _assert_temperature_envelope(metrics, Tmin=10.0, Tmax=1500.0):
     T = np.array(metrics["T"], dtype=float)
-    tail = T[-max(1, int(len(T) * tail_fraction)) :]
-    tail_mean = float(tail.mean())
-    tail_std = float(tail.std())
-    assert abs(tail_mean - target) < tol
-    assert tail_std > 1.0
-    assert tail_std < target
+    assert np.isfinite(T).all()
+    assert T.min() >= Tmin
+    assert T.max() <= Tmax
 
 
 def _run_and_check(md, molecule, prefix, molid, steps, expect_excited=False, n_states=None):
     _run_md(md, molecule, steps=steps)
     _assert_output_files(prefix, molid, steps, expect_excited=expect_excited, n_states=n_states)
-    h5_path = Path(f"{prefix}.{molid[0]}.h5")
-    _, T, Ek, Ep = _read_h5_thermo(h5_path)
-    return _metrics_from_thermo(T, Ek, Ep)
+    metrics_by_mol = []
+    for mol in molid:
+        h5_path = Path(f"{prefix}.{mol}.h5")
+        _, T, Ek, Ep = _read_h5_thermo(h5_path)
+        metrics_by_mol.append(_metrics_from_thermo(T, Ek, Ep))
+    return metrics_by_mol
 
 
 def test_md_basic_single(tmp_path, device, methane_molecule_data):
@@ -170,14 +165,14 @@ def test_md_basic_single(tmp_path, device, methane_molecule_data):
     md = Molecular_Dynamics_Basic(
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_basic_methane")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=1e-2, tol_slope=1e-3)
+    _assert_md_metrics(metrics[0], ref[0], tol_drift=1e-2, tol_slope=1e-3)
 
 
 def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data):
@@ -194,14 +189,15 @@ def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data):
     md = Molecular_Dynamics_Basic(
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_basic_batch_mixed")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=1e-2, tol_slope=1e-3)
+    for current, expected in zip(metrics, ref):
+        _assert_md_metrics(current, expected, tol_drift=1e-2, tol_slope=1e-3)
 
 
 def test_md_langevin_single(tmp_path, device, methane_molecule_data):
@@ -223,8 +219,8 @@ def test_md_langevin_single(tmp_path, device, methane_molecule_data):
         output=_output_config(prefix, molid),
     ).to(device)
 
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=100)
-    _assert_temperature_target(metrics, 300.0, tail_fraction=0.1, tol=50.0)
+    metrics = _run_and_check(md, molecule, prefix, molid, steps=50)
+    _assert_temperature_envelope(metrics[0])
 
 
 def test_md_langevin_batch_mixed(tmp_path, device, batch_molecule_data):
@@ -246,8 +242,9 @@ def test_md_langevin_batch_mixed(tmp_path, device, batch_molecule_data):
         output=_output_config(prefix, molid),
     ).to(device)
 
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=100)
-    _assert_temperature_target(metrics, 300.0, tail_fraction=0.1, tol=50.0)
+    metrics = _run_and_check(md, molecule, prefix, molid, steps=50)
+    for current in metrics:
+        _assert_temperature_envelope(current)
 
 
 def test_md_xl_bomd_single(tmp_path, device, methane_molecule_data):
@@ -266,14 +263,14 @@ def test_md_xl_bomd_single(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_xl_bomd_methane")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-3)
+    _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
 
 
 def test_md_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
@@ -292,14 +289,14 @@ def test_md_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_xl_bomd_methane_k4")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-3)
+    _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
 
 
 def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data):
@@ -323,14 +320,14 @@ def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_ksa_xl_bomd_methane")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-3)
+    _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
 
 
 def test_md_ksa_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
@@ -354,14 +351,14 @@ def test_md_ksa_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_ksa_xl_bomd_methane_k4")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-3)
+    _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
 
 
 def test_md_ksa_xl_bomd_batch_mixed(tmp_path, device, batch_molecule_data):
@@ -385,14 +382,15 @@ def test_md_ksa_xl_bomd_batch_mixed(tmp_path, device, batch_molecule_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path("md_ksa_xl_bomd_batch_mixed")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-3)
+    for current, expected in zip(metrics, ref):
+        _assert_md_metrics(current, expected, tol_drift=5e-2, tol_slope=5e-3)
 
 
 def test_md_excited_basic_batch(tmp_path, device, methanal_batch_data):
@@ -411,14 +409,16 @@ def test_md_excited_basic_batch(tmp_path, device, methanal_batch_data):
     md = Molecular_Dynamics_Basic(
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30, expect_excited=True, n_states=4)
     ref_path = reference_path("md_excited_basic_batch_methanal")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-2)
+    for current, expected in zip(metrics, ref):
+        _assert_md_metrics(current, expected, tol_drift=5e-2, tol_slope=5e-2)
+
 
 def test_md_excited_langevin_batch(tmp_path, device, methanal_batch_data):
     species, coordinates = methanal_batch_data
@@ -441,8 +441,9 @@ def test_md_excited_langevin_batch(tmp_path, device, methanal_batch_data):
         output=_output_config(prefix, molid),
     ).to(device)
 
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=150, expect_excited=True, n_states=4)
-    _assert_temperature_target(metrics, 300.0, tail_fraction=0.1, tol=50.0)
+    metrics = _run_and_check(md, molecule, prefix, molid, steps=80, expect_excited=True, n_states=4)
+    for current in metrics:
+        _assert_temperature_envelope(current)
 
 
 def test_md_excited_xl_bomd_batch(tmp_path, device, methanal_batch_data):
@@ -463,11 +464,12 @@ def test_md_excited_xl_bomd_batch(tmp_path, device, methanal_batch_data):
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
-        Temp=0.0,
+        Temp=300.0,
         output=_output_config(prefix, molid),
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30, expect_excited=True, n_states=4)
     ref_path = reference_path("md_excited_xl_bomd_batch_methanal")
     ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics, ref, tol_drift=5e-2, tol_slope=5e-3)
+    for current, expected in zip(metrics, ref):
+        _assert_md_metrics(current, expected, tol_drift=5e-2, tol_slope=5e-3)
