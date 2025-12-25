@@ -24,7 +24,7 @@ WEIGHT_45 = torch.tensor([1.0,
                           2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0,
                           2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0,
                           2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0])
-# Mapping for PM6 one-center two-electron integral (W) → local F contributions.
+# Mapping for PM6 one-center two-electron integral (W) -> local F contributions.
 # Each tuple is (FLocal_column, [W_idxs], [Pnew_idxs])
 PM6_FLOCAL_MAP = [
     ( 0, [  0,  1,  2,  3,  4], [14,20,27,35,44]),
@@ -98,6 +98,28 @@ K_ind_4 = torch.tensor([
     [3,4,5,8],
     [6,7,8,9]
 ], dtype=torch.long)
+P_INDEX_3 = torch.tensor([1, 2, 3], dtype=torch.long)
+P_OFF_I = torch.tensor([1, 1, 2], dtype=torch.long)
+P_OFF_J = torch.tensor([2, 3, 3], dtype=torch.long)
+
+_WEIGHT_CACHE = {}
+_INDEX_CACHE = {}
+def _cached_tensor(base, device, dtype=None):
+    key = (id(base), device, dtype or base.dtype)
+    cached = _WEIGHT_CACHE.get(key)
+    if cached is None:
+        cached = base.to(device=device, dtype=(dtype or base.dtype))
+        _WEIGHT_CACHE[key] = cached
+    return cached
+
+def _cached_index(base, device):
+    key = (id(base), device)
+    cached = _INDEX_CACHE.get(key)
+    if cached is None:
+        cached = base.to(device=device)
+        _INDEX_CACHE[key] = cached
+    return cached
+
 # ——— Main fock function ——————————————————————————————————————————————
 
 def fock(nmol, molsize, P0, M, maskd, mask, idxi, idxj,
@@ -159,12 +181,12 @@ def _one_center(F, P, maskd, gss, gpp, gsp, gp2, hsp):
     # F(s,s)
     tmp[:,0,0] = 0.5*Pss*gss + Pptot*sp_fac_1
 
-    i = torch.tensor([1,2,3], device=P.device)
+    i = _cached_index(P_INDEX_3, P.device)
     Pp_all   = Pdiag[:,i,i]
     tmp[:,i,i] = (Pss*sp_fac_1).unsqueeze(-1) + 0.5*Pp_all*gpp.unsqueeze(-1) + (Pptot.unsqueeze(-1)-Pp_all)*pp_fac_d.unsqueeze(-1)
     tmp[:,0,i] = Pdiag[:,0,i]*sp_fac_2.unsqueeze(-1)
-    ij_0 = torch.tensor([1,1,2], device=P.device)
-    ij_1 = torch.tensor([2,3,3], device=P.device)
+    ij_0 = _cached_index(P_OFF_I, P.device)
+    ij_1 = _cached_index(P_OFF_J, P.device)
     tmp[:, ij_0, ij_1] = Pdiag[:, ij_0, ij_1] * pp_fac_off.unsqueeze(-1)
 
     # # (p,p) diag + (s,p)/(p,s)
@@ -189,8 +211,9 @@ def _d_contrib_one_center(F, P, W, maskd):
     """
     Adds one-center terms from d-orbitals via the W-integrals.
     """
-    i0,i1 = TRIL_IDX_9  # lower-triangle coords
-    tril_scale = WEIGHT_45.to(device=P.device,dtype=P.dtype)
+    tril_idx = _cached_index(TRIL_IDX_9, P.device)  # lower-triangle coords
+    i0, i1 = tril_idx
+    tril_scale = _cached_tensor(WEIGHT_45, P.device, P.dtype)
     Pnew = P[:,i0,i1]*tril_scale.unsqueeze(0)
 
     blk   = P.shape[0]
@@ -213,12 +236,12 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
 
     if themethod=='PM6':
         nbf       = PM6_NBF
-        tril_idx  = TRIL_IDX_9
-        weight_tc = WEIGHT_45.to(device=P.device,dtype=P.dtype)
+        tril_idx  = _cached_index(TRIL_IDX_9, P.device)
+        weight_tc = _cached_tensor(WEIGHT_45, P.device, P.dtype)
     else:
         nbf       = DEFAULT_NBF
-        tril_idx  = TRIL_IDX_4
-        weight_tc = WEIGHT_10.to(device=P.device,dtype=P.dtype)
+        tril_idx  = _cached_index(TRIL_IDX_4, P.device)
+        weight_tc = _cached_tensor(WEIGHT_10, P.device, P.dtype)
 
     i0,i1 = tril_idx
 
@@ -235,7 +258,7 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
 
     # scatter J back
     B = w.shape[0]
-    sumA = torch.zeros(B,nbf,nbf,device=P.device,dtype=P.dtype)
+    sumA = torch.zeros(B, nbf, nbf, device=P.device, dtype=P.dtype)
     sumB = torch.zeros_like(sumA)
     sumA[:, i1, i0] = J_A
     sumB[:, i1, i0] = J_B
@@ -271,7 +294,7 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
     #             Ksum[..., i, j] = (Pp * wblk).sum(dim=(1,2))
 
     # This eliminates one of the for-loops but uses more memory
-    ind       = (K_ind_9 if themethod=='PM6' else K_ind_4).to(P.device)
+    ind = _cached_index(K_ind_9 if themethod == 'PM6' else K_ind_4, P.device)
 
     p_idx = ind.view(-1)               # (i*ν,)
     w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)  # last dim = nP, which is the packed index that packs nbf*nbf
@@ -296,4 +319,3 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
     F.index_add_(0, mask, Ksum)
 
     return F
-

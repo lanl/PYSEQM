@@ -10,6 +10,90 @@ import numpy
 from .parameters import  PWCCT
 from .RotationMatrixD import *
 import time
+
+_PM6_D_PARAM_CACHE = {}
+
+def _pm6_d_param_key(method, category, z, qn0, zetas, zetap, zetad, zs, zp, zd, g2sd):
+    return (
+        method,
+        category,
+        int(z),
+        int(qn0),
+        float(zetas),
+        float(zetap),
+        float(zetad),
+        float(zs),
+        float(zp),
+        float(zd),
+        float(g2sd),
+    )
+
+def _pm6_d_param_from_key(key):
+    cached = _PM6_D_PARAM_CACHE.get(key)
+    if cached is not None:
+        return cached
+    method, category, z, qn0, zetas, zetap, zetad, zs, zp, zd, g2sd = key
+    ds_add = 0.0
+    dp_add = 0.0
+    dd_add = 0.0
+    dd0_add = 0.0
+    dd4 = 0.0
+    dp3 = 0.0
+    aij52 = 0.0
+    aij43 = 0.0
+    aij63 = 0.0
+
+    if category == "A":
+        dp_add = (4.0 / 15.0) * GetSlaterCondonParameter(
+            1, qn0, zp, qn0 - 1, zd, qn0, zp, qn0 - 1, zd
+        )
+        if g2sd > 1.0e-9:
+            ds_add = 0.2 * g2sd
+        else:
+            ds_add = 0.2 * GetSlaterCondonParameter(
+                2, qn0, zs, qn0 - 1, zd, qn0, zs, qn0 - 1, zd
+            )
+        dd_add = (4.0 / 49.0) * GetSlaterCondonParameter(
+            2, qn0 - 1, zd, qn0 - 1, zd, qn0 - 1, zd, qn0 - 1, zd
+        )
+        dd0_add = GetSlaterCondonParameter(
+            0, qn0 - 1, zd, qn0 - 1, zd, qn0 - 1, zd, qn0 - 1, zd
+        )
+        dd4 = GetSlaterCondonParameter(
+            4, qn0 - 1, zd, qn0 - 1, zd, qn0 - 1, zd, qn0 - 1, zd
+        )
+        dp3 = (27.0 / 245.0) * GetSlaterCondonParameter(
+            3, qn0, zp, qn0 - 1, zd, qn0, zp, qn0 - 1, zd
+        )
+        aij52 = AIJL(zetap, zetad, qn0, qn0 - 1, 1)
+        aij43 = AIJL(zetas, zetad, qn0, qn0 - 1, 2)
+        aij63 = AIJL(zetad, zetad, qn0 - 1, qn0 - 1, 2)
+    elif category == "B" and method == "PM6":
+        ds_add = 0.2 * GetSlaterCondonParameter(
+            2, qn0, zs, qn0, zd, qn0, zs, qn0, zd
+        )
+        dp_add = (4.0 / 15.0) * GetSlaterCondonParameter(
+            1, qn0, zp, qn0, zd, qn0, zp, qn0, zd
+        )
+        dd_add = (4.0 / 49.0) * GetSlaterCondonParameter(
+            2, qn0, zd, qn0, zd, qn0, zd, qn0, zd
+        )
+        dd0_add = GetSlaterCondonParameter(
+            0, qn0, zd, qn0, zd, qn0, zd, qn0, zd
+        )
+        dd4 = GetSlaterCondonParameter(
+            4, qn0, zd, qn0, zd, qn0, zd, qn0, zd
+        )
+        dp3 = (27.0 / 245.0) * GetSlaterCondonParameter(
+            3, qn0, zp, qn0, zd, qn0, zp, qn0, zd
+        )
+        aij52 = AIJL(zetap, zetad, qn0, qn0, 1)
+        aij43 = AIJL(zetas, zetad, qn0, qn0, 2)
+        aij63 = AIJL(zetad, zetad, qn0, qn0, 2)
+
+    cached = (ds_add, dp_add, dd_add, dd0_add, dd4, dp3, aij52, aij43, aij63)
+    _PM6_D_PARAM_CACHE[key] = cached
+    return cached
 #two electron two center integrals
 def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, 
                             zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod):
@@ -33,14 +117,9 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     tore = const.tore
     qn = const.qn
     qnd = const.qnD_int
-    hpp = 0.5*(gpp-gp2)
-    hppd =  0.5*(gpp-gp2)
-    ##t0 = time.time()
-    j = 0
-    for i in hpp:
-       if(float(i) < 0.1):
-           hpp[j]= 0.1
-       j = j + 1
+    hpp = 0.5 * (gpp - gp2)
+    hppd = 0.5 * (gpp - gp2)
+    hpp = hpp.clamp_min(0.1)
     qn0=qn[Z]
     qnd0=qn[Z]
     #Z==0 is for padding zero
@@ -81,36 +160,49 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
 
     dd4 = torch.zeros_like(qn0)
     dp3 = torch.zeros_like(qn0)
-    i = 0
-    for j in Z:
-        if (j > 20 and j <30) or (j > 38 and j <48) or (j > 70 and j <80) or j == 57:
-#            dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i]-1,zd[i],qn0[i],zs[i],qn0[i]-1,zd[i])
-            dpAdditiveTerm[i]   = (4/15)*GetSlaterCondonParameter(1,qn0[i],zp[i],qn0[i]-1,zd[i],qn0[i],zp[i],qn0[i]-1,zd[i])
-            if (  G2SD[i] > 10**-9):
-                dsAdditiveTerm[i] = 1/5*G2SD[i]
+    mask_a = ((Z > 20) & (Z < 30)) | ((Z > 38) & (Z < 48)) | ((Z > 70) & (Z < 80)) | (Z == 57)
+    if themethod == "PM6":
+        mask_b = ((Z > 12) & (Z < 18)) | ((Z > 32) & (Z < 36)) | ((Z > 50) & (Z < 54))
+    else:
+        mask_b = torch.zeros_like(mask_a)
+    active = mask_a | mask_b
+    if active.any():
+        active_idx = active.nonzero(as_tuple=False).squeeze(1).tolist()
+        key_map = {}
+        for idx in active_idx:
+            zi = int(Z[idx].item())
+            if mask_a[idx]:
+                category = "A"
+            elif mask_b[idx]:
+                category = "B"
             else:
-                dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i]-1,zd[i],qn0[i],zs[i],qn0[i]-1,zd[i])
-            ddAdditiveTerm[i]   = (4/49)*GetSlaterCondonParameter(2,qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i])
-            dd0AdditiveTerm[i]  = GetSlaterCondonParameter(0,qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i])
-            dd4[i] = GetSlaterCondonParameter(4,qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i])
-            dp3[i] = 27/245*GetSlaterCondonParameter(3,qn0[i],zp[i],qn0[i]-1,zd[i],qn0[i],zp[i],qn0[i]-1,zd[i])
-            AIJ52[i]    = AIJL(zetap[i],zetad[i],qn0[i],qn0[i]-1,1)
-            AIJ43[i]    = AIJL(zetas[i],zetad[i],qn0[i],qn0[i]-1,2)
-            AIJ63[i]    = AIJL(zetad[i],zetad[i],qn0[i]-1,qn0[i]-1,2)
-
-                                   
-        elif ((j > 12 and j <18) or (j > 32 and j <36) or (j > 50 and j <54)) and themethod == "PM6":
-            dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i],zd[i],qn0[i],zs[i],qn0[i],zd[i])
-            dpAdditiveTerm[i]   = (4/15)*GetSlaterCondonParameter(1,qn0[i],zp[i],qn0[i],zd[i],qn0[i],zp[i],qn0[i],zd[i])
-            ddAdditiveTerm[i]   = (4/49)*GetSlaterCondonParameter(2,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
-            dd0AdditiveTerm[i]  = GetSlaterCondonParameter(0,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
-            dd4[i] = GetSlaterCondonParameter(4,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
-            dp3[i] = 27/245*GetSlaterCondonParameter(3,qn0[i],zp[i],qn0[i],zd[i],qn0[i],zp[i],qn0[i],zd[i])
-            AIJ52[i]    = AIJL(zetap[i],zetad[i],qn0[i],qn0[i],1)
-            AIJ43[i]    = AIJL(zetas[i],zetad[i],qn0[i],qn0[i],2)
-            AIJ63[i]    = AIJL(zetad[i],zetad[i],qn0[i],qn0[i],2)
-##        AIJ22[i] = AIJL(zetas[i],zetap[i],qn0[i],qn0[i],1)
-        i = i + 1
+                continue
+            key = _pm6_d_param_key(
+                themethod,
+                category,
+                zi,
+                qn0[idx].item(),
+                zetas[idx].item(),
+                zetap[idx].item(),
+                zetad[idx].item(),
+                zs[idx].item(),
+                zp[idx].item(),
+                zd[idx].item(),
+                G2SD[idx].item(),
+            )
+            key_map.setdefault(key, []).append(idx)
+        for key, idxs in key_map.items():
+            ds_add, dp_add, dd_add, dd0_add, dd4_val, dp3_val, aij52, aij43, aij63 = _pm6_d_param_from_key(key)
+            idxs_t = torch.as_tensor(idxs, device=Z.device)
+            dsAdditiveTerm[idxs_t] = ds_add
+            dpAdditiveTerm[idxs_t] = dp_add
+            ddAdditiveTerm[idxs_t] = dd_add
+            dd0AdditiveTerm[idxs_t] = dd0_add
+            dd4[idxs_t] = dd4_val
+            dp3[idxs_t] = dp3_val
+            AIJ52[idxs_t] = aij52
+            AIJ43[idxs_t] = aij43
+            AIJ63[idxs_t] = aij63
             
 
     #print("PRE-ROTATE:", time.time() - t0)
@@ -1609,4 +1701,3 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     dRdv = torch.einsum('nijd,ndk->nkij', dr_dq, dq_dv)
 
     return rot, dRdv
-

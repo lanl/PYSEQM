@@ -1,5 +1,17 @@
 import torch
-from .fock import DEFAULT_NBF, PM6_NBF, TRIL_IDX_9, WEIGHT_45, PM6_FLOCAL_MAP, WEIGHT_10, TRIL_IDX_4, K_ind_4, K_ind_9
+from .fock import (
+    DEFAULT_NBF,
+    PM6_NBF,
+    TRIL_IDX_9,
+    WEIGHT_45,
+    PM6_FLOCAL_MAP,
+    WEIGHT_10,
+    TRIL_IDX_4,
+    K_ind_4,
+    K_ind_9,
+    _cached_tensor,
+    _cached_index,
+)
 
 def fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, gpp, gsp, gp2, hsp, themethod, zetas, zetap, zetad, Z, F0SD, G2SD):
     """
@@ -107,8 +119,9 @@ def _d_contrib_one_center_u(F, P_tot, P_spin, W, maskd):
     dtype, device = F.dtype, F.device
 
     # lower-triangle coords & scaling
-    i0, i1     = TRIL_IDX_9
-    tril_scale = WEIGHT_45.to(device=device, dtype=dtype)
+    tril_idx = _cached_index(TRIL_IDX_9, device)
+    i0, i1 = tril_idx
+    tril_scale = _cached_tensor(WEIGHT_45, device, dtype)
 
     # extract only the on-atom blocks
     Ptot_d   = P_tot[maskd]        # (nc, 9, 9)
@@ -158,12 +171,12 @@ def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
     # pick basis‐size‐dependent parameters
     if themethod == 'PM6':
         nbf      = PM6_NBF
-        tril_idx = TRIL_IDX_9
-        weight_tc= WEIGHT_45.to(device=F.device, dtype=F.dtype)
+        tril_idx = _cached_index(TRIL_IDX_9, F.device)
+        weight_tc= _cached_tensor(WEIGHT_45, F.device, F.dtype)
     else:
         nbf      = DEFAULT_NBF
-        tril_idx = TRIL_IDX_4
-        weight_tc= WEIGHT_10.to(device=F.device, dtype=F.dtype)
+        tril_idx = _cached_index(TRIL_IDX_4, F.device)
+        weight_tc= _cached_tensor(WEIGHT_10, F.device, F.dtype)
 
     i0, i1 = tril_idx
 
@@ -194,7 +207,7 @@ def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
 
     # ——— Exchange (K) ———
     # prepare indirect indexing
-    ind   = (K_ind_9 if themethod=='PM6' else K_ind_4).to(F.device)
+    ind = _cached_index(K_ind_9 if themethod == 'PM6' else K_ind_4, F.device)
     p_idx = ind.view(-1)  # (nbf*nbf,)
     w1    = w[:, p_idx, :].view(B, nbf, nbf, -1)
 
@@ -596,4 +609,3 @@ def old_fock_u_batch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, W, gss, g
     F0_.add_(F0_.triu(1).transpose(2,3))
 
     return F0_
-
