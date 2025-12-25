@@ -2,10 +2,11 @@ import torch
 from seqm.seqm_functions.constants import Constants
 from seqm.Molecule import Molecule
 from seqm.MolecularDynamics import Molecular_Dynamics_Basic
-
 torch.set_default_dtype(torch.float64)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.set_num_threads(1)
+Molecular_Dynamics_Basic.run_from_checkpoint('./examples/Outputs/vik_ckpt_esmd.step_0.1.restart.pt', device=device)
+exit()
 
 
 species = torch.as_tensor([[8,6,1,1],
@@ -62,7 +63,7 @@ timestep = 0.1
 output = {
 # 'molid': [0,1],
 'molid': [0],
-'prefix': f'./examples/Outputs/vik_esmd.step_{timestep:.1f}',
+'prefix': f'./examples/Outputs/vik_ckpt_esmd.step_{timestep:.1f}',
 'print every': 1,
 "xyz": 1,
 "h5": {
@@ -71,7 +72,7 @@ output = {
     "write_mo": True,
     "coordinates": 1,
     },
-"checkpoint every": 0,
+"checkpoint every": 1,
 }
 
 torch.manual_seed(42)
@@ -87,4 +88,4 @@ temp=0.0
 # md =  XL_ESMD(xl_bomd_params=xl_bomd_params, Temp = temp, seqm_parameters=seqm_parameters, timestep=timestep, output=output).to(device)
 md = Molecular_Dynamics_Basic(seqm_parameters=seqm_parameters, Temp=temp, timestep=timestep, output=output).to(device)
 # md =  XL_BOMD(xl_bomd_params=xl_bomd_params, Temp = temp, seqm_parameters=seqm_parameters, timestep=timestep, output=output).to(device)
-_ = md.run(molecule, 500, remove_com=None,reuse_P=False)
+_ = md.run(molecule, 10, remove_com=None,reuse_P=False)

@@ -823,6 +823,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "forces": _tensor_cpu(molecule.force),
                 "dm": _tensor_cpu(molecule.dm) if reuse_P else None,
                 "cis_amplitudes": _tensor_cpu(molecule.cis_amplitudes) if reuse_P else None,
+                "transition_density_matrices": _tensor_cpu(getattr(molecule, "transition_density_matrices", None)),
                 "constants": molecule.const,
                 "old_mos": _tensor_cpu(molecule.old_mos),
             }
@@ -882,7 +883,12 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             molecule.cis_amplitudes = ckpt["molecules"]["cis_amplitudes"]
             if isinstance(molecule.cis_amplitudes, torch.Tensor):
                 molecule.cis_amplitudes = molecule.cis_amplitudes.to(device)
-                molecule.old_mos = ckpt["molecules"]["old_mos"].to(device)
+                old_mos = ckpt["molecules"].get("old_mos")
+                if isinstance(old_mos, torch.Tensor):
+                    molecule.old_mos = old_mos.to(device)
+                tdm = ckpt["molecules"].get("transition_density_matrices")
+                if isinstance(tdm, torch.Tensor):
+                    molecule.transition_density_matrices = tdm.to(device)
             if "dP2dt2" in ckpt:
                 molecule.dP2dt2 = ckpt["dP2dt2"].to(device)
         
