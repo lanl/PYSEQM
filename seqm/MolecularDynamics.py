@@ -833,7 +833,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "Pt": _tensor_cpu(self._xl_ctx["Pt"]),
                 "es_amp_t": _tensor_cpu(self._xl_ctx.get("es_amp_t"))
             }
-            ckpt["dP2dt2"] = _tensor_cpu(molecule.dP2dt2)
+            if isinstance(molecule.dP2dt2, torch.Tensor):
+                ckpt["dP2dt2"] = _tensor_cpu(molecule.dP2dt2)
         
         # Atomic write
         tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), 
