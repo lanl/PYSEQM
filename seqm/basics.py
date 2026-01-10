@@ -24,6 +24,7 @@ from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
 from .seqm_functions.XLESMD import elec_energy_excited_xl, sample_noisy_R_energy
+from .nac_utils import resolve_nac_config
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -356,9 +357,62 @@ class Energy(torch.nn.Module):
         if self.excited_states:
             self.excited_states.setdefault("make_best_guess",True)
             self.excited_states.setdefault("save_tdm",False)
+        # Resolve NAC configuration once at construction
+        nroots = None
+        if self.excited_states and "n_states" in self.excited_states:
+            nroots = int(self.excited_states["n_states"])
+        self.nac_config = resolve_nac_config(seqm_parameters, nroots=nroots, default_enabled=False)
         self.xlesmd = False
         if self.uhf and self.excited_states:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
+
+    @staticmethod
+    def _phase_align_cis(new_amp, ref_amp, rpa=False):
+        """Keep CIS/RPA amplitudes phase-consistent with a reference."""
+        if ref_amp is None:
+            return new_amp
+        if not (torch.is_tensor(new_amp) and torch.is_tensor(ref_amp)):
+            return new_amp
+        if new_amp.shape != ref_amp.shape:
+            return new_amp
+
+        amp = new_amp[0] if rpa else new_amp
+        ref = ref_amp[0] if rpa else ref_amp
+        sum_dims = tuple(range(2, amp.ndim))
+        ov = torch.sum(ref * amp, dim=sum_dims)
+        sign = torch.where(ov >= 0, torch.ones_like(ov), -torch.ones_like(ov))
+        sign = sign.view(*sign.shape, *([1] * (amp.ndim - sign.ndim)))
+        if rpa:
+            sign = sign.unsqueeze(0)
+        return new_amp * sign
+
+    @staticmethod
+    def _phase_match_molecular_orbitals(new_mos, prev_mos):
+        if not torch.is_tensor(prev_mos) or prev_mos.shape != new_mos.shape:
+            return new_mos
+        if new_mos.dim() == 4:
+            overlap = torch.einsum("nsbo,nsbo->nso", new_mos, prev_mos)
+            sign = torch.where(overlap >= 0, torch.ones_like(overlap), -torch.ones_like(overlap))
+            return new_mos * sign.unsqueeze(2)
+        overlap = torch.einsum("nbo,nbo->no", new_mos, prev_mos)
+        sign = torch.where(overlap >= 0, torch.ones_like(overlap), -torch.ones_like(overlap))
+        return new_mos * sign.unsqueeze(1)
+
+    def _build_parnuc(self, params):
+        alpha = params["alpha"]
+        if self.method == "MNDO":
+            return (alpha,)
+        if self.method in ("AM1", "PM6", "PM6_SP", "PM6_SP_STAR"):
+            K = torch.stack([params[f"Gaussian{i}_K"] for i in range(1, 5)], dim=1)
+            L = torch.stack([params[f"Gaussian{i}_L"] for i in range(1, 5)], dim=1)
+            M = torch.stack([params[f"Gaussian{i}_M"] for i in range(1, 5)], dim=1)
+            return (alpha, K, L, M)
+        if self.method == "PM3":
+            K = torch.stack([params[f"Gaussian{i}_K"] for i in range(1, 3)], dim=1)
+            L = torch.stack([params[f"Gaussian{i}_L"] for i in range(1, 3)], dim=1)
+            M = torch.stack([params[f"Gaussian{i}_M"] for i in range(1, 3)], dim=1)
+            return (alpha, K, L, M)
+        return (alpha,)
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs):
         """
@@ -376,23 +430,26 @@ class Energy(torch.nn.Module):
         else:
             molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(self.packpar(molecule.Z, learned_params = learned_parameters))
 
+        params = molecule.parameters
 
         if(molecule.method == 'PM6'):
-            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1), molecule.parameters['beta_d'].unsqueeze(1)),dim=1)
+            params['beta'] = torch.cat((params['beta_s'].unsqueeze(1), params['beta_p'].unsqueeze(1), params['beta_d'].unsqueeze(1)),dim=1)
         else:
-            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1), molecule.parameters['beta_p'].unsqueeze(1)),dim=1)
-            molecule.parameters['zeta_d'] = torch.zeros_like(molecule.parameters['zeta_s'])
-            molecule.parameters['s_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
-            molecule.parameters['p_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
-            molecule.parameters['d_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
+            params['beta'] = torch.cat((params['beta_s'].unsqueeze(1), params['beta_p'].unsqueeze(1)),dim=1)
+            zeros_zeta = torch.zeros_like(params['zeta_s'])
+            params['zeta_d'] = zeros_zeta
+            params['s_orb_exp_tail'] = zeros_zeta
+            params['p_orb_exp_tail'] = zeros_zeta
+            params['d_orb_exp_tail'] = zeros_zeta
 
-            molecule.parameters['U_dd'] = torch.zeros_like(molecule.parameters['U_ss'])
-            molecule.parameters['F0SD'] = torch.zeros_like(molecule.parameters['U_ss'])
-            molecule.parameters['G2SD'] = torch.zeros_like(molecule.parameters['U_ss'])
-            molecule.parameters['rho_core'] = torch.zeros_like(molecule.parameters['U_ss'])
+            zeros_uss = torch.zeros_like(params['U_ss'])
+            params['U_dd'] = zeros_uss
+            params['F0SD'] = zeros_uss
+            params['G2SD'] = zeros_uss
+            params['rho_core'] = zeros_uss
 
 
-        molecule.parameters['Kbeta'] = molecule.parameters.get('Kbeta', None)
+        params['Kbeta'] = params.get('Kbeta', None)
 
         F, e, P, Hcore, w, charge, rho0xi,rho0xj, riXH, ri, notconverged, molecular_orbitals =  self.hamiltonian(molecule, self.method, \
                                                  P0=P0)
@@ -417,40 +474,11 @@ class Energy(torch.nn.Module):
         else:
             e_gap = None
 
-        molecule.molecular_orbitals = molecular_orbitals
+        prev_mos = getattr(molecule, "molecular_orbitals", None)
+        molecule.molecular_orbitals = self._phase_match_molecular_orbitals(molecular_orbitals, prev_mos)
 
         #nuclear energy
-        alpha = molecule.parameters['alpha']
-        if self.method=='MNDO':
-            parnuc = (alpha,)
-        elif self.method=='AM1' or self.method=='PM6' or self.method=='PM6_SP' or self.method=='PM6_SP_STAR':
-            K = torch.stack((molecule.parameters['Gaussian1_K'],
-                             molecule.parameters['Gaussian2_K'],
-                             molecule.parameters['Gaussian3_K'],
-                             molecule.parameters['Gaussian4_K']),dim=1)
-            #
-            L = torch.stack((molecule.parameters['Gaussian1_L'],
-                             molecule.parameters['Gaussian2_L'],
-                             molecule.parameters['Gaussian3_L'],
-                             molecule.parameters['Gaussian4_L']),dim=1)
-            #molecule.
-            M = torch.stack((molecule.parameters['Gaussian1_M'],
-                             molecule.parameters['Gaussian2_M'],
-                             molecule.parameters['Gaussian3_M'],
-                             molecule.parameters['Gaussian4_M']),dim=1)
-            #
-            parnuc = (alpha, K, L, M)
-        elif self.method=='PM3':
-            K = torch.stack((molecule.parameters['Gaussian1_K'],
-                             molecule.parameters['Gaussian2_K']),dim=1)
-            #
-            L = torch.stack((molecule.parameters['Gaussian1_L'],
-                             molecule.parameters['Gaussian2_L']),dim=1)
-            #
-            M = torch.stack((molecule.parameters['Gaussian1_M'],
-                             molecule.parameters['Gaussian2_M']),dim=1)
-            #
-            parnuc = (alpha, K, L, M)
+        parnuc = self._build_parnuc(params)
 
         if 'g_ss_nuc' in molecule.parameters:
             g = molecule.parameters['g_ss_nuc']
@@ -504,6 +532,7 @@ class Energy(torch.nn.Module):
             cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()
             orbital_window=self.excited_states.get('orbital_window',None)
+            prev_cis_amp = molecule.cis_amplitudes if hasattr(molecule, "cis_amplitudes") else None
             with torch.no_grad():
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
@@ -522,6 +551,7 @@ class Energy(torch.nn.Module):
                         excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:
                         raise NotImplementedError("RPA for non-uniform batch not yet available")
+                exc_amps = self._phase_align_cis(exc_amps, prev_cis_amp,rpa=method == 'rpa')
                 molecule.cis_amplitudes = exc_amps
                 molecule.cis_energies = excitation_energies
 
@@ -535,9 +565,38 @@ class Energy(torch.nn.Module):
                     molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
 
-                cis_nac = kwargs.get('cis_nac',[False])
-                if cis_nac[0]:
-                    calc_nac(molecule,exc_amps, excitation_energies, P, ri, riXH,cis_nac[1],cis_nac[2],rpa=method=='rpa')
+                # Nonadiabatic couplings (unified resolution)
+                nac_settings = self.nac_config
+
+                if nac_settings.enabled:
+                    nroots = self.excited_states["n_states"]
+                    pair_list = nac_settings.pairs or [
+                        (i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)
+                    ]
+
+                    nmol = molecule.nmol
+                    molsize = molecule.molsize
+                    dtype = P.dtype
+                    device = P.device
+                    nac_vec = torch.zeros((nmol, nroots, nroots, molsize, 3), dtype=dtype, device=device)
+                    for s1, s2 in pair_list:
+                        vec = calc_nac(
+                            molecule,
+                            exc_amps,
+                            excitation_energies,
+                            P,
+                            ri,
+                            riXH,
+                            s1,
+                            s2,
+                            rpa=method == "rpa",
+                        )
+                        nac_vec[:, s1 - 1, s2 - 1] = vec
+                        nac_vec[:, s2 - 1, s1 - 1] = -vec
+                    molecule.nac = nac_vec
+                else:
+                    molecule.nac = None
+                molecule.nac_dot = None
 
             if molecule.active_state>0:
 
@@ -631,7 +690,8 @@ class Force(torch.nn.Module):
                 do_analytical_gradient = [True]
                 self.seqm_parameters['analytical_gradient'] = do_analytical_gradient
 
-        molecule.coordinates.requires_grad_(do_force and not do_analytical_gradient[0])
+        use_analytical = do_analytical_gradient[0]
+        molecule.coordinates.requires_grad_(do_force and not use_analytical)
 
         Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, cis_amp=cis_amp, *args, **kwargs)
@@ -645,7 +705,7 @@ class Force(torch.nn.Module):
             e = e.detach()
             e_gap = e_gap.detach()
 
-        if do_analytical_gradient[0]:
+        if use_analytical:
             force = -molecule.analytical_gradient
             return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
         #L = Etot.sum()

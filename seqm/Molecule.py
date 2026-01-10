@@ -124,6 +124,8 @@ class Molecule(torch.nn.Module):
         self.oscillator_strength = None
         self.cis_state_unrelaxed_dipole = None
         self.cis_state_relaxed_dipole = None
+        self.nac = None
+        self.nac_dot = None
         
                 
         def get_coordinates(self):
