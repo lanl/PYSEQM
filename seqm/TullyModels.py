@@ -179,6 +179,24 @@ class _TullyDynamicsMixin:
         self.initial_state = 0
         self._nstates = _TULLY_NSTATES
         self._active_state = 0
+        self.rho_history = []
+
+    def _reset_density_history(self):
+        self.rho_history = []
+
+    def _record_density_matrix(self):
+        coeffs = self._coeffs_complex()
+        if coeffs is None:
+            return
+        if coeffs.shape[1] < 2:
+            return
+        c0 = coeffs[:, 0]
+        c1 = coeffs[:, 1]
+        rho00 = torch.real(c0.conj() * c0)
+        rho11 = torch.real(c1.conj() * c1)
+        rho01 = torch.abs(c0.conj() * c1)
+        rho = torch.stack((rho00, rho11, rho01), dim=1)
+        self.rho_history.append(rho.detach().cpu())
 
     def _compute_electronic_structure(self, molecule, learned_parameters, **kwargs):
         x = molecule.coordinates[:, 0, 0]
@@ -223,6 +241,7 @@ class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
         force = pop[:, 0].view(-1, 1, 1) * molecule.all_forces[:, 1] + pop[:, 1].view(-1, 1, 1) * molecule.all_forces[:, 2]
         molecule.force = force
         molecule.Etot = torch.sum(pop * state_energies, dim=1)
+        self._record_density_matrix()
 
 class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
     def __init__(self, model: TullyModel, *, timestep=0.05, electronic_substeps=10):
@@ -239,6 +258,10 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
         molecule.force = molecule.all_forces[:, exc_idx + 1]
         self._current_potential = state_energies[:, exc_idx]
         molecule.Etot = self._current_potential
+
+    def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
+        super()._after_electronic_update(molecule, state_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step)
+        self._record_density_matrix()
 
 def run_tully(model: TullyModel, method="fssh", timestep=0.05, steps=200, x0=-8.0, v0=2.0, mass=2000.0, seed=0, electronic_substeps=10):
     torch.manual_seed(seed)

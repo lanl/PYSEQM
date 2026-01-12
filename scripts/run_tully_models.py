@@ -6,7 +6,7 @@ velocity.
 """
 
 import argparse
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,8 +20,13 @@ from seqm.TullyModels import (
     TullyMolecule,
     TullyModel,
 )
-from seqm.MolecularDynamics import CONSTANTS
 
+import os
+def _init_worker():
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
 
 def get_model(name: str) -> TullyModel:
     name = name.lower()
@@ -34,6 +39,17 @@ def get_model(name: str) -> TullyModel:
     raise ValueError(f"Unknown Tully model '{name}'")
 
 
+def _model_key(name: str) -> str:
+    name = name.lower()
+    if name in ("1", "single", "sac", "single_avoided_crossing", "model1"):
+        return "1"
+    if name in ("2", "double", "dac", "double_avoided_crossing", "model2"):
+        return "2"
+    if name in ("3", "extended", "reflection", "model3"):
+        return "3"
+    return "1"
+
+
 def _run_single_worker(
     seed: int,
     model_name: str,
@@ -44,23 +60,29 @@ def _run_single_worker(
     mass: float,
     x0: float,
     elec_substeps: int,
-) -> tuple[bool, bool]:
+    collect_density: bool,
+) -> tuple[bool, torch.Tensor, Optional[np.ndarray]]:
     """Worker-safe single trajectory run."""
     torch.manual_seed(seed)
-    torch.set_num_threads(1)
     model = get_model(model_name)
     dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
     dyn = dyn_cls(model, timestep=timestep, electronic_substeps=elec_substeps)
     mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
     dyn._setup_states(mol)
     dyn._init_coeffs(mol)
+    if collect_density and hasattr(dyn, "_reset_density_history"):
+        dyn._reset_density_history()
     mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
     with torch.no_grad():
         dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
     x_final = float(mol.coordinates[0, 0, 0])
-    return (x_final > 0.0), (dyn._active_state == 1)
+    pop = dyn.populations.detach().cpu()[0]
+    rho_hist = None
+    if collect_density and getattr(dyn, "rho_history", None):
+        rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
+    return (x_final > 0.0), pop, rho_hist
 
-
+import multiprocessing as mp
 def run_ensemble(
     model: TullyModel,
     method: str,
@@ -73,6 +95,7 @@ def run_ensemble(
     x0: float = -5.0,
     elec_substeps: int = 15,
     workers: int = 1,
+    collect_density: bool = False,
 ) -> List[Dict]:
     model_name = model if isinstance(model, str) else getattr(model, "name", None)
     if workers > 1 and not isinstance(model, str):
@@ -87,16 +110,23 @@ def run_ensemble(
         mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
         dyn._setup_states(mol)
         dyn._init_coeffs(mol)
+        if collect_density and hasattr(dyn, "_reset_density_history"):
+            dyn._reset_density_history()
         mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
         with torch.no_grad():
             dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
         x_final = float(mol.coordinates[0, 0, 0])
-        return (x_final > 0.0), (dyn._active_state == 1)
+        pop = dyn.populations.detach().cpu()[0]
+        rho_hist = None
+        if collect_density and getattr(dyn, "rho_history", None):
+            rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
+        return (x_final > 0.0), pop, rho_hist
 
     stats = []
     for v0 in velocities:
-        trans = refl = 0
-        state1 = 0
+        trans_lower = refl_lower = 0.0
+        trans_upper = refl_upper = 0.0
+        rho_sum = None
         seeds = range(ntraj)
         if workers > 1:
             worker = partial(
@@ -109,55 +139,116 @@ def run_ensemble(
                 mass=mass,
                 x0=x0,
                 elec_substeps=elec_substeps,
+                collect_density=collect_density,
             )
             try:
-                with ProcessPoolExecutor(max_workers=workers) as ex:
-                    for is_trans, is_state1 in ex.map(worker, seeds):
-                        trans += 1 if is_trans else 0
-                        refl += 0 if is_trans else 1
-                        state1 += 1 if is_state1 else 0
+                ctx = mp.get_context("spawn")
+                with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_init_worker) as ex:
+                    for is_trans, pop, rho_hist in ex.map(worker, seeds):
+                        p0 = float(pop[0].item())
+                        p1 = float(pop[1].item()) if pop.numel() > 1 else 0.0
+                        if is_trans:
+                            trans_lower += p0
+                            trans_upper += p1
+                        else:
+                            refl_lower += p0
+                            refl_upper += p1
+                        if collect_density and rho_hist is not None:
+                            rho_sum = rho_hist if rho_sum is None else rho_sum + rho_hist
             except PermissionError:
                 print("Parallel execution not permitted; falling back to serial.")
                 for seed in seeds:
-                    is_trans, is_state1 = _one(seed, v0)
-                    trans += 1 if is_trans else 0
-                    refl += 0 if is_trans else 1
-                    state1 += 1 if is_state1 else 0
+                    is_trans, pop, rho_hist = _one(seed, v0)
+                    p0 = float(pop[0].item())
+                    p1 = float(pop[1].item()) if pop.numel() > 1 else 0.0
+                    if is_trans:
+                        trans_lower += p0
+                        trans_upper += p1
+                    else:
+                        refl_lower += p0
+                        refl_upper += p1
+                    if collect_density and rho_hist is not None:
+                        rho_sum = rho_hist if rho_sum is None else rho_sum + rho_hist
         else:
             for seed in seeds:
-                is_trans, is_state1 = _one(seed, v0)
-                trans += 1 if is_trans else 0
-                refl += 0 if is_trans else 1
-                state1 += 1 if is_state1 else 0
+                is_trans, pop, rho_hist = _one(seed, v0)
+                p0 = float(pop[0].item())
+                p1 = float(pop[1].item()) if pop.numel() > 1 else 0.0
+                if is_trans:
+                    trans_lower += p0
+                    trans_upper += p1
+                else:
+                    refl_lower += p0
+                    refl_upper += p1
+                if collect_density and rho_hist is not None:
+                    rho_sum = rho_hist if rho_sum is None else rho_sum + rho_hist
+        rho_avg = None
+        if collect_density and rho_sum is not None:
+            rho_avg = rho_sum / float(ntraj)
         stats.append(
             {
                 "v0": v0,
-                "trans": trans / ntraj,
-                "reflect": refl / ntraj,
-                "state1": state1 / ntraj,
+                "trans_lower": trans_lower / ntraj,
+                "refl_lower": refl_lower / ntraj,
+                "trans_upper": trans_upper / ntraj,
+                "refl_upper": refl_upper / ntraj,
+                "rho": rho_avg,
             }
         )
     return stats
 
 
 ang_per_fs_to_au = 0.04571028904
-def plot_probs(stats: List[Dict], outfile: str):
-    v0 = np.array([s["v0"] for s in stats])*ang_per_fs_to_au
-    trans = np.array([s["trans"] for s in stats])
-    refl = np.array([s["reflect"] for s in stats])
-    state1 = np.array([s["state1"] for s in stats])
+amu_to_au = 1822.888486209
+
+def plot_probs(stats: List[Dict], outfile: str, *, model_key: str, mass_amu: float):
+    v0 = np.array([s["v0"] for s in stats]) * ang_per_fs_to_au
+    mass_au = mass_amu * amu_to_au
+    if model_key == "2":
+        energy = 0.5 * mass_au * v0 * v0
+        x = np.log(np.maximum(energy, 1e-18))
+        xlabel = "ln(E) (a.u.)"
+    else:
+        x = mass_au * v0
+        xlabel = "Momentum k (a.u.)"
+    trans_lower = np.array([s["trans_lower"] for s in stats])
+    refl_lower = np.array([s["refl_lower"] for s in stats])
+    trans_upper = np.array([s["trans_upper"] for s in stats])
 
     plt.figure(figsize=(6, 4))
-    plt.plot(v0, trans, "o-", label="Transmission")
-    plt.plot(v0, refl, "s-", label="Reflection")
-    plt.plot(v0, state1, "^-", label="Final on state 1")
-    plt.xlabel("Initial velocity v0 (a.u.)")
+    plt.plot(x, trans_lower, "o-", label="Trans (lower)")
+    plt.plot(x, refl_lower, "s-", label="Refl (lower)")
+    plt.plot(x, trans_upper, "^-", label="Trans (upper)")
+    plt.xlabel(xlabel)
     plt.ylabel("Probability")
     plt.ylim(-0.05, 1.05)
     plt.legend()
     plt.tight_layout()
     plt.savefig(outfile, dpi=200)
     print(f"Saved plot to {outfile}")
+
+
+def plot_density_matrix(stats: List[Dict], timestep: float, outfile: str):
+    base, ext = outfile.rsplit(".", 1) if "." in outfile else (outfile, "png")
+    for s in stats:
+        rho = s.get("rho")
+        if rho is None:
+            continue
+        t = np.arange(rho.shape[0]) * timestep
+        plt.figure(figsize=(6, 4))
+        plt.plot(t, rho[:, 0], label=r"$\rho_{00}$")
+        plt.plot(t, rho[:, 1], label=r"$\rho_{11}$")
+        plt.plot(t, rho[:, 2], label=r"$|\rho_{01}|$")
+        plt.xlabel("Time (fs)")
+        plt.ylabel("Average density matrix element")
+        plt.ylim(-0.05, 1.05)
+        plt.legend()
+        plt.tight_layout()
+        tag = f"_v{s['v0']:.3f}"
+        fname = f"{base}{tag}.{ext}"
+        plt.savefig(fname, dpi=200)
+        plt.close()
+        print(f"Saved density plot to {fname}")
 
 
 def plot_adiabatic_energies(xmin: float, xmax: float, npoints: int, outfile: str):
@@ -168,7 +259,7 @@ def plot_adiabatic_energies(xmin: float, xmax: float, npoints: int, outfile: str
         ("3", "Model 3"),
     ]
     fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
-    nac_scale = {"1": 1.0, "2": 1.0, "3": 1.0}
+    nac_scale = {"1": 50.0, "2": 12.0, "3": 1.0}
     for ax, (name, title) in zip(axes, models):
         model = get_model(name)
         E, _, nac = model.pot(x)
@@ -201,14 +292,16 @@ def main():
     parser.add_argument("--energy-outfile", default="tully_energies.png", help="Energy plot filename")
     parser.add_argument("--model", default="1", help="Tully model: 1,2,3 or name")
     parser.add_argument("--method", default="fssh", choices=["fssh", "ehrenfest"])
-    parser.add_argument("--velocities", nargs="+", type=float, default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+    parser.add_argument("--velocities", nargs="+", type=float, default=None)
     parser.add_argument("--ntraj", type=int, default=1000, help="Trajectories per velocity")
-    parser.add_argument("--steps", type=int, default=300, help="Steps per trajectory")
+    parser.add_argument("--steps", type=int, default=800, help="Steps per trajectory")
     parser.add_argument("--timestep", type=float, default=0.25, help="Time step (fs)")
     parser.add_argument("--elec-substeps", type=int, default=15, help="Electronic RK4 substeps per nuclear step")
     parser.add_argument("--mass", type=float, default=1.0971598, help="Mass in amu")
     parser.add_argument("--x0", type=float, default=-5.0, help="Initial position")
     parser.add_argument("--outfile", default="tully_probs.png", help="Output plot filename")
+    parser.add_argument("--plot-density", action="store_true", help="Plot averaged density matrix elements.")
+    parser.add_argument("--density-outfile", default="tully_density.png", help="Density matrix plot filename")
     parser.add_argument("--workers", type=int, default=1, help="Parallel workers for trajectories")
     args = parser.parse_args()
 
@@ -216,7 +309,15 @@ def main():
         plot_adiabatic_energies(args.x_min, args.x_max, args.x_points, args.energy_outfile)
         return
 
+    model_key = _model_key(args.model)
     model = get_model(args.model)
+    if args.velocities is None:
+        if model_key == "1":
+            args.velocities = np.arange(0.0, 0.33 + 1e-9, 0.03).tolist()
+        elif model_key == "2":
+            args.velocities = np.arange(0.1, 1.0 + 1e-9, 0.05).tolist()
+        else:
+            args.velocities = np.arange(0.03, 0.33 + 1e-9, 0.01).tolist()
     stats = run_ensemble(
         model,
         args.method,
@@ -228,11 +329,14 @@ def main():
         x0=args.x0,
         elec_substeps=args.elec_substeps,
         workers=max(1, args.workers),
+        collect_density=args.plot_density,
     )
-    print("Velocity  Trans   Reflect   Final state1")
+    print("Velocity  Trans(L)  Refl(L)  Trans(U)")
     for s in stats:
-        print(f"{s['v0']:7.3f}  {s['trans']:6.3f}  {s['reflect']:6.3f}  {s['state1']:6.3f}")
-    plot_probs(stats, args.outfile)
+        print(f"{s['v0']:7.3f}  {s['trans_lower']:7.3f}  {s['refl_lower']:7.3f}  {s['trans_upper']:7.3f}")
+    plot_probs(stats, args.outfile, model_key=model_key, mass_amu=args.mass)
+    if args.plot_density:
+        plot_density_matrix(stats, args.timestep, args.density_outfile)
 
 
 if __name__ == "__main__":
