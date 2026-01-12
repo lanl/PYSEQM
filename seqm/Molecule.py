@@ -124,7 +124,9 @@ class Molecule(torch.nn.Module):
         self.cis_state_unrelaxed_dipole = None
         self.cis_state_relaxed_dipole = None
         
-                
+        self.cis_tdms = None
+        self.ref_state_order = None
+
         def get_coordinates(self):
             return self.coordinates
 

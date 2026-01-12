@@ -4,7 +4,7 @@ from .constants import a0
 import math
 # from seqm.seqm_functions.pack import packone, unpackone
 
-def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbital_window=None):
+def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbital_window=None, return_tdm=False):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -178,7 +178,7 @@ def rcis_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, orbita
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window)
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots,orbital_window=orbital_window, return_tdm=return_tdm)
 
     return e_val_n, amplitude_store
 
@@ -550,16 +550,27 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Allocated Memory: {max_allocated:.2f} MB")
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
-def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None):
-    if not (mol.verbose or (mol.active_state>0)):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None, return_tdm=False):
+    if not (mol.verbose or (mol.active_state>0) or return_tdm):
         return 
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window)
+
+    # if return_tdm:
+    transition_dipole, oscillator_strength, tdms = calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window, return_tdm=return_tdm)
+    # else:
+    #     transition_dipole, oscillator_strength, tdms = calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window, return_tdm=False)
+
     if mol.verbose:
         print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
-    mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
-def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None):
+    if mol.active_state > 0:
+        mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
+
+    if return_tdm:
+        mol.cis_tdms = tdms
+
+
+def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False,orbital_window=None, return_tdm=False):
 
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window)
 
@@ -584,7 +595,11 @@ def calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat
     transition_dipole = torch.einsum('brmn,bdmn->brd',R,dipole_mat_packed)*math.sqrt(2.0)/a0
     hartree = 27.2113962 # value used in NEXMD
     oscillator_strength = 2.0/3.0*excitation_energies/hartree*torch.square(transition_dipole).sum(dim=2)
-    return transition_dipole, oscillator_strength
+
+    if return_tdm:
+        return transition_dipole, oscillator_strength, R
+    else:
+        return transition_dipole, oscillator_strength, None
 
 
 def print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength):

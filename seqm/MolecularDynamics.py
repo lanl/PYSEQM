@@ -61,7 +61,7 @@ class Geometry_Optimization_SD(torch.nn.Module):
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
         nmol = molecule.coordinates.shape[0]
-        molecule.verbose = False
+        molecule.verbose = True
         Lold = torch.zeros(nmol, dtype=dtype, device=device)
         print("Step,  Max_Force,      Etot(eV),     dE(eV)")
         for i in range(self.max_evl):
@@ -364,7 +364,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self.n_dof = 3.0 * molecule.num_atoms - constraints
 
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
-        molecule.verbose = False  # Dont print SCF and CIS/RPA results
+        molecule.verbose = True  # Dont print SCF and CIS/RPA results
         self.do_remove_com = remove_com is not None
         constraints = 0.0
         # remove_com is a tuple of (mode,stride), where mode='linear' or 'angular'

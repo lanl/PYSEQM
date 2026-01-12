@@ -5,7 +5,7 @@ from seqm.seqm_functions.pack import packone, unpackone
 from .dipole import calc_dipole_matrix
 from .rcis_batch import orthogonalize_to_current_subspace, getMaxSubspacesize, getMemUse, print_rcis_analysis, get_occ_virt
 
-def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
+def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, return_tdm=False):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
@@ -189,19 +189,30 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol,e_val_n,amplitude_store,nroots)
+    
+    rcis_analysis(mol,e_val_n,amplitude_store,nroots, return_tdm)
 
     return e_val_n, amplitude_store
 
-def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False):
-    if not (mol.verbose or (mol.active_state>0)):
+def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False, return_tdm=False):
+    if not (mol.verbose or (mol.active_state>0) or return_tdm):
         return 
     dipole_mat = calc_dipole_matrix(mol) 
-    transition_dipole, oscillator_strength =  calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
+
+    # if return_tdm:
+    transition_dipole, oscillator_strength, tdms = calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa, return_tdm=return_tdm)
+
+    # else:
+        # transition_dipole, oscillator_strength, tdms = calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa)
+
     if mol.verbose:
         print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
+        
     if mol.active_state > 0:
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
+
+    if return_tdm:
+        mol.cis_tdms = tdms
 
 def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # C: Molecule Orbital Coefficients
@@ -527,7 +538,7 @@ def get_subspace_eig_any_batched(H,nroots,max_nroots,zero_pad,e_val_n,done,nonor
             e_vec_n[mol_idx, :, :k]   = r_evec[j, :, s : s + k]
         return e_vec_n
 
-def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False):
+def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa=False, return_tdm=False):
 
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
     norb = Cocc.shape[1]
@@ -555,8 +566,11 @@ def calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots,
     transition_dipole = torch.einsum('brmn,bdmn->brd',R,dipole_mat_packed)*math.sqrt(2.0)/a0
     hartree = 27.2113962 # value used in NEXMD
     oscillator_strength = 2.0/3.0*excitation_energies/hartree*torch.square(transition_dipole).sum(dim=2)
-    return transition_dipole, oscillator_strength
 
+    if return_tdm:
+        return transition_dipole, oscillator_strength, R
+    else:
+        return transition_dipole, oscillator_strength
 
 def make_guess_any_batch(ea_ei,nroots,maxSubspacesize,V,nmol,nov_batch):
     # Make the davidson guess vectors

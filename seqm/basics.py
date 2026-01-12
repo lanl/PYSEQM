@@ -24,6 +24,7 @@ from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
 
+from .seqm_functions.check_crossing import hungarian_state_assignment_from_overlap, ensure_batched_tdms, broadcast_reference_tdms
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
 """
@@ -485,6 +486,12 @@ class Energy(torch.nn.Module):
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
         Eexcited = 0.0
+
+        # if a reference tdm tensor is provided, automatically calculate tdms for state ordering
+        ref_tdms = self.seqm_parameters.get('reference_tdms', None)
+        if ref_tdms is not None:
+            self.seqm_parameters['calc_cis_tdms'] = True
+
         if self.excited_states is not None:
             all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states['tolerance']
@@ -494,7 +501,13 @@ class Energy(torch.nn.Module):
                 if all_same_mols:
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis' or method == 'tda':
-                        excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window)
+                        if self.seqm_parameters.get('calc_cis_tdms', True):
+                            print("got to calc_cis_tdms")
+                            excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window, return_tdm=True)
+                            print(molecule.cis_tdms)
+                        else:
+                            excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window, return_tdm=False)
+
                     elif method == 'rpa':
                         excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
                     else:
@@ -502,12 +515,69 @@ class Energy(torch.nn.Module):
                 else:
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis':
-                        excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+                        if self.seqm_parameters.get('calc_cis_tdms', True):
+                            print("got to calc_cis_tdms")
+                            excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,return_tdm=True)
+                        else: 
+                            excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,return_tdm=False)
                     else:
                         raise NotImplementedError("RPA for non-uniform batch not yet available")
+                    
+                ### implement state ordering here
+
+                # ref_tdms = self.seqm_parameters.get('reference_tdms', None)
+                if ref_tdms is not None:
+
+                    # get current-step tdms
+                    current_tdms = molecule.cis_tdms
+                    if not torch.is_tensor(current_tdms):
+                        raise TypeError("molecule.cis_tdms must be a torch.Tensor")
+
+                    current_tdms = ensure_batched_tdms(current_tdms)
+                    B, N, M, M2 = current_tdms.shape
+                    if M != M2:
+                        raise ValueError(f"Current TDMs must be square in last dims; got {tuple(current_tdms.shape)}")
+
+                    # get reference tdms from user parameters
+                    ref_tdms = self.seqm_parameters.get("reference_tdms", None)
+
+                    if ref_tdms is None or isinstance(ref_tdms, bool):
+                        raise ValueError(
+                            "reference_tdms parameter must contain a Tensor/array of reference TDMs "
+                            "(not True/False)."
+                        )
+
+                    # Convert to torch tensor if needed
+                    if not torch.is_tensor(ref_tdms):
+                        ref_tdms = torch.as_tensor(ref_tdms)
+
+                    # Move to same device/dtype as current
+                    ref_tdms = ref_tdms.to(device=molecule.cis_tdms.device, dtype=molecule.cis_tdms.dtype)
+
+                    # shape normalization + compatibility checks
+                    ref_tdms = broadcast_reference_tdms(ref_tdms, B)
+
+                    if ref_tdms.shape[1] != N:
+                        raise ValueError(
+                            f"reference_tdms has N={ref_tdms.shape[1]} states but current step has N={N} states. "
+                            "They must match for 1-to-1 assignment."
+                        )
+                    if ref_tdms.shape[2:] != (M, M):
+                        raise ValueError(
+                            f"reference_tdms AO dims {tuple(ref_tdms.shape[2:])} do not match current "
+                            f"TDM dims {(M, M)}. They must match (same packed AO basis size)."
+                        )
+                    overlap = torch.einsum("bimn,bjmn->bij", ref_tdms, current_tdms)
+                    iorden, cost, score = hungarian_state_assignment_from_overlap(overlap, 
+                                                              window=2, 
+                                                              scale=1e5, 
+                                                              forbid_cost=1e5)
+                    molecule.ref_state_order = iorden
+                    print(molecule.ref_state_order)
+
                 molecule.cis_amplitudes = exc_amps
                 molecule.cis_energies = excitation_energies
-
+                print('calculating cis energies when excited states is not none')
                 # # Verify some stuff for excited state XL-BOMD
                 # tmp = make_cis_densities(molecule, True, False, False)
                 # cis_energy_from_transition_density(molecule,F,tmp["transition_density"],w,P,Hcore)
@@ -552,6 +622,9 @@ class Energy(torch.nn.Module):
                 molecule.all_forces = torch.empty(molecule.nmol,nroots+1,molecule.molsize,3)
                 molecule.all_cis_relaxed_diploles = torch.empty(molecule.nmol,nroots,3)
                 molecule.all_cis_unrelaxed_diploles = torch.empty(molecule.nmol,nroots,3)
+                
+                # molecule.all_cis_tdm = torch.empty(molecule.nmol,nroots,3)
+
                 molecule.all_forces[:,0,...] = -molecule.analytical_gradient
                 for i in range(1,nroots+1):
                     molecule.active_state = i
