@@ -271,7 +271,7 @@ def run_tully(model: TullyModel, method="fssh", timestep=0.05, steps=200, x0=-8.
             model = TullyModel.single_crossing()
         elif name in ("2", "double", "dac", "double_avoided_crossing", "model2"):
             model = TullyModel.double_crossing()
-        elif name in ("3", "extended", "reflection", "model3"):
+        elif name in ("3", "extended", "reflection", "model3","extended_coupling"):
             model = TullyModel.extended_coupling()
         else:
             raise ValueError(f"Unknown Tully model '{model}'")

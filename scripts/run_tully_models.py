@@ -34,7 +34,7 @@ def get_model(name: str) -> TullyModel:
         return TullyModel.single_crossing()
     if name in ("2", "double", "dac", "double_avoided_crossing", "model2"):
         return TullyModel.double_crossing()
-    if name in ("3", "extended", "reflection", "model3"):
+    if name in ("3", "extended", "reflection", "model3","extended_coupling"):
         return TullyModel.extended_coupling()
     raise ValueError(f"Unknown Tully model '{name}'")
 
@@ -45,7 +45,7 @@ def _model_key(name: str) -> str:
         return "1"
     if name in ("2", "double", "dac", "double_avoided_crossing", "model2"):
         return "2"
-    if name in ("3", "extended", "reflection", "model3"):
+    if name in ("3", "extended", "reflection", "model3","extended_coupling"):
         return "3"
     return "1"
 
