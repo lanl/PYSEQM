@@ -373,17 +373,26 @@ class Energy(torch.nn.Module):
             return new_amp
         if not (torch.is_tensor(new_amp) and torch.is_tensor(ref_amp)):
             return new_amp
-        if new_amp.shape != ref_amp.shape:
-            return new_amp
-
         amp = new_amp[0] if rpa else new_amp
         ref = ref_amp[0] if rpa else ref_amp
-        sum_dims = tuple(range(2, amp.ndim))
-        ov = torch.sum(ref * amp, dim=sum_dims)
+        if amp.ndim < 3 or ref.ndim < 3:
+            return new_amp
+        n_common = min(amp.shape[1], ref.shape[1])
+        if n_common == 0:
+            return new_amp
+
+        amp_sel = amp[:, :n_common]
+        ref_sel = ref[:, :n_common]
+        sum_dims = tuple(range(2, amp_sel.ndim))
+        ov = torch.sum(ref_sel * amp_sel, dim=sum_dims)
         sign = torch.where(ov >= 0, torch.ones_like(ov), -torch.ones_like(ov))
-        sign = sign.view(*sign.shape, *([1] * (amp.ndim - sign.ndim)))
+        sign = sign.view(*sign.shape, *([1] * (amp_sel.ndim - sign.ndim)))
         if rpa:
             sign = sign.unsqueeze(0)
+        if n_common < amp.shape[1]:
+            full_sign = torch.ones_like(new_amp)
+            full_sign[..., :n_common, :] = sign
+            return new_amp * full_sign
         return new_amp * sign
 
     @staticmethod
