@@ -8,7 +8,9 @@ launching many separate trajectories or processes.
 
 import argparse
 import os
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,6 +24,10 @@ def _set_single_thread():
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
+
+
+def _init_worker():
+    _set_single_thread()
 
 
 def get_model(name: str) -> TullyModel:
@@ -92,7 +98,9 @@ def _run_velocity(
     x0: float,
     elec_substeps: int,
     collect_density: bool,
+    seed: int,
 ) -> Dict:
+    torch.manual_seed(seed)
     dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
     dyn = dyn_cls(model, timestep=timestep, electronic_substeps=elec_substeps)
     mol = BatchedTullyMolecule(x0=x0, v0=[v0] * ntraj, mass=mass, dtype=torch.double)
@@ -113,31 +121,70 @@ def _run_velocity(
     if torch.any(active_state == 0):
         raise RuntimeError("Encountered ground-state label in Tully dynamics; expected excited-state indices only.")
     active_state = active_state - 1  # convert to zero-based
+
     in_window = (final_x > x0) & (final_x < -x0)
     is_trans = final_x >= -x0
+    include_mask = ~in_window
     lower = active_state == 0
     upper = active_state == 1
-    trans_lower = torch.sum(is_trans & lower & (~in_window)).item()
-    trans_upper = torch.sum(is_trans & upper & (~in_window)).item()
-    refl_lower = torch.sum((~is_trans) & lower & (~in_window)).item()
-    refl_upper = torch.sum((~is_trans) & upper & (~in_window)).item()
+    trans_lower = torch.sum(is_trans & lower & include_mask).item()
+    trans_upper = torch.sum(is_trans & upper & include_mask).item()
+    refl_lower = torch.sum((~is_trans) & lower & include_mask).item()
+    refl_upper = torch.sum((~is_trans) & upper & include_mask).item()
     excluded = int(torch.sum(in_window).item())
+    included = ntraj - excluded
+    if included <= 0:
+        raise RuntimeError("All trajectories were excluded (did not exit interaction region).")
+    if excluded / float(included + excluded) > 0.10:
+        raise RuntimeError(f"More than 10% of trajectories excluded ({excluded}/{included + excluded}).")
 
-    rho_sum = None
+    rho_avg = None
     if collect_density and getattr(dyn, "rho_history", None):
         rho_stack = torch.stack(dyn.rho_history, dim=0)  # (nsteps, nmol, 3)
-        rho_sum = rho_stack.sum(dim=1).cpu().numpy()  # sum over molecules
+        if include_mask.any():
+            rho_sel = rho_stack[:, include_mask, :]
+            rho_avg = rho_sel.mean(dim=1).cpu().numpy()
 
     return {
         "v0": v0,
-        "trans_lower": trans_lower,
-        "refl_lower": refl_lower,
-        "trans_upper": trans_upper,
-        "refl_upper": refl_upper,
-        "rho_sum": rho_sum,
-        "count": ntraj - excluded,
+        "trans_lower": trans_lower / included,
+        "refl_lower": refl_lower / included,
+        "trans_upper": trans_upper / included,
+        "refl_upper": refl_upper / included,
+        "rho": rho_avg,
+        "included": included,
         "excluded": excluded,
     }
+
+
+def _run_velocity_worker(args):
+    (
+        model_name,
+        method,
+        v0,
+        ntraj,
+        steps,
+        timestep,
+        mass,
+        x0,
+        elec_substeps,
+        collect_density,
+        seed,
+    ) = args
+    model = get_model(model_name)
+    return _run_velocity(
+        model,
+        method,
+        v0,
+        ntraj=ntraj,
+        steps=steps,
+        timestep=timestep,
+        mass=mass,
+        x0=x0,
+        elec_substeps=elec_substeps,
+        collect_density=collect_density,
+        seed=seed,
+    )
 
 
 def run_ensemble(
@@ -153,63 +200,62 @@ def run_ensemble(
     elec_substeps: int = 15,
     collect_density: bool = False,
     seed: int = 0,
-    max_batch_size: int = 256,
+    workers: int = 1,
 ) -> List[Dict]:
-    torch.manual_seed(seed)
-    _set_single_thread()
-    stats = []
-    for v0 in velocities:
-        remaining = ntraj
-        accum = {
-            "trans_lower": 0.0,
-            "refl_lower": 0.0,
-            "trans_upper": 0.0,
-            "refl_upper": 0.0,
-            "rho_sum": None,
-            "count": 0,
-            "excluded": 0,
-        }
-        while remaining > 0:
-            batch = min(remaining, max_batch_size)
-            res = _run_velocity(
-                model,
+    model_name = model if isinstance(model, str) else getattr(model, "name", None)
+    if workers > 1 and (not isinstance(model, str)) and (model_name is None or model_name == "custom"):
+        raise ValueError("Parallel execution requires a named built-in Tully model (1,2,3).")
+    model_key = model_name if isinstance(model, str) else model_name
+
+    stats: List[Dict] = []
+    v_seed_list = [(seed + i, v) for i, v in enumerate(velocities)]
+
+    if workers > 1:
+        args_list = [
+            (
+                model_key,
                 method,
-                v0,
-                ntraj=batch,
-                steps=steps,
-                timestep=timestep,
-                mass=mass,
-                x0=x0,
-                elec_substeps=elec_substeps,
-                collect_density=collect_density,
+                v,
+                ntraj,
+                steps,
+                timestep,
+                mass,
+                x0,
+                elec_substeps,
+                collect_density,
+                v_seed,
             )
-            for k in ("trans_lower", "refl_lower", "trans_upper", "refl_upper"):
-                accum[k] += res[k]
-            if collect_density and res.get("rho_sum") is not None:
-                if accum["rho_sum"] is None:
-                    accum["rho_sum"] = res["rho_sum"]
-                else:
-                    accum["rho_sum"] += res["rho_sum"]
-            accum["count"] += res["count"]
-            accum["excluded"] += res.get("excluded", 0)
-            remaining -= batch
-        if accum["count"] <= 0:
-            raise RuntimeError("All trajectories were excluded (did not exit interaction region).")
-        if accum["excluded"] / float(accum["count"] + accum["excluded"]) > 0.10:
-            raise RuntimeError(f"More than 10% of trajectories excluded ({accum['excluded']}/{accum['count'] + accum['excluded']}).")
-        rho_avg = None
-        if collect_density and accum["rho_sum"] is not None:
-            rho_avg = accum["rho_sum"] / float(accum["count"])
-        stats.append(
-            {
-                "v0": v0,
-                "trans_lower": accum["trans_lower"] / accum["count"],
-                "refl_lower": accum["refl_lower"] / accum["count"],
-                "trans_upper": accum["trans_upper"] / accum["count"],
-                "refl_upper": accum["refl_upper"] / accum["count"],
-                "rho": rho_avg,
-            }
-        )
+            for v_seed, v in v_seed_list
+        ]
+        try:
+            ctx = mp.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_init_worker) as ex:
+                for res in ex.map(_run_velocity_worker, args_list):
+                    stats.append(res)
+        except PermissionError:
+            print("Parallel execution not permitted; falling back to serial.")
+            workers = 1
+
+    if workers == 1:
+        for v_seed, v in v_seed_list:
+            torch.manual_seed(v_seed)
+            local_model = get_model(model_key) if isinstance(model_key, str) else model
+            stats.append(
+                _run_velocity(
+                    local_model,
+                    method,
+                    v,
+                    ntraj=ntraj,
+                    steps=steps,
+                    timestep=timestep,
+                    mass=mass,
+                    x0=x0,
+                    elec_substeps=elec_substeps,
+                    collect_density=collect_density,
+                    seed=v_seed,
+                )
+            )
+
     return stats
 
 
@@ -309,7 +355,7 @@ def main():
     parser.add_argument("--method", default="fssh", choices=["fssh", "ehrenfest"])
     parser.add_argument("--velocities", nargs="+", type=float, default=None)
     parser.add_argument("--ntraj", type=int, default=1000, help="Trajectories per velocity (batched)")
-    parser.add_argument("--steps", type=int, default=1000, help="Steps per trajectory")
+    parser.add_argument("--steps", type=int, default=800, help="Steps per trajectory")
     parser.add_argument("--timestep", type=float, default=0.25, help="Time step (fs)")
     parser.add_argument("--elec-substeps", type=int, default=15, help="Electronic RK4 substeps per nuclear step")
     parser.add_argument("--mass", type=float, default=1.0971598, help="Mass in amu")
@@ -318,7 +364,7 @@ def main():
     parser.add_argument("--plot-density", action="store_true", help="Plot averaged density matrix elements.")
     parser.add_argument("--density-outfile", default="tully_density.png", help="Density matrix plot filename")
     parser.add_argument("--seed", type=int, default=0, help="Random seed for hops")
-    parser.add_argument("--max-batch-size", type=int, default=2000, help="Maximum batch size per velocity")
+    parser.add_argument("--workers", type=int, default=1, help="Parallel workers (one velocity per worker)")
     args = parser.parse_args()
 
     if args.plot_energies:
@@ -401,7 +447,7 @@ def main():
         elec_substeps=args.elec_substeps,
         collect_density=args.plot_density,
         seed=args.seed,
-        max_batch_size=max(1, args.max_batch_size),
+        workers=max(1, args.workers),
     )
     print("Velocity  Trans(L)  Refl(L)  Trans(U)")
     for s in stats:
