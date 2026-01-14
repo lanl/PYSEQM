@@ -442,12 +442,15 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 excited_states_params = self.seqm_parameters.get('excited_states')
                 n_roots = excited_states_params["n_states"] if excited_states_params is not None else 0
 
+                ref_tdms = self.seqm_parameters.get('reference_tdms', None)
+                ordering = True if (ref_tdms is not None) and (excited_states_params is not None) else 0
                 self._h5_open(
                     molecule,
                     h5_prefix,
                     steps=steps,
                     data_stride=self._h5_data_every,
                     excited_states=n_roots,
+                    ordering=ordering,
                     write_mo=self._h5_write_mo,
                     resume=self.step_offset > 0,
                 )
@@ -537,6 +540,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                  steps,
                  data_stride=1,
                  excited_states=0,
+                 ordering=0,
                  write_mo=False,
                  resume=False,
                  compression="gzip",
@@ -581,6 +585,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "Nat": Nat_mol,
                 "active_slice": S,
                 "n_excited_states": R,
+                ""
                 "write_mo": bool(write_mo),
                 "Tw_data": int(Tw_data),
                 "Tw_vec": {
