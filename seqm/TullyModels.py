@@ -4,6 +4,7 @@ from typing import Callable, Dict, Tuple
 import torch
 
 from .NonadiabaticDynamics import EhrenfestDynamics, SurfaceHoppingDynamics
+from .active_state import active_state_tensor
 
 
 @dataclass
@@ -42,17 +43,12 @@ class TullyModel:
         D = 3.57106482609  # 1.0 1/Bohr^2 -> 1/Å^2
 
         def pot(x: torch.Tensor):
-            exp_pos = torch.exp(-B * x)   # used for x>0
-            exp_neg = torch.exp(B * x)    # used for x<0
-
-            V11_pos = A * (1.0 - exp_pos)          # x > 0
-            V11_neg = -A * (1.0 - exp_neg)         # x < 0
-            V11 = torch.where(x >= 0.0, V11_pos, V11_neg)
+            absx = torch.abs(x)
+            exp_abs = torch.exp(-B * absx)
+            sign = torch.sign(x)
+            V11 = A * (1.0 - exp_abs) * sign
+            dV11 = A * B * exp_abs
             V22 = -V11
-
-            dV11_pos = A * B * exp_pos             # derivative for x>0
-            dV11_neg = A * B * exp_neg             # derivative for x<0
-            dV11 = torch.where(x >= 0.0, dV11_pos, dV11_neg)
             dV22 = -dV11
 
             V12 = C * torch.exp(-D * x * x)
@@ -101,15 +97,11 @@ class TullyModel:
             dV11 = torch.zeros_like(x)
             dV22 = torch.zeros_like(x)
 
-            # piecewise coupling
-            V12_left  = B * torch.exp(C * x)             # x < 0
-            V12_right = B * (2.0 - torch.exp(-C * x))    # x >= 0
-            V12 = torch.where(x < 0.0, V12_left, V12_right)
-
-            # derivatives
-            dV12_left  = C * V12_left                    # d/dx [B e^{Cx}] = C * B e^{Cx}
-            dV12_right = B * (C * torch.exp(-C * x))     # d/dx [B(2 - e^{-Cx})] = B*C*e^{-Cx}
-            dV12 = torch.where(x < 0.0, dV12_left, dV12_right)
+            absx = torch.abs(x)
+            exp_abs = torch.exp(-C * absx)
+            s = 0.5 * (1.0 + torch.sign(x))
+            V12 = B * (s * (2.0 - exp_abs) + (1.0 - s) * exp_abs)
+            dV12 = B * C * exp_abs
 
             return TullyModel._two_state_from_diabatic(V11, V22, V12, dV11, dV22, dV12)
 
@@ -178,7 +170,8 @@ class _TullyDynamicsMixin:
         self.model = model
         self.initial_state = 0
         self._nstates = _TULLY_NSTATES
-        self._active_state = 0
+        self._active_states = None
+        self._active_state = 0  # backward compat for any stray references
         self.rho_history = []
 
     def _reset_density_history(self):
@@ -209,7 +202,11 @@ class _TullyDynamicsMixin:
         molecule.all_forces = torch.zeros((nmol, self._nstates + 1, molsize, 3), dtype=dtype, device=device)
         molecule.all_forces[:, 1, 0, 0] = -dE[:, 0]
         molecule.all_forces[:, 2, 0, 0] = -dE[:, 1]
-        exc_idx = int(getattr(self, "_active_state", 0))
+        if self._active_states is None:
+            self._active_states = torch.zeros((nmol,), dtype=torch.long, device=device)
+        exc_idx = int(self._active_states[0].item())
+        self._active_state = exc_idx
+        molecule.active_state = self._active_states + 1
         molecule.force = molecule.all_forces[:, exc_idx + 1]
         nac_vec = torch.zeros((nmol, self._nstates, self._nstates, molsize, 3), dtype=dtype, device=device)
         nac_vec[:, 0, 1, 0, 0] = nac
@@ -226,6 +223,8 @@ class _TullyDynamicsMixin:
             "nac_dot": nac_dot,
             "cis_amp": None,
         }
+        # Provide a minimal esdriver args cache so FSSH hop recomputation paths have defaults.
+        self._last_esdriver_args = {"learned_parameters": {}, "kwargs": {}, "esdriver_args": ()}
         return self._cache_new["energies"]
 
 
@@ -254,7 +253,8 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
 
     def _recompute_active_force(self, molecule):
         state_energies = self._compute_electronic_structure(molecule, learned_parameters={})
-        exc_idx = int(self._active_state)
+        exc_idx = int(self._active_states[0].item()) if self._active_states is not None else int(self._active_state)
+        self._active_state = exc_idx
         molecule.force = molecule.all_forces[:, exc_idx + 1]
         self._current_potential = state_energies[:, exc_idx]
         molecule.Etot = self._current_potential

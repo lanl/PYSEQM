@@ -25,6 +25,7 @@ here Tr(D) = 2*Nocc
 """
 
 import torch
+from seqm.active_state import active_state_tensor
 from .seqm_functions.energy import total_energy, pair_nuclear_energy, elec_energy_isolated_atom, heat_formation, elec_energy_xl
 from .seqm_functions.SP2 import SP2
 from .basics import Parser, Pack_Parameters
@@ -330,7 +331,8 @@ class EnergyXL(torch.nn.Module):
                 calc_ground_dipole(molecule,D)
 
         if self.excited_states:
-            if molecule.active_state<1:
+            active_states = active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device)
+            if torch.any(active_states < 1):
                 raise Exception("You have asked for excited states XL-MD, but you haven't specified the active state")
             # cis_tol = self.excited_states['tolerance']
             method = self.excited_states['method'].lower()

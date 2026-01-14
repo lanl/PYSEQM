@@ -1,4 +1,5 @@
 import torch
+from seqm.active_state import active_state_tensor
 from .constants import a0
 import math
 from seqm.seqm_functions.pack import packone, unpackone
@@ -182,13 +183,14 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     return e_val_n, amplitude_store
 
 def rcis_analysis(mol,excitation_energies,amplitudes,nroots_target,rpa=False):
-    if not (mol.verbose or (mol.active_state>0)):
+    active_states = active_state_tensor(mol.active_state, int(mol.nmol), mol.coordinates.device)
+    if not (mol.verbose or torch.any(active_states > 0)):
         return 
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles_any_batch(mol,amplitudes,excitation_energies,nroots_target,dipole_mat,rpa)
     if mol.verbose:
         print_rcis_analysis(excitation_energies,transition_dipole,oscillator_strength)
-    if mol.active_state > 0:
+    if torch.any(active_states > 0):
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
 def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):

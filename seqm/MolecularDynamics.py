@@ -15,6 +15,7 @@ import torch
 
 from seqm.basics import Force
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
+from seqm.active_state import active_state_tensor
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -133,6 +134,7 @@ class HDF5Writer:
         restricted = not bool(self.seqm_parameters.get('UHF', False))
         self._save_relaxed_dipole = (excited_states > 0 and 
                                      molecule.seqm_parameters.get('scf_backward', 0) == 0)
+        active_states = active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device)
         
         for mol in self.config.molid:
             h5_path = f"{prefix}.{mol}.h5"
@@ -158,7 +160,7 @@ class HDF5Writer:
             if resume:
                 self._open_resume(h5_path, mol, step_offset)
             else:
-                self._create_new(h5_path, mol, molecule, Nat_mol, Norb_mol, R, Tw_data, Tw_vec, Tw_tdm)
+                self._create_new(h5_path, mol, molecule, Nat_mol, Norb_mol, R, Tw_data, Tw_vec, Tw_tdm, active_states=active_states)
     
     def _open_resume(self, h5_path: str, mol: int, step_offset: int):
         """Open existing HDF5 file for resuming."""
@@ -199,7 +201,7 @@ class HDF5Writer:
         })
     
     def _create_new(self, h5_path: str, mol: int, molecule, Nat_mol: int, 
-                   Norb_mol: int, R: int, Tw_data: int, Tw_vec: Dict, Tw_tdm: int):
+                   Norb_mol: int, R: int, Tw_data: int, Tw_vec: Dict, Tw_tdm: int, active_states=None):
         """Create new HDF5 file."""
         _rotate_existing(h5_path)
         h5 = h5py.File(h5_path, "w")
@@ -221,7 +223,10 @@ class HDF5Writer:
             self._create_row_chunked(gd, "properties/ground_dipole", (Tw_data, 3))
             
             if R > 0:
-                gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
+                if active_states is not None:
+                    gd.create_dataset("excitation/active_state", data=int(active_states[mol].item()))
+                else:
+                    gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
                 self._create_row_chunked(gd, "excitation/excitation_energy", (Tw_data, R))
                 self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
                 self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
@@ -234,7 +239,7 @@ class HDF5Writer:
                     gtdm = gd["excitation"].create_group("transition_density_matrices")
                     self._create_row_chunked(gtdm, "steps", (Tw_tdm,), np.int64)
                     self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol, Norb_mol))
-            
+        
             if self._write_mo:
                 restricted = self.flags[mol]["restricted"]
                 shape = (Tw_data, 1) if restricted else (Tw_data, 2)
@@ -1093,7 +1098,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             P = self._propagate_P(P, Pt, cindx, molecule)
             Pt[(self.m - 1 - cindx)] = P
             
-            if molecule.active_state > 0:
+            if torch.any(active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device) > 0):
                 es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
                 es_amp_t[(self.m - 1 - cindx)] = es_amp
                 es_amp_ortho = es_amp
@@ -1151,7 +1156,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
     
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), 
                   do_xl_esmd=False, *args, **kwargs):
-        if molecule.active_state > 0:
+        if torch.any(active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device) > 0):
             self.move_on_excited_state = True
             self.esdriver.conservative_force.energy.excited_states['save_tdm'] = True
         
@@ -1199,7 +1204,10 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
             # for xl-esmd since we propagate the transition_density for only the active state, save only that
             if do_xl_esmd:
-                active_idx = molecule.active_state - 1  # Convert 1-indexed to 0-indexed
+                active_state_vec = active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device)
+                if torch.unique(active_state_vec).numel() != 1:
+                    raise ValueError("XL-ESMD currently supports a single active state across the batch.")
+                active_idx = int(active_state_vec[0].item()) - 1  # Convert 1-indexed to 0-indexed
                 molecule.transition_density_matrices = molecule.transition_density_matrices[:,active_idx:active_idx+1]
                 # For XL_ESMD, keep only the active state data for all excited state properties
                 # These are the properties that get saved to HDF5

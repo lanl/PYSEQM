@@ -1,4 +1,5 @@
 import torch
+from seqm.active_state import active_state_tensor
 from .dipole import calc_dipole_matrix
 from .constants import a0
 import math
@@ -566,7 +567,7 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
 def rcis_analysis(mol,excitation_energies,amplitudes,nroots,rpa=False,orbital_window=None, save_tdm=False):
-    if not (mol.verbose or (mol.active_state>0)):
+    if not (mol.verbose or torch.any(active_state_tensor(mol.active_state, int(mol.nmol), mol.coordinates.device) > 0)):
         return 
     dipole_mat = calc_dipole_matrix(mol) 
     transition_dipole, oscillator_strength =  calc_transition_dipoles(mol,amplitudes,excitation_energies,nroots,dipole_mat,rpa,orbital_window,save_tdm)
@@ -847,7 +848,17 @@ def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
 
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
 def make_cis_densities(mol,do_transition_denisty, do_difference_density, do_relaxed_density, orbital_window = None, w = None, e_mo = None, zvec_tolerance = 1e-6, rpa=False):
-    amp = mol.cis_amplitudes[...,mol.active_state-1,:]
+    active_states = active_state_tensor(mol.active_state, int(mol.nmol), mol.cis_amplitudes.device)
+    if torch.any(active_states <= 0):
+        raise ValueError("Active states must be >0 for CIS density construction.")
+    state_idx = active_states - 1
+    nmol = int(mol.nmol)
+    if mol.cis_amplitudes.dim() == 4:
+        idx = state_idx.view(1, nmol, 1, 1).expand(2, -1, 1, mol.cis_amplitudes.shape[-1])
+        amp = mol.cis_amplitudes.gather(2, idx).squeeze(2)
+    else:
+        idx = state_idx.view(nmol, 1, 1).expand(-1, 1, mol.cis_amplitudes.shape[-1])
+        amp = mol.cis_amplitudes.gather(1, idx).squeeze(1)
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window=orbital_window)
     nmol, norb = Cocc.shape[:2]
 

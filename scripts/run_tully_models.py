@@ -50,6 +50,18 @@ def _model_key(name: str) -> str:
     return "1"
 
 
+def _classify_exit(x_final: float, x0: float) -> Optional[bool]:
+    """
+    Returns True if transmitted (right of -x0), False if reflected (left of x0).
+    Returns None if still within interaction window (between x0 and -x0).
+    """
+    if x_final >= -x0:
+        return True
+    if x_final <= x0:
+        return False
+    return None
+
+
 def _run_single_worker(
     seed: int,
     model_name: str,
@@ -76,11 +88,23 @@ def _run_single_worker(
     with torch.no_grad():
         dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
     x_final = float(mol.coordinates[0, 0, 0])
-    pop = dyn.populations.detach().cpu()[0]
+    is_trans = _classify_exit(x_final, x0)
+    active_state = None
+    if hasattr(mol, "active_state"):
+        act = mol.active_state
+        if torch.is_tensor(act):
+            active_state = int(act.view(-1)[0].item())
+        else:
+            active_state = int(act)
+    if active_state is None and hasattr(dyn, "populations"):
+        active_state = int(torch.argmax(dyn.populations[0]).item())
+    # Convert to zero-based for counting (molecule.active_state is 1-based when set by dynamics)
+    if active_state is not None and active_state > 0:
+        active_state = active_state - 1
     rho_hist = None
     if collect_density and getattr(dyn, "rho_history", None):
         rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
-    return (x_final > 0.0), pop, rho_hist
+    return is_trans, active_state, rho_hist
 
 import multiprocessing as mp
 def run_ensemble(
@@ -102,12 +126,12 @@ def run_ensemble(
         if model_name is None or model_name == "custom":
             raise ValueError("Parallel runs require a named built-in Tully model (1,2,3).")
 
-    def _one(seed, v0):
-        torch.manual_seed(seed)
-        local_model = get_model(model_name) if isinstance(model_name, str) else model
-        dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-        dyn = dyn_cls(local_model, timestep=timestep, electronic_substeps=elec_substeps)
-        mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
+        def _one(seed, v0):
+            torch.manual_seed(seed)
+            local_model = get_model(model_name) if isinstance(model_name, str) else model
+            dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
+            dyn = dyn_cls(local_model, timestep=timestep, electronic_substeps=elec_substeps)
+            mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
         dyn._setup_states(mol)
         dyn._init_coeffs(mol)
         if collect_density and hasattr(dyn, "_reset_density_history"):
@@ -115,17 +139,29 @@ def run_ensemble(
         mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
         with torch.no_grad():
             dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
-        x_final = float(mol.coordinates[0, 0, 0])
-        pop = dyn.populations.detach().cpu()[0]
-        rho_hist = None
-        if collect_density and getattr(dyn, "rho_history", None):
-            rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
-        return (x_final > 0.0), pop, rho_hist
+            x_final = float(mol.coordinates[0, 0, 0])
+            is_trans = _classify_exit(x_final, x0)
+            active_state = None
+            if hasattr(mol, "active_state"):
+                act = mol.active_state
+                if torch.is_tensor(act):
+                    active_state = int(act.view(-1)[0].item())
+                else:
+                    active_state = int(act)
+            if active_state is None and hasattr(dyn, "populations"):
+                active_state = int(torch.argmax(dyn.populations[0]).item())
+            if active_state is not None and active_state > 0:
+                active_state = active_state - 1
+            rho_hist = None
+            if collect_density and getattr(dyn, "rho_history", None):
+                rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
+            return is_trans, active_state, rho_hist
 
     stats = []
     for v0 in velocities:
         trans_lower = refl_lower = 0.0
         trans_upper = refl_upper = 0.0
+        excluded = 0
         rho_sum = None
         seeds = range(ntraj)
         if workers > 1:
@@ -144,54 +180,74 @@ def run_ensemble(
             try:
                 ctx = mp.get_context("spawn")
                 with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_init_worker) as ex:
-                    for is_trans, pop, rho_hist in ex.map(worker, seeds):
-                        p0 = float(pop[0].item())
-                        p1 = float(pop[1].item()) if pop.numel() > 1 else 0.0
+                    for is_trans, active_state, rho_hist in ex.map(worker, seeds):
+                        if is_trans is None or active_state is None:
+                            excluded += 1
+                            continue
                         if is_trans:
-                            trans_lower += p0
-                            trans_upper += p1
+                            if active_state == 0:
+                                trans_lower += 1.0
+                            else:
+                                trans_upper += 1.0
                         else:
-                            refl_lower += p0
-                            refl_upper += p1
+                            if active_state == 0:
+                                refl_lower += 1.0
+                            else:
+                                refl_upper += 1.0
                         if collect_density and rho_hist is not None:
                             rho_sum = rho_hist if rho_sum is None else rho_sum + rho_hist
             except PermissionError:
                 print("Parallel execution not permitted; falling back to serial.")
                 for seed in seeds:
-                    is_trans, pop, rho_hist = _one(seed, v0)
-                    p0 = float(pop[0].item())
-                    p1 = float(pop[1].item()) if pop.numel() > 1 else 0.0
+                    is_trans, active_state, rho_hist = _one(seed, v0)
+                    if is_trans is None or active_state is None:
+                        excluded += 1
+                        continue
                     if is_trans:
-                        trans_lower += p0
-                        trans_upper += p1
+                        if active_state == 0:
+                            trans_lower += 1.0
+                        else:
+                            trans_upper += 1.0
                     else:
-                        refl_lower += p0
-                        refl_upper += p1
+                        if active_state == 0:
+                            refl_lower += 1.0
+                        else:
+                            refl_upper += 1.0
                     if collect_density and rho_hist is not None:
                         rho_sum = rho_hist if rho_sum is None else rho_sum + rho_hist
         else:
             for seed in seeds:
-                is_trans, pop, rho_hist = _one(seed, v0)
-                p0 = float(pop[0].item())
-                p1 = float(pop[1].item()) if pop.numel() > 1 else 0.0
+                is_trans, active_state, rho_hist = _one(seed, v0)
+                if is_trans is None or active_state is None:
+                    excluded += 1
+                    continue
                 if is_trans:
-                    trans_lower += p0
-                    trans_upper += p1
+                    if active_state == 0:
+                        trans_lower += 1.0
+                    else:
+                        trans_upper += 1.0
                 else:
-                    refl_lower += p0
-                    refl_upper += p1
+                    if active_state == 0:
+                        refl_lower += 1.0
+                    else:
+                        refl_upper += 1.0
                 if collect_density and rho_hist is not None:
                     rho_sum = rho_hist if rho_sum is None else rho_sum + rho_hist
         rho_avg = None
+        used = ntraj - excluded
+        if used <= 0:
+            raise RuntimeError("All trajectories were excluded (did not exit interaction region).")
+        if excluded / float(ntraj) > 0.10:
+            raise RuntimeError(f"More than 10% of trajectories excluded ({excluded}/{ntraj}).")
         if collect_density and rho_sum is not None:
-            rho_avg = rho_sum / float(ntraj)
+            rho_avg = rho_sum / float(used)
         stats.append(
             {
                 "v0": v0,
-                "trans_lower": trans_lower / ntraj,
-                "refl_lower": refl_lower / ntraj,
-                "trans_upper": trans_upper / ntraj,
-                "refl_upper": refl_upper / ntraj,
+                "trans_lower": trans_lower / used,
+                "refl_lower": refl_lower / used,
+                "trans_upper": trans_upper / used,
+                "refl_upper": refl_upper / used,
                 "rho": rho_avg,
             }
         )

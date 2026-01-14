@@ -25,6 +25,7 @@ from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
 from .seqm_functions.XLESMD import elec_energy_excited_xl, sample_noisy_R_energy
 from .nac_utils import resolve_nac_config
+from .active_state import active_state_tensor
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -502,26 +503,30 @@ class Energy(torch.nn.Module):
         Eelec = elec_energy(P, F, Hcore)
 
         do_analytical_gradient = self.seqm_parameters.get('analytical_gradient',[False])
-        if do_analytical_gradient[0] and molecule.active_state==0:
+        active_states = active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device)
+        ground_mask = active_states == 0
+        excited_mask = active_states > 0
+        grad_ground = None
+        if do_analytical_gradient[0] and ground_mask.any():
             # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so
             # we can save on memory since the compuational graph doesn't have to be stored.
             beta = molecule.parameters['beta']
             if molecule.const.do_timing: t0 = time.time()
             with torch.no_grad():
                 if len(do_analytical_gradient) > 1 and do_analytical_gradient[1].lower() == 'numerical':
-                    molecule.analytical_gradient =  scf_grad( P0=P, molecule = molecule, const=molecule.const, method = self.method,
+                    grad_ground =  scf_grad( P0=P, molecule = molecule, const=molecule.const, method = self.method,
                                                   molsize=molecule.molsize, maskd=molecule.maskd, mask=molecule.mask, idxi=molecule.idxi,
                                                   idxj=molecule.idxj, ni=molecule.ni, nj=molecule.nj, xij=molecule.xij, gam=gam, rij=molecule.rij,
                                                   Z=molecule.Z, parnuc = parnuc, zetas=molecule.parameters['zeta_s'], zetap=molecule.parameters['zeta_p'],
                                                   beta=beta,)
-                # elif analytical_gradient[1].lower()=='analytical':
                 else:
-                    molecule.analytical_gradient =  scf_analytic_grad( P0=P, molecule=molecule, const=molecule.const, method = self.method,
+                    grad_ground =  scf_analytic_grad( P0=P, molecule=molecule, const=molecule.const, method = self.method,
                               molsize=molecule.molsize, maskd=molecule.maskd, mask=molecule.mask, idxi=molecule.idxi, idxj=molecule.idxj,
                               ni=molecule.ni, nj=molecule.nj, xij=molecule.xij, rij=molecule.rij, Z=molecule.Z, gam=gam, parnuc = parnuc,
                               zetas=molecule.parameters['zeta_s'], zetap=molecule.parameters['zeta_p'], gss=molecule.parameters['g_ss'],
                               gpp=molecule.parameters['g_pp'], gp2=molecule.parameters['g_p2'], hsp=molecule.parameters['h_sp'],
                               beta=beta, ri=ri, riXH=riXH,)
+            molecule.analytical_gradient = grad_ground
 
             if molecule.const.do_timing:
                 if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -532,10 +537,10 @@ class Energy(torch.nn.Module):
         if molecule.method not in ('PM6',): # Not yet implemented for PM6 d-orbitals
             calc_ground_dipole(molecule,P)
 
-        if molecule.active_state > 0 and not self.excited_states and not self.xlesmd:
+        if excited_mask.any() and not self.excited_states and not self.xlesmd:
             raise Exception("You have requested for excited state dynamics but have not given input parameters for excited states (like n_states) in seqm_parameters")
 
-        Eexcited = 0.0
+        Eexcited = torch.zeros(int(molecule.nmol), dtype=Eelec.dtype, device=Eelec.device)
         if self.excited_states:
             all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states['tolerance']
@@ -607,23 +612,66 @@ class Energy(torch.nn.Module):
                     molecule.nac = None
                 molecule.nac_dot = None
 
-            if molecule.active_state>0:
+            if excited_mask.any():
+                active_idx = torch.clamp(active_states - 1, min=0)
+
+                def _gather_active_amplitude(amplitudes):
+                    if method == 'rpa':
+                        idx = active_idx.view(1, -1, 1, 1).expand(2, -1, 1, amplitudes.shape[-1])
+                        gathered = amplitudes.gather(2, idx).squeeze(2)
+                        mask_expand = excited_mask.view(1, -1, 1)
+                        out = torch.zeros_like(gathered)
+                        out[mask_expand.expand_as(out)] = gathered[mask_expand.expand_as(out)]
+                        return out
+                    idx = active_idx.view(-1, 1, 1).expand(-1, 1, amplitudes.shape[-1])
+                    gathered = amplitudes.gather(1, idx).squeeze(1)
+                    out = torch.zeros_like(gathered)
+                    out[excited_mask] = gathered[excited_mask]
+                    return out
 
                 if do_analytical_gradient[0]:
                     if not all_same_mols:
                         raise NotImplementedError
 
-                    Eexcited = excitation_energies[:,molecule.active_state-1]
+                    Eexcited[excited_mask] = excitation_energies[excited_mask, active_idx[excited_mask]]
                     if molecule.const.do_timing: t0 = time.time()
-                    molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=True, orbital_window=orbital_window, calculate_dipole = True)
+                    saved_active_state = molecule.active_state
+                    try:
+                        molecule.active_state = active_states
+                        grad_excited = rcis_grad_batch(
+                            molecule,
+                            w,
+                            e,
+                            riXH,
+                            ri,
+                            P,
+                            cis_tol,
+                            gam,
+                            self.method,
+                            parnuc,
+                            rpa=method == 'rpa',
+                            include_ground_state=True,
+                            orbital_window=orbital_window,
+                            calculate_dipole=True,
+                        )
+                    finally:
+                        molecule.active_state = saved_active_state
                     if molecule.const.do_timing:
                         t1 = time.time()
                         molecule.const.timing["Force"].append(t1 - t0)
-                else:
-                    if all_same_mols:
-                        Eexcited = calc_cis_energy(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],F,P,rpa=method=='rpa',orbital_window=orbital_window)
+                    if grad_ground is None:
+                        molecule.analytical_gradient = grad_excited
                     else:
-                        Eexcited = calc_cis_energy_any_batch(molecule,w,e,exc_amps[...,self.seqm_parameters['active_state']-1,:],rpa=method=='rpa')
+                        combined_grad = grad_ground.clone()
+                        combined_grad[excited_mask] = grad_excited[excited_mask]
+                        molecule.analytical_gradient = combined_grad
+                else:
+                    amp_sel = _gather_active_amplitude(exc_amps)
+                    if all_same_mols:
+                        cis_energy = calc_cis_energy(molecule,w,e,amp_sel,F,P,rpa=method=='rpa',orbital_window=orbital_window)
+                    else:
+                        cis_energy = calc_cis_energy_any_batch(molecule,w,e,amp_sel,rpa=method=='rpa')
+                    Eexcited[excited_mask] = cis_energy[excited_mask]
 
             if self.seqm_parameters.get('do_all_forces',False):
                 init_active_state = molecule.active_state
@@ -692,9 +740,10 @@ class Force(torch.nn.Module):
 
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
         do_analytical_gradient = self.seqm_parameters.get('analytical_gradient', [False])
+        active_states = active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device)
 
         # For excited states, back-prop forces work only if we have scf_backward == 1 or 2. We will have to fall back on analytical_gradient otherwise
-        if molecule.active_state > 0 and do_force:
+        if torch.any(active_states > 0) and do_force:
             if self.seqm_parameters.get('scf_backward', 0) == 0:
                 do_analytical_gradient = [True]
                 self.seqm_parameters['analytical_gradient'] = do_analytical_gradient

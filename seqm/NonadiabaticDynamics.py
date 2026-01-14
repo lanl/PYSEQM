@@ -4,8 +4,11 @@ from typing import Dict, List, Optional
 
 import torch
 
+from seqm.seqm_functions.rcis_batch import get_occ_virt, packone_batch
+
 from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Basic
 from .nac_utils import resolve_nac_config
+from .seqm_functions.hcore import overlap_between_geometries
 
 HBAR_EV_FS = 0.6582119514 # Planck's constant (reduced) in eV·fs
 
@@ -35,6 +38,7 @@ class HopEvent:
     from_state: int
     to_state: int
     accepted: bool
+    mol_index: Optional[int] = None
     reason: Optional[str] = None
 
 
@@ -110,7 +114,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         self._nstates: Optional[int] = None
         self._amp_phase: Optional[torch.Tensor] = None  # (nmol, nstates, 3): x, y, theta
         self._current_potential: Optional[torch.Tensor] = None
-        self._active_state = int(initial_state)
+        self._active_states: Optional[torch.Tensor] = None  # (nmol,)
         self.hop_log: List[HopEvent] = []
         self._cache_old = None
         self._cache_new = None
@@ -133,22 +137,44 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
                 "Quantum dynamics requires seqm_parameters['excited_states']['n_states'] to be set."
             )
         self._nstates = int(exc_cfg["n_states"])
-        if self._active_state >= self._nstates:
+        init_state = int(self.initial_state)
+        if init_state >= self._nstates:
             raise ValueError(
-                f"Initial state {self._active_state} >= available states ({self._nstates})."
+                f"Initial state {init_state} >= available states ({self._nstates})."
             )
 
     def _init_coeffs(self, molecule):
-        if self._amp_phase is not None:
-            return
         nmol = molecule.species.shape[0]
+        device = molecule.coordinates.device
+        if self._active_states is None or self._active_states.shape[0] != nmol:
+            init_state = int(self.initial_state)
+            self._active_states = torch.full(
+                (nmol,),
+                init_state,
+                dtype=torch.long,
+                device=device,
+            )
+        if self._amp_phase is not None and self._amp_phase.shape[0] == nmol:
+            return
         amp_phase = torch.zeros(
             (nmol, self._nstates, 3),
             dtype=molecule.coordinates.dtype,
-            device=molecule.coordinates.device,
+            device=device,
         )
-        amp_phase[:, self._active_state, 0] = 1.0
+        idx = torch.arange(nmol, device=device)
+        amp_phase[idx, self._active_states, 0] = 1.0
         self._amp_phase = amp_phase
+
+    def _uniform_active_state(self) -> Optional[int]:
+        """Return scalar active state if all molecules share it."""
+        if self._active_states is None:
+            return int(self.initial_state)
+        if torch.is_tensor(self._active_states):
+            unique = torch.unique(self._active_states)
+            if unique.numel() == 1:
+                return int(unique.item())
+            return None
+        return int(self._active_states)
 
     @property
     def populations(self) -> torch.Tensor:
@@ -206,23 +232,46 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         state_energies = torch.zeros((nmol, self._nstates), dtype=dtype, device=device)
         base = molecule.Etot.reshape(nmol)
         if active_exc_index is not None:
-            if active_exc_index < 0 or active_exc_index >= n_exc:
-                raise ValueError("Active-state index out of range for cis energies.")
-            base = base - molecule.cis_energies[:, active_exc_index]
+            if torch.is_tensor(active_exc_index):
+                idx = active_exc_index.to(device=device)
+                if idx.dim() == 0:
+                    idx = idx.expand(nmol)
+                if torch.any((idx < 0) | (idx >= n_exc)):
+                    raise ValueError("Active-state index out of range for cis energies.")
+                base = base - molecule.cis_energies[torch.arange(nmol, device=device), idx]
+            else:
+                if active_exc_index < 0 or active_exc_index >= n_exc:
+                    raise ValueError("Active-state index out of range for cis energies.")
+                base = base - molecule.cis_energies[:, active_exc_index]
         state_energies[:, :n_exc] = base.unsqueeze(1) + molecule.cis_energies[:, :n_exc]
         return state_energies
 
-    def _compute_electronic_structure(self, molecule, learned_parameters, **kwargs):
+    def _set_compute_nac(self, enabled: bool, pairs=None):
+        """
+        Toggle NAC computation in the underlying Energy object.
+        Returns previous (enabled, pairs) to allow restore.
+        """
+        cf = getattr(self.esdriver, "conservative_force", None)
+        if cf is None or not hasattr(cf, "energy"):
+            return None
+        cfg = cf.energy.nac_config
+        prev = (cfg.enabled, getattr(cfg, "pairs", None))
+        cfg.enabled = enabled
+        cfg.pairs = pairs
+        return prev
+
+    def _compute_electronic_structure(self, molecule, learned_parameters, compute_nac: bool = False, nac_pairs=None, **kwargs):
         # For "all" forces, set active_state = 0 so Etot is the ground state energy.
         # For "active" forces, keep the active excited state so Etot corresponds to that state.
         old_state = molecule.active_state
         if self._force_mode == "active":
-            target_state = self._active_state + 1  # 1-based for excited-state gradients
-            active_exc_index = self._active_state
+            target_state = self._active_states + 1  # 1-based for excited-state gradients
+            active_exc_index = self._active_states
         else:
             target_state = 0
             active_exc_index = None
         molecule.active_state = target_state
+        prev_nac_cfg = self._set_compute_nac(compute_nac, nac_pairs)
         esdriver_args = kwargs.pop("esdriver_args", ())
         self._last_esdriver_args = {
             "learned_parameters": learned_parameters,
@@ -239,6 +288,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             **kwargs,
         )
         molecule.active_state = old_state
+        if prev_nac_cfg is not None:
+            self._set_compute_nac(prev_nac_cfg[0], prev_nac_cfg[1])
         energies = self._build_state_energies(molecule, active_exc_index=active_exc_index)
         _, nac_vec = self._compute_nac_matrix(molecule)
         self._cache_new = {
@@ -352,6 +403,142 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         perm = self._compute_perm_from_overlap(ref_amp, tgt_amp)
         return self._permute_cache(cache_target, perm), perm
 
+    @staticmethod
+    def _time_derivative_coupling(
+        molecule,
+        coords_prev,
+        mos_prev,
+        cis_prev,   # CIS: (nmol,nstates,nov) or RPA: (2,nmol,nstates,nov)
+        cis_curr,
+        dt,
+        enforce_antisym=True,
+    ):
+        """
+        Excited–excited time-derivative NAC using finite diff of state overlaps.
+        See I. Ryabinkin, J. Nagesh, and F. Izmaylov, J. Phys. Chem. Lett. 6, 4200-4203 (2015) 
+        The implementation below follows NWCHEM's: J. Chem. Theory Comput. 2020, 16, 6418−6427  
+        Shapes expected:
+          - CIS/TDA: cis_* shape (nmol, nstates, nov)  with nov = nocc*nvirt
+          - RPA:     cis_* shape (2, nmol, nstates, nov) with [X,Y]
+
+        Returns:
+          nac_dt: (nmol, nstates, nstates)
+        """
+        if coords_prev is None or mos_prev is None or cis_prev is None or cis_curr is None:
+            return None
+
+        if molecule.nocc.dim() != 1: # restricted closed-shell
+            return None
+
+        # TODO: orbital_window logic to limit nocc/nvirt
+        nocc = int(molecule.nocc[0].item())
+        norb = int(molecule.norb[0].item())
+        nvirt = norb - nocc
+
+        nmol = int(molecule.nmol)
+        nov = nocc * nvirt
+
+        def parse_amp(amp):
+            # CIS/TDA: (nmol, nstates, nov)
+            if amp.dim() == 3:
+                # keep both flattened and 4D views
+                flat = amp
+                view = amp.view(nmol, amp.shape[1], nocc, nvirt)
+                return ("cis", flat, view)
+
+            # RPA: (2, nmol, nstates, nov)
+            if amp.dim() == 4 and amp.shape[0] == 2:
+                Xf = amp[0]
+                Yf = amp[1]
+                Xv = Xf.view(nmol, amp.shape[2], nocc, nvirt)
+                Yv = Yf.view(nmol, amp.shape[2], nocc, nvirt)
+                return ("rpa", (Xf, Yf), (Xv, Yv))
+
+            return None
+
+        prev = parse_amp(cis_prev)
+        curr = parse_amp(cis_curr)
+        if prev is None or curr is None:
+            return None
+
+        with torch.no_grad():
+            # AO overlap between current geometry (rows) and previous geometry (cols)
+            # TODO: check if overlap is b/w current-prev or prev-current
+            S_ao = overlap_between_geometries(
+                molecule,
+                molecule.coordinates.detach(),
+                coords_prev.detach()
+            )
+            # S_ao has to be packed (hydrogen blocks with zero-padding have to be removed)  
+            S_ao = packone_batch(S_ao, 4*molecule.nHeavy[0], molecule.nHydro[0], norb)
+
+            # MO overlap: S_mo = C(t)^T S_ao(t,t-dt) C(t-dt)
+            Cc = molecule.molecular_orbitals  # (nmol, nao, norb)
+            Cp = mos_prev                     # (nmol, nao, norb)
+            S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)  # (nmol, norb, norb)
+
+            Soo = S_mo[:, :nocc, :nocc]      # (nmol, nocc, nocc)
+            Svv = S_mo[:, nocc:, nocc:]      # (nmol, nvirt, nvirt)
+
+            dSoo = Soo.transpose(1, 2) - Soo
+            dSvv = Svv.transpose(1, 2) - Svv
+
+            # helper: MO-derivative term on virtual block
+            def mo_term_virtual(C_view):
+                # C_view: (nmol, nstates, nocc, nvirt)
+                Cd = torch.matmul(C_view, dSvv.transpose(1, 2))      # (nmol, nstates, nocc, nvirt)
+                Cf = C_view.reshape(nmol, C_view.shape[1], nov)      # (nmol, nstates, nov)
+                Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
+                return torch.bmm(Cf, Cdf.transpose(1, 2))            # (nmol, nstates, nstates)
+
+            # helper: MO-derivative term on occupied block
+            def mo_term_occ(C_view):
+                # apply dSoo^T on the occ index
+                Ct = C_view.permute(0, 1, 3, 2)                      # (nmol, nstates, nvirt, nocc)
+                Ctd = torch.matmul(Ct, dSoo.transpose(1, 2))         # (nmol, nstates, nvirt, nocc)
+                Cd = Ctd.permute(0, 1, 3, 2)                         # (nmol, nstates, nocc, nvirt)
+                Cf = C_view.reshape(nmol, C_view.shape[1], nov)
+                Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
+                return torch.bmm(Cf, Cdf.transpose(1, 2))
+
+            if curr[0] == "cis":
+                _, flat_p, view_p = prev
+                _, flat_c, view_c = curr
+
+                # CI-derivative term: <p|c> - <c|p>
+                ov_pc = torch.bmm(flat_p, flat_c.transpose(1, 2))
+                ov_cp = torch.bmm(flat_c, flat_p.transpose(1, 2))
+                coup = (ov_pc - ov_cp)
+
+                # MO-derivative terms
+                coup = coup + mo_term_virtual(view_c) + mo_term_occ(view_c)
+
+            else:
+                _, (Xp_f, Yp_f), (Xp_v, Yp_v) = prev
+                _, (Xc_f, Yc_f), (Xc_v, Yc_v) = curr
+
+                # CI-derivative term in Fortran style:
+                # (X+Y)^T(X+Y) + (X-Y)^T(X-Y)  antisymmetrized between steps
+                Ap_p = (Xp_f + Yp_f)
+                Ap_c = (Xc_f + Yc_f)
+                Am_p = (Xp_f - Yp_f)
+                Am_c = (Xc_f - Yc_f)
+
+                ov_pc = torch.bmm(Ap_p, Ap_c.transpose(1, 2)) + torch.bmm(Am_p, Am_c.transpose(1, 2))
+                ov_cp = torch.bmm(Ap_c, Ap_p.transpose(1, 2)) + torch.bmm(Am_c, Am_p.transpose(1, 2))
+                coup = (ov_pc - ov_cp)
+
+                # MO-derivative terms: +X part +Y part (note the + sign)
+                coup = coup + mo_term_virtual(Xc_v) + mo_term_occ(Xc_v) + mo_term_virtual(Yc_v) + mo_term_occ(Yc_v)
+
+            if enforce_antisym:
+                coup = 0.5 * (coup - coup.transpose(1, 2))
+                coup = coup - torch.diag_embed(torch.diagonal(coup, dim1=1, dim2=2))
+
+            nac_dt = coup / (2.0 * dt)
+
+        return nac_dt
+    
     def _detect_crossings(self, cache_old, cache_new):
         if not self._detect_crossings_flag:
             return []
@@ -494,12 +681,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         return super()._thermo_potential(molecule)
 
     def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
-        if molecule.coordinates.shape[0] != 1:
-            raise RuntimeError("Quantum dynamics currently supports a single molecule at a time.")
         self._setup_states(molecule)
         self._init_coeffs(molecule)
-        self._active_state = self.initial_state
-        molecule.active_state = self.initial_state + 1  # excited-state index (1-based for downstream grad routines)
+        molecule.active_state = self._active_states + 1  # excited-state index (1-based for downstream grad routines)
         super().initialize(
             molecule,
             remove_com=remove_com,
@@ -509,7 +693,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         )
         # Recompute forces with full excited-state information
         state_energies = self._compute_electronic_structure(
-            molecule, learned_parameters, **kwargs
+            molecule, learned_parameters, compute_nac=True, **kwargs
         )
         # Initialize caches so old == new for the first step
         self._cache_old = {
@@ -528,6 +712,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
     def _do_integrator_step(self, i, molecule, learned_parameters, **kwargs):
         dt = self.timestep
         cache_old = self._cache_old or self._cache_new
+        coords_prev = molecule.coordinates.detach().clone()
+        mos_prev = getattr(molecule, "molecular_orbitals", None)
+        if torch.is_tensor(mos_prev):
+            mos_prev = mos_prev.detach().clone()
         with torch.no_grad():
             start_vel = molecule.velocities.detach().clone()
 
@@ -537,7 +725,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             molecule.coordinates.add_(molecule.velocities * dt)
 
         _ = self._compute_electronic_structure(
-            molecule, learned_parameters, **kwargs
+            molecule, learned_parameters, compute_nac=False, **kwargs
         )
 
         # ---- Half kick to t+dt ----
@@ -546,6 +734,14 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             molecule.velocities.add_(0.5 * molecule.acc * dt)
 
         cache_new = self._cache_new
+        nac_dt = self._time_derivative_coupling(
+            molecule,
+            coords_prev,
+            mos_prev,
+            cache_old.get("cis_amp") if cache_old is not None else None,
+            cache_new.get("cis_amp"),
+            dt,
+        )
         # # TODO: Detect trivial crossings and reorder states if needed
         # # Not sure code below is correct for that
         # cache_new, perm_new = self._reorder_against_ref(cache_old, self._cache_new)
@@ -569,8 +765,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             cache["nac_dot"] = nd
             return cache
 
-        cache_old = _attach_nac_dot(cache_old, start_vel) if cache_old is not None else None
-        cache_new = _attach_nac_dot(cache_new, molecule.velocities.detach()) if cache_new is not None else None
+        if nac_dt is None:
+            cache_old = _attach_nac_dot(cache_old, start_vel) if cache_old is not None else None
+            cache_new = _attach_nac_dot(cache_new, molecule.velocities.detach()) if cache_new is not None else None
+        else:
+            cache_new = dict(cache_new)
+            cache_new["nac_dot"] = nac_dt
 
         self._propagate_electronic(cache_old, cache_new, substeps=self._electronic_substeps)
         self._after_electronic_update(
@@ -627,105 +827,97 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
     def __init__(self, seqm_parameters: Dict, *args, **kwargs):
         params = dict(seqm_parameters)
-        params["do_all_forces"] = False
+        params.setdefault("do_all_forces", False)
         na_cfg = dict(params.get("nonadiabatic", {}))
         na_cfg.setdefault("force_mode", "active")
         na_cfg.setdefault("recompute_on_hop", True)
         params["nonadiabatic"] = na_cfg
         super().__init__(params, *args, **kwargs)
 
-    def _attempt_hop(self, nac_vec, state_energies, molecule, step: int):
+    def _attempt_hop(self, state_energies, molecule, step: int):
+        nmol = state_energies.shape[0]
         if self._hop_integral is None:
-            return None
-        i = self._active_state
-        denom = float(torch.clamp(self.populations[0, i], min=1e-10))
-        r = float(torch.rand(1, device=molecule.coordinates.device))
-        cumulative = 0.0
-        target: Optional[int] = None
-
-        for j in range(self._nstates):
-            if j == i:
+            return [None] * nmol
+        if self._active_states is None or self._active_states.shape[0] != nmol:
+            device = molecule.coordinates.device
+            self._active_states = torch.full((nmol,), int(self.initial_state), dtype=torch.long, device=device)
+        Ek_all = self._kinetic_energy(molecule)
+        pop = self.populations
+        hop_targets: List[Optional[int]] = [None] * nmol
+        for mol in range(nmol):
+            i_state = int(self._active_states[mol].item())
+            denom = float(torch.clamp(pop[mol, i_state], min=1e-10))
+            if denom <= 0.0:
                 continue
-            gij = max(float(self._hop_integral[0, i, j] / denom), 0.0)
-            cumulative += gij
-            if r < cumulative:
-                target = j
-                break
+            r = float(torch.rand(1, device=molecule.coordinates.device))
+            cumulative = 0.0
+            target: Optional[int] = None
+            for j in range(self._nstates):
+                if j == i_state:
+                    continue
+                gij = max(float(self._hop_integral[mol, i_state, j] / denom), 0.0)
+                cumulative += gij
+                if r < cumulative:
+                    target = j
+                    break
+            if target is None:
+                continue
+            dE = float((state_energies[mol, target] - state_energies[mol, i_state]).item())  # eV
+            Ek = float(Ek_all[mol].item())  # eV
+            if dE > Ek + 1e-12:
+                self.hop_log.append(
+                    HopEvent(
+                        step=step + 1,
+                        from_state=i_state,
+                        to_state=target,
+                        accepted=False,
+                        mol_index=mol,
+                        reason="Insufficient kinetic energy",
+                    )
+                )
+                continue
+            hop_targets[mol] = target
+        return hop_targets
 
-        if target is None:
-            return None
-
-        dE = float((state_energies[0, target] - state_energies[0, i]).item()) # in eV
-        Ek = float(self._kinetic_energy(molecule)[0].item()) # in eV
-        if dE <= Ek + 1e-12:
-            # Rescale velocities along NAC direction if available
-            if nac_vec is not None:
-                dvec = nac_vec[0, i, target] 
-                # A = Σ m_k |d_k|^2
-                # mass is in a.m.u., dvec in Å^-1, velocities in Å/fs
-                # dnorm2 = torch.sum(dvec * dvec * molecule.mass.reshape(-1, 1)[0])
-                dnorm2 = torch.sum(molecule.mass[0] * torch.sum(dvec * dvec, dim=1)).item()
-                if dnorm2 < 1e-12:
-                    return None
-                # B = Σ m_k v_k·d_k
-                # v_dot_d = float(torch.sum(molecule.mass[0] * molecule.velocities[0] * dvec))
-                v_dot_d = torch.sum(molecule.mass[0] * torch.sum(molecule.velocities[0] * dvec, dim=1)).item()
-                # v_dot_d is in amu/fs, dnorm2 is in amu·(Å^-2)
-                # convert dE to amu·(Å/fs)^2
-                # rad will be in (amu/fs)^2
-                rad = v_dot_d * v_dot_d - 2.0 * (dE / CONSTANTS.KINETIC_ENERGY_SCALE) * dnorm2
-                if rad >= 0.0:
-                    # choose the root than changes the velocities the least
-                    # alpha = (-v_dot_d + math.copysign(math.sqrt(rad), v_dot_d)) / float(dnorm2)
-                    sqrt_rad = math.sqrt(rad)
-                    alpha1 = (-v_dot_d + sqrt_rad) / dnorm2
-                    alpha2 = (-v_dot_d - sqrt_rad) / dnorm2
-                    alpha = alpha1 if abs(alpha1) < abs(alpha2) else alpha2
-
-                    with torch.no_grad():
-                        # alpha has units of Å^2/fs, so velocities remain in Å/fs
-                        molecule.velocities[0] = molecule.velocities[0] + alpha * dvec
-                    if self._decohere_on_hop:
-                        if self._amp_phase is None:
-                            raise RuntimeError("Electronic coefficients not initialized.")
-                        self._amp_phase[..., :2].zero_()
-                        self._amp_phase[:, target, 0] = 1.0
-                        self._normalize_coeffs()
-                else:
-                    # TODO: Implement configurable frustrated-hop treatment:
-                    # - "none": do nothing (current)
-                    # - "reflect": reflect velocity component along NAC direction
-                    # - "reverse": reverse NAC component
-                    self.hop_log.append(HopEvent(step=step + 1, from_state=i, to_state=target,
-                                     accepted=False, reason="Frustrated hop (no real rescale)"))
-                    return None
-            else:
-                # fallback isotropic scaling (incorrect)
-                scale = math.sqrt(max((Ek - dE) / max(Ek, 1e-12), 0.0))
-                with torch.no_grad():
-                    molecule.velocities.mul_(scale)
-            self._active_state = target
-            self.hop_log.append(
-                HopEvent(step=step + 1, from_state=i, to_state=target, accepted=True)
-            )
-            return target
-        else:
+    def _rescale_velocity_along_nac(self, nac_vec, i_state, j_state, molecule, dE, step, mol_index: int):
+        if nac_vec is None:
+            return False
+        dvec = nac_vec[mol_index, i_state, j_state]
+        mass = molecule.mass[mol_index]
+        dnorm2 = torch.sum(mass * torch.sum(dvec * dvec, dim=1)).item()
+        if dnorm2 < 1e-12:
+            return False
+        v_dot_d = torch.sum(mass * torch.sum(molecule.velocities[mol_index] * dvec, dim=1)).item()
+        rad = v_dot_d * v_dot_d - 2.0 * (dE / CONSTANTS.KINETIC_ENERGY_SCALE) * dnorm2
+        if rad < 0.0:
             self.hop_log.append(
                 HopEvent(
                     step=step + 1,
-                    from_state=i,
-                    to_state=target,
+                    from_state=i_state,
+                    to_state=j_state,
                     accepted=False,
-                    reason="Insufficient kinetic energy",
+                    mol_index=mol_index,
+                    reason="Frustrated hop (no real rescale)",
                 )
             )
-            return None
+            return False
+        sqrt_rad = math.sqrt(rad)
+        alpha1 = (-v_dot_d + sqrt_rad) / dnorm2
+        alpha2 = (-v_dot_d - sqrt_rad) / dnorm2
+        alpha = alpha1 if abs(alpha1) < abs(alpha2) else alpha2
+        with torch.no_grad():
+            molecule.velocities[mol_index] = molecule.velocities[mol_index] + alpha * dvec
+        return True
 
     def _recompute_active_force(self, molecule):
         if self._last_esdriver_args is None:
             raise RuntimeError("No cached electronic-structure call available for hop recompute.")
         es = self._last_esdriver_args
-        molecule.active_state = self._active_state + 1
+        if self._active_states is not None:
+            molecule.active_state = self._active_states + 1
+        else:
+            active_state_scalar = self._uniform_active_state()
+            molecule.active_state = (active_state_scalar + 1) if active_state_scalar is not None else 0
         self.esdriver(
             molecule,
             learned_parameters=es["learned_parameters"],
@@ -741,10 +933,15 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
     def _after_electronic_update(
         self, molecule, state_energies, nac_matrix=None, nac_dot=None, step: Optional[int] = None
     ):
-        hop_target = None
+        nmol = state_energies.shape[0]
+        device = molecule.coordinates.device
+        if self._active_states is None or self._active_states.shape[0] != nmol:
+            self._active_states = torch.full((nmol,), int(self.initial_state), dtype=torch.long, device=device)
+        else:
+            self._active_states = self._active_states.to(device)
+        hop_targets: List[Optional[int]] = [None] * nmol
         if nac_dot is not None:
-            hop_target = self._attempt_hop(
-                nac_matrix,
+            hop_targets = self._attempt_hop(
                 state_energies,
                 molecule,
                 step=step if step is not None else self.step_offset,
@@ -752,11 +949,83 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         # TODO: Add decoherence correction (e.g., energy-based decoherence / A-FSSH).
         # Plain FSSH overcoheres when no hops occur; collapse-on-hop alone is not sufficient.
 
-        exc_idx = int(self._active_state)
-        self._current_potential = state_energies[:, exc_idx]
+        if self._last_esdriver_args is None:
+            # Fallback for analytic models (e.g., Tully) that don't call _compute_electronic_structure
+            self._last_esdriver_args = {"learned_parameters": {}, "kwargs": {}, "esdriver_args": ()}
+
+        hop_pairs = []
+        for mol, target in enumerate(hop_targets):
+            if target is None:
+                continue
+            hop_pairs.append((int(self._active_states[mol].item()) + 1, target + 1))
+        if hop_pairs:
+            unique_pairs = []
+            seen_pairs = set()
+            for pair in hop_pairs:
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                unique_pairs.append(pair)
+            _ = self._compute_electronic_structure(
+                molecule,
+                learned_parameters=self._last_esdriver_args["learned_parameters"],
+                compute_nac=True,
+                nac_pairs=unique_pairs,
+                **self._last_esdriver_args["kwargs"],
+                esdriver_args=self._last_esdriver_args["esdriver_args"],
+            )
+            nac_matrix = self._cache_new.get("nac_vec")
+
+        for mol, target in enumerate(hop_targets):
+            if target is None:
+                continue
+            exc_idx = int(self._active_states[mol].item())
+            dE = float((state_energies[mol, target] - state_energies[mol, exc_idx]).item())
+            success = self._rescale_velocity_along_nac(
+                nac_matrix,
+                exc_idx,
+                target,
+                molecule,
+                dE,
+                step or self.step_offset,
+                mol_index=mol,
+            )
+            if success:
+                self._active_states[mol] = target
+                if self._decohere_on_hop:
+                    if self._amp_phase is None:
+                        raise RuntimeError("Electronic coefficients not initialized.")
+                    self._amp_phase[mol, :, :2].zero_()
+                    self._amp_phase[mol, target, 0] = 1.0
+                self.hop_log.append(
+                    HopEvent(
+                        step=step + 1 if step is not None else self.step_offset + 1,
+                        from_state=exc_idx,
+                        to_state=target,
+                        accepted=True,
+                        mol_index=mol,
+                    )
+                )
+            else:
+                # Hop rejected after rescale attempt
+                self.hop_log.append(
+                    HopEvent(
+                        step=step + 1 if step is not None else self.step_offset + 1,
+                        from_state=exc_idx,
+                        to_state=target,
+                        accepted=False,
+                        mol_index=mol,
+                        reason="Frustrated hop (no NAC rescale)",
+                    )
+                )
+
+        idx = torch.arange(nmol, device=device)
+        active_idx = self._active_states.to(device)
+        if molecule.all_forces is not None and molecule.all_forces.shape[1] >= self._nstates + 1:
+            molecule.force = molecule.all_forces[idx, active_idx + 1]
+        self._current_potential = state_energies[idx, active_idx]
         molecule.Etot = self._current_potential
-        molecule.active_state = exc_idx + 1  # 1-based excited-state index
-        if hop_target is not None and self._recompute_on_hop:
-            self._recompute_active_force(molecule)
+        if molecule.force is not None:
             with torch.no_grad():
                 molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
+        molecule.active_state = active_idx + 1

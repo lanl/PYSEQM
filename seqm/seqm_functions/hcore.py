@@ -166,3 +166,82 @@ def hcore(molecule, doTETCI=True):
     # It is easier to retain Hcore as M without reshaping it 
 
     return M, w, rho0xi, rho0xj, riXH, ri
+
+
+def overlap_between_geometries(molecule, coords1, coords2):
+    """
+    Compute the overlap matrix between atomic orbitals centered at coords1 (rows)
+    and coords2 (cols) for a batch of molecules.
+    coords1, coords2: (nmol, molsize, 3)
+    returns: (nmol, orb_dim * molsize, orb_dim * molsize)
+    """
+    if coords1.shape != coords2.shape:
+        raise ValueError("coords1 and coords2 must have the same shape")
+
+    is_pm6 = (molecule.method == 'PM6')
+    orb_dim = 9 if is_pm6 else 4
+    if is_pm6:
+        overlap_fn = diatom_overlap_matrixD
+        overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
+        zeta_fields = ['zeta_s', 'zeta_p', 'zeta_d']
+    else:
+        overlap_fn = diatom_overlap_matrix_PM6_SP
+        overlap_args = (molecule.const.qn_int,)
+        zeta_fields = ['zeta_s', 'zeta_p']
+
+    # Parameters are stored only for real atoms; rebuild a padded view for indexing
+    zeta = torch.stack([molecule.parameters[f] for f in zeta_fields], dim=1)
+    nmol, molsize = molecule.species.shape
+    species = molecule.species
+    device = coords1.device
+    dtype = coords1.dtype
+
+    atom_index = torch.arange(nmol * molsize, device=device, dtype=torch.int64)
+    real_atoms = atom_index[(species.reshape(-1) > 0)]
+    zeta_full = torch.zeros((nmol * molsize, zeta.shape[1]), dtype=zeta.dtype, device=zeta.device)
+    zeta_full[real_atoms] = zeta
+    zeta_full = zeta_full.view(nmol, molsize, -1)
+
+    # Pair geometry between coords1 (row atoms) and coords2 (column atoms)
+    diff = coords2.unsqueeze(1) - coords1.unsqueeze(2)  # (nmol, molsize, molsize, 3)
+    dist = torch.linalg.norm(diff, dim=-1)
+    rij = dist * molecule.const.length_conversion_factor
+    xij = torch.zeros_like(diff)
+    nonzero_dist = dist > 0
+    xij[nonzero_dist] = diff[nonzero_dist] / dist[nonzero_dist].unsqueeze(-1)
+    xij[~nonzero_dist] = torch.tensor([1.0, 0.0, 0.0], device=device, dtype=dtype)
+
+    atom_mask = (species.unsqueeze(2) > 0) & (species.unsqueeze(1) > 0)
+    close_pairs = atom_mask & (rij <= overlap_cutoff)
+    diag_mask = torch.eye(molsize, dtype=torch.bool, device=device).unsqueeze(0)
+    diag_zero = close_pairs & diag_mask & (~nonzero_dist)
+
+    di_blocks = torch.zeros((nmol, molsize, molsize, orb_dim, orb_dim), dtype=dtype, device=device)
+
+    valid_pairs = close_pairs & (~diag_zero)
+
+    if valid_pairs.any():
+        ni = species.unsqueeze(2).expand(-1, -1, molsize)[valid_pairs]
+        nj = species.unsqueeze(1).expand(-1, molsize, -1)[valid_pairs]
+        x_flat = xij[valid_pairs]
+        r_flat = rij[valid_pairs]
+        zeta_i = zeta_full.unsqueeze(2).expand(-1, -1, molsize, -1)[valid_pairs]
+        zeta_j = zeta_full.unsqueeze(1).expand(-1, molsize, -1, -1)[valid_pairs]
+
+        swap = ni < nj  # enforce ni >= nj as expected by overlap kernels
+        ni_use = torch.where(swap, nj, ni)
+        nj_use = torch.where(swap, ni, nj)
+        x_use = torch.where(swap.unsqueeze(-1), -x_flat, x_flat)
+        zeta_i_use = torch.where(swap.unsqueeze(-1), zeta_j, zeta_i)
+        zeta_j_use = torch.where(swap.unsqueeze(-1), zeta_i, zeta_j)
+
+        di_tmp = overlap_fn(ni_use, nj_use, x_use, r_flat, zeta_i_use, zeta_j_use, *overlap_args)
+        di_tmp[swap] = di_tmp[swap].transpose(1, 2)
+        di_blocks[valid_pairs] = di_tmp
+
+    # When coords1 and coords2 coincide for the same atom, the overlap is identity
+    if diag_zero.any():
+        di_blocks[diag_zero] = torch.eye(orb_dim, dtype=dtype, device=device)
+
+    overlap_matrix = di_blocks.transpose(2, 3).reshape(nmol, orb_dim * molsize, orb_dim * molsize)
+    return overlap_matrix
