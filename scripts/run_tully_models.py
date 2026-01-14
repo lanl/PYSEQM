@@ -99,7 +99,9 @@ def _run_single_worker(
     if active_state is None and hasattr(dyn, "populations"):
         active_state = int(torch.argmax(dyn.populations[0]).item())
     # Convert to zero-based for counting (molecule.active_state is 1-based when set by dynamics)
-    if active_state is not None and active_state > 0:
+    if active_state is not None:
+        if active_state == 0:
+            raise RuntimeError("Encountered ground-state label in Tully dynamics; expected excited-state indices only.")
         active_state = active_state - 1
     rho_hist = None
     if collect_density and getattr(dyn, "rho_history", None):
@@ -150,7 +152,9 @@ def run_ensemble(
                     active_state = int(act)
             if active_state is None and hasattr(dyn, "populations"):
                 active_state = int(torch.argmax(dyn.populations[0]).item())
-            if active_state is not None and active_state > 0:
+            if active_state is not None:
+                if active_state == 0:
+                    raise RuntimeError("Encountered ground-state label in Tully dynamics; expected excited-state indices only.")
                 active_state = active_state - 1
             rho_hist = None
             if collect_density and getattr(dyn, "rho_history", None):

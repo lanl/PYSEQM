@@ -107,10 +107,12 @@ def _run_velocity(
     # Active state per trajectory; fallback to argmax(pop) if not set (Ehrenfest)
     if hasattr(mol, "active_state") and torch.is_tensor(mol.active_state):
         active_state = mol.active_state.view(-1).long()
-        active_state = torch.where(active_state > 0, active_state - 1, active_state)
     else:
         pop = dyn.populations.detach()
         active_state = torch.argmax(pop, dim=1)
+    if torch.any(active_state == 0):
+        raise RuntimeError("Encountered ground-state label in Tully dynamics; expected excited-state indices only.")
+    active_state = active_state - 1  # convert to zero-based
     in_window = (final_x > x0) & (final_x < -x0)
     is_trans = final_x >= -x0
     lower = active_state == 0
