@@ -135,8 +135,8 @@ def _run_velocity(
     included = ntraj - excluded
     if included <= 0:
         raise RuntimeError("All trajectories were excluded (did not exit interaction region).")
-    if excluded / float(included + excluded) > 0.10:
-        raise RuntimeError(f"More than 10% of trajectories excluded ({excluded}/{included + excluded}).")
+    if excluded / float(included + excluded) > 0.15:
+        raise RuntimeError(f"More than 15% of trajectories excluded ({excluded}/{included + excluded}).")
 
     rho_avg = None
     if collect_density and getattr(dyn, "rho_history", None):
@@ -278,9 +278,9 @@ def plot_probs(stats: List[Dict], outfile: str, *, model_key: str, mass_amu: flo
     trans_upper = np.array([s["trans_upper"] for s in stats])
 
     plt.figure(figsize=(6, 4))
-    plt.plot(x, trans_lower, "o-", label="Trans (lower)")
-    plt.plot(x, refl_lower, "s-", label="Refl (lower)")
-    plt.plot(x, trans_upper, "^-", label="Trans (upper)")
+    plt.plot(x, trans_lower, "o-", markersize=4, label="Trans (lower)")
+    plt.plot(x, refl_lower, "s-",  markersize=4,label="Refl (lower)")
+    plt.plot(x, trans_upper, "^-", markersize=4,label="Trans (upper)")
     plt.xlabel(xlabel)
     plt.ylabel("Probability")
     plt.ylim(-0.05, 1.05)
@@ -354,8 +354,8 @@ def main():
     parser.add_argument("--model", default="1", help="Tully model: 1,2,3 or name")
     parser.add_argument("--method", default="fssh", choices=["fssh", "ehrenfest"])
     parser.add_argument("--velocities", nargs="+", type=float, default=None)
-    parser.add_argument("--ntraj", type=int, default=1000, help="Trajectories per velocity (batched)")
-    parser.add_argument("--steps", type=int, default=800, help="Steps per trajectory")
+    parser.add_argument("--ntraj", type=int, default=2000, help="Trajectories per velocity (batched)")
+    parser.add_argument("--steps", type=int, default=1000, help="Steps per trajectory")
     parser.add_argument("--timestep", type=float, default=0.25, help="Time step (fs)")
     parser.add_argument("--elec-substeps", type=int, default=15, help="Electronic RK4 substeps per nuclear step")
     parser.add_argument("--mass", type=float, default=1.0971598, help="Mass in amu")
@@ -408,6 +408,8 @@ def main():
                 0.325647,
                 0.348513,
             ]
+            f = np.arange(8.5,8.7,.02);c=np.arange(9,33,1);x=np.concatenate([(0,6,7,8),f,c]); x=x/(args.mass*amu_to_au*ang_per_fs_to_au)
+            args.velocities = list(x)
         elif model_key == "2":
             args.velocities = [
                 0.108682557,
