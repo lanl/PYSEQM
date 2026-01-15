@@ -3,17 +3,12 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-import torch
 
-from seqm.seqm_functions.constants import Constants
+from seqm.MolecularDynamics import KSA_XL_BOMD, XL_BOMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
 from seqm.Molecule import Molecule
-from seqm.MolecularDynamics import (
-    Molecular_Dynamics_Basic,
-    Molecular_Dynamics_Langevin,
-    XL_BOMD,
-    KSA_XL_BOMD,
-)
-from tests.reference_data import assert_allclose, load_or_update_reference, reference_path
+from seqm.seqm_functions.constants import Constants
+
+from ..reference_data import assert_allclose, load_or_update_reference, reference_path
 
 
 def _output_config(prefix, molid):
@@ -23,12 +18,7 @@ def _output_config(prefix, molid):
         "print every": 0,
         "checkpoint every": 0,
         "xyz": 1,
-        "h5": {
-            "data": 1,
-            "coordinates": 1,
-            "velocities": 1,
-            "forces": 1,
-        },
+        "h5": {"data": 1, "coordinates": 1, "velocities": 1, "forces": 1},
     }
 
 
@@ -113,13 +103,7 @@ def _metrics_from_thermo(T, Ek, Ep):
         slope = float(np.polyfit(np.arange(len(Etot)), Etot, 1)[0])
     else:
         slope = 0.0
-    return {
-        "drift": drift,
-        "slope": slope,
-        "Etot": Etot.tolist(),
-        "Ek": Ek.tolist(),
-        "T": T.tolist(),
-    }
+    return {"drift": drift, "slope": slope, "Etot": Etot.tolist(), "Ek": Ek.tolist(), "T": T.tolist()}
 
 
 def _assert_md_metrics(metrics, ref, tol_drift=1e-3, tol_slope=1e-3):
@@ -153,20 +137,13 @@ def _run_and_check(md, molecule, prefix, molid, steps, expect_excited=False, n_s
 
 def test_md_basic_single(tmp_path, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = [0]
     prefix = str(tmp_path / "md_basic_single")
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = Molecular_Dynamics_Basic(
-        seqm_parameters=seqm_parameters,
-        timestep=0.5,
-        Temp=300.0,
-        output=_output_config(prefix, molid),
+        seqm_parameters=seqm_parameters, timestep=0.5, Temp=300.0, output=_output_config(prefix, molid)
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
@@ -177,20 +154,13 @@ def test_md_basic_single(tmp_path, device, methane_molecule_data):
 
 def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = list(range(species.shape[0]))
     prefix = str(tmp_path / "md_basic_batch_mixed")
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = Molecular_Dynamics_Basic(
-        seqm_parameters=seqm_parameters,
-        timestep=0.5,
-        Temp=300.0,
-        output=_output_config(prefix, molid),
+        seqm_parameters=seqm_parameters, timestep=0.5, Temp=300.0, output=_output_config(prefix, molid)
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
@@ -202,11 +172,7 @@ def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data):
 
 def test_md_langevin_single(tmp_path, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = [0]
     prefix = str(tmp_path / "md_langevin_single")
@@ -225,11 +191,7 @@ def test_md_langevin_single(tmp_path, device, methane_molecule_data):
 
 def test_md_langevin_batch_mixed(tmp_path, device, batch_molecule_data):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = list(range(species.shape[0]))
     prefix = str(tmp_path / "md_langevin_batch_mixed")
@@ -249,11 +211,7 @@ def test_md_langevin_batch_mixed(tmp_path, device, batch_molecule_data):
 
 def test_md_xl_bomd_single(tmp_path, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = [0]
     prefix = str(tmp_path / "md_xl_bomd_single")
@@ -275,11 +233,7 @@ def test_md_xl_bomd_single(tmp_path, device, methane_molecule_data):
 
 def test_md_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = [0]
     prefix = str(tmp_path / "md_xl_bomd_single_k4")
@@ -301,22 +255,13 @@ def test_md_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
 
 def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = [0]
     prefix = str(tmp_path / "md_ksa_xl_bomd_single")
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = KSA_XL_BOMD(
-        xl_bomd_params={
-            "k": 6,
-            "max_rank": 3,
-            "err_threshold": 0.0,
-            "T_el": 1500,
-        },
+        xl_bomd_params={"k": 6, "max_rank": 3, "err_threshold": 0.0, "T_el": 1500},
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
@@ -332,22 +277,13 @@ def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data):
 
 def test_md_ksa_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = [0]
     prefix = str(tmp_path / "md_ksa_xl_bomd_single_k4")
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = KSA_XL_BOMD(
-        xl_bomd_params={
-            "k": 4,
-            "max_rank": 3,
-            "err_threshold": 0.0,
-            "T_el": 1500,
-        },
+        xl_bomd_params={"k": 4, "max_rank": 3, "err_threshold": 0.0, "T_el": 1500},
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
@@ -363,22 +299,13 @@ def test_md_ksa_xl_bomd_single_k4(tmp_path, device, methane_molecule_data):
 
 def test_md_ksa_xl_bomd_batch_mixed(tmp_path, device, batch_molecule_data):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molid = list(range(species.shape[0]))
     prefix = str(tmp_path / "md_ksa_xl_bomd_batch_mixed")
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = KSA_XL_BOMD(
-        xl_bomd_params={
-            "k": 6,
-            "max_rank": 3,
-            "err_threshold": 0.0,
-            "T_el": 1500,
-        },
+        xl_bomd_params={"k": 6, "max_rank": 3, "err_threshold": 0.0, "T_el": 1500},
         damp=None,
         seqm_parameters=seqm_parameters,
         timestep=0.5,
@@ -407,10 +334,7 @@ def test_md_excited_basic_batch(tmp_path, device, methanal_batch_data):
     prefix = str(tmp_path / "md_excited_basic_batch")
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = Molecular_Dynamics_Basic(
-        seqm_parameters=seqm_parameters,
-        timestep=0.5,
-        Temp=300.0,
-        output=_output_config(prefix, molid),
+        seqm_parameters=seqm_parameters, timestep=0.5, Temp=300.0, output=_output_config(prefix, molid)
     ).to(device)
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30, expect_excited=True, n_states=4)

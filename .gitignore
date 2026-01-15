@@ -12,6 +12,7 @@ examples/hipnn_train_reactive/combined_datasets/15_cut/DM_star_3-5.npy
 examples/hipnn_train_reactive/combined_datasets/15_cut/DM_6-5.npy
 examples/hipnn_train_reactive/combined_datasets/15_cut/DM.npy
 examples/Outputs/vik*
+examples/Outputs/*bak*
 PYSEQM.egg-info/
 **/__pycache__/
 **/.ipynb_checkpoints/

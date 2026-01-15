@@ -32,28 +32,32 @@ Notes
 """
 
 import argparse
-import sys
 import os
-import numpy as np
+import sys
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Matplotlib font sizes
-plt.rcParams.update({
-    'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial'],
-    'font.size':       18,
-    'axes.titlesize':  18,
-    'axes.labelsize':  18,
-    'xtick.labelsize': 16,
-    'ytick.labelsize': 16,
-    'legend.fontsize': 16,
-    'legend.title_fontsize': 16,
-    'lines.markersize': 10.0
-})
+plt.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial"],
+        "font.size": 18,
+        "axes.titlesize": 18,
+        "axes.labelsize": 18,
+        "xtick.labelsize": 16,
+        "ytick.labelsize": 16,
+        "legend.fontsize": 16,
+        "legend.title_fontsize": 16,
+        "lines.markersize": 10.0,
+    }
+)
 
 HC_EV_NM = 1239.8419843320026  # Planck*c in eV*nm
 
 # --------------------------- IO & math helpers ---------------------------
+
 
 def smart_loadtxt(path, xcol=0, ycol=1):
     """Load two numeric columns from a text file with auto delimiter detection."""
@@ -94,22 +98,27 @@ def smart_loadtxt(path, xcol=0, ycol=1):
     idx = np.argsort(x)
     return x[idx], y[idx]
 
+
 def broaden_energy(x_sticks_eV, y_sticks, E_grid, sigma_eV):
     """Gaussian broadening on an energy grid (unit-area kernels scaled by y)."""
-    X = E_grid[:, None]                   # (Ng, 1)
-    MU = x_sticks_eV[None, :]             # (1, Ns)
+    X = E_grid[:, None]  # (Ng, 1)
+    MU = x_sticks_eV[None, :]  # (1, Ns)
     G = np.exp(-0.5 * ((X - MU) / sigma_eV) ** 2) / (sigma_eV * np.sqrt(2 * np.pi))
     return (G * y_sticks[None, :]).sum(axis=1)  # intensity per eV
 
+
 def stem(path):
     return os.path.splitext(os.path.basename(path))[0]
+
 
 def csv_path(template, infile):
     """Insert input stem before extension of template; handle single/multiple inputs."""
     base, ext = os.path.splitext(template)
     return f"{base}_{stem(infile)}{ext or '.csv'}"
 
+
 # --------------------------- main ---------------------------
+
 
 def main():
     p = argparse.ArgumentParser(description="Overlay Gaussian-broadened spectra from multiple files.")
@@ -126,19 +135,32 @@ def main():
     p.add_argument("--dx", type=float, default=None, help="Energy grid spacing in eV (default: auto)")
     p.add_argument("--points", type=int, default=None, help="Alternative to dx: number of grid points")
 
-    p.add_argument("--axis", choices=("eV", "nm"), default="eV",
-                   help="Plot x-axis in energy (eV) or wavelength (nm). Input x must be in eV.")
-    p.add_argument("--normalize", action="store_true", default=True,
-                   help="Normalize each broadened curve to its own max (per-curve).")
-    p.add_argument("--show-sticks", action="store_true",
-                   help="Overlay original stick spectra (unit-consistent).")
-    p.add_argument("--labels", nargs="+", default=None,
-                   help="Legend labels (must match number/order of input files).")
+    p.add_argument(
+        "--axis",
+        choices=("eV", "nm"),
+        default="eV",
+        help="Plot x-axis in energy (eV) or wavelength (nm). Input x must be in eV.",
+    )
+    p.add_argument(
+        "--normalize",
+        action="store_true",
+        default=True,
+        help="Normalize each broadened curve to its own max (per-curve).",
+    )
+    p.add_argument(
+        "--show-sticks", action="store_true", help="Overlay original stick spectra (unit-consistent)."
+    )
+    p.add_argument(
+        "--labels", nargs="+", default=None, help="Legend labels (must match number/order of input files)."
+    )
     p.add_argument("--title", default=None, help="Custom plot title")
     p.add_argument("--out-png", default=None, help="Save overlay plot to PNG path")
-    p.add_argument("--out-csv", default=None,
-                   help="Save broadened data for each file to CSV using this template path; "
-                        "output becomes <template_stem>_<input_stem>.csv")
+    p.add_argument(
+        "--out-csv",
+        default=None,
+        help="Save broadened data for each file to CSV using this template path; "
+        "output becomes <template_stem>_<input_stem>.csv",
+    )
     args = p.parse_args()
 
     # FWHM/sigma in eV
@@ -205,12 +227,10 @@ def main():
         order_grid = np.argsort(lam)
         Xplot_grid = lam[order_grid]
         xlabel = "Wavelength (nm)"
-        ylabel_units = "(per nm)"
     else:
         Xplot_grid = Eg
         order_grid = slice(None)  # identity
         xlabel = "Energy (eV)"
-        ylabel_units = "(per eV)"
 
     # Labels
     if args.labels:
@@ -225,7 +245,7 @@ def main():
     plt.figure()
 
     # Process each dataset
-    ticktype="-"
+    ticktype = "-"
     for (f, xs_eV, ys), lab in zip(datasets, labels):
         # Broaden in energy
         Yg_E = broaden_energy(xs_eV, ys, Eg, sigma_eV)  # per eV
@@ -238,7 +258,7 @@ def main():
             sticks_y = ys
         else:
             lam_vals = HC_EV_NM / Eg
-            jac = HC_EV_NM / (lam_vals ** 2)  # |dE/dλ|
+            jac = HC_EV_NM / (lam_vals**2)  # |dE/dλ|
             Y_lambda = Yg_E * jac
 
             # reorder increasing wavelength
@@ -247,7 +267,7 @@ def main():
 
             # sticks transformed consistently
             sticks_x = HC_EV_NM / xs_eV
-            sticks_y = ys * (xs_eV ** 2) / HC_EV_NM  # equivalent to HC/λ^2 at stick
+            sticks_y = ys * (xs_eV**2) / HC_EV_NM  # equivalent to HC/λ^2 at stick
 
         # Normalize per curve if requested
         if args.normalize:
@@ -264,8 +284,7 @@ def main():
             out_xy = np.column_stack([Xplot, Yplot])
             xhdr = "energy_eV" if args.axis == "eV" else "wavelength_nm"
             out_path = csv_path(args.out_csv, f)
-            np.savetxt(out_path, out_xy, delimiter=",",
-                       header=f"{xhdr},broadened_intensity", comments="")
+            np.savetxt(out_path, out_xy, delimiter=",", header=f"{xhdr},broadened_intensity", comments="")
             print(f"Saved broadened data to {out_path}")
 
         # Plot curve
@@ -280,7 +299,7 @@ def main():
 
     # Final plot cosmetics
     plt.xlabel(xlabel)
-    plt.xlim([Xplot[0],Xplot[-1]])
+    plt.xlim([Xplot[0], Xplot[-1]])
     plt.ylabel("Intensity " + ("(normalized)" if args.normalize else "(arb. units)"))
     ttl = args.title if args.title else f"Gaussian-broadened spectrum ({width_label})"
     ttl = args.title if args.title else ""
@@ -297,6 +316,6 @@ def main():
     except Exception:
         pass
 
+
 if __name__ == "__main__":
     main()
-

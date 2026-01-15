@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PYSEQM"
+version = "2.0.0"
+description = "A Semi-Empirical Born Oppenheimer Molecular Dynamics Engine implemented in PyTorch."
+readme = "README.md"
+license = { text = "BSD 3-Clause License" }
+authors = [
+  { name = "Vishikh Athavale", email = "vishikh@lanl.gov" },
+  { name = "Guoqing Zhou", email = "guoqingz@usc.edu" },
+]
+keywords = ["Semi-Empirical Quantum Mechanics"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Research",
+  "Topic :: Quantum Chemistry",
+  "License :: BSD 3-Clause License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+]
+requires-python = ">=3.7"
+dependencies = [
+  "numpy",
+  "torch>=1.9",
+]
+
+[project.optional-dependencies]
+geomopt = ["geometric"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+seqm = ["params/*.csv"]
+
+[tool.ruff]
+line-length = 110
+indent-width = 4
+target-version = "py37"
+extend-exclude = [
+  "examples/**/*.ipynb",
+  "examples/hipnn_train_reactive/**",
+  "docs/**",
+  "seqm/seqm_functions/two_elec_two_center_int*.py",
+  "seqm/seqm_functions/build_two_elec_one_center_int_D.py",
+  "seqm/seqm_functions/tools.py",
+  "seqm/seqm_functions/G_sdc.py",
+]
+
+[tool.ruff.lint]
+# A pragmatic set: pyflakes/pycodestyle errors, import sorting, common bugs,
+# modernization, and some Ruff-native checks.
+select = [
+  "E9",  # syntax errors
+  "F",   # pyflakes
+  "I",   # isort (import sorting)
+  # "E7", "E9",  # important pycodestyle errors
+  # "B",               # flake8-bugbear
+  # "UP",              # pyupgrade
+  # "SIM",             # flake8-simplify
+  # "RUF",             # Ruff-specific rules
+]
+
+# If you're formatting with ruff format, consider NOT enforcing E501:
+# Ruff will flag *any* long line, while the formatter is best-effort
+# (esp. comments / long strings). :contentReference[oaicite:0]{index=0}
+ignore = [
+  "E501", # line too long
+]
+
+# Let pre-commit apply fixes automatically.
+fixable = ["ALL"]
+unfixable = []
+isort.split-on-trailing-comma=false
+
+# Optional but common: keep notebooks from complaining about print/debug patterns
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = [
+  "T20", # flake8-print (only if you enable T later)
+]
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true

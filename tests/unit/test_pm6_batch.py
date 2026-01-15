@@ -1,17 +1,16 @@
 import torch
 
-from seqm.seqm_functions.constants import Constants
-from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
-from tests.reference_data import assert_allclose, load_or_update_reference, reference_path
+from seqm.Molecule import Molecule
+from seqm.seqm_functions.constants import Constants
+
+from ..reference_data import assert_allclose, load_or_update_reference, reference_path
 
 
 def test_pm6_batch_from_notebook(device):
     torch.set_default_dtype(torch.float64)
     species = torch.as_tensor(
-        [[16, 16], [22, 22], [22, 16], [35, 17], [24, 22]],
-        dtype=torch.int64,
-        device=device,
+        [[16, 16], [22, 22], [22, 16], [35, 17], [24, 22]], dtype=torch.int64, device=device
     )
 
     coordinates = torch.tensor(
@@ -44,10 +43,7 @@ def test_pm6_batch_from_notebook(device):
     esdriver = Electronic_Structure(seqm_parameters).to(device)
     esdriver(molecule)
 
-    data = {
-        "Etot": molecule.Etot.detach().cpu().tolist(),
-        "force": molecule.force.detach().cpu().tolist(),
-    }
+    data = {"Etot": molecule.Etot.detach().cpu().tolist(), "force": molecule.force.detach().cpu().tolist()}
     ref_path = reference_path("pm6_batch_notebook")
     ref = load_or_update_reference(ref_path, data)
 

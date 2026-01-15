@@ -1,5 +1,7 @@
-import torch
 from typing import Callable, Optional
+
+import torch
+
 
 def conjugate_gradient_batch(
     A: Callable[[torch.Tensor], torch.Tensor],
@@ -27,33 +29,33 @@ def conjugate_gradient_batch(
     batch_size = b.shape[0]
     # dims to sum over when computing inner‐products / norms:
     sum_dims = tuple(range(1, b.dim()))
-    expand_shape = (batch_size,) + (1,) * (b.dim() - 1) 
+    expand_shape = (batch_size,) + (1,) * (b.dim() - 1)
 
     # 1) init
     x = torch.zeros_like(b)
-    r = b.clone()                      # residual
+    r = b.clone()  # residual
     if M_diag is not None:
         M_inv = 1.0 / M_diag
-        z = r * M_inv                  # preconditioned residual
+        z = r * M_inv  # preconditioned residual
     else:
-        z = r                          # no preconditioner
-    p = z.clone()                      # search direction
+        z = r  # no preconditioner
+    p = z.clone()  # search direction
     rs_old = torch.sum(r * z, dim=sum_dims)  # [B]
 
     # # mask of active (not yet converged) systems
     # active = torch.norm(r,dim=sum_dims) >= tol
-    r_norm = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims)
-    active = r_norm >= tol                           # [B] bool mask
+    r_norm = torch.linalg.vector_norm(r, ord=float("inf"), dim=sum_dims)
+    active = r_norm >= tol  # [B] bool mask
     alpha_dtype = rs_old.dtype
-    minclamp = 1e-20 if alpha_dtype==torch.float64 else 1e-10
+    minclamp = 1e-20 if alpha_dtype == torch.float64 else 1e-10
 
     for i in range(max_iter):
         if not active.any():
             return x
 
         Ap = A(p)  # [B, D1…Dk]
-        denom = torch.sum(p * Ap, dim=sum_dims)         # [B]
-        alpha = rs_old / denom.clamp(min=minclamp)         # [B]
+        denom = torch.sum(p * Ap, dim=sum_dims)  # [B]
+        alpha = rs_old / denom.clamp(min=minclamp)  # [B]
         # zero‐out for converged
         alpha = alpha * active.to(alpha_dtype)
 
@@ -66,7 +68,7 @@ def conjugate_gradient_batch(
 
         # check convergence
         # r_norm = torch.norm(r, dim=sum_dims)
-        r_norm = torch.linalg.vector_norm(r, ord=float('inf'), dim=sum_dims)
+        r_norm = torch.linalg.vector_norm(r, ord=float("inf"), dim=sum_dims)
         active = r_norm >= tol
 
         # precondition
@@ -87,27 +89,29 @@ def conjugate_gradient_batch(
         # if i % 1 == 0 or i == max_iter - 1:
         #     print(f"Iteration {i:3}: Residual norms = {r_norm}")
 
-    if torch.any(active): raise RuntimeError(f"Conjugate gradient did not converge in {max_iter} steps (resid={r_norm})")
+    if torch.any(active):
+        raise RuntimeError(f"Conjugate gradient did not converge in {max_iter} steps (resid={r_norm})")
+
 
 # Example Usage
 if __name__ == "__main__":
     # Parameters
     batch = 1
     n = 5  # Dimension of the matrix
-    k = 1    # Number of right-hand sides
+    k = 1  # Number of right-hand sides
     tol = 1e-6
     max_iter = 100
 
     # Device configuration: use GPU if available
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Generate a random SPD matrix A
     torch.manual_seed(0)
-    A_dense = torch.rand(batch,n, n, device=device)
-    A_dense = A_dense + A_dense.mT + 100*n * torch.eye(n, device=device).unsqueeze(0)  # Ensures SPD
+    A_dense = torch.rand(batch, n, n, device=device)
+    A_dense = A_dense + A_dense.mT + 100 * n * torch.eye(n, device=device).unsqueeze(0)  # Ensures SPD
     print(f"A shape is {A_dense.shape}")
-    applyA = lambda b: torch.einsum('bij,bj->bi',A_dense,b)
+    applyA = lambda b: torch.einsum("bij,bj->bi", A_dense, b)
 
     # Alternatively, define A as a sparse matrix or a linear operator
     # For this example, we'll use the dense matrix
@@ -116,7 +120,7 @@ if __name__ == "__main__":
     B = torch.randn(batch, n, device=device)
 
     # Optionally, define a preconditioner (Jacobi: diagonal of A)
-    M = torch.diagonal(A_dense,dim1=1,dim2=2).to(device)  # Shape: (n,)
+    M = torch.diagonal(A_dense, dim1=1, dim2=2).to(device)  # Shape: (n,)
 
     # Solve AX = B using CG
     X = conjugate_gradient_batch(applyA, B, tol=tol, max_iter=max_iter, M_diag=M)
@@ -130,4 +134,3 @@ if __name__ == "__main__":
         # Optionally, compute the relative residual
         relative_residual = residual_norm / torch.norm(B, dim=1)
         print(f"Relative residual norms: {relative_residual.cpu().numpy()}")
-

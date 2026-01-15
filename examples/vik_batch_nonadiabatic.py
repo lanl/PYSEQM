@@ -6,12 +6,10 @@ Usage:
 """
 
 import argparse
+
 import torch
 
-from seqm.seqm_functions.constants import Constants
-from seqm.seqm_functions.read_xyz import read_xyz
-from seqm.Molecule import Molecule
-from seqm.NonadiabaticDynamics import SurfaceHoppingDynamics
+from seqm.api import Constants, Molecule, SurfaceHoppingDynamics, read_xyz
 
 
 def build_molecule(xyz_path: str, ntraj: int, device):
@@ -30,9 +28,7 @@ def build_molecule(xyz_path: str, ntraj: int, device):
         "excited_states": {"n_states": 5, "method": "cis", "tolerance": 1e-6, "make_best_guess": True},
         "active_state": 3,
         "analytical_gradient": [True],
-        "nonadiabatic": {
-            "compute_nac": True,
-        },
+        "nonadiabatic": {"compute_nac": True},
     }
     mol = Molecule(const, seqm_parameters, coords, species).to(device)
     return mol

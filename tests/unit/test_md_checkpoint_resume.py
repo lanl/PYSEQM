@@ -1,19 +1,15 @@
 import h5py
-import torch
 
-from seqm.seqm_functions.constants import Constants
+from seqm.MolecularDynamics import KSA_XL_BOMD, XL_BOMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
 from seqm.Molecule import Molecule
-from seqm.MolecularDynamics import (
-    Molecular_Dynamics_Basic,
-    Molecular_Dynamics_Langevin,
-    XL_BOMD,
-    KSA_XL_BOMD,
-)
-from tests.reference_data import assert_allclose
+from seqm.seqm_functions.constants import Constants
+
+from ..reference_data import assert_allclose
 
 
 class _SimulatedCrash(RuntimeError):
     pass
+
 
 def _output_config(prefix, molid, checkpoint_every):
     return {
@@ -22,12 +18,7 @@ def _output_config(prefix, molid, checkpoint_every):
         "print every": 0,
         "checkpoint every": checkpoint_every,
         "xyz": 0,
-        "h5": {
-            "data": 1,
-            "coordinates": 1,
-            "velocities": 1,
-            "forces": 1,
-        },
+        "h5": {"data": 1, "coordinates": 1, "velocities": 1, "forces": 1},
     }
 
 
@@ -60,7 +51,9 @@ def _run_continuous(md_cls, seqm_parameters, device, species, coordinates, prefi
     return _read_last_frame(prefix, molid)
 
 
-def _run_checkpoint_resume(md_cls, seqm_parameters, device, species, coordinates, prefix, molid, steps, split, **md_kwargs):
+def _run_checkpoint_resume(
+    md_cls, seqm_parameters, device, species, coordinates, prefix, molid, steps, split, **md_kwargs
+):
     molecule = _build_molecule(device, species, coordinates, seqm_parameters)
     md = md_cls(
         seqm_parameters=seqm_parameters,
@@ -97,11 +90,7 @@ def _compare_runs(continuous, resumed, steps):
 
 def test_md_checkpoint_resume_basic(batch_molecule_data, device, tmp_path):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     steps = 6
     split = 3
@@ -133,11 +122,7 @@ def test_md_checkpoint_resume_basic(batch_molecule_data, device, tmp_path):
 
 def test_md_checkpoint_resume_langevin(batch_molecule_data, device, tmp_path):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     steps = 6
     split = 3
@@ -171,11 +156,7 @@ def test_md_checkpoint_resume_langevin(batch_molecule_data, device, tmp_path):
 
 def test_md_checkpoint_resume_xl_bomd(batch_molecule_data, device, tmp_path):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     steps = 6
     split = 3
@@ -211,22 +192,13 @@ def test_md_checkpoint_resume_xl_bomd(batch_molecule_data, device, tmp_path):
 
 def test_md_checkpoint_resume_ksa_xl_bomd(batch_molecule_data, device, tmp_path):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     steps = 6
     split = 3
     molid = [0, 1]
 
-    xl_params = {
-        "k": 6,
-        "max_rank": 3,
-        "err_threshold": 0.0,
-        "T_el": 1500,
-    }
+    xl_params = {"k": 6, "max_rank": 3, "err_threshold": 0.0, "T_el": 1500}
 
     continuous = _run_continuous(
         KSA_XL_BOMD,

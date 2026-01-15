@@ -1,19 +1,14 @@
 import pytest
 import torch
 
-from seqm.seqm_functions.constants import Constants
-from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
-from tests.reference_data import assert_allclose, load_or_update_reference, reference_path
+from seqm.Molecule import Molecule
+from seqm.seqm_functions.constants import Constants
+
+from ..reference_data import assert_allclose, load_or_update_reference, reference_path
 
 
-@pytest.mark.parametrize(
-    "excited_method",
-    [
-        "cis",
-        "rpa",
-    ],
-)
+@pytest.mark.parametrize("excited_method", ["cis", "rpa"])
 def test_excited_states_single_molecule(device, methane_molecule_data, excited_method):
     species, coordinates = methane_molecule_data
     const = Constants().to(device)
@@ -23,10 +18,7 @@ def test_excited_states_single_molecule(device, methane_molecule_data, excited_m
         "method": "AM1",
         "scf_eps": 1.0e-7,
         "scf_converger": [1],
-        "excited_states": {
-            "n_states": n_states,
-            "method": excited_method,
-        },
+        "excited_states": {"n_states": n_states, "method": excited_method},
         "active_state": 1,
     }
 

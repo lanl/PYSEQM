@@ -1,9 +1,10 @@
 import torch
 
-from seqm.seqm_functions.constants import Constants
-from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
-from tests.reference_data import assert_allclose
+from seqm.Molecule import Molecule
+from seqm.seqm_functions.constants import Constants
+
+from ..reference_data import assert_allclose
 
 
 def _rotation_matrix_z(theta):
@@ -26,11 +27,7 @@ def test_rotation_invariance_ground_state(device, methane_molecule_data):
     species, coordinates = methane_molecule_data
     const = Constants().to(device)
 
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molecule = Molecule(const, seqm_parameters, coordinates.clone(), species).to(device)
     esdriver = Electronic_Structure(seqm_parameters).to(device)

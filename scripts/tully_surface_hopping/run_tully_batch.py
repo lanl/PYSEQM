@@ -7,15 +7,14 @@ launching many separate trajectories or processes.
 """
 
 import argparse
-import os
-from typing import Dict, List, Sequence
 import multiprocessing as mp
+import os
 from concurrent.futures import ProcessPoolExecutor
+from typing import Dict, List, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
 from TullyModels import TullyDynamics, TullyFSSH, TullyModel
 
 
@@ -119,7 +118,9 @@ def _run_velocity(
         pop = dyn.populations.detach()
         active_state = torch.argmax(pop, dim=1)
     if torch.any(active_state == 0):
-        raise RuntimeError("Encountered ground-state label in Tully dynamics; expected excited-state indices only.")
+        raise RuntimeError(
+            "Encountered ground-state label in Tully dynamics; expected excited-state indices only."
+        )
     active_state = active_state - 1  # convert to zero-based
 
     in_window = (final_x > x0) & (final_x < -x0)
@@ -158,19 +159,7 @@ def _run_velocity(
 
 
 def _run_velocity_worker(args):
-    (
-        model_name,
-        method,
-        v0,
-        ntraj,
-        steps,
-        timestep,
-        mass,
-        x0,
-        elec_substeps,
-        collect_density,
-        seed,
-    ) = args
+    (model_name, method, v0, ntraj, steps, timestep, mass, x0, elec_substeps, collect_density, seed) = args
     model = get_model(model_name)
     return _run_velocity(
         model,
@@ -212,19 +201,7 @@ def run_ensemble(
 
     if workers > 1:
         args_list = [
-            (
-                model_key,
-                method,
-                v,
-                ntraj,
-                steps,
-                timestep,
-                mass,
-                x0,
-                elec_substeps,
-                collect_density,
-                v_seed,
-            )
+            (model_key, method, v, ntraj, steps, timestep, mass, x0, elec_substeps, collect_density, v_seed)
             for v_seed, v in v_seed_list
         ]
         try:
@@ -279,8 +256,8 @@ def plot_probs(stats: List[Dict], outfile: str, *, model_key: str, mass_amu: flo
 
     plt.figure(figsize=(6, 4))
     plt.plot(x, trans_lower, "o-", markersize=4, label="Trans (lower)")
-    plt.plot(x, refl_lower, "s-",  markersize=4,label="Refl (lower)")
-    plt.plot(x, trans_upper, "^-", markersize=4,label="Trans (upper)")
+    plt.plot(x, refl_lower, "s-", markersize=4, label="Refl (lower)")
+    plt.plot(x, trans_upper, "^-", markersize=4, label="Trans (upper)")
     plt.xlabel(xlabel)
     plt.ylabel("Probability")
     plt.ylim(-0.05, 1.05)
@@ -315,11 +292,7 @@ def plot_density_matrix(stats: List[Dict], timestep: float, outfile: str):
 
 def plot_adiabatic_energies(xmin: float, xmax: float, npoints: int, outfile: str):
     x = torch.linspace(xmin, xmax, npoints)
-    models = [
-        ("1", "Model 1"),
-        ("2", "Model 2"),
-        ("3", "Model 3"),
-    ]
+    models = [("1", "Model 1"), ("2", "Model 2"), ("3", "Model 3")]
     fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
     nac_scale = {"1": 50.0, "2": 12.0, "3": 1.0}
     for ax, (name, title) in zip(axes, models):
@@ -357,7 +330,9 @@ def main():
     parser.add_argument("--ntraj", type=int, default=2000, help="Trajectories per velocity (batched)")
     parser.add_argument("--steps", type=int, default=1000, help="Steps per trajectory")
     parser.add_argument("--timestep", type=float, default=0.25, help="Time step (fs)")
-    parser.add_argument("--elec-substeps", type=int, default=15, help="Electronic RK4 substeps per nuclear step")
+    parser.add_argument(
+        "--elec-substeps", type=int, default=15, help="Electronic RK4 substeps per nuclear step"
+    )
     parser.add_argument("--mass", type=float, default=1.0971598, help="Mass in amu")
     parser.add_argument("--x0", type=float, default=-5.0, help="Initial position")
     parser.add_argument("--outfile", default="tully_probs.png", help="Output plot filename")
@@ -408,7 +383,10 @@ def main():
                 0.325647,
                 0.348513,
             ]
-            f = np.arange(8.5,8.7,.02);c=np.arange(9,33,1);x=np.concatenate([(0,6,7,8),f,c]); x=x/(args.mass*amu_to_au*ang_per_fs_to_au)
+            f = np.arange(8.5, 8.7, 0.02)
+            c = np.arange(9, 33, 1)
+            x = np.concatenate([(0, 6, 7, 8), f, c])
+            x = x / (args.mass * amu_to_au * ang_per_fs_to_au)
             args.velocities = list(x)
         elif model_key == "2":
             args.velocities = [

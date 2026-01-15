@@ -27,10 +27,7 @@ def _dedup_pairs(pairs: Sequence[Tuple[int, int]], nroots: Optional[int]) -> Lis
 
 
 def resolve_nac_config(
-    seqm_parameters: Dict,
-    *,
-    nroots: Optional[int] = None,
-    default_enabled: bool = False,
+    seqm_parameters: Dict, *, nroots: Optional[int] = None, default_enabled: bool = False
 ) -> NACConfig:
     """
     Unified NAC configuration:
@@ -47,7 +44,11 @@ def resolve_nac_config(
     state_list = na_cfg.get("states")
     if state_list:
         uniq_states = sorted({int(s) for s in state_list if isinstance(s, (int, float))})
-        pairs.extend((uniq_states[i], uniq_states[j]) for i in range(len(uniq_states)) for j in range(i + 1, len(uniq_states)))
+        pairs.extend(
+            (uniq_states[i], uniq_states[j])
+            for i in range(len(uniq_states))
+            for j in range(i + 1, len(uniq_states))
+        )
 
     explicit_pairs = na_cfg.get("pairs")
     if explicit_pairs:

@@ -1,8 +1,7 @@
+# Not sure why we even have this file but I'll keep
+# it in case it's needed in other packages using pyseqm like sedacs
 
 import torch
-import time
-
-
 
 # it is better to define mask as the same way defining maskd
 # as it will be better to do summation using the representation of P in

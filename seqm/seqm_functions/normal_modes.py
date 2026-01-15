@@ -1,34 +1,37 @@
 import torch
 
+
 def normal_modes(molecule, energy):
     """
     Calculates the mass‐weighted Hessian and normal‐mode frequencies (in cm⁻¹) using PyTorch autograd.
 
     Parameters
     ----------
-    molecule : molecule object 
+    molecule : molecule object
     energy : torch.Tensor
         A tensor representing the potential energy
 
     Returns
     -------
     frequencies_cm1 : torch.Tensor
-        A 1D tensor of vibrational frequencies (in cm⁻¹), sorted in ascending order, 
+        A 1D tensor of vibrational frequencies (in cm⁻¹), sorted in ascending order,
         excluding the six near‐zero modes (3 translations + 3 rotations).
     modes : torch.Tensor
-        A tensor of shape (3*N_atoms, 3*N_atoms–6). Each column is a mass‐weighted normal‐mode 
+        A tensor of shape (3*N_atoms, 3*N_atoms–6). Each column is a mass‐weighted normal‐mode
         eigenvector in Cartesian coordinates (after removing the first six non‐vibrational modes).
 
     Notes
     -----
     1. The Hessian matrix H is defined by H_{ij} = ∂²E/(∂x_i ∂x_j).
        We compute it by first taking ∂E/∂x (grad1) and then differentiating each component of grad1.
-    2. Mass‐weighting: H_w = M^(−1/2) · H · M^(−1/2), where M is diagonal with each atom’s mass 
+    2. Mass‐weighting: H_w = M^(−1/2) · H · M^(−1/2), where M is diagonal with each atom’s mass
        repeated for x, y, z. After diagonalizing H_w, the eigenvalues λ give normal-mode frequencies ω in cm⁻¹
        from the equation ω = sqrt(λ)/(2*pi*c)
     """
     if molecule.nmol != 1:
-        raise ValueError("Hessian and Normal mode calculation currently not available for a batch of more than one molecule. Please input only one molecule")
+        raise ValueError(
+            "Hessian and Normal mode calculation currently not available for a batch of more than one molecule. Please input only one molecule"
+        )
         # TODO: extend this function to handle multiple molecules at once
 
     coords = molecule.coordinates
@@ -51,7 +54,7 @@ def normal_modes(molecule, energy):
 
     # === 2) Build Hessian by differentiating each component of grad1_flat ===
     # Note: create_graph=False here since we don't need third derivatives.
-    # retain_graph=True is required until the last iteration; 
+    # retain_graph=True is required until the last iteration;
     # PERFORMANCE NOTE: This loop is O(3N) autograd calls, which scales poorly for large molecules.
     # I could not make better approaches work like using torch.autograd.functional.hessian() or
     # using JAX with jax.hessian().
@@ -78,7 +81,7 @@ def normal_modes(molecule, energy):
     eigvals, modes = torch.linalg.eigh(H_mass)
 
     # === 7) Convert eigenvalues → frequencies (cm⁻¹) ===
-    # eigval is in the units of eV/Å²/amu. 
+    # eigval is in the units of eV/Å²/amu.
     # Conversion to cm-1: sqrt(eV/Å²/amu) → cm⁻¹ = 521.470898 (approx).
     conv_factor = 521.470898
 
@@ -87,7 +90,9 @@ def normal_modes(molecule, energy):
 
     # We expect 6 near‐zero modes (3 translations + 3 rotations). Check that we have >6 total modes:
     if eigvals_clipped.numel() <= 6:
-        raise ValueError( f"Only {eigvals_clipped.numel()} eigenvalues found; need at least 7 to extract vibrational modes.")
+        raise ValueError(
+            f"Only {eigvals_clipped.numel()} eigenvalues found; need at least 7 to extract vibrational modes."
+        )
 
     # Discard first six modes (indices 0..5), keep indices 6..end
     # Compute frequencies in cm⁻¹: ω = conv_factor * sqrt(λ)

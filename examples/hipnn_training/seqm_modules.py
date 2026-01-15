@@ -1,13 +1,10 @@
 import torch
+
 from seqm.basics import Energy
-from seqm.seqm_functions.constants import Constants
-from seqm.seqm_functions.parameters import params
-from seqm.seqm_functions.energy import elec_energy_isolated_atom
 from seqm.Molecule import Molecule
+from seqm.seqm_functions.constants import Constants
 from seqm.seqm_functions.make_dm_guess import make_dm_guess
-
-
-from .check import check, check_dist
+from seqm.seqm_functions.parameters import params
 
 
 class Scale(torch.nn.Module):
@@ -94,7 +91,9 @@ class SEQM_OrbitalMask(torch.nn.Module):
         norb, nocc = num_orb(species, self.target_method)
         nmol, molsize = species.shape
         tmp = (
-            torch.arange(4 * molsize, dtype=torch.int64, device=species.device).reshape(1, -1).expand(nmol, 4 * molsize)
+            torch.arange(4 * molsize, dtype=torch.int64, device=species.device)
+            .reshape(1, -1)
+            .expand(nmol, 4 * molsize)
         )
         if isinstance(self.nOccVirt, (list, tuple)):
             NOCC, NVIRT = self.nOccVirt
@@ -158,7 +157,6 @@ class SEQM_MaskOnMolOrbitalAtom(torch.nn.Module):
 
 
 def pack_par(obj, species, par_atom, par_bond=None):
-
     learned_parameters = {}
     eps = 1.0e-2
     if torch.is_tensor(par_bond):
@@ -176,10 +174,18 @@ def pack_par(obj, species, par_atom, par_bond=None):
         # print('p',obj.p[Z, i])
         learned_parameters[obj.learned[i]] = par_atom[:, i] * obj.weight[i] + obj.p[Z, i]
 
-    
-    
-    for x in ["zeta_s", "zeta_p", "g_ss", "h_sp", "alpha", "Gaussian1_L", "Gaussian2_L", "Gaussian3_L", "Gaussian4_L"]:
-        #print('111')
+    for x in [
+        "zeta_s",
+        "zeta_p",
+        "g_ss",
+        "h_sp",
+        "alpha",
+        "Gaussian1_L",
+        "Gaussian2_L",
+        "Gaussian3_L",
+        "Gaussian4_L",
+    ]:
+        # print('111')
         if x in obj.learned:
             # print(x)
             # print(learned_parameters[x])
@@ -193,7 +199,9 @@ def pack_par(obj, species, par_atom, par_bond=None):
     # hpp = 0.5*(gpp-gp2)>0
     if "g_pp" in obj.learned and "g_p2" in obj.learned:
         learned_parameters["g_pp"] = (
-            obj.softplus(learned_parameters["g_pp"] - learned_parameters["g_p2"]) + learned_parameters["g_p2"] + eps
+            obj.softplus(learned_parameters["g_pp"] - learned_parameters["g_p2"])
+            + learned_parameters["g_p2"]
+            + eps
         )
 
     if obj.not_learned:
@@ -229,7 +237,9 @@ class SEQM_Energy(torch.nn.Module):
         self.elements = seqm_parameters["elements"]
         self.method = seqm_parameters["method"]
         self.filedir = seqm_parameters["parameter_file_dir"]
-        self.p = params(method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.learned)
+        self.p = params(
+            method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.learned
+        )
         self.softplus = torch.nn.Softplus(beta=5.0)
         self.tanh = torch.nn.Tanh()
         self.weight = []
@@ -246,9 +256,9 @@ class SEQM_Energy(torch.nn.Module):
         get the energy terms
         """
         learned_parameters = pack_par(self, species, par_atom)
-        
+
         molecule = Molecule(self.const, self.seqm_parameters, coordinates, species).to(species.device)
-        
+
         Etot_m_Eiso, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, P, charge, notconverged = self.energy(
             molecule, learned_parameters=learned_parameters, all_terms=True
         )
@@ -277,7 +287,9 @@ class SEQM_All(torch.nn.Module):
         self.elements = seqm_parameters["elements"]
         self.method = seqm_parameters["method"]
         self.filedir = seqm_parameters["parameter_file_dir"]
-        self.p = params(method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.learned)
+        self.p = params(
+            method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.learned
+        )
         self.softplus = torch.nn.Softplus(beta=5.0)
         self.tanh = torch.nn.Tanh()
         self.weight = []
@@ -288,33 +300,43 @@ class SEQM_All(torch.nn.Module):
                 self.weight.append(self.hartree_eV)
         self.weight = torch.nn.Parameter(torch.tensor(self.weight), requires_grad=False)
         self.not_learned = seqm_parameters.get("not_learned", None)
-        
 
     def forward(self, par_atom, coordinates, species):
         """
         get the energy terms
         """
         learned_parameters = pack_par(self, species, par_atom)
-        
-        molecule = Molecule(self.const, self.seqm_parameters, coordinates, species, learned_parameters=learned_parameters).to(species.device)
 
-        if self.seqm_parameters.get('UHF', False) and self.seqm_parameters.get('BS', False):
-            #print('DOING OS-BS')
+        molecule = Molecule(
+            self.const, self.seqm_parameters, coordinates, species, learned_parameters=learned_parameters
+        ).to(species.device)
+
+        if self.seqm_parameters.get("UHF", False) and self.seqm_parameters.get("BS", False):
+            # print('DOING OS-BS')
             with torch.no_grad():
-                dm = make_dm_guess(molecule, self.seqm_parameters, mix_homo_lumo=True, mix_coeff=0.3, learned_parameters=learned_parameters, overwrite_existing_dm=True)[0]
-                #print('DOING BS\n')
-                #dm = molecule.dm.clone().detach()
-            #del molecule
-            #molecule = Molecule(self.const, self.seqm_parameters, coordinates, species).to(species.device)
+                dm = make_dm_guess(
+                    molecule,
+                    self.seqm_parameters,
+                    mix_homo_lumo=True,
+                    mix_coeff=0.3,
+                    learned_parameters=learned_parameters,
+                    overwrite_existing_dm=True,
+                )[0]
+                # print('DOING BS\n')
+                # dm = molecule.dm.clone().detach()
+            # del molecule
+            # molecule = Molecule(self.const, self.seqm_parameters, coordinates, species).to(species.device)
         else:
-            #print('DOING CS')
+            # print('DOING CS')
             dm = None
 
         Etot_m_Eiso, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, P, charge, notconverged = self.energy(
-            molecule, learned_parameters=learned_parameters, all_terms=True, P0=dm,
+            molecule, learned_parameters=learned_parameters, all_terms=True, P0=dm
         )
         n_molecule, n_atom = species.shape
-        atomic_charge = self.const.tore[species] - P.diagonal(dim1=1, dim2=2).reshape(n_molecule, n_atom, -1).sum(dim=2)
+        atomic_charge = self.const.tore[species] - P.diagonal(dim1=1, dim2=2).reshape(
+            n_molecule, n_atom, -1
+        ).sum(dim=2)
 
         return (
             Etot.reshape(-1, 1),

@@ -1,13 +1,12 @@
-import torch
-from .constants import Constants
-from .two_elec_two_center_int import GetSlaterCondonParameter
-from .cal_par import *
-from .constants import ev
-import sys
-import numpy
-# import scipy.special
-from .parameters import  PWCCT
 import math
+
+import torch
+
+from .cal_par import *
+from .constants import Constants
+
+# import scipy.special
+from .two_elec_two_center_int import GetSlaterCondonParameter
 
 #two electron two center integrals
 

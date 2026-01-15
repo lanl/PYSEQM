@@ -1,9 +1,10 @@
 import torch
-from .pack import *
 
-#this pseudo_diag is not efficient to be implemented in python
-#as it applies a series Jacobi transformation on eigenvectors (in place operations)
-#have to use python for loop
+from .pack import pack, unpack
+
+# this pseudo_diag is not efficient to be implemented in python
+# as it applies a series Jacobi transformation on eigenvectors (in place operations)
+# have to use python for loop
 
 CHECK_DEGENERACY = False
 # flag to control whether consider degeneracy when constructing the density matrix
@@ -21,14 +22,12 @@ PADDING_EIGENSHIFT_START_FACTOR = 1.0
 PADDING_EIGENSHIFT_INCREMENT = 0.005  # dx increment for eigenvalue shifts
 
 
-def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
-    #x single Fock matrix
-    #here x has padding 0, but is symmetric, i.e. lower and upper trianlge parts are filled
-    #C eigenvectors from previous iteration
-    #C is from symeig of x0, see sym_eig_trunc, C[:,i] is eigenvectors i
-    #E eigenvalues with shape x.shape[0]
-    dtype =  x.dtype
-    device = x.device
+def pseudo_diag(x, C, E, nheavyatom, nH, nocc):
+    # x single Fock matrix
+    # here x has padding 0, but is symmetric, i.e. lower and upper trianlge parts are filled
+    # C eigenvectors from previous iteration
+    # C is from symeig of x0, see sym_eig_trunc, C[:,i] is eigenvectors i
+    # E eigenvalues with shape x.shape[0]
     """
     norbs = nheavyatom*4 + nH
     F=torch.zeros((norbs, norbs),dtype=dtype,device=device)
@@ -40,38 +39,36 @@ def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
     F[nho:(nho+nH), :nho] = x[nho:(nho+4*nH):4,:nho]
     """
     F = pack(x, nheavyatom, nH)
-    #Fov = C_o^T * F * C_v
-    if nocc>norbs/2.0:
-        Fov = torch.matmul(C[:,:nocc].T, torch.matmul(F, C[:,nocc:]))
+    # Fov = C_o^T * F * C_v
+    if nocc > norbs / 2.0:  # noqa: F821
+        Fov = torch.matmul(C[:, :nocc].T, torch.matmul(F, C[:, nocc:]))
     else:
-        Fov = torch.matmul(torch.matmul(C[:,:nocc].T,F), C[:,nocc:])
-    D = E[:nocc].unsqueeze(1)-E[nocc:norbs].unsqueeze(0)
+        Fov = torch.matmul(torch.matmul(C[:, :nocc].T, F), C[:, nocc:])
+    D = E[:nocc].unsqueeze(1) - E[nocc:norbs].unsqueeze(0)  # noqa: F821
     Cr = C.clone()
 
-    tmp = - torch.sqrt(4.0*Fov**2+D**2)
-    alp = torch.sqrt(0.5*(1.0+D/tmp))
-    bet = - torch.sqrt(1.0-alp**2) * Fov.sign()
-    #these two criterias are taken from mopac7 diag.f
-    tiny = 0.05*torch.max(torch.abs(Fov))
-    #bigeps = 1.4901161193847656e-7
+    tmp = -torch.sqrt(4.0 * Fov**2 + D**2)
+    alp = torch.sqrt(0.5 * (1.0 + D / tmp))
+    bet = -torch.sqrt(1.0 - alp**2) * Fov.sign()
+    # these two criterias are taken from mopac7 diag.f
+    tiny = 0.05 * torch.max(torch.abs(Fov))
+    # bigeps = 1.4901161193847656e-7
     bigeps = 1.49e-7
-    cond = (Fov>=tiny) * (torch.abs(Fov/D)>=bigeps)
+    cond = (Fov >= tiny) * (torch.abs(Fov / D) >= bigeps)
 
-    for i in range(Norbs-Nocc): # virtual orbs
-        for j in range(Nocc): # occupied orbs
-            if cond[j,i]:
-                A = Cr[:,j]
-                B = Cr[:,i]
-                Cr[:,j] = alp[j,i]*A + bet[j,i]*B
-                Cr[:,i] = alp[j,i]*B - bet[j,i]*A
-
-    #
+    for i in range(Norbs - Nocc):  # virtual orbs # noqa: F821
+        for j in range(Nocc):  # occupied orbs # noqa: F821
+            if cond[j, i]:
+                A = Cr[:, j]
+                B = Cr[:, i]
+                Cr[:, j] = alp[j, i] * A + bet[j, i] * B
+                Cr[:, i] = alp[j, i] * B - bet[j, i] * A
 
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
     # v : v_{alpha,i}
     # 2.0*v_{alpha,i,1}*v_{1,i,beta}
-    t = 2.0*torch.matmul(Cr[:,:nocc], Cr[:,:nocc].transpose(0,1))
+    t = 2.0 * torch.matmul(Cr[:, :nocc], Cr[:, :nocc].transpose(0, 1))
     """
     P =  torch.zeros_like(x)
     P[:nho,:nho] = t[:nho,:nho]
@@ -82,8 +79,8 @@ def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
     """
     P = unpack(t, nheavyatom, nH, x.shape)
 
-    if eigenvectors:
-        return P, v
+    if eigenvectors:  # noqa: F821
+        return P, v  # noqa: F821
     else:
         return P
 
@@ -91,22 +88,22 @@ def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
 def construct_P(e, v, nocc):
     # e: eigenvalue, sorted, ascending
     # v: eigenvector
-    # nocc: int 
-    if e.dtype==torch.float32:
-            atol = 1.0e-7
-    elif e.dtype==torch.float64:
-            atol = 1.0e-14
-    cond = (e-e[nocc-1]).abs()<=atol
+    # nocc: int
+    if e.dtype == torch.float32:
+        atol = 1.0e-7
+    elif e.dtype == torch.float64:
+        atol = 1.0e-14
+    cond = (e - e[nocc - 1]).abs() <= atol
     if cond[nocc:].any():
         c = torch.nonzero(cond)
         indx1 = c[0].item()
-        indx2 = c[-1].item()+1
-        nd = indx2-indx1
-        coeff = torch.ones(1, indx2, device=e.device,dtype=e.dtype)
-        coeff[0,indx1:] = (nocc.type(torch.double)-indx1)/nd
-        t = 2.0*torch.matmul(coeff*v[:,:indx2], v[:,:indx2].transpose(0,1))
+        indx2 = c[-1].item() + 1
+        nd = indx2 - indx1
+        coeff = torch.ones(1, indx2, device=e.device, dtype=e.dtype)
+        coeff[0, indx1:] = (nocc.type(torch.double) - indx1) / nd
+        t = 2.0 * torch.matmul(coeff * v[:, :indx2], v[:, :indx2].transpose(0, 1))
     else:
-        t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
+        t = 2.0 * torch.matmul(v[:, :nocc], v[:, :nocc].transpose(0, 1))
     return t
 
 
@@ -116,70 +113,83 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
     with padding-aware handling.
     """
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
-    dtype =  x.dtype
+    dtype = x.dtype
     device = x.device
-    if x.dim()==2: # Simple case: single (N, N) matrix without batch
+    if x.dim() == 2:  # Simple case: single (N, N) matrix without batch
         e0, v = sym_eigh(pack(x, nheavyatom, nH))
-        e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
-        e[:(nheavyatom*4+nH)] = e0
-    elif x.dim()==4: # Batched case for unrestricted calculations: shape (B, 2, N, N)
+        e = torch.zeros((x.shape[0]), dtype=dtype, device=device)
+        e[: (nheavyatom * 4 + nH)] = e0
+    elif x.dim() == 4:  # Batched case for unrestricted calculations: shape (B, 2, N, N)
         nheavyatom = nheavyatom.repeat_interleave(2)
         nH = nH.repeat_interleave(2)
         nocc = nocc.flatten()
-        #Gershgorin circle theorem estimate upper bounds of eigenvalues  
+        # Gershgorin circle theorem estimate upper bounds of eigenvalues
         x_orig_shape = x.size()
         x0 = pack(x, nheavyatom, nH)
         nmol, size, _ = x0.shape
 
-        aii = x0.diagonal(dim1=1,dim2=2)
-        ri = torch.sum(torch.abs(x0),dim=2)-torch.abs(aii)
-        hN = torch.max(aii+ri,dim=1)[0]
-        dE = hN - torch.min(aii-ri,dim=1)[0] #(maximal - minimal) get range
+        aii = x0.diagonal(dim1=1, dim2=2)
+        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
+        hN = torch.max(aii + ri, dim=1)[0]
+        dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
 
-        norb = nheavyatom*4+nH
+        norb = nheavyatom * 4 + nH
         pnorb = size - norb
         nn = torch.max(pnorb).item()
         dx = PADDING_EIGENSHIFT_INCREMENT
-        mutipler = torch.arange(PADDING_EIGENSHIFT_START_FACTOR+dx, PADDING_EIGENSHIFT_START_FACTOR+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
+        mutipler = torch.arange(
+            PADDING_EIGENSHIFT_START_FACTOR + dx,
+            PADDING_EIGENSHIFT_START_FACTOR + nn * dx + dx,
+            dx,
+            dtype=dtype,
+            device=device,
+        )[:nn]
         ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb>0
+        cond = pnorb > 0
         for i in range(nmol):
             if cond[i]:
-                x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
+                x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
         try:
             e0, v = sym_eigh(x0)
         except RuntimeError as e:
             if torch.isnan(x0).any():
-                raise RuntimeError(f"sym_eigh failed with NaN in input matrix") from e
+                raise RuntimeError("sym_eigh failed with NaN in input matrix") from e
             else:
                 raise RuntimeError(f"sym_eigh failed: {e}") from e
-        e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
-        e[...,:size] = e0
+        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
+        e[..., :size] = e0
         for i in range(nmol):
-            if cond[i]: e[i,norb[i]:size] = 0.0
-    else:    # Batched, restricted: (B, N, N), similar to above but without spin channels
+            if cond[i]:
+                e[i, norb[i] : size] = 0.0
+    else:  # Batched, restricted: (B, N, N), similar to above but without spin channels
         # Add large diagonal shifts to padded orbital blocks to prevent them
         # from interfering with physical eigenvalues during eigendecomposition.
 
-        #Gershgorin circle theorem estimate upper bounds of eigenvalues            
+        # Gershgorin circle theorem estimate upper bounds of eigenvalues
         x0 = pack(x, nheavyatom, nH)
         nmol, size, _ = x0.shape
 
-        aii = x0.diagonal(dim1=1,dim2=2)
-        ri = torch.sum(torch.abs(x0),dim=2)-torch.abs(aii)
-        hN = torch.max(aii+ri,dim=1)[0]
-        dE = hN - torch.min(aii-ri,dim=1)[0] #(maximal - minimal) get range
+        aii = x0.diagonal(dim1=1, dim2=2)
+        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
+        hN = torch.max(aii + ri, dim=1)[0]
+        dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
 
-        norb = nheavyatom*4+nH
+        norb = nheavyatom * 4 + nH
         pnorb = size - norb
         nn = torch.max(pnorb).item()
         dx = PADDING_EIGENSHIFT_INCREMENT
-        mutipler = torch.arange(PADDING_EIGENSHIFT_START_FACTOR+dx, PADDING_EIGENSHIFT_START_FACTOR+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
+        mutipler = torch.arange(
+            PADDING_EIGENSHIFT_START_FACTOR + dx,
+            PADDING_EIGENSHIFT_START_FACTOR + nn * dx + dx,
+            dx,
+            dtype=dtype,
+            device=device,
+        )[:nn]
         ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb>0
+        cond = pnorb > 0
         for i in range(nmol):
             if cond[i]:
-                x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
+                x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
         try:
             e0, v = sym_eigh(x0)
         except RuntimeError as e:
@@ -187,24 +197,25 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
                 raise RuntimeError(f"sym_eigh failed with NaN in input: {e}") from e
             else:
                 raise RuntimeError(f"sym_eigh failed: {e}") from e
-        e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
-        e[...,:size] = e0
+        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
+        e[..., :size] = e0
         for i in range(nmol):
-            if cond[i]: e[i,norb[i]:size] = 0.0
+            if cond[i]:
+                e[i, norb[i] : size] = 0.0
 
     if eig_only:
-        if x.dim()==4:
+        if x.dim() == 4:
             e = e.reshape(x_orig_shape[0:3])
-            v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
+            v = v.reshape(int(v.shape[0] / 2), 2, v.shape[1], v.shape[2])
         return e, v
 
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
-    if x.dim()==2:
+    if x.dim() == 2:
         if CHECK_DEGENERACY:
             t = construct_P(e, v, nocc)
         else:
-            t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
+            t = 2.0 * torch.matmul(v[:, :nocc], v[:, :nocc].transpose(0, 1))
     else:
         """
         t = torch.zeros_like(v)
@@ -214,97 +225,87 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         t*=2.0
         """
         if CHECK_DEGENERACY:
-            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
+            t = torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
         else:
-            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
-            
+            t = 2.0 * torch.stack(
+                list(map(lambda a, n: torch.matmul(a[:, :n], a[:, :n].transpose(0, 1)), v, nocc))
+            )
+
     P = unpack(t, nheavyatom, nH, x.shape[-1])
 
-    if x.dim()==4:
+    if x.dim() == 4:
         e = e.reshape(x_orig_shape[0:3])
-        v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
+        v = v.reshape(int(v.shape[0] / 2), 2, v.shape[1], v.shape[2])
         P = P.reshape(x_orig_shape)
 
     return e, P, v
-
 
 
 def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype = x.dtype
     device = x.device
-    
-    if x.dim()==2:
-        print('diag: DOING 2')
+
+    if x.dim() == 2:
+        print("diag: DOING 2")
         e0, V = sym_eigh(pack(x, nheavyatom, nH))
         e = torch.zeros((x.shape[0]), dtype=dtype, device=device)
-        e[:(nheavyatom*4+nH)] = e0
-    elif x.dim()==4:#need to add large diagonal values to replace 0 padding
-        #Gershgorin circle theorem estimate upper bounds of eigenvalues
+        e[: (nheavyatom * 4 + nH)] = e0
+    elif x.dim() == 4:  # need to add large diagonal values to replace 0 padding
+        # Gershgorin circle theorem estimate upper bounds of eigenvalues
         nheavyatom = nheavyatom.repeat_interleave(2)
         nH = nH.repeat_interleave(2)
         nocc = nocc.flatten()
         x_orig_shape = x.size()
         x = x.flatten(start_dim=0, end_dim=1)
-        
+
         ######################################################################################
         ######################################################################################
-        e0, v0 = list(zip(*list(map(
-                        lambda a, b, c: sym_eigh(pack(a, b, c)),
-                        x, nheavyatom, nH))))
+        e0, v0 = list(zip(*list(map(lambda a, b, c: sym_eigh(pack(a, b, c)), x, nheavyatom, nH))))
         ######################################################################################
         ######################################################################################
-        
+
         if CHECK_DEGENERACY:
-            P0 = list(map(
-                     lambda e, v, nc : construct_P(e, v, nc),
-                     e0, v0, nocc))
+            P0 = list(map(lambda e, v, nc: construct_P(e, v, nc), e0, v0, nocc))
         else:
-            P0 = list(map(
-                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
-                     v0, nocc))
+            P0 = list(map(lambda v, nc: 2.0 * torch.matmul(v[:, :nc], v[:, :nc].transpose(0, 1)), v0, nocc))
         nmol = x.shape[0]
-        norb = nheavyatom*4+nH
+        norb = nheavyatom * 4 + nH
         e = torch.zeros(x.shape[:2], dtype=dtype, device=device)
         P = torch.zeros_like(x)
         for i in range(nmol):
-            e[i,:norb[i]] = e0[i]
+            e[i, : norb[i]] = e0[i]
             P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
-            
+
         e = e.reshape(x_orig_shape[0:3])
-        v0 = tuple(map(lambda a, b : torch.stack((a, b), dim=0), v0[::2], v0[1::2]))
+        v0 = tuple(map(lambda a, b: torch.stack((a, b), dim=0), v0[::2], v0[1::2]))
         V = v0
         P = P.reshape(x_orig_shape)
-    else:#need to add large diagonal values to replace 0 padding
-        #Gershgorin circle theorem estimate upper bounds of eigenvalues
+    else:  # need to add large diagonal values to replace 0 padding
+        # Gershgorin circle theorem estimate upper bounds of eigenvalues
 
-        e0, v0 = list(zip(*list(map(
-                        lambda a, b, c: sym_eigh(pack(a, b, c)),
-                        x, nheavyatom, nH))))
+        e0, v0 = list(zip(*list(map(lambda a, b, c: sym_eigh(pack(a, b, c)), x, nheavyatom, nH))))
         if CHECK_DEGENERACY:
-            P0 = list(map(
-                     lambda e, v, nc : construct_P(e, v, nc),
-                     e0, v0, nocc))
+            P0 = list(map(lambda e, v, nc: construct_P(e, v, nc), e0, v0, nocc))
         else:
-            P0 = list(map(
-                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
-                     v0, nocc))
+            P0 = list(map(lambda v, nc: 2.0 * torch.matmul(v[:, :nc], v[:, :nc].transpose(0, 1)), v0, nocc))
         nmol = x.shape[0]
-        norb = nheavyatom*4+nH
-        e=torch.zeros(x.shape[:2], dtype=dtype, device=device)
+        norb = nheavyatom * 4 + nH
+        e = torch.zeros(x.shape[:2], dtype=dtype, device=device)
         P = torch.zeros_like(x)
         for i in range(nmol):
-            e[i,:norb[i]] = e0[i]
+            e[i, : norb[i]] = e0[i]
             P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
 
-        norb = nheavyatom*4 + nH           
-        nmax = int(torch.max(norb))        # the largest “norb[i]” over all molecules
+        norb = nheavyatom * 4 + nH
+        nmax = int(torch.max(norb))  # the largest “norb[i]” over all molecules
         V = torch.zeros((nmol, nmax, nmax), dtype=dtype, device=device)
 
         for i in range(nmol):
-            V[i, :norb[i], :norb[i]] = v0[i]
+            V[i, : norb[i], : norb[i]] = v0[i]
 
-    if eig_only: return e, V
+    if eig_only:
+        return e, V
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
     return e, P, V
@@ -315,7 +316,7 @@ def pytorch_symeig(A):
     Effectively only a wrapper around pytorch's standard eigh
     (for testing, sanity checks, and comparison)
     """
-    eival, eivec = torch.linalg.eigh(A, UPLO='U')
+    eival, eivec = torch.linalg.eigh(A, UPLO="U")
     return eival, eivec
 
 
@@ -326,12 +327,12 @@ class degen_symeig(torch.autograd.Function):
                    ON DEGENERATE EIGENVECTORS !!!
     !!! BEWARE: REMOVED SANITY CHECKS FOR PERFORMANCE REASONS !!!
 
-    
+
     This Function computes the symmetric eigendecomposition
     A = V Λ Vᵀ in the forward pass, and in the backward pass returns
     ∂L/∂A from given (∂L/∂Λ, ∂L/∂V) while dropping any ill-posed
     gradient components arising from nearly-equal eigenvalues.
-    
+
     Notes
     -----
     If Δᵢⱼ = λᵢ – λⱼ and |Δᵢⱼ| ≤ ε (the global DEGEN_THRESHOLD), then
@@ -344,10 +345,11 @@ class degen_symeig(torch.autograd.Function):
 
     Based on idea in M.F. Kasim, arXiv:2011.04366 (2020)
     """
+
     @staticmethod
     def forward(ctx, A):
         try:
-            eival, eivec = torch.linalg.eigh(A, UPLO='U')
+            eival, eivec = torch.linalg.eigh(A, UPLO="U")
         except:
             print(A)
             raise ValueError("PROBLEMS with torch.linalg.eigh\n {} !!!".format(A))
@@ -359,7 +361,6 @@ class degen_symeig(torch.autograd.Function):
         eival, eivec = ctx.saved_tensors
         eivecT = eivec.transpose(-2, -1).conj()
         if grad_eivec is not None:
-
             delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
             # remove parallel and degenerate part of eigenvector deriv
 
@@ -369,7 +370,7 @@ class degen_symeig(torch.autograd.Function):
 
             idx = torch.abs(delta) > DEGEN_THRESHOLD
             delta_inv = torch.zeros_like(delta)
-            delta_inv[idx] = delta[idx].reciprocal() 
+            delta_inv[idx] = delta[idx].reciprocal()
 
             dC_proj = delta_inv * torch.matmul(eivecT, grad_eivec)
 

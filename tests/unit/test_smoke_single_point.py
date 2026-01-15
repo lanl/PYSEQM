@@ -1,10 +1,11 @@
 import pytest
 import torch
 
-from seqm.seqm_functions.constants import Constants
-from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
-from tests.reference_data import assert_allclose, load_or_update_reference, reference_path
+from seqm.Molecule import Molecule
+from seqm.seqm_functions.constants import Constants
+
+from ..reference_data import assert_allclose, load_or_update_reference, reference_path
 
 
 @pytest.mark.parametrize("method", ["MNDO", "AM1", "PM3", "PM6", "PM6_SP"])
@@ -12,11 +13,7 @@ def test_single_point_runs_for_all_methods(method, device, methane_molecule_data
     species, coordinates = methane_molecule_data
     const = Constants().to(device)
 
-    seqm_parameters = {
-        "method": method,
-        "scf_eps": 1.0e-6,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": method, "scf_eps": 1.0e-6, "scf_converger": [1]}
 
     molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
     esdriver = Electronic_Structure(seqm_parameters).to(device)

@@ -2,8 +2,8 @@ import torch
 
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants, overlap_cutoff
-from seqm.seqm_functions.diat_overlapD import diatom_overlap_matrixD
 from seqm.seqm_functions.diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
+from seqm.seqm_functions.diat_overlapD import diatom_overlap_matrixD
 from seqm.seqm_functions.hcore import overlap_between_geometries
 
 
@@ -118,19 +118,10 @@ def test_overlap_between_geometries_batch_mixed_sizes(device):
 
     doubled_species = torch.cat([species, species], dim=1)
     doubled_coords = torch.cat([coords1, coords2], dim=1)
-    labels = torch.cat(
-        [torch.zeros_like(species, dtype=torch.int64), torch.ones_like(species, dtype=torch.int64)], dim=1
-    )
-
     # sort atoms to descending species to satisfy Molecule, keep track of which geometry each atom came from
     perms = torch.argsort(doubled_species, dim=1, descending=True)
     species_sorted = torch.gather(doubled_species, 1, perms)
-    coords_sorted = torch.gather(
-        doubled_coords,
-        1,
-        perms.unsqueeze(-1).expand(-1, -1, 3),
-    )
-    labels_sorted = torch.gather(labels, 1, perms)
+    coords_sorted = torch.gather(doubled_coords, 1, perms.unsqueeze(-1).expand(-1, -1, 3))
 
     doubled_mol = Molecule(const, seqm_parameters, coords_sorted.clone(), species_sorted.clone()).to(device)
 

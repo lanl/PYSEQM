@@ -1,10 +1,14 @@
-import torch
-from .diat_overlap import diatom_overlap_matrix
-from .diat_overlapD import diatom_overlap_matrixD
-from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
-from .two_elec_two_center_int import two_elec_two_center_int as TETCI
-from .constants import overlap_cutoff
+# Not sure why we even have this file but I'll keep
+# it in case it's needed in other packages using pyseqm like sedacs
+
 import time
+
+import torch
+
+from .constants import overlap_cutoff
+from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
+from .diat_overlapD import diatom_overlap_matrixD
+from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
 
 def get_hcore(molecule):

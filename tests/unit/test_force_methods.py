@@ -1,12 +1,11 @@
 import pytest
-import torch
 
-from seqm.seqm_functions.constants import Constants
-from seqm.Molecule import Molecule
 from seqm.ElectronicStructure import Electronic_Structure
+from seqm.Molecule import Molecule
+from seqm.seqm_functions.constants import Constants
 from tests import reference_data
-from tests.reference_data import assert_allclose, load_or_update_reference, reference_path
 
+from ..reference_data import assert_allclose, load_or_update_reference, reference_path
 
 _FORCE_MODES = [
     ("autodiff", {}),
@@ -14,10 +13,7 @@ _FORCE_MODES = [
     ("semi_numerical", {"analytical_gradient": [True, "numerical"]}),
 ]
 
-_EXCITED_FORCE_MODES = [
-    ("autodiff", {"scf_backward": 1}),
-    ("analytical", {"analytical_gradient": [True]}),
-]
+_EXCITED_FORCE_MODES = [("autodiff", {"scf_backward": 1}), ("analytical", {"analytical_gradient": [True]})]
 
 
 def _load_reference_for_mode(path, data, is_reference_mode):
@@ -30,11 +26,7 @@ def _load_reference_for_mode(path, data, is_reference_mode):
 
 def _run_ground_force(device, species, coordinates, mode_overrides):
     const = Constants().to(device)
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-    }
+    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
     seqm_parameters.update(mode_overrides)
 
     molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)

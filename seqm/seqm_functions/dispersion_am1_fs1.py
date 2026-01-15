@@ -1,6 +1,8 @@
-import os
 import math
+import os
+
 import torch
+
 from .constants import a0
 
 # AM1-FS1 constants
@@ -8,7 +10,8 @@ S_R = 1.1058892
 d = 1000.0
 
 EV_PER_ATOM_PER_J_PER_MOL = 1.036426966e-5
-D_TOL = 12.0 * math.log(10.0)    # tolerance for the exponential argument for the damping function
+D_TOL = 12.0 * math.log(10.0)  # tolerance for the exponential argument for the damping function
+
 
 def dispersion_am1_fs1(mol, P):
     # Dispersion corrected AM1 method called AM1-FS1
@@ -26,7 +29,7 @@ def dispersion_am1_fs1(mol, P):
     # E_disp = \sum_ij (i<j) -C_6^ij/r^6*f_damp(r_ij)
     E_disp_pair = -C6ij * torch.pow(a0 * mol.rij, -6.0) * f_damp  # J/mol nm^6/Ang^6
 
-    E_disp = torch.zeros((mol.nmol, ), dtype=mol.rij.dtype, device=mol.rij.device)
+    E_disp = torch.zeros((mol.nmol,), dtype=mol.rij.dtype, device=mol.rij.device)
     E_disp.index_add_(0, mol.pair_molid, E_disp_pair)
     E_disp = E_disp * EV_PER_ATOM_PER_J_PER_MOL * 1e6  # nm^6/Ang^6 = 1e6; now the energy is in eV/atom
 
@@ -38,6 +41,7 @@ def dispersion_am1_fs1(mol, P):
 
     return E_disp
 
+
 def dispersion_damping(mol, get_grad_factor=False):
     # E_disp = \sum_ij (i<j) -C_6^ij/r^6*f_damp(r_ij)
     # where f_damp(r_ij) = 1/(1+exp(-d(r_ij/(S_R*R_vdw)-1)))
@@ -45,14 +49,14 @@ def dispersion_damping(mol, get_grad_factor=False):
 
     # get C6 parameters
     # C6 is in J nm^6/mol, R_van is in Ang
-    C6ij, R_vdw = get_c6_r0_params(mol, mol.seqm_parameters['elements'])
+    C6ij, R_vdw = get_c6_r0_params(mol, mol.seqm_parameters["elements"])
 
     exp_arg = d * (a0 * mol.rij / (S_R * R_vdw) - 1.0)
     # f_damp = 1.0 / (1.0 + torch.exp(-exp_arg))
     f_damp = torch.sigmoid(exp_arg)
     # The original AM1-FS1 code corrects the f_damp function for numerical extreme values
-    # clip in saturated regions 
-    f_damp = torch.where(exp_arg >  D_TOL, torch.ones_like(f_damp),  f_damp)
+    # clip in saturated regions
+    f_damp = torch.where(exp_arg > D_TOL, torch.ones_like(f_damp), f_damp)
     f_damp = torch.where(exp_arg < -D_TOL, torch.zeros_like(f_damp), f_damp)
 
     # f_damp[exp_arg > d_tol] = 1.0
@@ -70,22 +74,24 @@ def get_c6_r0_params(mol, elements):
     file_path = os.path.join(os.path.dirname(__file__), "../params/grimme_2006_b97-d.csv")
 
     m = max(elements)
-    C_6 = torch.zeros(m + 1, device=mol.rij.device,dtype=mol.rij.dtype)  # m+1 because indexing starts from 1 for atomic number
-    R_0 = torch.zeros(m + 1, device=mol.rij.device,dtype=mol.rij.dtype)
+    C_6 = torch.zeros(
+        m + 1, device=mol.rij.device, dtype=mol.rij.dtype
+    )  # m+1 because indexing starts from 1 for atomic number
+    R_0 = torch.zeros(m + 1, device=mol.rij.device, dtype=mol.rij.dtype)
 
     # Open file and read line by line
     with open(file_path, "r") as f:
         _ = f.readline()  # Read the header line
 
         for line in f:
-            values = line.strip().replace(' ', '').split(",")  # Split CSV row
+            values = line.strip().replace(" ", "").split(",")  # Split CSV row
             at_no = int(values[0])  # Convert at_no to int
 
             if at_no in elements:  # Check if at_no is in the target set
                 C_6[at_no] = float(values[2])  # Store C6 directly
                 R_0[at_no] = float(values[3])  # Store R0 directly
 
-    C6ij = torch.sqrt(C_6[mol.ni] * C_6[mol.nj])     # J nm^6 / mol
+    C6ij = torch.sqrt(C_6[mol.ni] * C_6[mol.nj])  # J nm^6 / mol
 
     # get van der Walls radii R_van
     # Angstrom
@@ -94,25 +100,26 @@ def get_c6_r0_params(mol, elements):
     )  # The original paper claims that R_vdw = 0.5*(Ri + Rj), but in their actual implementation R_vdw = Ri + Rj
     return C6ij, R_vdw
 
+
 def dEdisp_dr(mol):
     """
     dE/dr = 6*C*f/r^7 - (C/r^6) * (d/(S*Rvdw)) * f*(1-f)
     Uses the same clipped f(r) for numerical stability.
     """
-    f_damp, C6ij, alpha = dispersion_damping(mol,get_grad_factor=True)
+    f_damp, C6ij, alpha = dispersion_damping(mol, get_grad_factor=True)
 
     r = mol.rij
-    inv_r7 = torch.pow(a0*r,-7.0)
+    inv_r7 = torch.pow(a0 * r, -7.0)
 
     bracket = 6.0 - alpha * r * (1.0 - f_damp)  # well-behaved: (1-f)=0 in tails
     dE_pair = C6ij * f_damp * inv_r7 * bracket * 1e6 * EV_PER_ATOM_PER_J_PER_MOL  # convert to eV
-    return -dE_pair.unsqueeze(1)*mol.xij # negative because xij is xj-xi
+    return -dE_pair.unsqueeze(1) * mol.xij  # negative because xij is xj-xi
 
 
 def hbond_correction_am1fs1(mol, P, R_van):
     # Works only for a single molecule.
     # Need to vectorize for a batch of molecules instead of looping
-    E_hbonding = torch.empty(mol.nmol,device=mol.coordinates.device,dtype=mol.coordinates.dtype)
+    E_hbonding = torch.empty(mol.nmol, device=mol.coordinates.device, dtype=mol.coordinates.dtype)
     for i in range(mol.nmol):
         species = mol.species[i]
         coords = mol.coordinates[i]
@@ -122,7 +129,7 @@ def hbond_correction_am1fs1(mol, P, R_van):
         coords = coords[real_atoms]
 
         # Step 1. Identify hydrogen and heavy atoms (O, N, F)
-        hydrogen_mask = (species == 1)
+        hydrogen_mask = species == 1
         heavy_mask = (species == 7) | (species == 8) | (species == 9)
         hydrogen_indices = torch.where(hydrogen_mask)[0]
         heavy_indices = torch.where(heavy_mask)[0]
@@ -133,7 +140,7 @@ def hbond_correction_am1fs1(mol, P, R_van):
 
         # Exclude self-distance:
         rows = torch.arange(hydrogen_coords.shape[0])
-        distances[rows, hydrogen_indices] = float('inf')
+        distances[rows, hydrogen_indices] = float("inf")
 
         # For each hydrogen, get the index of its nearest neighbor
         _, nn_indices = distances.min(dim=1)
@@ -183,7 +190,9 @@ def hbond_correction_am1fs1(mol, P, R_van):
 
         # Get atomic charges
         natoms = real_atoms.sum()
-        atomic_charge = mol.const.tore[species] - P[i,:4*natoms,:4*natoms].diagonal().reshape(natoms, -1).sum(dim=1)
+        atomic_charge = mol.const.tore[species] - P[i, : 4 * natoms, : 4 * natoms].diagonal().reshape(
+            natoms, -1
+        ).sum(dim=1)
 
         bohr_to_ang = 0.52917724924
         ha_to_eV = 27.2114079527
@@ -193,16 +202,30 @@ def hbond_correction_am1fs1(mol, P, R_van):
         heavy_species = species[filtered_heavy_indices]
 
         # Compute van der Waals radius (R_vdw) for heavy atoms and hydrogen pairs. This is multiplied by 2 because each of the R_van have to be multiplied by 2 (idk why!)
-        R_vdw = 2.0 * (R_van[heavy_species]**3 + R_van[1].unsqueeze(0)**3) / (R_van[heavy_species]**2 +
-                                                                              R_van[1].unsqueeze(0)**2)
+        R_vdw = (
+            2.0
+            * (R_van[heavy_species] ** 3 + R_van[1].unsqueeze(0) ** 3)
+            / (R_van[heavy_species] ** 2 + R_van[1].unsqueeze(0) ** 2)
+        )
 
         # Compute the damping function.
-        f_damp = torch.exp(-((rij - alpha2 * R_vdw)**2) / (alpha3 * (bohr_to_ang + alpha4 * (rij - alpha2 * R_vdw)))**2)
+        f_damp = torch.exp(
+            -((rij - alpha2 * R_vdw) ** 2) / (alpha3 * (bohr_to_ang + alpha4 * (rij - alpha2 * R_vdw))) ** 2
+        )
 
         # Calculate the hydrogen bonding correction energy.
-        E_hbonding[i] = ha_to_eV * alpha1 * torch.sum(
-            atomic_charge[filtered_heavy_indices] * atomic_charge[filtered_hydrogen_indices] / rij * bohr_to_ang *
-            (cos_angles[angle_mask]**2) * f_damp)
+        E_hbonding[i] = (
+            ha_to_eV
+            * alpha1
+            * torch.sum(
+                atomic_charge[filtered_heavy_indices]
+                * atomic_charge[filtered_hydrogen_indices]
+                / rij
+                * bohr_to_ang
+                * (cos_angles[angle_mask] ** 2)
+                * f_damp
+            )
+        )
 
     return E_hbonding
 
@@ -211,43 +234,48 @@ def pair_disp(mol):
     f_damp, C6ij = dispersion_damping(mol)
 
     # E_disp = \sum_ij (i<j) -C_6^ij/r^6*f_damp(r_ij)
-    E_disp_pair = -C6ij * torch.pow(a0 * mol.rij, -6.0) * f_damp * EV_PER_ATOM_PER_J_PER_MOL * 1e6  # nm^6/Ang^6 = 1e6; now the energy is in eV/atom  # J/mol nm^6/Ang^6
-    E_disp = torch.zeros((mol.nmol, ), dtype=mol.rij.dtype, device=mol.rij.device)
+    E_disp_pair = (
+        -C6ij * torch.pow(a0 * mol.rij, -6.0) * f_damp * EV_PER_ATOM_PER_J_PER_MOL * 1e6
+    )  # nm^6/Ang^6 = 1e6; now the energy is in eV/atom  # J/mol nm^6/Ang^6
+    E_disp = torch.zeros((mol.nmol,), dtype=mol.rij.dtype, device=mol.rij.device)
     E_disp.index_add_(0, mol.pair_molid, E_disp_pair)
-    print(f'Grad: Dispersion correction + H-Bonding correction to the total energy is {E_disp}')
+    print(f"Grad: Dispersion correction + H-Bonding correction to the total energy is {E_disp}")
     return E_disp_pair
 
-delta = 1e-5 # delta for finite difference calcs
+
+delta = 1e-5  # delta for finite difference calcs
+
+
 def numericaldE(mol):
     dtype = mol.rij.dtype
     device = mol.rij.device
-    xij= mol.xij
-    rij=mol.rij
+    xij = mol.xij
+    rij = mol.rij
     Xij = xij * rij.unsqueeze(1) * a0
     npairs = Xij.shape[0]
 
-    pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
+    pair_grad = torch.zeros((npairs, 3), dtype=dtype, device=device)
 
     for coord in range(3):
-        for t in ('+','-'):
+        for t in ("+", "-"):
             # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-            if t=="-":
+            if t == "-":
                 Xij[:, coord] -= delta
-                rij_= torch.norm(Xij, dim=1)
-                rij_= rij_/ a0
+                rij_ = torch.norm(Xij, dim=1)
+                rij_ = rij_ / a0
             else:
                 Xij[:, coord] += delta
-                rij_= torch.norm(Xij, dim=1)
-                rij_= rij_/ a0
+                rij_ = torch.norm(Xij, dim=1)
+                rij_ = rij_ / a0
 
             old_rij = mol.rij
             mol.rij = rij_
             diff = pair_disp(mol)
             mol.rij = old_rij
-            if t=="-":
-                pair_grad[:, coord] -= diff 
+            if t == "-":
+                pair_grad[:, coord] -= diff
             else:
-                pair_grad[:, coord] += diff 
+                pair_grad[:, coord] += diff
             Xij = xij * rij.unsqueeze(1) * a0
 
-    return pair_grad/ (2.0 * delta)
+    return pair_grad / (2.0 * delta)
