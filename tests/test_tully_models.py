@@ -1,6 +1,11 @@
 import torch
 
-from seqm.TullyModels import TullyDynamics, TullyFSSH, TullyMolecule, TullyModel
+from scripts.tully_surface_hopping.TullyModels import (
+    TullyDynamics,
+    TullyFSSH,
+    TullyMolecule,
+    TullyModel,
+)
 
 
 def test_tully_cache_shapes_and_dtypes():

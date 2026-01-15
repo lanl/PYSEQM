@@ -14,7 +14,7 @@ import torch
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 
-from seqm.TullyModels import (
+from .TullyModels import (
     TullyDynamics,
     TullyFSSH,
     TullyMolecule,

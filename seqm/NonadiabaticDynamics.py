@@ -486,7 +486,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             # helper: MO-derivative term on virtual block
             def mo_term_virtual(C_view):
                 # C_view: (nmol, nstates, nocc, nvirt)
-                Cd = torch.matmul(C_view, dSvv.transpose(1, 2))      # (nmol, nstates, nocc, nvirt)
+                Cd = torch.matmul(C_view, dSvv.transpose(1, 2).unsqueeze(1))      # (nmol, nstates, nocc, nvirt)
                 Cf = C_view.reshape(nmol, C_view.shape[1], nov)      # (nmol, nstates, nov)
                 Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
                 return torch.bmm(Cf, Cdf.transpose(1, 2))            # (nmol, nstates, nstates)
@@ -495,7 +495,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             def mo_term_occ(C_view):
                 # apply dSoo^T on the occ index
                 Ct = C_view.permute(0, 1, 3, 2)                      # (nmol, nstates, nvirt, nocc)
-                Ctd = torch.matmul(Ct, dSoo.transpose(1, 2))         # (nmol, nstates, nvirt, nocc)
+                Ctd = torch.matmul(Ct, dSoo.transpose(1, 2).unsqueeze(1))         # (nmol, nstates, nvirt, nocc)
                 Cd = Ctd.permute(0, 1, 3, 2)                         # (nmol, nstates, nocc, nvirt)
                 Cf = C_view.reshape(nmol, C_view.shape[1], nov)
                 Cdf = Cd.reshape(nmol, Cd.shape[1], nov)

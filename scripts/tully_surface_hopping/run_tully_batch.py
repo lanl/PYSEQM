@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from seqm.TullyModels import TullyDynamics, TullyFSSH, TullyModel
+from TullyModels import TullyDynamics, TullyFSSH, TullyModel
 
 
 def _set_single_thread():

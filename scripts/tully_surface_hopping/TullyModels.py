@@ -3,8 +3,7 @@ from typing import Callable, Dict, Tuple
 
 import torch
 
-from .NonadiabaticDynamics import EhrenfestDynamics, SurfaceHoppingDynamics
-from .active_state import active_state_tensor
+from seqm.NonadiabaticDynamics import EhrenfestDynamics, SurfaceHoppingDynamics
 
 
 @dataclass

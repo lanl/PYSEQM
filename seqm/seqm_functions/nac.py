@@ -141,11 +141,10 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2,rpa=False):
     nac_cis.index_add_(0, mol.idxi, pair_grad)
     nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
     
-    nac_cis = nac_cis/(e_exc[:,state2]-e_exc[:,state1]).unsqueeze(1)
-
     nac_cis = nac_cis.view(nmol, molsize, 3)
+    nac_cis = nac_cis/(e_exc[:,state2]-e_exc[:,state1]).unsqueeze(1).unsqueeze(2)
     
-    torch.set_printoptions(precision=9)
-    print(f'NAC vectors between CIS states (Angstrom^-1) {state1+1} and {state2+1} is:\n{nac_cis}')
+    # torch.set_printoptions(precision=9)
+    # print(f'NAC vectors between CIS states (Angstrom^-1) {state1+1} and {state2+1} is:\n{nac_cis}')
 
     return nac_cis
