@@ -1,17 +1,18 @@
 import torch
 
-ev = 27.21 #used in mopac7
-#1 hatree = 27.211386 eV
-#ev =  27.211386
+# fmt: off
+ev = 27.21  # used in mopac7
+# 1 hatree = 27.211386 eV
+# ev =  27.211386
 
 # a0=0.529167  #used in mopac7
-a0 = 0.529167 # used in amber and nexmd
-#a0=0.5291772109
+a0 = 0.529167  # used in amber and nexmd
+# a0=0.5291772109
 ev_kcalpmol = 23.061  # 1 eV = 23.061 kcal/mol
 
 charge_on_electron = 1.60217733e-19
 speed_of_light = 2.99792458e8
-to_debye = charge_on_electron*1e-10*speed_of_light/1e-21
+to_debye = charge_on_electron * 1e-10 * speed_of_light / 1e-21
 debye_to_AU = 0.393456
 
 """
@@ -21,12 +22,13 @@ set cutoff = 20.0 Angstrom and 20/0.529167 = 37.8
 """
 overlap_cutoff = 40.0
 
+
 class Constants(torch.nn.Module):
     """
     Constants used in seqm
     """
 
-    def __init__(self, do_timing=False, length_conversion_factor=(1.0/a0), energy_conversion_factor=1.0):
+    def __init__(self, do_timing=False, length_conversion_factor=(1.0 / a0), energy_conversion_factor=1.0):
         """
         Constructor
         length_conversion_factor : atomic unit is used for length inside seqm
@@ -43,17 +45,17 @@ class Constants(torch.nn.Module):
         # 1.8897261246364832 = 1.0/0.5291772109  1.0/bohr radius
         # factor convert length to atomic unit (default is from Angstrom to atomic unit)
         self.length_conversion_factor = length_conversion_factor
-        #self.a0 = 0.529167  #used in mopac7
-        #self.a0=0.5291772109
+        # self.a0 = 0.529167  #used in mopac7
+        # self.a0=0.5291772109
 
         # factor converting energy to eV (default is eV)
         self.energy_conversion_factor = energy_conversion_factor
-        #self.ev = 27.21 #used in mopac7
-        #1 hatree = 27.211386 eV
-        #self.ev =  27.211386
+        # self.ev = 27.21 #used in mopac7
+        # 1 hatree = 27.211386 eV
+        # self.ev =  27.211386
         #
         # valence shell charge for each atom type
-        #tore[1]=1, Hydrogen has 1.0 charge on valence shell
+        # tore[1]=1, Hydrogen has 1.0 charge on valence shell
         self.label=['0',
                'H',                                                                                            'He',
                'Li','Be',                                                            'B', 'C',  'N', 'O', 'F', 'Ne',
@@ -81,7 +83,7 @@ class Constants(torch.nn.Module):
 
 
         #
-        #principal quantum number for valence shell
+        # principal quantum number for valence shell
         # qn[1] = 1, principal quantum number for the valence shell of Hydrogen is 1
         qn = torch.as_tensor([0.0,
                1.0,                                                                          1.0,
@@ -104,7 +106,7 @@ class Constants(torch.nn.Module):
         #
         qn_int = qn.type(torch.int64)
         qnD_int = qnd.type(torch.int64)
-        #number of s electrons for each element
+        # number of s electrons for each element
 
         iso=torch.as_tensor([0.0,
                               0.0,                                                                0.0,
@@ -195,23 +197,21 @@ class Constants(torch.nn.Module):
                               85.46800,  87.62000,  88.90600,  91.22400,  92.90600,  95.95000,  97.00000, 101.07000, 102.91000, 106.42000, 107.87000, 112.41000, 114.82000, 118.71000, 121.76000, 127.60000, 126.90000, 131.29000,
                              132.91000, 137.33000, 174.97000, 178.49000, 180.95000, 183.84000, 186.21000, 190.23000, 192.22000, 195.08000, 196.97000, 200.59000, 204.38000, 207.20000, 208.98000, 209.00000, 210.00000, 222.00000 ])
 
-
-
-        self.atomic_num   = torch.nn.Parameter(atomic_num,   requires_grad=False)
-        self.tore   = torch.nn.Parameter(tore,   requires_grad=False)
-        self.iso   = torch.nn.Parameter(iso,   requires_grad=False)
-        self.qn     = torch.nn.Parameter(qn,     requires_grad=False)
+        self.atomic_num = torch.nn.Parameter(atomic_num, requires_grad=False)
+        self.tore = torch.nn.Parameter(tore, requires_grad=False)
+        self.iso = torch.nn.Parameter(iso, requires_grad=False)
+        self.qn = torch.nn.Parameter(qn, requires_grad=False)
         self.qn_int = torch.nn.Parameter(qn_int, requires_grad=False)
         self.qnD_int = torch.nn.Parameter(qnD_int, requires_grad=False)
-        self.ussc   = torch.nn.Parameter(ussc,   requires_grad=False)
-        self.uppc   = torch.nn.Parameter(uppc,   requires_grad=False)
-        self.gssc   = torch.nn.Parameter(gssc,   requires_grad=False)
-        self.gspc   = torch.nn.Parameter(gspc,   requires_grad=False)
-        self.hspc   = torch.nn.Parameter(hspc,   requires_grad=False)
-        self.gp2c   = torch.nn.Parameter(gp2c,   requires_grad=False)
-        self.gppc   = torch.nn.Parameter(gppc,   requires_grad=False)
-        self.eheat  = torch.nn.Parameter(eheat/ev_kcalpmol,  requires_grad=False)
-        self.mass   = torch.nn.Parameter(mass,   requires_grad=False)
+        self.ussc = torch.nn.Parameter(ussc, requires_grad=False)
+        self.uppc = torch.nn.Parameter(uppc, requires_grad=False)
+        self.gssc = torch.nn.Parameter(gssc, requires_grad=False)
+        self.gspc = torch.nn.Parameter(gspc, requires_grad=False)
+        self.hspc = torch.nn.Parameter(hspc, requires_grad=False)
+        self.gp2c = torch.nn.Parameter(gp2c, requires_grad=False)
+        self.gppc = torch.nn.Parameter(gppc, requires_grad=False)
+        self.eheat = torch.nn.Parameter(eheat / ev_kcalpmol, requires_grad=False)
+        self.mass = torch.nn.Parameter(mass, requires_grad=False)
         self.do_timing = do_timing
         if self.do_timing:
             self.timing = {"Hcore + STO Integrals" : [],
@@ -221,7 +221,7 @@ class Constants(torch.nn.Module):
                            "D*"                    : [],
                            "CIS/RPA"               : [],
                           }
-
+# fmt: on
 
     def forward(self):
         pass

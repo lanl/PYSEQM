@@ -85,8 +85,8 @@ class TullyModel:
         """Tully Model 3: extended coupling with reflection (correct canonical form)."""
 
         # Original (a.u.): A=0.0006 Eh, B=0.10 Eh, C=0.90 1/Bohr
-        A = 0.01632683175       # eV
-        B = 2.72113862460       # eV
+        A = 0.01632683175  # eV
+        B = 2.72113862460  # eV
         bohr_per_ang = 1.8897261246257702
         C = 0.90 * bohr_per_ang  # 1/Angstrom  (NOTE: linear, not squared!)
 
@@ -130,14 +130,13 @@ class TullyMolecule:
         self.nac_dot = None
         self.Etot = torch.zeros(1, device=self.device)
         from seqm.seqm_functions.constants import Constants
+
         self.const = Constants().to(self.device)
         self.species = torch.tensor([[1]], device=self.device)
         self.num_atoms = torch.tensor([1.0], device=self.device, dtype=dtype)
         self.tot_charge = torch.zeros(1, device=self.device)
         self.mult = torch.tensor([1.0], device=self.device)
-        self.seqm_parameters = {
-            "excited_states": {"n_states": 2},
-        }
+        self.seqm_parameters = {"excited_states": {"n_states": 2}}
 
 
 _TULLY_NSTATES = 2
@@ -156,15 +155,14 @@ def _tully_seqm_params() -> Dict:
 
 
 class _TullyDynamicsMixin:
-    def _tully_init(self, model: TullyModel, *, timestep: float, electronic_substeps: int, nonadiabatic: Dict = None):
+    def _tully_init(
+        self, model: TullyModel, *, timestep: float, electronic_substeps: int, nonadiabatic: Dict = None
+    ):
         params = _tully_seqm_params()
         if nonadiabatic:
             params["nonadiabatic"].update(nonadiabatic)
         super().__init__(
-            params,
-            timestep=timestep,
-            electronic_substeps=electronic_substeps,
-            output=_TULLY_OUTPUT,
+            params, timestep=timestep, electronic_substeps=electronic_substeps, output=_TULLY_OUTPUT
         )
         self.model = model
         self.initial_state = 0
@@ -236,10 +234,14 @@ class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
     def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
         pop = self.populations
         # TODO: add non-adiabatic coupling contribution to forces
-        force = pop[:, 0].view(-1, 1, 1) * molecule.all_forces[:, 1] + pop[:, 1].view(-1, 1, 1) * molecule.all_forces[:, 2]
+        force = (
+            pop[:, 0].view(-1, 1, 1) * molecule.all_forces[:, 1]
+            + pop[:, 1].view(-1, 1, 1) * molecule.all_forces[:, 2]
+        )
         molecule.force = force
         molecule.Etot = torch.sum(pop * state_energies, dim=1)
         self._record_density_matrix()
+
 
 class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
     def __init__(self, model: TullyModel, *, timestep=0.05, electronic_substeps=10):
@@ -252,17 +254,32 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
 
     def _recompute_active_force(self, molecule):
         state_energies = self._compute_electronic_structure(molecule, learned_parameters={})
-        exc_idx = int(self._active_states[0].item()) if self._active_states is not None else int(self._active_state)
+        exc_idx = (
+            int(self._active_states[0].item()) if self._active_states is not None else int(self._active_state)
+        )
         self._active_state = exc_idx
         molecule.force = molecule.all_forces[:, exc_idx + 1]
         self._current_potential = state_energies[:, exc_idx]
         molecule.Etot = self._current_potential
 
     def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
-        super()._after_electronic_update(molecule, state_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step)
+        super()._after_electronic_update(
+            molecule, state_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
+        )
         self._record_density_matrix()
 
-def run_tully(model: TullyModel, method="fssh", timestep=0.05, steps=200, x0=-8.0, v0=2.0, mass=2000.0, seed=0, electronic_substeps=10):
+
+def run_tully(
+    model: TullyModel,
+    method="fssh",
+    timestep=0.05,
+    steps=200,
+    x0=-8.0,
+    v0=2.0,
+    mass=2000.0,
+    seed=0,
+    electronic_substeps=10,
+):
     torch.manual_seed(seed)
     if isinstance(model, str):
         name = model.lower()
@@ -270,7 +287,7 @@ def run_tully(model: TullyModel, method="fssh", timestep=0.05, steps=200, x0=-8.
             model = TullyModel.single_crossing()
         elif name in ("2", "double", "dac", "double_avoided_crossing", "model2"):
             model = TullyModel.double_crossing()
-        elif name in ("3", "extended", "reflection", "model3","extended_coupling"):
+        elif name in ("3", "extended", "reflection", "model3", "extended_coupling"):
             model = TullyModel.extended_coupling()
         else:
             raise ValueError(f"Unknown Tully model '{model}'")

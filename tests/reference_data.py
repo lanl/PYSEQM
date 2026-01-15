@@ -23,8 +23,7 @@ def load_or_update_reference(path, data):
 
     if not path.exists():
         pytest.skip(
-            f"Missing reference data at {path}. "
-            "Run tests with PYSEQM_UPDATE_REFERENCES=1 to generate it."
+            f"Missing reference data at {path}. Run tests with PYSEQM_UPDATE_REFERENCES=1 to generate it."
         )
 
     with path.open("r", encoding="utf-8") as handle:

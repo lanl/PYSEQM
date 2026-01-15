@@ -4,12 +4,12 @@ from seqm.api import Constants, Molecular_Dynamics_Basic, Molecule
 
 torch.set_default_dtype(torch.float64)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
-torch.set_num_threads(1)
-Molecular_Dynamics_Basic.run_from_checkpoint(
-    "./examples/Outputs/vik_ckpt_esmd.step_0.1.restart.pt", device=device
-)
-exit()
+# device = torch.device("cpu")
+# torch.set_num_threads(1)
+# Molecular_Dynamics_Basic.run_from_checkpoint(
+#     "./examples/Outputs/vik_ckpt_esmd.step_0.1.restart.pt", device=device
+# )
+# exit()
 
 
 species = torch.as_tensor(

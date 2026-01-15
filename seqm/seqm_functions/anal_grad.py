@@ -190,11 +190,16 @@ def contract_ao_derivatives_with_density(
     e1b_x.add_(sumB)
 
     # Core-elecron interaction
+    # fmt: off
     scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
-        device=device,
+        [[1.0, 2.0, 2.0, 2.0],
+         [0.0, 1.0, 2.0, 2.0],
+         [0.0, 0.0, 1.0, 2.0],
+         [0.0, 0.0, 0.0, 1.0]],
         dtype=dtype,
+        device=device,
     )
+    # fmt: on
     e1b_x *= scale_emat
     e2a_x *= scale_emat
     # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
