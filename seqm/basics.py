@@ -547,7 +547,7 @@ class Energy(torch.nn.Module):
         self.uhf = seqm_parameters.get("UHF", False)
         self.eig = seqm_parameters.get("eig", True)
         self.excited_states = seqm_parameters.get("excited_states")
-        if self.excited_states:
+        if self.excited_states is not None:
             self.excited_states.setdefault("make_best_guess", True)
             self.excited_states.setdefault("save_tdm", False)
         # Resolve NAC configuration once at construction
@@ -556,7 +556,7 @@ class Energy(torch.nn.Module):
             nroots = int(self.excited_states["n_states"])
         self.nac_config = resolve_nac_config(seqm_parameters, nroots=nroots, default_enabled=False)
         self.xlesmd = False
-        if self.uhf and self.excited_states:
+        if self.uhf and self.excited_states is not None:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
     @staticmethod
