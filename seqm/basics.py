@@ -26,6 +26,7 @@ from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.XLESMD import elec_energy_excited_xl
+from .seqm_functions.XLESMD_gradient import xlesmd_rcis_grad_batch
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -1009,6 +1010,24 @@ class Energy(torch.nn.Module):
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
             Eexcited, molecule.transition_density_matrices = elec_energy_excited_xl(molecule, cis_amp, w, e)
+            # if do_analytical_gradient[0]:
+            if True:
+                molecule.analytical_gradient = xlesmd_rcis_grad_batch(
+                    cis_amp,
+                    molecule.transition_density_matrices,
+                    molecule,
+                    w,
+                    e,
+                    riXH,
+                    ri,
+                    P,
+                    self.seqm_parameters["scf_eps"] * 10.0,
+                    gam,
+                    self.method,
+                    parnuc,
+                    include_ground_state=True,
+                    calculate_dipole=True,
+                )
 
         if self.eig and not self.uhf and self.excited_states and self.excited_states["make_best_guess"]:
             molecule.old_mos = molecule.molecular_orbitals.clone()

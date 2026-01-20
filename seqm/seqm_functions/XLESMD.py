@@ -6,10 +6,7 @@ from .rcis_batch import get_occ_virt, makeA_pi_batched
 
 
 def elec_energy_excited_xl(mol, R, w, e_mo):
-    # e_mo = mol.e_mo
-    # R = mol.transition_density_matrices
     nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window=None, e_mo=e_mo)
-    # R = torch.einsum('bmi,bia,bna->bmn', Cocc,Xbar.view(-1,nocc,nvirt), Cvirt)
     with torch.no_grad():
         Xbar = torch.einsum("bmi,brmn,bna->bria", Cocc, R, Cvirt)  # .reshape(-1,nocc*nvirt)
     R_ = torch.einsum("bmi,bria,bna->brmn", Cocc, Xbar, Cvirt)
@@ -30,12 +27,13 @@ def elec_energy_excited_xl(mol, R, w, e_mo):
     E = E1 + E2
 
     # print(f"CIS Energy is {E.item()}, omega is {omega}, norm of X difference is {torch.linalg.vector_norm(X-Xbar)}")
+    # print(f"XLESMD CIS Energy is {E.item():.15f}")
     # print(mol.cis_energies[0,0].item())
     # exit()
     with torch.no_grad():
-        X_AO = torch.einsum("bmi,bia,bna->bmn", Cocc, X.view(-1, nocc, nvirt), Cvirt).unsqueeze(
-            1
-        )  # convert it back to the shape of brmn
+        # if True:
+        X_AO = torch.einsum("bmi,bia,bna->bmn", Cocc, X.view(-1, nocc, nvirt), Cvirt).unsqueeze(1)
+        # convert it back to the shape of brmn
     return E, X_AO
 
 

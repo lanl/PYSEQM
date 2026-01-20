@@ -780,10 +780,10 @@ def calc_cis_energy(mol, w, e_mo, amplitude, F, P, rpa=False, orbital_window=Non
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
 
     # for near-degenerate use the formulation where E_cis is expressed in atomic orbital basis only
-    if ((e_mo[:, 1:] - e_mo[:, :-1]) < 1e-4).any() and not rpa:
+    norb, nocc = norb_batch[0], nocc_batch[0]
+    if ((e_mo[:norb, 1:] - e_mo[:norb, :-1]) < 1e-4).any() and not rpa:
         return calc_cis_energy_from_density(mol, w, F, P, amplitude, rpa, orbital_window)
 
-    norb, nocc = norb_batch[0], nocc_batch[0]
     if orbital_window is not None:
         n_below, m_above = orbital_window
         occ_idx = torch.arange(nocc - n_below, nocc)
@@ -822,6 +822,9 @@ def calc_cis_energy(mol, w, e_mo, amplitude, F, P, rpa=False, orbital_window=Non
 
 
 def calc_cis_energy_from_density(mol, w, F, P, amplitude, rpa=False, orbital_window=None):
+    if rpa:
+        raise NotImplementedError
+
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window=orbital_window)
     with torch.no_grad():
         R = torch.einsum("bmi,bia,bna->bmn", Cocc, amplitude.view(-1, nocc, nvirt), Cvirt)
@@ -837,9 +840,6 @@ def calc_cis_energy_from_density(mol, w, F, P, amplitude, rpa=False, orbital_win
     F0 += R @ F_ - F_ @ R
     F0 = D @ F0 @ Q / 2.0  # project to occ-virt subspace
     E_cis = (R * F0).sum(dim=(1, 2))
-
-    if rpa:
-        raise NotImplementedError
 
     return E_cis
 
@@ -993,18 +993,16 @@ def make_cis_densities(
             # make RHS of the CPSCF equation:
             B_pi = makeA_pi_batched(mol, B.unsqueeze(1), w).squeeze(1) * 2.0
             R_pi = makeA_pi_batched(mol, R.unsqueeze(1), w).squeeze(1) * 2.0
-            RHS = -torch.einsum("Nma,Nmn,Nni->Nai", Cvirt, B_pi, Cocc)
-            RHS -= torch.einsum("Nma,Nmn,Nni->Nai", Cvirt, R_pi, B_virt)
-            RHS += torch.einsum("Nma,Nmn,Nni->Nai", B_occ, R_pi, Cocc)
+            RHS = -torch.einsum("Nni,Nmn,Nma->Nia", Cocc, B_pi, Cvirt)
+            RHS -= torch.einsum("Nni,Nmn,Nma->Nia", B_virt, R_pi, Cvirt)
+            RHS += torch.einsum("Nni,Nmn,Nma->Nia", Cocc, R_pi, B_occ)
+
             if rpa:
-                RHS -= torch.einsum("Nma,Nnm,Nni->Nai", Cvirt, R_pi, B_virt_Y)
-                RHS += torch.einsum("Nma,Nnm,Nni->Nai", B_occ_Y, R_pi, Cocc)
+                RHS -= torch.einsum("Nni,Nnm,Nma->Nia", B_virt_Y, R_pi, Cvirt)
+                RHS += torch.einsum("Nni,Nnm,Nma->Nia", Cocc, R_pi, B_occ_Y)
 
             del B_occ, B_virt
-
-            # debugging:
-            nov = nocc * nvirt
-            RHS = RHS.transpose(1, 2).reshape(nmol, nov)  # RHS_ia
+            RHS = RHS.reshape(nmol, nocc * nvirt)
             ea_ei = e_mo[:, nocc:norb].unsqueeze(1) - e_mo[:, :nocc].unsqueeze(2)
 
             # Ad_inv_b = RHS/ea_ei

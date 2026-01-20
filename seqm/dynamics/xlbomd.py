@@ -348,6 +348,7 @@ class EnergyXL(torch.nn.Module):
             with torch.set_grad_enabled(
                 self.excited_states is not None
             ):  # no grad tracking unless doing excited states
+                # if True:
                 if sp2[0]:
                     D = unpack(
                         SP2(pack(F, molecule.nHeavy, molecule.nHydro), molecule.nocc, sp2[1]),
@@ -461,28 +462,27 @@ class EnergyXL(torch.nn.Module):
                 )
             # cis_tol = self.excited_states['tolerance']
             method = self.excited_states["method"].lower()
-            with torch.no_grad():
-                if molecule.const.do_timing:
-                    t0 = time.time()
-                if method == "cis":
-                    Eexcited, molecule.transition_density_matrices = elec_energy_excited_xl(
-                        molecule, cis_amp, w, e
-                    )
-                    # excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
-                elif method == "rpa":
-                    raise NotImplementedError
-                    # excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
-                else:
-                    raise Exception("Excited state method has to be CIS or RPA")
+            if molecule.const.do_timing:
+                t0 = time.time()
+            if method == "cis":
+                Eexcited, molecule.transition_density_matrices = elec_energy_excited_xl(
+                    molecule, cis_amp, w, e
+                )
+                # excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+            elif method == "rpa":
+                raise NotImplementedError
+                # excitation_energies, exc_amps = rpa(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp)
+            else:
+                raise Exception("Excited state method has to be CIS or RPA")
 
-                if molecule.const.do_timing:
-                    if torch.cuda.is_available():
-                        torch.cuda.synchronize()
-                    t1 = time.time()
-                    molecule.const.timing["CIS/RPA"].append(t1 - t0)
+            if molecule.const.do_timing:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = time.time()
+                molecule.const.timing["CIS/RPA"].append(t1 - t0)
 
-                # Eelec += excitation_energies[:,molecule.active_state-1]
-                # molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=False)
+            # Eelec += excitation_energies[:,molecule.active_state-1]
+            # molecule.analytical_gradient = rcis_grad_batch(molecule,w,e,riXH,ri,P,cis_tol,gam,self.method,parnuc,rpa=method=='rpa',include_ground_state=False)
             Eelec += Eexcited
 
         if all_terms:
