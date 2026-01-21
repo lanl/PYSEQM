@@ -502,9 +502,7 @@ class Energy(torch.nn.Module):
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis' or method == 'tda':
                         if self.seqm_parameters.get('calc_cis_tdms', True):
-                            # print("got to calc_cis_tdms")
                             excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window, return_tdm=True)
-                            # print(molecule.cis_tdms)
                         else:
                             excitation_energies, exc_amps = rcis_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,orbital_window=orbital_window, return_tdm=False)
 
@@ -516,7 +514,6 @@ class Energy(torch.nn.Module):
                     if molecule.const.do_timing: t0 = time.time()
                     if method == 'cis':
                         if self.seqm_parameters.get('calc_cis_tdms', True):
-                            # print("got to calc_cis_tdms")
                             excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,return_tdm=True)
                         else: 
                             excitation_energies, exc_amps = rcis_any_batch(molecule,w,e,self.excited_states['n_states'],cis_tol,init_amplitude_guess=cis_amp,return_tdm=False)
@@ -524,8 +521,6 @@ class Energy(torch.nn.Module):
                         raise NotImplementedError("RPA for non-uniform batch not yet available")
                     
                 ### implement state ordering here
-
-                # ref_tdms = self.seqm_parameters.get('reference_tdms', None)
                 if ref_tdms is not None:
 
                     # get current-step tdms
@@ -570,16 +565,15 @@ class Energy(torch.nn.Module):
                     
                     # compute overlap
                     overlap = torch.einsum("bimn,bjmn->bij", ref_tdms, current_tdms)
-                    iorden, cost, score = hungarian_state_assignment_from_overlap(overlap, 
-                                                              window=2, 
-                                                              scale=1e5, 
-                                                              forbid_cost=1e5)
+                    iorden, _ = hungarian_state_assignment_from_overlap(overlap, 
+                                                              window=self.seqm_parameters.get('overlap_window', 2), 
+                                                              window_penalty=self.seqm_parameters.get('window_penalty', 1e5))
                     molecule.ref_state_order = iorden
                     # print(molecule.ref_state_order)
 
                 molecule.cis_amplitudes = exc_amps
                 molecule.cis_energies = excitation_energies
-                # print('calculating cis energies when excited states is not none')
+
                 # # Verify some stuff for excited state XL-BOMD
                 # tmp = make_cis_densities(molecule, True, False, False)
                 # cis_energy_from_transition_density(molecule,F,tmp["transition_density"],w,P,Hcore)

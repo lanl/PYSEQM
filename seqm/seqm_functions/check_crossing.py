@@ -5,7 +5,6 @@ from scipy.optimize import linear_sum_assignment
 def hungarian_state_assignment_from_overlap(
     overlap: torch.Tensor,
     window: int = 2,
-    # scale: float = 1e5,
     window_penalty: int = 100000,
 ):
     """
@@ -15,21 +14,18 @@ def hungarian_state_assignment_from_overlap(
     ----------
     overlap : torch.Tensor
         Overlap tensor with shape (B, N, N) or (N, N).
-        Rows correspond to reference/old states, columns to current/new states.
     window : int
         Allowed assignment band: |j - i| <= window.
-    scale : float
-        Scaling used before integer conversion (NEXMD uses 1e5).
     window_penalty : int
         Large positive cost for forbidden assignments.
 
     Returns
     -------
-    iorden : torch.LongTensor
+    iorden : torch.Tensor
         Shape (B, N). Mapping iorden[b, i] = j (reference i -> current j).
-    cost : torch.LongTensor
+    cost : torch.Tensor
         Shape (B, N, N). Integer cost matrices used for Hungarian.
-    score : torch.LongTensor
+    score : torch.Tensor
         Shape (B, N, N). Integer similarity matrices before negation.
     """
     if not torch.is_tensor(overlap):
@@ -43,11 +39,8 @@ def hungarian_state_assignment_from_overlap(
 
     B, N, _ = overlap.shape
 
-    # Square to avoid arbitrary sign flip
-    score = (overlap ** 2)
-
-    # Convert to cost (minimize): cost = -score
-    cost = -score
+    # Negate and square to avoid arbitrary sign flip 
+    cost = -(overlap ** 2)
 
     # Apply window constraint: forbid |i-j| > window
     I = torch.arange(N, device=overlap.device).view(N, 1)
@@ -55,18 +48,18 @@ def hungarian_state_assignment_from_overlap(
     mask_forbidden = (I - J).abs() > window
     cost[:, mask_forbidden] = int(window_penalty)
 
-    # Run Hungarian per batch (SciPy expects NumPy)
+    # Run Hungarian on batch on cpu
     iorden_list = []
     cost_cpu = cost.detach().cpu().numpy()  # (B,N,N)
     for b in range(B):
         row_ind, col_ind = linear_sum_assignment(cost_cpu[b])
-        # ensure row order corresponds to reference indices 0..N-1
+
         order = np.argsort(row_ind)
         iorden_list.append(col_ind[order])
 
     iorden = torch.as_tensor(np.stack(iorden_list, axis=0), device=overlap.device, dtype=torch.int64) + 1 # ordering starting with index 1
 
-    return iorden, cost, score
+    return iorden, cost
 
 def ensure_batched_tdms(tdms: torch.Tensor) -> torch.Tensor:
     """Ensure tdms has shape (B, N, M, M). Accept (N,M,M) -> (1,N,M,M)."""
