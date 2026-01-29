@@ -1,8 +1,9 @@
+# This file is required for SEDACS
 import torch
 
 from seqm.basics import Pack_Parameters
 
-from .build_two_elec_one_center_int_D import calc_integral, calc_integral_os
+from .build_two_elec_one_center_int_D import calc_integral#, calc_integral_os
 from .diag import (
     DEGEN_EIGENSOLVER,
     construct_P,
