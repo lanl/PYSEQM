@@ -48,6 +48,7 @@ indent-width = 4
 target-version = "py37"
 extend-exclude = [
   "examples/**/*.ipynb",
+  "examples/vik*.py",
   "examples/hipnn_train_reactive/**",
   "docs/**",
   "seqm/seqm_functions/two_elec_two_center_int*.py",

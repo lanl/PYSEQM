@@ -1385,16 +1385,18 @@ class XL_ESMD(XL_BOMD):
             es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
             es_amp_t[(self.m - 1 - cindx)] = es_amp
 
-            # Purify with McWeeny polynomial since P may not be idempotent
-            # 3P^2 - 2P^3
-            # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
-            # TODO: Make it work for unrestricted P
-            # P2 = P @ P
-            # P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
-            P0 = P
+            dm_prop = self.dmprop
 
-        # dm_prop = 'SCF'
-        dm_prop = "XL-BOMD"
+            if dm_prop == "SCF":
+                # Purify with McWeeny polynomial since P may not be idempotent
+                # 3P^2 - 2P^3
+                # For restricted density matrix (spin summed) D = 2P. So to purify, D0 = 3/2 D^2 - 1/2 D^3
+                # TODO: Make it work for unrestricted P
+                P2 = P @ P
+                P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
+            else:
+                P0 = P
+
         self.esdriver(
             molecule,
             learned_parameters=learned_parameters,
@@ -1434,6 +1436,8 @@ class XL_ESMD(XL_BOMD):
         )
         self.esdriver.conservative_force.energy.excited_states = None
         self.esdriver.conservative_force.energy.xlesmd = True
+        # self.dmprop = kwargs.get("dmprop","XL-BOMD")
+        self.dmprop = kwargs.get("dmprop", "SCF")
 
 
 """
