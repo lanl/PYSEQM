@@ -23,6 +23,17 @@ def make_dummy(nstates=2, timestep=1.0, substeps=4):
     nad._apc_window = 2
     nad._detect_crossings_flag = True
     nad._crossing_overlap_thresh = 0.9
+    # Minimal state/caches used by internal helpers.
+    nad._eye_cache = {}
+    nad._arange_cache = {}
+    nad._perm_cost_buffers = {}
+    nad._trivial_zero_buffers = {}
+    nad._trivial_swap_buffers = {}
+    nad._state_energy_buffers = {}
+    nad._hop_buffer = None
+    nad._active_states = torch.zeros((1,), dtype=torch.long)
+    nad.post_hop_holdoff = torch.zeros((1,), dtype=torch.long)
+    nad.prev_state = torch.full((1,), -1, dtype=torch.long)
     return nad
 
 
@@ -57,19 +68,21 @@ def test_apc_window_limits_assignment():
     ref = torch.eye(2).unsqueeze(0)
     # new amplitudes swapped
     tgt = torch.tensor([[[0.0, 1.0], [1.0, 0.0]]])
-    perm = nad._compute_perm_from_overlap(ref, tgt)
-    assert perm == [0, 1]  # window prevents swap
+    perm = nad._compute_perm_from_overlap(ref, tgt).tolist()
+    assert perm == [[0, 1]]  # window prevents swap
     # Allow wider window -> swap chosen
     nad._apc_window = 2
-    perm2 = nad._compute_perm_from_overlap(ref, tgt)
-    assert perm2 in ([1, 0], [0, 1])  # Hungarian may pick either if costs equal
+    perm2 = nad._compute_perm_from_overlap(ref, tgt).tolist()
+    assert perm2 in ([[1, 0]], [[0, 1]])  # Hungarian may pick either if costs equal
 
 
 def test_crossing_detection_triggers():
     nad = make_dummy()
     ref_amp = torch.tensor([[[1.0, 0.0], [0.0, 1.0]]])
-    tgt_amp = torch.tensor([[[0.5, 0.5], [0.5, 0.5]]])
+    tgt_amp = torch.tensor([[[0.0, 1.0], [1.0, 0.0]]])  # swapped
     cache_old = {"cis_amp": ref_amp}
     cache_new = {"cis_amp": tgt_amp}
     crossings = nad._detect_crossings(cache_old, cache_new)
-    assert crossings  # should detect low overlap pairs
+    perms = crossings
+    mask = perms[:, 0] >= 0
+    assert mask.any()

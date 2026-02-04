@@ -108,34 +108,49 @@ class TullyModel:
 
 
 class TullyMolecule:
-    """Minimal 1D molecule representation for Tully models."""
+    """Minimal 1D molecule representation for Tully models (batched)."""
 
     def __init__(self, x0: float, v0: float, mass: float = 2000.0, device=None, dtype=torch.double):
         self.device = device or torch.device("cpu")
         self.dtype = dtype
-        self.coordinates = torch.zeros((1, 1, 3), dtype=dtype, device=self.device)
-        self.coordinates[0, 0, 0] = x0
+
+        x0 = torch.as_tensor(x0, dtype=dtype, device=self.device).view(-1)
+        v0 = torch.as_tensor(v0, dtype=dtype, device=self.device).view(-1)
+        if v0.numel() == 1 and x0.numel() > 1:
+            v0 = v0.expand_as(x0)
+        if v0.shape != x0.shape:
+            raise ValueError("x0 and v0 must have the same shape or be scalar.")
+
+        nmol = x0.shape[0]
+        self.coordinates = torch.zeros((nmol, 1, 3), dtype=dtype, device=self.device)
+        self.coordinates[:, 0, 0] = x0
         self.velocities = torch.zeros_like(self.coordinates)
-        self.velocities[0, 0, 0] = v0
+        self.velocities[:, 0, 0] = v0
         self.acc = torch.zeros_like(self.coordinates)
-        self.mass = torch.tensor([[mass]], dtype=dtype, device=self.device)
+
+        mass_t = torch.as_tensor(mass, dtype=dtype, device=self.device)
+        if mass_t.numel() == 1:
+            mass_t = mass_t.expand(nmol)
+        mass_t = mass_t.view(nmol, 1, 1)
+        self.mass = mass_t
         self.mass_inverse = 1.0 / self.mass
-        self.dm = torch.zeros(1, 1, 1, device=self.device)
+
+        self.dm = torch.zeros(nmol, 1, 1, device=self.device)
         self.cis_amplitudes = None
         self.cis_energies = None
         self.transition_density_matrices = None
         self.force = torch.zeros_like(self.coordinates)
-        self.all_forces = torch.zeros((1, 3, 1, 3), dtype=dtype, device=self.device)
+        self.all_forces = torch.zeros((nmol, 3, 1, 3), dtype=dtype, device=self.device)
         self.nac = None
         self.nac_dot = None
-        self.Etot = torch.zeros(1, device=self.device)
+        self.Etot = torch.zeros(nmol, device=self.device)
         from seqm.seqm_functions.constants import Constants
 
         self.const = Constants().to(self.device)
-        self.species = torch.tensor([[1]], device=self.device)
-        self.num_atoms = torch.tensor([1.0], device=self.device, dtype=dtype)
-        self.tot_charge = torch.zeros(1, device=self.device)
-        self.mult = torch.tensor([1.0], device=self.device)
+        self.species = torch.ones((nmol, 1), dtype=torch.int64, device=self.device)
+        self.num_atoms = torch.ones(nmol, device=self.device, dtype=dtype)
+        self.tot_charge = torch.zeros(nmol, device=self.device)
+        self.mult = torch.ones(nmol, device=self.device, dtype=dtype)
         self.seqm_parameters = {"excited_states": {"n_states": 2}}
 
 
@@ -171,6 +186,19 @@ class _TullyDynamicsMixin:
         self._active_state = 0  # backward compat for any stray references
         self.rho_history = []
 
+    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+        # Pre-compute analytic energies/NACs so NonadiabaticDynamicsBase.initialize
+        # can build caches without requiring a SEQM esdriver call.
+        self._setup_states(molecule)
+        self._init_coeffs(molecule)
+        molecule.active_state = self._active_states + 1
+        self._compute_electronic_structure(
+            molecule, learned_parameters=learned_parameters, compute_nac=self.compute_nac, **kwargs
+        )
+        return super().initialize(
+            molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs
+        )
+
     def _reset_density_history(self):
         self.rho_history = []
 
@@ -188,14 +216,21 @@ class _TullyDynamicsMixin:
         rho = torch.stack((rho00, rho11, rho01), dim=1)
         self.rho_history.append(rho.detach().cpu())
 
-    def _compute_electronic_structure(self, molecule, learned_parameters, **kwargs):
+    def _compute_electronic_structure(
+        self, molecule, learned_parameters, compute_nac: bool = False, nac_pairs=None, **kwargs
+    ):
         x = molecule.coordinates[:, 0, 0]
         E, dE, nac = self.model.pot(x)
         nmol, molsize = molecule.coordinates.shape[:2]
         device = molecule.coordinates.device
         dtype = molecule.coordinates.dtype
-        molecule.cis_energies = (E[:, 1] - E[:, 0]).unsqueeze(1)
-        molecule.Etot = E[:, 0]
+        delta = E[:, 1] - E[:, 0]
+        molecule.cis_energies = torch.stack((torch.zeros_like(delta), delta), dim=1)
+        if self._force_mode == "active" and self._active_states is not None:
+            act = self._active_states.to(device=device)
+            molecule.Etot = E[torch.arange(nmol, device=device), act]
+        else:
+            molecule.Etot = E[:, 0]
         molecule.all_forces = torch.zeros((nmol, self._nstates + 1, molsize, 3), dtype=dtype, device=device)
         molecule.all_forces[:, 1, 0, 0] = -dE[:, 0]
         molecule.all_forces[:, 2, 0, 0] = -dE[:, 1]
@@ -205,13 +240,19 @@ class _TullyDynamicsMixin:
         self._active_state = exc_idx
         molecule.active_state = self._active_states + 1
         molecule.force = molecule.all_forces[:, exc_idx + 1]
-        nac_vec = torch.zeros((nmol, self._nstates, self._nstates, molsize, 3), dtype=dtype, device=device)
-        nac_vec[:, 0, 1, 0, 0] = nac
-        nac_vec[:, 1, 0, 0, 0] = -nac
-        nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=dtype, device=device)
-        vel = molecule.velocities[:, 0, 0]
-        nac_dot[:, 0, 1] = nac * vel
-        nac_dot[:, 1, 0] = -nac * vel
+        want_nac = bool(self.compute_nac) or bool(compute_nac)
+        nac_vec = None
+        nac_dot = None
+        if want_nac:
+            nac_vec = torch.zeros(
+                (nmol, self._nstates, self._nstates, molsize, 3), dtype=dtype, device=device
+            )
+            nac_vec[:, 0, 1, 0, 0] = nac
+            nac_vec[:, 1, 0, 0, 0] = -nac
+            nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=dtype, device=device)
+            vel = molecule.velocities[:, 0, 0]
+            nac_dot[:, 0, 1] = nac * vel
+            nac_dot[:, 1, 0] = -nac * vel
         molecule.nac = nac_vec
         molecule.nac_dot = nac_dot
         self._cache_new = {
@@ -232,14 +273,9 @@ class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
         self._tully_init(model, timestep=timestep, electronic_substeps=electronic_substeps)
 
     def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
-        pop = self.populations
-        # TODO: add non-adiabatic coupling contribution to forces
-        force = (
-            pop[:, 0].view(-1, 1, 1) * molecule.all_forces[:, 1]
-            + pop[:, 1].view(-1, 1, 1) * molecule.all_forces[:, 2]
+        super()._after_electronic_update(
+            molecule, state_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
         )
-        molecule.force = force
-        molecule.Etot = torch.sum(pop * state_energies, dim=1)
         self._record_density_matrix()
 
 

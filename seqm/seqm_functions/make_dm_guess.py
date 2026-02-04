@@ -3,7 +3,7 @@ import torch
 
 from seqm.basics import Pack_Parameters
 
-from .build_two_elec_one_center_int_D import calc_integral#, calc_integral_os
+from .build_two_elec_one_center_int_D import calc_integral  # , calc_integral_os
 from .diag import (
     DEGEN_EIGENSOLVER,
     construct_P,
@@ -116,18 +116,7 @@ def make_dm_guess(
 
     if molecule.method == "PM6":
         if molecule.nocc.dim() == 2:  # open shell
-            W, W_exch = calc_integral_os(
-                zs,
-                zp,
-                zd,
-                molecule.Z,
-                nmol * molecule.molsize * molecule.molsize,
-                molecule.maskd,
-                P,
-                F0SD,
-                G2SD,
-            )
-            W = torch.stack((W, W_exch))
+            raise RuntimeError("Openshell PM6 not tested")
         else:
             W = calc_integral(
                 zs,
@@ -140,10 +129,10 @@ def make_dm_guess(
                 F0SD,
                 G2SD,
             )
-            W_exch = torch.tensor([0], device=molecule.nocc.device)
+            # W_exch = torch.tensor([0], device=molecule.nocc.device)
     else:
         W = torch.tensor([0], device=molecule.nocc.device)
-        W_exch = torch.tensor([0], device=molecule.nocc.device)
+        # W_exch = torch.tensor([0], device=molecule.nocc.device)
 
     if molecule.nocc.dim() == 2:
         P = molecule.dm

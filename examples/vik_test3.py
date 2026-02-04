@@ -35,7 +35,7 @@ coordinates = torch.tensor(
     device=device,
 )
 
-species, coordinates = read_xyz(["./methane.xyz"])
+species, coordinates = read_xyz(["../../Downloads/23ppe-min.xyz"])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
 

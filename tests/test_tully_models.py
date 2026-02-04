@@ -43,3 +43,19 @@ def test_other_tully_models_produce_finite_values():
         assert torch.isfinite(E).all()
         assert torch.isfinite(dE).all()
         assert torch.isfinite(nac).all()
+
+
+def test_tully_fssh_batch_runs():
+    torch.manual_seed(0)
+    model = TullyModel.single_crossing()
+    dyn = TullyFSSH(model, timestep=0.05, electronic_substeps=5)
+    x0 = torch.tensor([-8.0, -7.5], dtype=torch.double)
+    v0 = torch.tensor([2.0, 2.1], dtype=torch.double)
+    mol = TullyMolecule(x0=x0, v0=v0, mass=2000.0, dtype=torch.double)
+    dyn._setup_states(mol)
+    dyn._init_coeffs(mol)
+    dyn.run(mol, steps=5, reuse_P=True, remove_com=None)
+    assert mol.velocities.shape[0] == 2
+    assert dyn._amp_phase.shape[0] == 2
+    # One hop attempt per molecule per step at most
+    assert len(dyn.hop_log) <= 10
