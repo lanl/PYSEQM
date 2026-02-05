@@ -90,6 +90,9 @@ class OutputConfig:
     def get_h5_write_tdm(self) -> int:
         return int(self.h5_config.get("transition_density_matrices", 0))
 
+    def get_h5_write_nonadiabatic(self) -> int:
+        return int(self.h5_config.get("nonadiabatic", 0))
+
 
 class HDF5Writer:
     """Manages HDF5 file writing for MD trajectories."""
@@ -101,12 +104,14 @@ class HDF5Writer:
         self.i_data: Dict[int, int] = {}
         self.i_vec: Dict[int, Dict[str, int]] = {}
         self.i_tdm: Dict[int, int] = {}
+        self.i_na: Dict[int, int] = {}
         self.flags: Dict[int, Dict] = {}
 
         self._cadence = output_config.get_h5_cadence()
         self._data_every = output_config.get_h5_data_every()
         self._write_mo = output_config.get_h5_write_mo()
         self._write_tdm = output_config.get_h5_write_tdm()
+        self._write_nonadiabatic = output_config.get_h5_write_nonadiabatic()
         self._save_relaxed_dipole = False
 
     @staticmethod
@@ -137,6 +142,7 @@ class HDF5Writer:
         Tw_data = self._n_timepoints(steps, self._data_every)
         Tw_vec = {k: self._n_timepoints(steps, v) for k, v in self._cadence.items()}
         Tw_tdm = self._n_timepoints(steps, self._write_tdm)
+        Tw_na = self._n_timepoints(steps, self._write_nonadiabatic)
 
         restricted = not bool(self.seqm_parameters.get("UHF", False))
         self._save_relaxed_dipole = (
@@ -151,6 +157,7 @@ class HDF5Writer:
             Nat_mol = int(torch.sum(molecule.species[mol] > 0))
             Norb_mol = int(molecule.norb[mol])
             R = int(excited_states) if excited_states > 0 else 0
+            Tw_na_mol = Tw_na if R > 0 else 0
 
             self.flags[mol] = {
                 "restricted": restricted,
@@ -160,11 +167,14 @@ class HDF5Writer:
                 "n_excited_states": R,
                 "write_mo": self._write_mo,
                 "write_tdm": bool(Tw_tdm > 0),
+                "write_nonadiabatic": bool(Tw_na_mol > 0),
                 "Tw_data": Tw_data,
                 "Tw_tdm": Tw_tdm,
+                "Tw_na": Tw_na_mol,
                 "Tw_vec": Tw_vec.copy(),
                 "stride": self._cadence.copy(),
                 "tdm_stride": self._write_tdm,
+                "na_stride": self._write_nonadiabatic,
             }
 
             if resume:
@@ -180,6 +190,7 @@ class HDF5Writer:
                     Tw_data,
                     Tw_vec,
                     Tw_tdm,
+                    Tw_na_mol,
                     active_states=active_states,
                 )
 
@@ -202,6 +213,11 @@ class HDF5Writer:
             )
             else 0
         )
+        Tw_na_exist = (
+            h5["data/nonadiabatic/steps"].shape[0]
+            if ("data" in h5 and "nonadiabatic" in h5["data"] and "steps" in h5["data/nonadiabatic"])
+            else 0
+        )
 
         # Validate
         if self._data_every > 0 and Tw_data_exist == 0:
@@ -211,14 +227,22 @@ class HDF5Writer:
                 raise RuntimeError(f"Resume requested but /{k} group not present in HDF5.")
         if self._write_tdm > 0 and Tw_tdm_exist == 0:
             raise RuntimeError("Resume: /data/excitation/transition_density_matrices not present.")
+        if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0 and Tw_na_exist == 0:
+            raise RuntimeError("Resume: /data/nonadiabatic not present.")
 
         # Set indices
         self.i_data[mol] = (step_offset // self._data_every) if self._data_every > 0 else 0
         self.i_vec[mol] = {k: (step_offset // v) if v > 0 else 0 for k, v in self._cadence.items()}
         self.i_tdm[mol] = (step_offset // self._write_tdm) if self._write_tdm > 0 else 0
+        if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0:
+            self.i_na[mol] = step_offset // self._write_nonadiabatic
+        else:
+            self.i_na[mol] = 0
 
         # Update flags with existing capacities
-        self.flags[mol].update({"Tw_data": Tw_data_exist, "Tw_tdm": Tw_tdm_exist, "Tw_vec": Tw_vec_exist})
+        self.flags[mol].update(
+            {"Tw_data": Tw_data_exist, "Tw_tdm": Tw_tdm_exist, "Tw_na": Tw_na_exist, "Tw_vec": Tw_vec_exist}
+        )
 
     def _create_new(
         self,
@@ -231,6 +255,7 @@ class HDF5Writer:
         Tw_data: int,
         Tw_vec: Dict,
         Tw_tdm: int,
+        Tw_na: int,
         active_states=None,
     ):
         """Create new HDF5 file."""
@@ -240,13 +265,16 @@ class HDF5Writer:
         self.i_data[mol] = 0
         self.i_vec[mol] = {"coordinates": 0, "velocities": 0, "forces": 0}
         self.i_tdm[mol] = 0
+        self.i_na[mol] = 0
 
         S = slice(0, Nat_mol)
         h5.create_dataset("atoms", data=_to_np(molecule.species[mol, S]))
 
         # Create /data group
-        if Tw_data > 0:
+        gd = None
+        if Tw_data > 0 or Tw_na > 0:
             gd = h5.create_group("data")
+        if Tw_data > 0:
             self._create_row_chunked(gd, "steps", (Tw_data,), np.int64)
             self._create_row_chunked(gd, "thermo/T", (Tw_data,))
             self._create_row_chunked(gd, "thermo/Ek", (Tw_data,))
@@ -271,12 +299,21 @@ class HDF5Writer:
                     self._create_row_chunked(gtdm, "steps", (Tw_tdm,), np.int64)
                     self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol, Norb_mol))
 
-            if self._write_mo:
-                restricted = self.flags[mol]["restricted"]
-                shape = (Tw_data, 1) if restricted else (Tw_data, 2)
-                self._create_row_chunked(gd, "mo/homo_lumo_gap", shape)
-                nocc_data = int(molecule.nocc[mol].item()) if restricted else _to_np(molecule.nocc[mol])
-                gd.create_dataset("mo/nocc", data=nocc_data)
+                if self._write_mo:
+                    restricted = self.flags[mol]["restricted"]
+                    shape = (Tw_data, 1) if restricted else (Tw_data, 2)
+                    self._create_row_chunked(gd, "mo/homo_lumo_gap", shape)
+                    nocc_data = int(molecule.nocc[mol].item()) if restricted else _to_np(molecule.nocc[mol])
+                    gd.create_dataset("mo/nocc", data=nocc_data)
+
+        if Tw_na > 0 and R > 0:
+            if gd is None:
+                gd = h5.create_group("data")
+            gna = gd.create_group("nonadiabatic")
+            self._create_row_chunked(gna, "steps", (Tw_na,), np.int64)
+            self._create_row_chunked(gna, "active_surface", (Tw_na,), np.int64)
+            self._create_row_chunked(gna, "electronic_amplitudes", (Tw_na, R, 2))
+            self._create_row_chunked(gna, "NACT", (Tw_na, R, R))
 
         # Create vector groups
         for name, Tlen in Tw_vec.items():
@@ -287,6 +324,8 @@ class HDF5Writer:
 
     def append_data(self, step_idx: int, molecule, T, Ek, Ep, e_gap):
         """Append scalar data (thermo, MO, excitations)."""
+        do_tdm = self._write_tdm > 0 and (step_idx % self._write_tdm) == 0
+        write_mo = self._write_mo
         for mol in self.config.molid:
             i = self.i_data.get(mol)
             if i is None or self.flags[mol]["Tw_data"] == 0:
@@ -314,7 +353,7 @@ class HDF5Writer:
                     )
                     gd["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole[mol])
 
-                if flags.get("write_tdm") and (step_idx % flags["tdm_stride"]) == 0:
+                if flags.get("write_tdm") and do_tdm:
                     i_tdm = self.i_tdm[mol]
                     if i_tdm < flags["Tw_tdm"]:
                         gtdm = gd["excitation/transition_density_matrices"]
@@ -325,7 +364,7 @@ class HDF5Writer:
                         )
                         self.i_tdm[mol] = i_tdm + 1
 
-            if flags.get("write_mo"):
+            if write_mo:
                 Norb = flags["Norb"]
                 if flags["restricted"]:
                     gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol, None])
@@ -338,23 +377,28 @@ class HDF5Writer:
 
     def append_vectors(self, step_idx: int, molecule):
         """Append vector data (coordinates, velocities, forces)."""
+        write_names = []
+        for name, stride in self._cadence.items():
+            if stride > 0 and (step_idx % stride) == 0:
+                write_names.append(name)
+        if not write_names:
+            return
+
         for mol in self.config.molid:
             h5 = self.handles[mol]
             f = self.flags[mol]
             S = f["active_slice"]
 
-            tensors = {
-                "coordinates": molecule.coordinates[mol, S, :],
-                "velocities": molecule.velocities[mol, S, :],
-                "forces": molecule.force[mol, S, :],
-            }
+            tensors = {}
+            if "coordinates" in write_names:
+                tensors["coordinates"] = molecule.coordinates[mol, S, :]
+            if "velocities" in write_names:
+                tensors["velocities"] = molecule.velocities[mol, S, :]
+            if "forces" in write_names:
+                tensors["forces"] = molecule.force[mol, S, :]
 
             did_write = False
             for name, arr in tensors.items():
-                stride = f["stride"][name]
-                if stride <= 0 or (step_idx % stride) != 0:
-                    continue
-
                 i = self.i_vec[mol][name]
                 if i >= f["Tw_vec"][name]:
                     continue
@@ -366,6 +410,78 @@ class HDF5Writer:
                 did_write = did_write or (self.i_vec[mol][name] % 100 == 0)
 
             if did_write:
+                h5.flush()
+
+    def append_nonadiabatic(self, step_idx: int, active_states, amplitudes, nac_dot):
+        """Append nonadiabatic data (active surface, electronic amplitudes, NACT)."""
+        stride = self._write_nonadiabatic
+        if stride <= 0 or (step_idx % stride) != 0:
+            return
+
+        flags = self.flags
+        handles = self.handles
+        i_na = self.i_na
+
+        active_vals = None
+        if torch.is_tensor(active_states):
+            active_vals = active_states.detach().cpu().numpy()
+
+        amp_np_all = None
+        if torch.is_tensor(amplitudes):
+            amp_tensor = amplitudes
+            if torch.is_complex(amp_tensor):
+                amp_tensor = torch.stack((amp_tensor.real, amp_tensor.imag), dim=-1)
+            elif amp_tensor.dim() == 2:
+                amp_tensor = torch.stack((amp_tensor, torch.zeros_like(amp_tensor)), dim=-1)
+            amp_np_all = _to_np(amp_tensor)
+
+        nac_np_all = _to_np(nac_dot) if torch.is_tensor(nac_dot) else None
+
+        for mol in self.config.molid:
+            f = flags.get(mol)
+            if f is None or f["Tw_na"] == 0 or not f.get("write_nonadiabatic"):
+                continue
+            i = i_na.get(mol)
+            if i is None or i >= f["Tw_na"]:
+                continue
+
+            n_states = f["n_excited_states"]
+            if n_states <= 0:
+                continue
+
+            h5 = handles[mol]
+            gna = h5["data/nonadiabatic"]
+            gna["steps"][i] = int(step_idx)
+
+            active_val = -1
+            if active_vals is not None:
+                active_val = int(active_vals[mol])
+            elif active_states is not None:
+                active_val = int(active_states)
+            gna["active_surface"][i] = active_val
+
+            if amplitudes is None:
+                amp_np = np.full((n_states, 2), np.nan, dtype=np.float64)
+            elif amp_np_all is not None:
+                amp_np = amp_np_all[mol]
+            else:
+                amp_mol = amplitudes[mol]
+                amp_np = np.asarray(amp_mol)
+                if np.iscomplexobj(amp_np):
+                    amp_np = np.stack((amp_np.real, amp_np.imag), axis=-1)
+                elif amp_np.ndim == 1:
+                    amp_np = np.stack((amp_np, np.zeros_like(amp_np)), axis=-1)
+            gna["electronic_amplitudes"][i, ...] = amp_np
+
+            if nac_dot is None:
+                gna["NACT"][i, ...] = np.nan
+            elif nac_np_all is not None:
+                gna["NACT"][i, ...] = nac_np_all[mol, :n_states, :n_states]
+            else:
+                gna["NACT"][i, ...] = _to_np(nac_dot[mol, :n_states, :n_states])
+
+            i_na[mol] = i + 1
+            if (i + 1) % 100 == 0:
                 h5.flush()
 
     def flush(self):
@@ -388,6 +504,7 @@ class HDF5Writer:
         self.i_data.clear()
         self.i_vec.clear()
         self.i_tdm.clear()
+        self.i_na.clear()
         self.flags.clear()
 
 
@@ -583,6 +700,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if vel_com:
             self._zero_com(molecule, translate_to_origin=True)
 
+        print(molecule.velocities * 1e3)
+
         return molecule.velocities
 
     def _zero_com(self, molecule, remove_angular=True, translate_to_origin=False):
@@ -753,8 +872,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         # Setup output
         do_screen = self.output_config.print_every > 0
         do_xyz = self.output_config.xyz_every > 0
-        do_h5 = self.output_config.get_h5_data_every() > 0 or any(
-            self.output_config.get_h5_cadence().values()
+        do_h5 = (
+            self.output_config.get_h5_data_every() > 0
+            or any(self.output_config.get_h5_cadence().values())
+            or self.output_config.get_h5_write_nonadiabatic() > 0
         )
 
         # Velocity scaling / energy shift

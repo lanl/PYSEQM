@@ -170,17 +170,13 @@ def _tully_seqm_params() -> Dict:
 
 
 class _TullyDynamicsMixin:
-    def _tully_init(
-        self, model: TullyModel, *, timestep: float, electronic_substeps: int, nonadiabatic: Dict = None
-    ):
+    def _tully_init(self, model: TullyModel, *, timestep: float, nonadiabatic: Dict = None):
         params = _tully_seqm_params()
         if nonadiabatic:
             params["nonadiabatic"].update(nonadiabatic)
-        super().__init__(
-            params, timestep=timestep, electronic_substeps=electronic_substeps, output=_TULLY_OUTPUT
-        )
+        super().__init__(params, timestep=timestep, output=_TULLY_OUTPUT)
         self.model = model
-        self.initial_state = 0
+        self.initial_state = 1
         self._nstates = _TULLY_NSTATES
         self._active_states = None
         self._active_state = 0  # backward compat for any stray references
@@ -269,8 +265,8 @@ class _TullyDynamicsMixin:
 class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
     """Ehrenfest dynamics over analytic Tully models."""
 
-    def __init__(self, model: TullyModel, *, timestep=0.05, electronic_substeps=10):
-        self._tully_init(model, timestep=timestep, electronic_substeps=electronic_substeps)
+    def __init__(self, model: TullyModel, *, timestep=0.05):
+        self._tully_init(model, timestep=timestep)
 
     def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
         super()._after_electronic_update(
@@ -280,13 +276,8 @@ class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
 
 
 class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
-    def __init__(self, model: TullyModel, *, timestep=0.05, electronic_substeps=10):
-        self._tully_init(
-            model,
-            timestep=timestep,
-            electronic_substeps=electronic_substeps,
-            nonadiabatic={"recompute_on_hop": True},
-        )
+    def __init__(self, model: TullyModel, *, timestep=0.05):
+        self._tully_init(model, timestep=timestep, nonadiabatic={"recompute_on_hop": True})
 
     def _recompute_active_force(self, molecule):
         state_energies = self._compute_electronic_structure(molecule, learned_parameters={})
@@ -306,15 +297,7 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
 
 
 def run_tully(
-    model: TullyModel,
-    method="fssh",
-    timestep=0.05,
-    steps=200,
-    x0=-8.0,
-    v0=2.0,
-    mass=2000.0,
-    seed=0,
-    electronic_substeps=10,
+    model: TullyModel, method="fssh", timestep=0.05, steps=200, x0=-8.0, v0=2.0, mass=2000.0, seed=0
 ):
     torch.manual_seed(seed)
     if isinstance(model, str):
@@ -328,7 +311,7 @@ def run_tully(
         else:
             raise ValueError(f"Unknown Tully model '{model}'")
     dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-    dyn = dyn_cls(model, timestep=timestep, electronic_substeps=electronic_substeps)
+    dyn = dyn_cls(model, timestep=timestep)
     mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
     # Pre-initialize coefficients so initialization keeps the desired state
     dyn._setup_states(mol)

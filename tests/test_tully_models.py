@@ -18,7 +18,7 @@ def test_tully_cache_shapes_and_dtypes():
 
 def test_tully_ehrenfest_population_norm():
     model = TullyModel.single_crossing()
-    dyn = TullyDynamics(model, timestep=0.05, electronic_substeps=5)
+    dyn = TullyDynamics(model, timestep=0.05)
     mol = TullyMolecule(x0=-8.0, v0=2.0, mass=2000.0)
     dyn.run(mol, steps=10, reuse_P=True, remove_com=None)
     pop = dyn.populations
@@ -27,7 +27,7 @@ def test_tully_ehrenfest_population_norm():
 
 def test_tully_fssh_runs_and_logs():
     model = TullyModel.single_crossing()
-    dyn = TullyFSSH(model, timestep=0.05, electronic_substeps=5)
+    dyn = TullyFSSH(model, timestep=0.05)
     mol = TullyMolecule(x0=-8.0, v0=2.0, mass=2000.0)
     dyn.run(mol, steps=10, reuse_P=True, remove_com=None)
     # hop log should never exceed number of steps
@@ -48,7 +48,7 @@ def test_other_tully_models_produce_finite_values():
 def test_tully_fssh_batch_runs():
     torch.manual_seed(0)
     model = TullyModel.single_crossing()
-    dyn = TullyFSSH(model, timestep=0.05, electronic_substeps=5)
+    dyn = TullyFSSH(model, timestep=0.05)
     x0 = torch.tensor([-8.0, -7.5], dtype=torch.double)
     v0 = torch.tensor([2.0, 2.1], dtype=torch.double)
     mol = TullyMolecule(x0=x0, v0=v0, mass=2000.0, dtype=torch.double)

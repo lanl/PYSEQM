@@ -1,13 +1,13 @@
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import torch
 
 from seqm.seqm_functions.rcis_batch import packone_batch
 
 from .dynamics.nac_utils import resolve_nac_config
-from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Basic
+from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
 from .seqm_functions.hcore import overlap_between_geometries
 
 try:
@@ -48,7 +48,7 @@ class HopEvent:
     reason: Optional[str] = None
 
 
-class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
+class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
     """
     Base class for non-adiabatic dynamics over an excited-state manifold.
 
@@ -60,16 +60,21 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
     def __init__(
         self,
         seqm_parameters: Dict,
-        timestep: float = 0.5,
+        timestep: float = 0.1,
         Temp: float = 0.0,
         step_offset: int = 0,
         output: Optional[Dict] = None,
-        electronic_substeps: int = 10,
         compute_nac: Optional[bool] = None,
-        initial_state: int = 0,
+        initial_state: Union[int, torch.Tensor] = 1,
+        damp: Optional[float] = None,
         *args,
         **kwargs,
     ):
+        if "damp" in kwargs:
+            if damp is None:
+                damp = kwargs.pop("damp")
+            else:
+                kwargs.pop("damp")
         params = dict(seqm_parameters)
         # Analytical gradients are required; all-state forces are needed for mean-field dynamics.
         params.setdefault("analytical_gradient", [True])
@@ -96,7 +101,14 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             na_cfg["nac_states"] = nac_settings.pairs
         params["nonadiabatic"] = na_cfg
         super().__init__(
-            params, timestep=timestep, Temp=Temp, step_offset=step_offset, output=output, *args, **kwargs
+            damp=damp,
+            seqm_parameters=params,
+            timestep=timestep,
+            Temp=Temp,
+            step_offset=step_offset,
+            output=output,
+            *args,
+            **kwargs,
         )
         self.compute_nac = nac_settings.enabled
         self._nac_pairs = nac_settings.pairs
@@ -104,11 +116,11 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         if self._force_mode not in ("all", "active"):
             raise ValueError(f"Invalid nonadiabatic.force_mode '{self._force_mode}'.")
         self._recompute_on_hop = bool(na_cfg.get("recompute_on_hop", False))
-        self.initial_state = int(initial_state)
+        self.initial_state = initial_state
         max_electronic_dt = 0.05  # fs
+        electronic_substeps: int = 10
         nsub = max(int(electronic_substeps), math.ceil(self.timestep / max_electronic_dt))
-        # force even (and at least 2)
-        nsub = max(2, nsub)
+        # force even
         if nsub % 2:
             nsub += 1
         self._electronic_substeps = nsub
@@ -134,6 +146,31 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         self._trivial_swap_buffers: Dict[tuple, torch.Tensor] = {}
         self._perm_cost_buffers: Dict[tuple, torch.Tensor] = {}
 
+    def _normalize_initial_state(self, nmol: int, device) -> torch.Tensor:
+        init = self.initial_state
+        if torch.is_tensor(init):
+            if init.dim() != 1:
+                raise ValueError("initial_state tensor must be 1D with shape (nmol,).")
+            if init.numel() != nmol:
+                raise ValueError(f"initial_state tensor must have length nmol={nmol}.")
+            init_raw = init.to(device=device, dtype=torch.long)
+            min_raw = int(init_raw.min().item())
+            max_raw = int(init_raw.max().item())
+        else:
+            try:
+                init_val = int(init)
+            except Exception as exc:
+                raise TypeError("initial_state must be an int or a torch.Tensor of shape (nmol,).") from exc
+            init_raw = torch.full((nmol,), init_val, dtype=torch.long, device=device)
+            min_raw = init_val
+            max_raw = init_val
+
+        if min_raw < 1:
+            raise ValueError("initial_state is 1-indexed; values must be >= 1.")
+        if self._nstates is not None and max_raw > self._nstates:
+            raise ValueError(f"Initial state {max_raw} > available states ({self._nstates}).")
+        return init_raw - 1
+
     def _setup_states(self, molecule):
         # TODO: Calculate more states than required so that lower states are more accurate.
         # So add 2 states to n_states in seqm_parameters,
@@ -145,9 +182,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
                 "Quantum dynamics requires seqm_parameters['excited_states']['n_states'] to be set."
             )
         self._nstates = int(exc_cfg["n_states"])
-        init_state = int(self.initial_state)
-        if init_state >= self._nstates:
-            raise ValueError(f"Initial state {init_state} >= available states ({self._nstates}).")
+        nmol = molecule.species.shape[0]
+        device = molecule.coordinates.device
+        self._ensure_active_states(nmol, device)
 
     def _init_coeffs(self, molecule):
         nmol = molecule.species.shape[0]
@@ -163,8 +200,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
     def _ensure_active_states(self, nmol: int, device):
         """Ensure `_active_states` exists with correct shape/device."""
         if self._active_states is None or self._active_states.shape[0] != nmol:
-            init_state = int(self.initial_state)
-            self._active_states = torch.full((nmol,), init_state, dtype=torch.long, device=device)
+            self._active_states = self._normalize_initial_state(nmol, device)
         else:
             self._active_states = self._active_states.to(device=device)
         return self._active_states
@@ -172,7 +208,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
     def _uniform_active_state(self) -> Optional[int]:
         """Return scalar active state if all molecules share it."""
         if self._active_states is None:
-            return int(self.initial_state)
+            init = self.initial_state
+            if torch.is_tensor(init):
+                unique = torch.unique(init)
+                if unique.numel() == 1:
+                    return int(unique.item()) - 1
+                return None
+            return int(init) - 1
         if torch.is_tensor(self._active_states):
             unique = torch.unique(self._active_states)
             if unique.numel() == 1:
@@ -220,14 +262,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             else:
                 t.fill_(fill_value)
         return t
-
-    def _normalize_coeffs(self):
-        if self._amp_phase is None:
-            return
-        amp_xy = self._amp_phase[..., :2]
-        norm = torch.sqrt(torch.sum(amp_xy * amp_xy, dim=(1, 2), keepdim=True))
-        norm = torch.clamp(norm, min=1e-12)
-        self._amp_phase[..., :2] = amp_xy / norm
 
     def _coeffs_complex(self) -> Optional[torch.Tensor]:
         # Optional reconstruction of full coefficients c from (x, y, theta).
@@ -895,6 +929,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             self._amp_phase[..., 1] = y0 + (dt_sub / 6.0) * (dy1 + 2 * dy2 + 2 * dy3 + dy4)
             self._amp_phase[..., 2] = th0 + (dt_sub / 6.0) * (dth1 + 2 * dth2 + 2 * dth3 + dth4)
 
+        # Wrap self._amp_phase[..., 2] to [-pi, pi]
+        self._amp_phase[..., 2] = torch.remainder(self._amp_phase[..., 2] + torch.pi, 2 * torch.pi) - torch.pi
+
         hop_int.mul_(dt_sub / 3.0)
         hop_int.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
         self._hop_integral = hop_int
@@ -950,8 +987,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         mos_prev = getattr(molecule, "molecular_orbitals", None)
         if torch.is_tensor(mos_prev):
             mos_prev = mos_prev.detach().clone()
-        with torch.no_grad():
-            start_vel = molecule.velocities.detach().clone()
+        if self.damp is not None:
+            self._apply_langevin_thermostat(molecule)
+
+        start_vel = None
+        if cache_old is not None and cache_old.get("nac_dot") is None:
+            with torch.no_grad():
+                start_vel = molecule.velocities.detach().clone()
 
         # ---- Half kick + drift to t+dt ----
         with torch.no_grad():
@@ -964,6 +1006,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
             molecule.velocities.add_(0.5 * molecule.acc * dt)
+
+        if self.damp is not None:
+            self._apply_langevin_thermostat(molecule)
 
         cache_new = self._cache_new
 
@@ -986,7 +1031,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             return cache
 
         if nac_dt is None:
-            cache_old = _attach_nac_dot(cache_old, start_vel) if cache_old is not None else None
+            if cache_old is not None and cache_old.get("nac_dot") is None:
+                cache_old = _attach_nac_dot(cache_old, start_vel)
             cache_new = (
                 _attach_nac_dot(cache_new, molecule.velocities.detach()) if cache_new is not None else None
             )
@@ -1011,6 +1057,24 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Basic):
             nac_dot=cache_new.get("nac_dot"),
             step=i + self.step_offset,
         )
+
+        if self._h5_writer:
+            na_stride = self.output_config.get_h5_write_nonadiabatic()
+            if na_stride > 0 and ((i + 1) % na_stride == 0):
+                active_states = None
+                if self._active_states is not None:
+                    active_states = self._active_states + 1
+                else:
+                    uniform = self._uniform_active_state()
+                    if uniform is not None:
+                        active_states = uniform + 1
+                amplitudes = self._coeffs_complex()
+                self._h5_writer.append_nonadiabatic(
+                    i + 1,
+                    active_states=active_states,
+                    amplitudes=amplitudes,
+                    nac_dot=cache_new.get("nac_dot"),
+                )
 
         # shift caches for next step
         self._cache_old = {

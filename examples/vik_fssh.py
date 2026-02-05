@@ -64,7 +64,7 @@ output = {
     "prefix": f"./examples/Outputs/vik_fssh.step_{timestep:.1f}",
     "print every": 1,
     "xyz": 1,
-    "h5": {"data": 1, "velocities": 1, "coordinates": 1, "forces": 1},
+    "h5": {"data": 1, "velocities": 1, "coordinates": 1, "forces": 1, "nonadiabatic": 1},
     "checkpoint every": 0,
 }
 
@@ -82,7 +82,7 @@ with torch.no_grad():
     molecule.velocities = molecule.velocities.unsqueeze(0).repeat(molecule.coordinates.shape[0],1,1)
 
 
-initial_excited_state = 2  # zero-based (0 -> S1, 1 -> S2, ...)
+initial_excited_state = 3  # 1-based (1 -> S1, 2 -> S2, ...)
 
 dyn = SurfaceHoppingDynamics(
     seqm_parameters,

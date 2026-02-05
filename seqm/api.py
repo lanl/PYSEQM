@@ -8,7 +8,7 @@ long dotted paths in user code.
 from .dynamics import NACConfig, active_state_tensor, resolve_nac_config
 from .dynamics.xlbomd import EnergyXL, ForceXL
 from .ElectronicStructure import Electronic_Structure
-from .io.xyz import read_xyz, save_xyz
+from .io.xyz import read_xyz, read_xyz_trajectory, save_xyz
 from .MolecularDynamics import XL_BOMD, XL_ESMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
 from .Molecule import Molecule
 from .NonadiabaticDynamics import EhrenfestDynamics, NonadiabaticDynamicsBase, SurfaceHoppingDynamics
@@ -36,6 +36,7 @@ __all__ = [
     "geomeTRIC_optimization",
     "geometric_optimization",
     "read_xyz",
+    "read_xyz_trajectory",
     "resolve_nac_config",
     "save_xyz",
 ]
