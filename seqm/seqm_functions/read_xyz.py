@@ -50,11 +50,13 @@ def read_xyz(files, sort=True):
 
 
 def read_xyz_trajectory(
-    file, start=0, stop=None, step=1, num=None, sort=True, vel_file=None, return_vel=False
+    file, start=0, stop=None, step=1, num=None, sort=True, vel_file=None, return_vel=False, indices=None
 ):
     """
     Read concatenated XYZ frames from coords.xyz file produced by NEXMD
 
+    If `indices` is provided: reads exactly those frames (in that order; duplicates allowed).
+    Else:
     Use start/stop/step slicing, or set num to sample evenly between
     start and stop (inclusive).
 
@@ -79,54 +81,29 @@ def read_xyz_trajectory(
       - first column (id_or_elem) constant across frames (so we compute species + order once)
     """
 
+    if indices is not None and num is not None:
+        raise ValueError("Use either indices or num, not both.")
+    if indices is not None and step != 1:
+        raise ValueError("When using indices, step must be 1.")
     if num is not None and step != 1:
         raise ValueError("Provide either step or num, not both.")
 
-    # Count frames only if needed (num or negative indices)
-    need_total = (num is not None) or (start < 0) or (stop is not None and stop < 0)
-
-    def count_frames():
-        c = 0
-        with open(file, "r", buffering=8<<20) as f:
-            while True:
-                nline = f.readline()
-                if not nline: break
-                n = int(nline)
-                f.readline()                       # comment
-                for _ in range(n): f.readline()    # atoms
-                c += 1
-        return c
-
-    total = count_frames() if need_total else None
-    if total == 0:
-        zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
-        return (zS, zC, zC.copy()) if return_vel else (zS, zC)
-
-    if start < 0: start += total
-    if stop is not None and stop < 0: stop += total
-
-    if num is None:
-        if stop is None and total is not None: stop = total
-        idxs = np.arange(start, stop, step, dtype=int)
-    else:
-        if total is None: total = count_frames()
-        if stop is None: stop = total - 1
-        idxs = np.rint(np.linspace(start, stop, num=num)).astype(int)
-        idxs = np.unique(idxs)  # drop duplicates for speed/clarity
-
-    if idxs.size == 0:
-        zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
-        return (zS, zC, zC.copy()) if return_vel else (zS, zC)
-
-    want = set(idxs.tolist())
-    M = idxs.size
-
-    # ---- velocity file ----
     if return_vel:
         if vel_file is None:
             vel_file = os.path.join(os.path.dirname(file), "velocity.out")
         if not os.path.exists(vel_file):
             raise FileNotFoundError("velocity.out not found (or vel_file not provided).")
+
+    def count_frames():
+        c = 0
+        with open(file, "r", buffering=8 << 20) as f:
+            while True:
+                nline = f.readline()
+                if not nline: break
+                n = int(nline); f.readline()
+                for _ in range(n): f.readline()
+                c += 1
+        return c
 
     def read_n_lines(fh, n):
         lines = [fh.readline() for _ in range(n)]
@@ -135,22 +112,64 @@ def read_xyz_trajectory(
         return lines
 
     def read_vel(vh, n):
-        vh.readline()  # comment
-        if vh.readline().strip().upper() != "$VELOC": raise ValueError("Bad velocity.out ($VELOC).")
+        vh.readline()
+        if vh.readline().strip().upper() != "$VELOC":
+            raise ValueError("Bad velocity.out ($VELOC).")
         v = np.fromstring("".join(read_n_lines(vh, n)), sep=" ")
-        if v.size != n * 3: raise ValueError("Bad velocity.out (vector count).")
-        if vh.readline().strip().upper() != "$ENDVELOC": raise ValueError("Bad velocity.out ($ENDVELOC).")
+        if v.size != n * 3:
+            raise ValueError("Bad velocity.out (vector count).")
+        if vh.readline().strip().upper() != "$ENDVELOC":
+            raise ValueError("Bad velocity.out ($ENDVELOC).")
         return v.reshape(n, 3)
 
-    # ---- main pass ----
+    # ---- choose frames: build order_out (output order, with duplicates), and out_map (frame->output slots) ----
+    if indices is not None:
+        idxs = np.asarray(indices, dtype=int)
+        if idxs.size == 0:
+            zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+            return (zS, zC, zC.copy()) if return_vel else (zS, zC)
+        total = count_frames() if np.any(idxs < 0) else None
+        if total is not None:
+            idxs = np.where(idxs < 0, idxs + total, idxs)
+        order_out = idxs.tolist()  # keep order + duplicates
+    else:
+        need_total = (num is not None) or (start < 0) or (stop is not None and stop < 0)
+        total = count_frames() if need_total else None
+        if total == 0:
+            zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+            return (zS, zC, zC.copy()) if return_vel else (zS, zC)
+
+        if start < 0: start += total
+        if stop is not None and stop < 0: stop += total
+
+        if num is None:
+            if stop is None and total is not None: stop = total
+            idxs = np.arange(start, stop, step, dtype=int)
+        else:
+            if total is None: total = count_frames()
+            if stop is None: stop = total - 1
+            idxs = np.rint(np.linspace(start, stop, num=num)).astype(int)
+            idxs = np.unique(idxs)  # your current behavior
+        order_out = idxs.tolist()
+
+    if len(order_out) == 0:
+        zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+        return (zS, zC, zC.copy()) if return_vel else (zS, zC)
+
+    out_map = {}
+    for j, fr in enumerate(order_out):
+        out_map.setdefault(int(fr), []).append(j)
+    want = set(out_map.keys())
+    M = len(order_out)
+
+    # ---- main pass (one scan; cache species/order; fill all requested output slots) ----
     species_fixed = order = None
     numeric = None
-    K = None
 
-    with open(file, "r", buffering=64<<20) as f, (open(vel_file, "r", buffering=64<<20) if return_vel else open(os.devnull, "r")) as vf:
-        # first pass: find K from first frame header
+    with open(file, "r", buffering=64 << 20) as f, (open(vel_file, "r", buffering=64 << 20) if return_vel else open(os.devnull, "r")) as vf:
         nline = f.readline()
-        if not nline: raise ValueError("Empty XYZ.")
+        if not nline:
+            raise ValueError("Empty XYZ.")
         K = int(nline)
         f.seek(0)
 
@@ -158,15 +177,14 @@ def read_xyz_trajectory(
         coords  = np.empty((M, K, 3), dtype=float)
         vels    = np.empty((M, K, 3), dtype=float) if return_vel else None
 
-        out_i = 0
         frame_i = 0
         while True:
             nline = f.readline()
             if not nline: break
             n = int(nline)
-            if n != K: raise ValueError("Variable atom count not supported in fast path.")
-            f.readline()  # comment
-
+            if n != K:
+                raise ValueError("Variable atom count not supported in fast path.")
+            f.readline()
             atom_lines = read_n_lines(f, K)
 
             if frame_i in want:
@@ -188,7 +206,6 @@ def read_xyz_trajectory(
                     else:
                         order = None
                         species_fixed = sp
-
                 else:
                     if numeric:
                         co = np.fromstring("".join(atom_lines), sep=" ").reshape(K, 4)[:, 1:4]
@@ -197,27 +214,23 @@ def read_xyz_trajectory(
                     if order is not None:
                         co = co[order]
 
-                species[out_i, :] = species_fixed
-                coords[out_i, :, :] = co
-
+                v = None
                 if return_vel:
                     v = read_vel(vf, K)
                     if order is not None:
                         v = v[order]
-                    vels[out_i, :, :] = v
-                out_i += 1
+
+                for j in out_map[frame_i]:
+                    species[j, :] = species_fixed
+                    coords[j, :, :] = co
+                    if return_vel:
+                        vels[j, :, :] = v
             else:
                 if return_vel:
-                    # skip velocity frame: fixed layout
                     vf.readline(); vf.readline()
                     for _ in range(K): vf.readline()
                     vf.readline()
 
             frame_i += 1
 
-        species = species[:out_i]
-        coords = coords[:out_i]
-        if return_vel:
-            vels = vels[:out_i]
-            return species, coords, vels
-        return species, coords
+    return (species, coords, vels) if return_vel else (species, coords)
