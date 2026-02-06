@@ -941,7 +941,15 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             return self._current_potential
         return super()._thermo_potential(molecule)
 
-    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+    def initialize(
+        self,
+        molecule,
+        remove_com=None,
+        learned_parameters=dict(),
+        steps: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
         self._setup_states(molecule)
         self._init_coeffs(molecule)
         molecule.active_state = (
@@ -951,7 +959,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # Inital energies, forces calculated in parent initialize.
         # TODO: For Ehrenfest need NACs too.
         super().initialize(
-            molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs
+            molecule,
+            remove_com=remove_com,
+            learned_parameters=learned_parameters,
+            steps=steps,
+            *args,
+            **kwargs,
         )
         state_energies = self._build_state_energies(molecule, active_exc_index=self._active_states)
         nac_vec = self._get_nac_matrix(molecule)
@@ -961,6 +974,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             "cis_amp": None if molecule.cis_amplitudes is None else molecule.cis_amplitudes.detach().clone(),
             "nac_dot": None,
         }
+
+        if self._cache_old["nac_dot"] is None and self._cache_old["nac_vec"] is not None:
+            with torch.no_grad():
+                v = molecule.velocities.detach()
+                nd = torch.sum(v.unsqueeze(1).unsqueeze(1) * self._cache_old["nac_vec"], dim=(3, 4))
+                self._cache_old["nac_dot"] = nd
 
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
@@ -975,6 +994,18 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         )  # blocks hop acceptance
         self.prev_state = torch.full((nmol,), -1, dtype=torch.long, device=device)  # like ihopprev
 
+        if self.step_offset == 0 and self._h5_writer is not None:
+            na_stride = self.output_config.get_h5_write_nonadiabatic()
+            if na_stride > 0:
+                active_states = self._active_states + 1
+                amplitudes = self._coeffs_complex()
+                nac_dot = None
+                if self._cache_old is not None:
+                    nac_dot = self._cache_old.get("nac_dot")
+                self._h5_writer.append_nonadiabatic(
+                    0, active_states=active_states, amplitudes=amplitudes, nac_dot=nac_dot
+                )
+
     def _after_electronic_update(
         self, molecule, state_energies, nac_matrix=None, nac_dot=None, step: Optional[int] = None
     ):
@@ -983,17 +1014,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
     def _do_integrator_step(self, i, molecule, learned_parameters, **kwargs):
         dt = self.timestep
         cache_old = self._cache_old or self._cache_new
+
         coords_prev = molecule.coordinates.detach().clone()
         mos_prev = getattr(molecule, "molecular_orbitals", None)
         if torch.is_tensor(mos_prev):
             mos_prev = mos_prev.detach().clone()
         if self.damp is not None:
             self._apply_langevin_thermostat(molecule)
-
-        start_vel = None
-        if cache_old is not None and cache_old.get("nac_dot") is None:
-            with torch.no_grad():
-                start_vel = molecule.velocities.detach().clone()
 
         # ---- Half kick + drift to t+dt ----
         with torch.no_grad():
@@ -1031,8 +1058,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             return cache
 
         if nac_dt is None:
-            if cache_old is not None and cache_old.get("nac_dot") is None:
-                cache_old = _attach_nac_dot(cache_old, start_vel)
             cache_new = (
                 _attach_nac_dot(cache_new, molecule.velocities.detach()) if cache_new is not None else None
             )
@@ -1146,12 +1171,10 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         i_state = active_states
         denom = torch.clamp(pop[arange, i_state], min=1e-10)
         # FSSH: g_ij = max(0, - Δa_ii / a_ii) with Δa_ii ≈ ∫ 2 Re[c_i* c_j τ_ij] dt
-        print("!!!CHECK IF HOP INTEGRAL SIGN CONVENTION CORRECT!!! DELETE THIS LINE AFTER VERIFYING!!!")
-        g_rows = -self._hop_integral[arange, i_state] / denom.unsqueeze(1)
-        print(f"g_rows before clamp: {g_rows}")
+        g_rows = self._hop_integral[arange, i_state] / denom.unsqueeze(1)
         g_rows = torch.clamp(g_rows, min=0.0)
 
-        # g_rows = torch.clamp(-self._hop_integral[arange, i_state] / denom.unsqueeze(1), min=0.0)
+        # g_rows = torch.clamp(self._hop_integral[arange, i_state] / denom.unsqueeze(1), min=0.0)
 
         # Guard against dt so large that Σ_j g_ij > 1
         g_sum = g_rows.sum(dim=1, keepdim=True)

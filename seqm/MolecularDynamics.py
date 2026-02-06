@@ -115,9 +115,14 @@ class HDF5Writer:
         self._save_relaxed_dipole = False
 
     @staticmethod
-    def _n_timepoints(steps: int, stride: int) -> int:
+    def _n_timepoints(steps: int, stride: int, include_initial: bool = False) -> int:
         """Calculate number of timepoints for given stride."""
-        return (steps + stride - 1) // stride if stride > 0 else 0
+        if stride <= 0:
+            return 0
+        if include_initial:
+            # Include t=0 snapshot plus the regular cadence.
+            return (steps + stride) // stride
+        return (steps + stride - 1) // stride
 
     @staticmethod
     def _create_row_chunked(
@@ -137,12 +142,15 @@ class HDF5Writer:
         excited_states: int = 0,
         resume: bool = False,
         step_offset: int = 0,
+        include_initial: bool = False,
     ):
         """Open HDF5 files for writing."""
-        Tw_data = self._n_timepoints(steps, self._data_every)
-        Tw_vec = {k: self._n_timepoints(steps, v) for k, v in self._cadence.items()}
-        Tw_tdm = self._n_timepoints(steps, self._write_tdm)
-        Tw_na = self._n_timepoints(steps, self._write_nonadiabatic)
+        Tw_data = self._n_timepoints(steps, self._data_every, include_initial=include_initial)
+        Tw_vec = {
+            k: self._n_timepoints(steps, v, include_initial=include_initial) for k, v in self._cadence.items()
+        }
+        Tw_tdm = self._n_timepoints(steps, self._write_tdm, include_initial=include_initial)
+        Tw_na = self._n_timepoints(steps, self._write_nonadiabatic, include_initial=include_initial)
 
         restricted = not bool(self.seqm_parameters.get("UHF", False))
         self._save_relaxed_dipole = (
@@ -230,12 +238,12 @@ class HDF5Writer:
         if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0 and Tw_na_exist == 0:
             raise RuntimeError("Resume: /data/nonadiabatic not present.")
 
-        # Set indices
-        self.i_data[mol] = (step_offset // self._data_every) if self._data_every > 0 else 0
-        self.i_vec[mol] = {k: (step_offset // v) if v > 0 else 0 for k, v in self._cadence.items()}
-        self.i_tdm[mol] = (step_offset // self._write_tdm) if self._write_tdm > 0 else 0
+        # Set indices (assume an initial snapshot at step 0 exists in resumed files)
+        self.i_data[mol] = (step_offset // self._data_every) + 1 if self._data_every > 0 else 0
+        self.i_vec[mol] = {k: ((step_offset // v) + 1 if v > 0 else 0) for k, v in self._cadence.items()}
+        self.i_tdm[mol] = (step_offset // self._write_tdm) + 1 if self._write_tdm > 0 else 0
         if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0:
-            self.i_na[mol] = step_offset // self._write_nonadiabatic
+            self.i_na[mol] = (step_offset // self._write_nonadiabatic) + 1
         else:
             self.i_na[mol] = 0
 
@@ -656,6 +664,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         self._h5_writer: Optional[HDF5Writer] = None
         self._xyz_writer: Optional[XYZWriter] = None
+        self._do_screen = False
+        self._do_xyz = False
+        self._do_h5 = False
 
     @property
     def output(self):
@@ -803,7 +814,15 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """Hook for subclasses to override integration."""
         return self.one_step(molecule, learned_parameters=learned_parameters, **kwargs)
 
-    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+    def initialize(
+        self,
+        molecule,
+        remove_com=None,
+        learned_parameters=dict(),
+        steps: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
         """Initialize MD simulation."""
         molecule.verbose = False  # Dont print SCF and CIS/RPA results
         self.do_remove_com = remove_com is not None
@@ -839,6 +858,55 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
 
+        # Setup output
+        self._do_screen = self.output_config.print_every > 0
+        self._do_xyz = self.output_config.xyz_every > 0
+        self._do_h5 = (
+            self.output_config.get_h5_data_every() > 0
+            or any(self.output_config.get_h5_cadence().values())
+            or self.output_config.get_h5_write_nonadiabatic() > 0
+        )
+
+        if steps is None:
+            return
+
+        if self._do_h5:
+            excited_states_params = self.seqm_parameters.get("excited_states")
+            n_roots = excited_states_params["n_states"] if excited_states_params else 0
+            # With XL-ESMD, only the active state is computed
+            if isinstance(self, XL_ESMD):
+                n_roots = 1
+            self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters)
+            self._h5_writer.open(
+                molecule,
+                self.output_config.prefix,
+                steps,
+                n_roots,
+                resume=(self.step_offset > 0),
+                step_offset=self.step_offset,
+                include_initial=(self.step_offset == 0),
+            )
+
+        if self._do_xyz:
+            self._xyz_writer = XYZWriter(self.output_config, self.step_offset)
+            self._xyz_writer.open()
+
+        if self.step_offset == 0:
+            with torch.no_grad():
+                Ek0 = self._kinetic_energy(molecule)
+                T0 = self._calc_temperature(Ek0)
+                V0 = self._thermo_potential(molecule)
+
+                if self._do_h5:
+                    if self.output_config.get_h5_data_every() > 0:
+                        self._h5_writer.append_data(0, molecule, T0, Ek0, V0, molecule.e_gap)
+                    if self.output_config.h5_vectors_every:
+                        self._h5_writer.append_vectors(0, molecule)
+
+                if self._do_xyz:
+                    # Write an initial snapshot labeled as step 0.
+                    self._xyz_writer.write(-1, molecule, Ek0, V0)
+
     def run(
         self,
         molecule,
@@ -862,21 +930,17 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             reuse_P = True
 
         self.initialize(
-            molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs
+            molecule,
+            remove_com=remove_com,
+            learned_parameters=learned_parameters,
+            steps=steps,
+            *args,
+            **kwargs,
         )
 
         if not reuse_P:
             molecule.dm = None
             molecule.cis_amplitudes = None
-
-        # Setup output
-        do_screen = self.output_config.print_every > 0
-        do_xyz = self.output_config.xyz_every > 0
-        do_h5 = (
-            self.output_config.get_h5_data_every() > 0
-            or any(self.output_config.get_h5_cadence().values())
-            or self.output_config.get_h5_write_nonadiabatic() > 0
-        )
 
         # Velocity scaling / energy shift
         do_scale_vel = "scale_vel" in kwargs
@@ -895,27 +959,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         checkpoint_every = self.output_config.checkpoint_every
         checkpoint_path = f"{self.output_config.prefix}.restart.pt"
 
+        do_screen = self._do_screen
+        do_xyz = self._do_xyz
+        do_h5 = self._do_h5
+
         try:
-            if do_h5:
-                excited_states_params = self.seqm_parameters.get("excited_states")
-                n_roots = excited_states_params["n_states"] if excited_states_params else 0
-                # With XL-ESMD, only the active state is computed
-                if isinstance(self, XL_ESMD):
-                    n_roots = 1
-                self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters)
-                self._h5_writer.open(
-                    molecule,
-                    self.output_config.prefix,
-                    steps,
-                    n_roots,
-                    resume=(self.step_offset > 0),
-                    step_offset=self.step_offset,
-                )
-
-            if do_xyz:
-                self._xyz_writer = XYZWriter(self.output_config, self.step_offset)
-                self._xyz_writer.open()
-
             for i in range(self.step_offset, steps):
                 self._do_integrator_step(i, molecule, learned_parameters, *args, **kwargs)
 
@@ -1210,7 +1258,15 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
                 torch.cuda.synchronize()
             molecule.const.timing["MD"].append(time.time() - t0)
 
-    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+    def initialize(
+        self,
+        molecule,
+        remove_com=None,
+        learned_parameters=dict(),
+        steps: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
         if self.damp is not None:
             dt = self.timestep
             # s = -γ dt
@@ -1222,7 +1278,7 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
             # c2 = 1 - c1^2 = 1 - e^{-γ dt}
             one_me = -torch.expm1(s)
             self.langevin_c2 = torch.sqrt(one_me * self.Temp * molecule.mass_inverse) * CONSTANTS.VEL_SCALE
-        return super().initialize(molecule, remove_com, learned_parameters, *args, **kwargs)
+        return super().initialize(molecule, remove_com, learned_parameters, steps=steps, *args, **kwargs)
 
 
 class XL_BOMD(Molecular_Dynamics_Langevin):
@@ -1383,7 +1439,14 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         self._xl_ctx.update(P=P, Pt=Pt, es_amp=es_amp, es_amp_t=es_amp_t)
 
     def initialize(
-        self, molecule, remove_com=None, learned_parameters=dict(), do_xl_esmd=False, *args, **kwargs
+        self,
+        molecule,
+        remove_com=None,
+        learned_parameters=dict(),
+        steps: Optional[int] = None,
+        do_xl_esmd=False,
+        *args,
+        **kwargs,
     ):
         if torch.any(
             active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device) > 0
@@ -1391,8 +1454,17 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             self.move_on_excited_state = True
             self.esdriver.conservative_force.energy.excited_states["save_tdm"] = True
 
+        molecule.Electronic_entropy = torch.zeros(
+            molecule.species.shape[0], device=molecule.coordinates.device
+        )
+
         super().initialize(
-            molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs
+            molecule,
+            remove_com=remove_com,
+            learned_parameters=learned_parameters,
+            steps=steps,
+            *args,
+            **kwargs,
         )
 
         if self.move_on_excited_state and not do_xl_esmd:
@@ -1414,9 +1486,6 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                 torch.as_tensor(scf_eps), requires_grad=False
             )
             self.esdriver.conservative_force.energy.excited_states["tolerance"] = es_eps
-            molecule.Electronic_entropy = torch.zeros(
-                molecule.species.shape[0], device=molecule.coordinates.device
-            )
             self.esdriver.conservative_force.energy.excited_states["make_best_guess"] = False
             if self.esdriver.conservative_force.energy.excited_states["method"].lower() == "rpa":
                 raise ValueError(
@@ -1543,11 +1612,20 @@ class XL_ESMD(XL_BOMD):
 
         return P, Pt, es_amp, es_amp_t
 
-    def initialize(self, molecule, remove_com=None, learned_parameters=dict(), *args, **kwargs):
+    def initialize(
+        self,
+        molecule,
+        remove_com=None,
+        learned_parameters=dict(),
+        steps: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
         super().initialize(
             molecule,
             remove_com=remove_com,
             learned_parameters=learned_parameters,
+            steps=steps,
             do_xl_esmd=True,
             *args,
             **kwargs,

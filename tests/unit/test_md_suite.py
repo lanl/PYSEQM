@@ -70,14 +70,15 @@ def _read_h5_thermo(path):
 
 
 def _assert_output_files(prefix, molid, steps, expect_excited=False, n_states=None):
+    expected_steps = steps + 1
     for h5_path in _h5_paths(prefix, molid):
         assert h5_path.exists()
         with h5py.File(h5_path, "r") as h5:
             assert "data" in h5
-            assert h5["data/steps"].shape[0] == steps
-            assert h5["coordinates/values"].shape[0] == steps
-            assert h5["velocities/values"].shape[0] == steps
-            assert h5["forces/values"].shape[0] == steps
+            assert h5["data/steps"].shape[0] == expected_steps
+            assert h5["coordinates/values"].shape[0] == expected_steps
+            assert h5["velocities/values"].shape[0] == expected_steps
+            assert h5["forces/values"].shape[0] == expected_steps
             if expect_excited:
                 assert "excitation" in h5["data"]
                 assert "excitation_energy" in h5["data/excitation"]
@@ -87,7 +88,7 @@ def _assert_output_files(prefix, molid, steps, expect_excited=False, n_states=No
                     assert h5["data/excitation/oscillator_strength"].shape[1] == n_states
     for xyz_path in _xyz_paths(prefix, molid):
         assert xyz_path.exists()
-        assert _read_xyz_frames(xyz_path) == steps
+        assert _read_xyz_frames(xyz_path) == expected_steps
         mol = int(xyz_path.stem.split(".")[-1])
         h5_path = Path(f"{prefix}.{mol}.h5")
         with h5py.File(h5_path, "r") as h5:

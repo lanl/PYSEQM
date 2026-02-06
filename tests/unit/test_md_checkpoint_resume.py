@@ -81,9 +81,10 @@ def _run_checkpoint_resume(
 
 
 def _compare_runs(continuous, resumed, steps):
+    expected_steps = steps + 1
     for (coords_a, vels_a, steps_a), (coords_b, vels_b, steps_b) in zip(continuous, resumed):
-        assert steps_a == steps
-        assert steps_b == steps
+        assert steps_a == expected_steps
+        assert steps_b == expected_steps
         assert_allclose(coords_a, coords_b, rtol=1e-5, atol=1e-5)
         assert_allclose(vels_a, vels_b, rtol=1e-5, atol=1e-5)
 
