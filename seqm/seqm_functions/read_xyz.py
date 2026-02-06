@@ -53,217 +53,171 @@ def read_xyz_trajectory(
     file, start=0, stop=None, step=1, num=None, sort=True, vel_file=None, return_vel=False
 ):
     """
-    Read concatenated XYZ frames from one file.
+    Read concatenated XYZ frames from coords.xyz file produced by NEXMD
 
     Use start/stop/step slicing, or set num to sample evenly between
     start and stop (inclusive).
 
-    Set return_vel=True to also read velocity.out in the same folder
+    Set return_vel=True to also read velocity.out (from NEXMD) in the same folder
     (or pass vel_file).
+    
+    assumptions:
+
+    XYZ per frame (no blank lines):
+        n
+        comment
+        n lines: <id_or_elem> x y z
+
+    velocity.out per frame (fixed, no blank lines):
+        comment
+        $VELOC
+        n lines: vx vy vz
+        $ENDVELOC
+
+    Also:
+      - n constant across frames
+      - first column (id_or_elem) constant across frames (so we compute species + order once)
     """
 
-    def _count_frames(path):
-        count = 0
-        with open(path) as fh:
+    if num is not None and step != 1:
+        raise ValueError("Provide either step or num, not both.")
+
+    # Count frames only if needed (num or negative indices)
+    need_total = (num is not None) or (start < 0) or (stop is not None and stop < 0)
+
+    def count_frames():
+        c = 0
+        with open(file, "r", buffering=8<<20) as f:
             while True:
-                line = fh.readline()
-                if not line:
-                    break
-                while line and not line.strip():
-                    line = fh.readline()
-                if not line:
-                    break
-                try:
-                    n = int(line.split()[0])
-                except ValueError as exc:
-                    raise ValueError(f"Expected atom count: {line.strip()}") from exc
-                if not fh.readline():
-                    raise ValueError("Truncated XYZ frame.")
-                for _ in range(n):
-                    if not fh.readline():
-                        raise ValueError("Truncated XYZ frame.")
-                count += 1
-        return count
+                nline = f.readline()
+                if not nline: break
+                n = int(nline)
+                f.readline()                       # comment
+                for _ in range(n): f.readline()    # atoms
+                c += 1
+        return c
 
-    def _read_atoms(fh, n):
-        data = np.zeros((n, 4), float)
-        line = fh.readline()
-        if not line:
-            raise ValueError("Truncated XYZ frame.")
-        toks = line.split()
-        numeric = toks[0].isdigit()
-        data[0, 0] = int(toks[0]) if numeric else _element_dict[toks[0]]
-        data[0, 1:4] = list(map(float, toks[1:4]))
-        for i in range(1, n):
-            line = fh.readline()
-            if not line:
-                raise ValueError("Truncated XYZ frame.")
-            toks = line.split()
-            data[i, 0] = int(toks[0]) if numeric else _element_dict[toks[0]]
-            data[i, 1:4] = list(map(float, toks[1:4]))
-        if sort:
-            order = data[:, 0].argsort(kind="stable")[::-1]
-            data = data[order]
-            return data, order
-        return data, None
-
-    def _skip_atoms(fh, n):
-        for _ in range(n):
-            if not fh.readline():
-                raise ValueError("Truncated XYZ frame.")
-
-    def _parse_vel_line(line):
-        toks = line.split()
-        if len(toks) < 3:
-            return None
-        if len(toks) >= 4 and (toks[0].isdigit() or toks[0] in _element_dict):
-            xyz = toks[1:4]
-        else:
-            xyz = toks[:3]
-        try:
-            return list(map(float, xyz))
-        except ValueError:
-            return None
-
-    def _read_vel_frame(vh, n):
-        line = vh.readline()
-        while line and "$VELOC" not in line.upper():
-            line = vh.readline()
-        if not line:
-            raise ValueError("velocity.out missing $VELOC block.")
-        vals = np.zeros((n, 3), float)
-        i = 0
-        while i < n:
-            line = vh.readline()
-            if not line:
-                raise ValueError("velocity.out truncated.")
-            s = line.strip()
-            if not s or "$END" in s.upper():
-                continue
-            vec = _parse_vel_line(s)
-            if vec is None:
-                continue
-            vals[i, :] = vec
-            i += 1
-        return vals
-
-    need_total = num is not None or (start is not None and start < 0) or (stop is not None and stop < 0)
-    total = _count_frames(file) if need_total else None
+    total = count_frames() if need_total else None
     if total == 0:
-        return np.zeros((0, 0), int), np.zeros((0, 0, 3), float)
+        zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+        return (zS, zC, zC.copy()) if return_vel else (zS, zC)
+
+    if start < 0: start += total
+    if stop is not None and stop < 0: stop += total
 
     if num is None:
-        start_idx = 0 if start is None else (start + total if total is not None and start < 0 else start)
-        stop_idx = (
-            total
-            if stop is None and total is not None
-            else (stop + total if total is not None and stop < 0 else stop)
-        )
-        start_idx = max(0, start_idx)
-        if total is not None:
-            start_idx = min(start_idx, total)
-        if stop_idx is not None:
-            stop_idx = max(0, stop_idx)
-            if total is not None:
-                stop_idx = min(stop_idx, total)
-            if start_idx >= stop_idx:
-                return np.zeros((0, 0), int), np.zeros((0, 0, 3), float)
+        if stop is None and total is not None: stop = total
+        idxs = np.arange(start, stop, step, dtype=int)
     else:
-        if step != 1:
-            raise ValueError("Provide either step or num, not both.")
-        start_idx = 0 if start is None else (start + total if start < 0 else start)
-        stop_idx = (total - 1) if stop is None else (stop + total if stop < 0 else stop)
-        start_idx = max(0, min(start_idx, total - 1))
-        stop_idx = max(0, min(stop_idx, total - 1))
-        if start_idx > stop_idx:
-            raise ValueError("start must be <= stop when num is provided.")
-        count = stop_idx - start_idx + 1
-        use_all = num >= count
-        if not use_all:
-            idx_list = np.rint(np.linspace(start_idx, stop_idx, num=num)).astype(int).tolist()
-            last_idx = idx_list[-1] if idx_list else -1
+        if total is None: total = count_frames()
+        if stop is None: stop = total - 1
+        idxs = np.rint(np.linspace(start, stop, num=num)).astype(int)
+        idxs = np.unique(idxs)  # drop duplicates for speed/clarity
 
+    if idxs.size == 0:
+        zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+        return (zS, zC, zC.copy()) if return_vel else (zS, zC)
+
+    want = set(idxs.tolist())
+    M = idxs.size
+
+    # ---- velocity file ----
     if return_vel:
         if vel_file is None:
-            guess = os.path.join(os.path.dirname(file), "velocity.out")
-            if os.path.exists(guess):
-                vel_file = guess
-        if vel_file is None or not os.path.exists(vel_file):
+            vel_file = os.path.join(os.path.dirname(file), "velocity.out")
+        if not os.path.exists(vel_file):
             raise FileNotFoundError("velocity.out not found (or vel_file not provided).")
 
-    selected = []
-    vselected = [] if return_vel else None
+    def read_n_lines(fh, n):
+        lines = [fh.readline() for _ in range(n)]
+        if any(l == "" for l in lines):
+            raise ValueError("Truncated frame.")
+        return lines
 
-    with open(file) as f, open(vel_file) if return_vel else open(os.devnull) as vf:
-        idx = 0
-        pos = 0
+    def read_vel(vh, n):
+        vh.readline()  # comment
+        if vh.readline().strip().upper() != "$VELOC": raise ValueError("Bad velocity.out ($VELOC).")
+        v = np.fromstring("".join(read_n_lines(vh, n)), sep=" ")
+        if v.size != n * 3: raise ValueError("Bad velocity.out (vector count).")
+        if vh.readline().strip().upper() != "$ENDVELOC": raise ValueError("Bad velocity.out ($ENDVELOC).")
+        return v.reshape(n, 3)
+
+    # ---- main pass ----
+    species_fixed = order = None
+    numeric = None
+    K = None
+
+    with open(file, "r", buffering=64<<20) as f, (open(vel_file, "r", buffering=64<<20) if return_vel else open(os.devnull, "r")) as vf:
+        # first pass: find K from first frame header
+        nline = f.readline()
+        if not nline: raise ValueError("Empty XYZ.")
+        K = int(nline)
+        f.seek(0)
+
+        species = np.empty((M, K), dtype=int)
+        coords  = np.empty((M, K, 3), dtype=float)
+        vels    = np.empty((M, K, 3), dtype=float) if return_vel else None
+
+        out_i = 0
+        frame_i = 0
         while True:
-            line = f.readline()
-            if not line:
-                break
-            while line and not line.strip():
-                line = f.readline()
-            if not line:
-                break
-            try:
-                n = int(line.split()[0])
-            except ValueError as exc:
-                raise ValueError(f"Expected atom count: {line.strip()}") from exc
-            if not f.readline():
-                raise ValueError("Truncated XYZ frame.")
+            nline = f.readline()
+            if not nline: break
+            n = int(nline)
+            if n != K: raise ValueError("Variable atom count not supported in fast path.")
+            f.readline()  # comment
 
-            if num is None:
-                if stop_idx is not None and idx >= stop_idx:
-                    break
-                take = idx >= start_idx and ((idx - start_idx) % step == 0)
-                dup = 1
-            else:
-                if use_all:
-                    if idx > stop_idx:
-                        break
-                    take = idx >= start_idx
-                    dup = 1
+            atom_lines = read_n_lines(f, K)
+
+            if frame_i in want:
+                if species_fixed is None:
+                    t0 = atom_lines[0].split(None, 1)[0]
+                    numeric = t0.isdigit()
+                    if numeric:
+                        a = np.fromstring("".join(atom_lines), sep=" ").reshape(K, 4)
+                        sp = a[:, 0].astype(int, copy=False)
+                        co = a[:, 1:4]
+                    else:
+                        sp = np.array([_element_dict[l.split(None, 1)[0]] for l in atom_lines], dtype=int)
+                        co = np.fromstring("".join(l.split(None, 1)[1] for l in atom_lines), sep=" ").reshape(K, 3)
+
+                    if sort:
+                        order = sp.argsort(kind="stable")[::-1]
+                        species_fixed = sp[order]
+                        co = co[order]
+                    else:
+                        order = None
+                        species_fixed = sp
+
                 else:
-                    if idx > last_idx:
-                        break
-                    dup = 0
-                    while pos < len(idx_list) and idx_list[pos] == idx:
-                        dup += 1
-                        pos += 1
-                    take = dup > 0
+                    if numeric:
+                        co = np.fromstring("".join(atom_lines), sep=" ").reshape(K, 4)[:, 1:4]
+                    else:
+                        co = np.fromstring("".join(l.split(None, 1)[1] for l in atom_lines), sep=" ").reshape(K, 3)
+                    if order is not None:
+                        co = co[order]
 
-            if take:
-                data, order = _read_atoms(f, n)
+                species[out_i, :] = species_fixed
+                coords[out_i, :, :] = co
+
                 if return_vel:
-                    v = _read_vel_frame(vf, n)
+                    v = read_vel(vf, K)
                     if order is not None:
                         v = v[order]
-                for _ in range(dup):
-                    selected.append(data)
-                    if return_vel:
-                        vselected.append(v)
+                    vels[out_i, :, :] = v
+                out_i += 1
             else:
-                _skip_atoms(f, n)
                 if return_vel:
-                    _read_vel_frame(vf, n)
+                    # skip velocity frame: fixed layout
+                    vf.readline(); vf.readline()
+                    for _ in range(K): vf.readline()
+                    vf.readline()
 
-            idx += 1
+            frame_i += 1
 
-    if not selected:
-        return np.zeros((0, 0), int), np.zeros((0, 0, 3), float)
-
-    M = len(selected)
-    K = max(m.shape[0] for m in selected)
-    species = np.zeros((M, K), int)
-    coords = np.zeros((M, K, 3), float)
-    for i, m in enumerate(selected):
-        k = m.shape[0]
-        species[i, :k] = m[:, 0].astype(int)
-        coords[i, :k, :] = m[:, 1:]
-    if return_vel:
-        vels = np.zeros((M, K, 3), float)
-        for i, v in enumerate(vselected):
-            k = v.shape[0]
-            vels[i, :k, :] = v[:, :3]
-        return species, coords, vels
-    return species, coords
+        species = species[:out_i]
+        coords = coords[:out_i]
+        if return_vel:
+            vels = vels[:out_i]
+            return species, coords, vels
+        return species, coords
