@@ -279,6 +279,19 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
     def __init__(self, model: TullyModel, *, timestep=0.05):
         self._tully_init(model, timestep=timestep, nonadiabatic={"recompute_on_hop": True})
 
+    def _compute_NACR_for_hop(self, molecule, nac_pairs):
+        x = molecule.coordinates[:, 0, 0]
+        _, _, nac = self.model.pot(x)
+        nmol, molsize = molecule.coordinates.shape[:2]
+        device = molecule.coordinates.device
+        dtype = molecule.coordinates.dtype
+        nac_vec = torch.zeros((nmol, self._nstates, self._nstates, molsize, 3), dtype=dtype, device=device)
+        # Tully models are 2-state; fill the only nonzero NAC element.
+        nac_vec[:, 0, 1, 0, 0] = nac
+        nac_vec[:, 1, 0, 0, 0] = -nac
+        molecule.nac = nac_vec
+        return nac_vec
+
     def _recompute_active_force(self, molecule):
         state_energies = self._compute_electronic_structure(molecule, learned_parameters={})
         exc_idx = (

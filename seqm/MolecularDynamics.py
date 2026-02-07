@@ -97,9 +97,10 @@ class OutputConfig:
 class HDF5Writer:
     """Manages HDF5 file writing for MD trajectories."""
 
-    def __init__(self, output_config: OutputConfig, seqm_parameters: Dict):
+    def __init__(self, output_config: OutputConfig, seqm_parameters: Dict, timestep: float):
         self.config = output_config
         self.seqm_parameters = seqm_parameters
+        self.timestep = float(timestep)
         self.handles: Dict[int, h5py.File] = {}
         self.i_data: Dict[int, int] = {}
         self.i_vec: Dict[int, Dict[str, int]] = {}
@@ -269,6 +270,7 @@ class HDF5Writer:
         """Create new HDF5 file."""
         _rotate_existing(h5_path)
         h5 = h5py.File(h5_path, "w")
+        h5.attrs["timestep_fs"] = float(self.timestep)
         self.handles[mol] = h5
         self.i_data[mol] = 0
         self.i_vec[mol] = {"coordinates": 0, "velocities": 0, "forces": 0}
@@ -572,9 +574,9 @@ class XYZWriter:
 
 class Geometry_Optimization_SD(torch.nn.Module):
     """
-    steepest descent algorithm for geometry optimization
-    pass in function for Eelec and EnucAB and current coordinates
-    use line search to choose best alpha
+    !!! This class uses steepest descent algorithm for geometry optimization, which is not recommended for production use due to its inefficiency.
+    It is provided here for demonstration and testing purposes.
+    For practical geometry optimization with PYSEQM use the geomeTRIC optimizer instead.
     """
 
     def __init__(self, seqm_parameters, alpha=0.01, force_tol=1.0e-4, max_evl=1000):
@@ -876,7 +878,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             # With XL-ESMD, only the active state is computed
             if isinstance(self, XL_ESMD):
                 n_roots = 1
-            self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters)
+            self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters, self.timestep)
             self._h5_writer.open(
                 molecule,
                 self.output_config.prefix,
@@ -1037,6 +1039,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         now = datetime.now()
         print(f"MD run ended at {now}")
         print(f"Time elapsed since the beginning of MD run: {now - self.start_time}", flush=True)
+        if self.__class__.__name__ == "SurfaceHoppingDynamics" and callable(
+            getattr(self, "_print_hop_log", None)
+        ):
+            self._print_hop_log()
         return molecule.coordinates, molecule.velocities, molecule.acc
 
     def _flush_all(self):
@@ -1048,63 +1054,25 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
     def save_checkpoint(self, molecule, steps: int, reuse_P, remove_com, *, step_done: int, path: str):
         """Save checkpoint for restart."""
-
-        def _tensor_cpu(x):
-            return x.detach().cpu() if torch.is_tensor(x) else x
-
-        ckpt = {
-            "MD_type": self.__class__.__name__,
-            "device": molecule.coordinates.device,
-            "step_done": int(step_done),
-            "steps": int(steps),
-            "reuse_P": bool(reuse_P),
-            "timestep": float(self.timestep),
-            "Temp": float(self.Temp),
-            "damp": getattr(self, "damp", None),
-            "xl_bomd_params": getattr(self, "xl_bomd_params", None),
-            "seqm_parameters": self.seqm_parameters,
-            "remove_com": remove_com,
-            "output": self.output,
-            "rng": {
-                "torch_cpu": torch.random.get_rng_state(),
-                "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
-            },
-            "molecules": {
-                "species": _tensor_cpu(molecule.species),
-                "coordinates": _tensor_cpu(molecule.coordinates),
-                "velocities": _tensor_cpu(molecule.velocities),
-                "forces": _tensor_cpu(molecule.force),
-                "dm": _tensor_cpu(molecule.dm) if reuse_P else None,
-                "cis_amplitudes": _tensor_cpu(molecule.cis_amplitudes) if reuse_P else None,
-                "transition_density_matrices": _tensor_cpu(
-                    getattr(molecule, "transition_density_matrices", None)
-                ),
-                "constants": molecule.const,
-                "old_mos": _tensor_cpu(molecule.old_mos),
-            },
-        }
+        ckpt = self._build_checkpoint_base(
+            molecule, steps, reuse_P, remove_com, step_done=step_done, include_forces=True
+        )
+        ckpt.update(
+            {"MD_type": self.__class__.__name__, "xl_bomd_params": getattr(self, "xl_bomd_params", None)}
+        )
 
         if hasattr(self, "m"):  # XL-BOMD variants
             ckpt["xl_ctx"] = {
-                "Pt": _tensor_cpu(self._xl_ctx["Pt"]),
-                "es_amp_t": _tensor_cpu(self._xl_ctx.get("es_amp_t")),
+                "Pt": self._tensor_cpu(self._xl_ctx["Pt"]),
+                "es_amp_t": self._tensor_cpu(self._xl_ctx.get("es_amp_t")),
             }
             if isinstance(molecule.dP2dt2, torch.Tensor):
-                ckpt["dP2dt2"] = _tensor_cpu(molecule.dP2dt2)
+                ckpt["dP2dt2"] = self._tensor_cpu(molecule.dP2dt2)
 
-        # Atomic write
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_ckpt_", suffix=".pt")
-        os.close(tmp_fd)
-        try:
-            torch.save(ckpt, tmp_path)
-            os.replace(tmp_path, path)
-        finally:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except:
-                    pass
+        self._save_checkpoint_and_report(ckpt, path)
 
+    def _save_checkpoint_and_report(self, ckpt: Dict, path: str):
+        self._atomic_save_checkpoint(ckpt, path)
         now = datetime.now()
         print(f"Saved checkpoint at {now}")
         print(f"Time elapsed since the beginning of MD run: {now - self.start_time}", flush=True)
@@ -1112,42 +1080,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     @staticmethod
     def run_from_checkpoint(path: str, device=None):
         """Load and resume from checkpoint."""
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
-
-        torch.random.set_rng_state(ckpt["rng"]["torch_cpu"])
-        if torch.cuda.is_available() and ckpt["rng"]["torch_cuda"]:
-            torch.cuda.set_rng_state_all(ckpt["rng"]["torch_cuda"])
-
-        # rebuild objects
-        from seqm.Molecule import Molecule
-
-        torch.set_default_dtype(ckpt["molecules"]["coordinates"].dtype)
-        device = device or ckpt["device"]
-        const = ckpt["molecules"]["constants"].to(device)
-
-        molecule = Molecule(
-            const,
-            ckpt["seqm_parameters"],
-            ckpt["molecules"]["coordinates"].to(device),
-            ckpt["molecules"]["species"].to(device),
-        ).to(device)
-
-        reuse_P = ckpt["reuse_P"]
-        with torch.no_grad():
-            molecule.velocities = ckpt["molecules"]["velocities"].to(device)
-            molecule.force = ckpt["molecules"]["forces"].to(device)
-            molecule.dm = ckpt["molecules"]["dm"].to(device) if reuse_P else None
-            molecule.cis_amplitudes = ckpt["molecules"]["cis_amplitudes"]
-            if isinstance(molecule.cis_amplitudes, torch.Tensor):
-                molecule.cis_amplitudes = molecule.cis_amplitudes.to(device)
-                old_mos = ckpt["molecules"].get("old_mos")
-                if isinstance(old_mos, torch.Tensor):
-                    molecule.old_mos = old_mos.to(device)
-                tdm = ckpt["molecules"].get("transition_density_matrices")
-                if isinstance(tdm, torch.Tensor):
-                    molecule.transition_density_matrices = tdm.to(device)
-            if "dP2dt2" in ckpt:
-                molecule.dP2dt2 = ckpt["dP2dt2"].to(device)
+        ckpt, molecule, device, reuse_P = Molecular_Dynamics_Basic._load_checkpoint_base(path, device=device)
+        if "dP2dt2" in ckpt:
+            molecule.dP2dt2 = ckpt["dP2dt2"].to(device)
 
         md_type = ckpt["MD_type"]
         md_classes = {
@@ -1161,13 +1096,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             raise RuntimeError(f"Unknown MD type '{md_type}' in checkpoint")
 
         md_cls = md_classes[md_type]
-        kwargs = {
-            "seqm_parameters": ckpt["seqm_parameters"],
-            "timestep": ckpt["timestep"],
-            "Temp": ckpt["Temp"],
-            "output": ckpt["output"],
-            "step_offset": ckpt["step_done"],
-        }
+        kwargs = Molecular_Dynamics_Basic._checkpoint_init_kwargs(ckpt)
 
         if md_type in ("Molecular_Dynamics_Langevin", "XL_BOMD", "KSA_XL_BOMD"):
             kwargs["damp"] = ckpt["damp"]
@@ -1190,6 +1119,116 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             md._xl_ctx = {"P": P, "Pt": Pt, "es_amp": es_amp, "es_amp_t": es_amp_t}
 
         md.run(molecule=molecule, steps=ckpt["steps"], reuse_P=reuse_P, remove_com=ckpt["remove_com"])
+
+    @staticmethod
+    def _tensor_cpu(x):
+        return x.detach().cpu() if torch.is_tensor(x) else x
+
+    @staticmethod
+    def _checkpoint_init_kwargs(ckpt: Dict) -> Dict:
+        return {
+            "seqm_parameters": ckpt["seqm_parameters"],
+            "timestep": ckpt["timestep"],
+            "Temp": ckpt["Temp"],
+            "output": ckpt["output"],
+            "step_offset": ckpt["step_done"],
+        }
+
+    def _build_checkpoint_base(
+        self, molecule, steps: int, reuse_P: bool, remove_com, *, step_done: int, include_forces: bool
+    ):
+        molecules = {
+            "species": self._tensor_cpu(molecule.species),
+            "coordinates": self._tensor_cpu(molecule.coordinates),
+            "velocities": self._tensor_cpu(molecule.velocities),
+            "dm": self._tensor_cpu(molecule.dm) if reuse_P else None,
+            "cis_amplitudes": self._tensor_cpu(molecule.cis_amplitudes) if reuse_P else None,
+            "transition_density_matrices": self._tensor_cpu(
+                getattr(molecule, "transition_density_matrices", None)
+            ),
+            "constants": molecule.const,
+            "old_mos": self._tensor_cpu(molecule.old_mos),
+        }
+        if include_forces:
+            molecules["forces"] = self._tensor_cpu(molecule.force)
+
+        return {
+            "device": molecule.coordinates.device,
+            "step_done": int(step_done),
+            "steps": int(steps),
+            "reuse_P": bool(reuse_P),
+            "timestep": float(self.timestep),
+            "Temp": float(self.Temp),
+            "damp": getattr(self, "damp", None),
+            "seqm_parameters": self.seqm_parameters,
+            "remove_com": remove_com,
+            "output": self.output,
+            "rng": {
+                "torch_cpu": torch.random.get_rng_state(),
+                "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            },
+            "molecules": molecules,
+        }
+
+    @staticmethod
+    def _restore_molecule_from_ckpt(mol_ckpt, molecule, reuse_P: bool, device):
+        with torch.no_grad():
+            molecule.velocities = mol_ckpt["velocities"].to(device)
+            if "forces" in mol_ckpt:
+                molecule.force = mol_ckpt["forces"].to(device)
+            if "molecular_orbitals" in mol_ckpt and torch.is_tensor(mol_ckpt["molecular_orbitals"]):
+                molecule.molecular_orbitals = mol_ckpt["molecular_orbitals"].to(device)
+            if "cis_energies" in mol_ckpt and torch.is_tensor(mol_ckpt["cis_energies"]):
+                molecule.cis_energies = mol_ckpt["cis_energies"].to(device)
+            molecule.dm = mol_ckpt["dm"].to(device) if reuse_P else None
+            molecule.cis_amplitudes = mol_ckpt["cis_amplitudes"]
+            if isinstance(molecule.cis_amplitudes, torch.Tensor):
+                molecule.cis_amplitudes = molecule.cis_amplitudes.to(device)
+                old_mos = mol_ckpt.get("old_mos")
+                if isinstance(old_mos, torch.Tensor):
+                    molecule.old_mos = old_mos.to(device)
+                tdm = mol_ckpt.get("transition_density_matrices")
+                if isinstance(tdm, torch.Tensor):
+                    molecule.transition_density_matrices = tdm.to(device)
+
+    @staticmethod
+    def _atomic_save_checkpoint(ckpt: Dict, path: str):
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_ckpt_", suffix=".pt")
+        os.close(tmp_fd)
+        try:
+            torch.save(ckpt, tmp_path)
+            os.replace(tmp_path, path)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _load_checkpoint_base(path: str, device=None):
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+
+        torch.random.set_rng_state(ckpt["rng"]["torch_cpu"])
+        if torch.cuda.is_available() and ckpt["rng"]["torch_cuda"]:
+            torch.cuda.set_rng_state_all(ckpt["rng"]["torch_cuda"])
+
+        from seqm.Molecule import Molecule
+
+        torch.set_default_dtype(ckpt["molecules"]["coordinates"].dtype)
+        device = device or ckpt["device"]
+        const = ckpt["molecules"]["constants"].to(device)
+
+        molecule = Molecule(
+            const,
+            ckpt["seqm_parameters"],
+            ckpt["molecules"]["coordinates"].to(device),
+            ckpt["molecules"]["species"].to(device),
+        ).to(device)
+
+        reuse_P = ckpt["reuse_P"]
+        Molecular_Dynamics_Basic._restore_molecule_from_ckpt(ckpt["molecules"], molecule, reuse_P, device)
+        return ckpt, molecule, device, reuse_P
 
 
 def _to_np(x):

@@ -681,9 +681,7 @@ class Energy(torch.nn.Module):
             self.hamiltonian(molecule, self.method, P0=P0)
         )
 
-        # ugly tweak for XL-ESMD
-        if kwargs.get("save_w", False):
-            molecule.w = w
+        molecule.w = w
 
         if self.eig:
             if self.uhf:
@@ -716,6 +714,9 @@ class Energy(torch.nn.Module):
             gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b) ** 2)
         else:
             gam = w[..., 0, 0]
+
+        molecule._parnuc = parnuc
+        molecule._gam = gam
 
         EnucAB = pair_nuclear_energy(
             molecule.Z,

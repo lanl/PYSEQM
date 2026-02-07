@@ -92,7 +92,7 @@ dyn = SurfaceHoppingDynamics(
     output=output,
 ).to(device)
 
-steps = 10
+steps = 2
 dyn.run(molecule, steps, reuse_P=True, remove_com=None)
 
 if dyn.hop_log:

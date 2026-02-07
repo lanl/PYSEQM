@@ -1,6 +1,6 @@
 import torch
 
-from seqm.seqm_functions.anal_grad import core_core_der, overlap_der_finiteDiff, w_der
+from seqm.seqm_functions.anal_grad import core_core_der, overlap_der_finiteDiff, w_der, w_derivative_numerical
 from seqm.seqm_functions.rcis_batch import make_cis_densities, unpackone_batch
 
 from .constants import a0
@@ -80,27 +80,30 @@ def rcis_grad_batch(
     )
 
     w_x = torch.zeros(mol.rij.shape[0], 3, 10, 10, dtype=dtype, device=device)
-    e1b_x, e2a_x = w_der(
-        mol.const,
-        mol.Z,
-        mol.const.tore,
-        mol.ni,
-        mol.nj,
-        w_x,
-        mol.rij,
-        mol.xij,
-        Xij,
-        mol.idxi,
-        mol.idxj,
-        mol.parameters["g_ss"],
-        mol.parameters["g_pp"],
-        mol.parameters["g_p2"],
-        mol.parameters["h_sp"],
-        mol.parameters["zeta_s"],
-        mol.parameters["zeta_p"],
-        riXH,
-        ri,
-    )
+    if riXH is not None and ri is not None:
+        e1b_x, e2a_x = w_der(
+            mol.const,
+            mol.Z,
+            mol.const.tore,
+            mol.ni,
+            mol.nj,
+            w_x,
+            mol.rij,
+            mol.xij,
+            Xij,
+            mol.idxi,
+            mol.idxj,
+            mol.parameters["g_ss"],
+            mol.parameters["g_pp"],
+            mol.parameters["g_p2"],
+            mol.parameters["h_sp"],
+            mol.parameters["zeta_s"],
+            mol.parameters["zeta_p"],
+            riXH,
+            ri,
+        )
+    else:
+        e1b_x, e2a_x = w_derivative_numerical(mol, Xij, w_x)
 
     B = B0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)

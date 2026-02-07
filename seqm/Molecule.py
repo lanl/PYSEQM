@@ -130,6 +130,15 @@ class Molecule(torch.nn.Module):
         self.dm = None
         self.q = None
 
+        # Two-electron integrals are stored in the molecule object
+        # For surface hopping, when we need to recompute forces after a hop,
+        # for which we need two-electron integrals,
+        self.w = None
+
+        # also needed for forces, so stored in molecule object
+        self._parnuc = None
+        self._gam = None
+
         self.Hf = None
         self.Etot = None
         self.Eelec = None
