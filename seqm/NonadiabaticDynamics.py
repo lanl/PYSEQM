@@ -317,7 +317,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         state_energies = self._get_tensor(
             self._state_energy_buffers, key, (nmol, self._nstates), device=device, dtype=dtype, fill_value=0.0
         )
-        base = molecule.Etot.reshape(nmol)
+        with torch.no_grad():
+            base = molecule.Etot.reshape(nmol)
         if active_exc_index is not None:
             if torch.is_tensor(active_exc_index):
                 idx = active_exc_index.to(device=device)
@@ -1275,7 +1276,8 @@ class EhrenfestDynamics(NonadiabaticDynamicsBase):
 
         molecule.force = force
         self._current_potential = torch.sum(pop * state_energies, dim=1)
-        molecule.Etot = self._current_potential
+        with torch.no_grad():
+            molecule.Etot = self._current_potential
 
 
 class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
@@ -1552,4 +1554,5 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         idx = self._get_arange(nmol, device=device)
         active_idx = self._active_states.to(device)
         self._current_potential = state_energies[idx, active_idx]
-        molecule.Etot = self._current_potential
+        with torch.no_grad():
+            molecule.Etot = self._current_potential

@@ -62,7 +62,7 @@ def read_xyz_trajectory(
 
     Set return_vel=True to also read velocity.out (from NEXMD) in the same folder
     (or pass vel_file).
-    
+
     assumptions:
 
     XYZ per frame (no blank lines):
@@ -99,9 +99,12 @@ def read_xyz_trajectory(
         with open(file, "r", buffering=8 << 20) as f:
             while True:
                 nline = f.readline()
-                if not nline: break
-                n = int(nline); f.readline()
-                for _ in range(n): f.readline()
+                if not nline:
+                    break
+                n = int(nline)
+                f.readline()
+                for _ in range(n):
+                    f.readline()
                 c += 1
         return c
 
@@ -126,7 +129,8 @@ def read_xyz_trajectory(
     if indices is not None:
         idxs = np.asarray(indices, dtype=int)
         if idxs.size == 0:
-            zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+            zS = np.zeros((0, 0), int)
+            zC = np.zeros((0, 0, 3), float)
             return (zS, zC, zC.copy()) if return_vel else (zS, zC)
         total = count_frames() if np.any(idxs < 0) else None
         if total is not None:
@@ -136,24 +140,31 @@ def read_xyz_trajectory(
         need_total = (num is not None) or (start < 0) or (stop is not None and stop < 0)
         total = count_frames() if need_total else None
         if total == 0:
-            zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+            zS = np.zeros((0, 0), int)
+            zC = np.zeros((0, 0, 3), float)
             return (zS, zC, zC.copy()) if return_vel else (zS, zC)
 
-        if start < 0: start += total
-        if stop is not None and stop < 0: stop += total
+        if start < 0:
+            start += total
+        if stop is not None and stop < 0:
+            stop += total
 
         if num is None:
-            if stop is None and total is not None: stop = total
+            if stop is None and total is not None:
+                stop = total
             idxs = np.arange(start, stop, step, dtype=int)
         else:
-            if total is None: total = count_frames()
-            if stop is None: stop = total - 1
+            if total is None:
+                total = count_frames()
+            if stop is None:
+                stop = total - 1
             idxs = np.rint(np.linspace(start, stop, num=num)).astype(int)
             idxs = np.unique(idxs)  # your current behavior
         order_out = idxs.tolist()
 
     if len(order_out) == 0:
-        zS = np.zeros((0, 0), int); zC = np.zeros((0, 0, 3), float)
+        zS = np.zeros((0, 0), int)
+        zC = np.zeros((0, 0, 3), float)
         return (zS, zC, zC.copy()) if return_vel else (zS, zC)
 
     out_map = {}
@@ -166,7 +177,9 @@ def read_xyz_trajectory(
     species_fixed = order = None
     numeric = None
 
-    with open(file, "r", buffering=64 << 20) as f, (open(vel_file, "r", buffering=64 << 20) if return_vel else open(os.devnull, "r")) as vf:
+    with open(file, "r", buffering=64 << 20) as f, (
+        open(vel_file, "r", buffering=64 << 20) if return_vel else open(os.devnull, "r")
+    ) as vf:
         nline = f.readline()
         if not nline:
             raise ValueError("Empty XYZ.")
@@ -174,13 +187,14 @@ def read_xyz_trajectory(
         f.seek(0)
 
         species = np.empty((M, K), dtype=int)
-        coords  = np.empty((M, K, 3), dtype=float)
-        vels    = np.empty((M, K, 3), dtype=float) if return_vel else None
+        coords = np.empty((M, K, 3), dtype=float)
+        vels = np.empty((M, K, 3), dtype=float) if return_vel else None
 
         frame_i = 0
         while True:
             nline = f.readline()
-            if not nline: break
+            if not nline:
+                break
             n = int(nline)
             if n != K:
                 raise ValueError("Variable atom count not supported in fast path.")
@@ -197,7 +211,9 @@ def read_xyz_trajectory(
                         co = a[:, 1:4]
                     else:
                         sp = np.array([_element_dict[l.split(None, 1)[0]] for l in atom_lines], dtype=int)
-                        co = np.fromstring("".join(l.split(None, 1)[1] for l in atom_lines), sep=" ").reshape(K, 3)
+                        co = np.fromstring("".join(l.split(None, 1)[1] for l in atom_lines), sep=" ").reshape(
+                            K, 3
+                        )
 
                     if sort:
                         order = sp.argsort(kind="stable")[::-1]
@@ -210,7 +226,9 @@ def read_xyz_trajectory(
                     if numeric:
                         co = np.fromstring("".join(atom_lines), sep=" ").reshape(K, 4)[:, 1:4]
                     else:
-                        co = np.fromstring("".join(l.split(None, 1)[1] for l in atom_lines), sep=" ").reshape(K, 3)
+                        co = np.fromstring("".join(l.split(None, 1)[1] for l in atom_lines), sep=" ").reshape(
+                            K, 3
+                        )
                     if order is not None:
                         co = co[order]
 
@@ -227,8 +245,10 @@ def read_xyz_trajectory(
                         vels[j, :, :] = v
             else:
                 if return_vel:
-                    vf.readline(); vf.readline()
-                    for _ in range(K): vf.readline()
+                    vf.readline()
+                    vf.readline()
+                    for _ in range(K):
+                        vf.readline()
                     vf.readline()
 
             frame_i += 1
