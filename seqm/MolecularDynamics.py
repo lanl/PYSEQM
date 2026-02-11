@@ -1593,6 +1593,19 @@ class KSA_XL_BOMD(XL_BOMD):
 class XL_ESMD(XL_BOMD):
     """XL-BOMD for excited state MD."""
 
+    def _propagate_excited_state(self, es_amp, es_amp_t, cindx, molecule):
+        """Propagate excited state transition density matrices."""
+        if getattr(molecule, "dxi2dt2", None) is None:
+            c = 0.95
+            es_new = self.coeff_D * (
+                c * molecule.transition_density_matrices + (1.0 - c) * es_amp
+            ) + torch.sum(self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1, 1) * es_amp_t, dim=0)
+        else:
+            es_new = self.coeff_D * (molecule.dxi2dt2 + es_amp) + torch.sum(
+                self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1, 1) * es_amp_t, dim=0
+            )
+        return es_new
+
     def one_step(
         self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=dict(), *args, **kwargs
     ):

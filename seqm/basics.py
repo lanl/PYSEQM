@@ -811,7 +811,8 @@ class Energy(torch.nn.Module):
 
         # Calculate ground state molecular dipole
         if molecule.method not in ("PM6",):  # Not yet implemented for PM6 d-orbitals
-            calc_ground_dipole(molecule, P)
+            with torch.no_grad():
+                calc_ground_dipole(molecule, P)
 
         if excited_mask.any() and not self.excited_states and not self.xlesmd:
             raise Exception(
@@ -1010,9 +1011,12 @@ class Energy(torch.nn.Module):
 
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
-            Eexcited, molecule.transition_density_matrices = elec_energy_excited_xl(molecule, cis_amp, w, e)
-            # if do_analytical_gradient[0]:
-            if True:
+            E_XL, molecule.transition_density_matrices = elec_energy_excited_xl(
+                molecule, cis_amp, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
+            )
+            Eexcited = E_XL[:, 0]  # TODO: get the active_state energy
+            if do_analytical_gradient[0]:
+                # if True:
                 molecule.analytical_gradient = xlesmd_rcis_grad_batch(
                     cis_amp,
                     molecule.transition_density_matrices,
