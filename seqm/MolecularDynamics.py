@@ -713,8 +713,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if vel_com:
             self._zero_com(molecule, translate_to_origin=True)
 
-        print(molecule.velocities * 1e3)
-
         return molecule.velocities
 
     def _zero_com(self, molecule, remove_angular=True, translate_to_origin=False):
