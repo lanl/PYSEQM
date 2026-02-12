@@ -7,6 +7,72 @@ import torch
 from .rcis_batch import get_occ_virt, makeA_pi_batched
 
 
+def get_exact_excited(mol, w, e_mo, R):
+    nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window=None, e_mo=e_mo)
+    b = R.shape[0]
+    r = R.shape[1]
+    n = nocc * nvirt
+
+    exact = mol.cis_amplitudes
+    exact_e = mol.cis_energies
+    print("Exact CIS energies: ", exact_e.item())
+
+    # --- Build eta = Xbar in MO (occ-virt) with r blocks ---
+    with torch.no_grad():
+        eta = torch.einsum("bmi,brmn,bna->bria", Cocc, R, Cvirt)
+
+    # --- Define Coulomb-exchange integral function for amplitudes ---
+    def G_apply(Y: torch.Tensor) -> torch.Tensor:
+        # Y: (b,r,nocc,nvirt) -> G(Y): (b,r,nocc,nvirt)
+        R_y = torch.einsum("bmi,bria,bna->brmn", Cocc, Y, Cvirt)
+        G_ao = makeA_pi_batched(mol, R_y, w)  # expected (b,r,m,n)
+        G_y = torch.einsum("bmi,brmn,bna->bria", Cocc, G_ao, Cvirt)
+        return 2.0 * G_y
+
+    ea_ei_flat = ea_ei.reshape(b, 1, n)
+
+    xl_bomd_params = {"max_rank": 3, "err_threshold": 1e-8}
+
+    eta_flat = eta.reshape(b, r, n)
+    print(f"Initial tdm diff is {torch.norm(R - mol.transition_density_matrices)}")
+
+    print(
+        "Before iterations: "
+        f"diff = {torch.norm(eta_flat - exact)}, "
+        f"diff_tdm = {torch.norm(torch.einsum('bmi,bria,bna->brmn', Cocc, eta_flat.view(b, r, nocc, nvirt), Cvirt) - mol.transition_density_matrices)}"
+    )
+    for iter in range(10):
+        Gx = G_apply(eta_flat.view(b, r, nocc, nvirt))  # (b,r,nocc,nvirt)
+
+        Gx_flat = Gx.reshape(b, r, n)
+
+        # --- Solve for xi and omega ---
+        with torch.no_grad():
+            xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
+            # xi_flat: (b,r,n), omega_br: (b,r)
+
+        E1 = (xi_flat * xi_flat * ea_ei_flat).sum(dim=2)  # (b,r)
+        E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
+        E = E1 + E2  # (b,r)
+
+        # --- Compute dxi2dt2 via rank-m Krylov ---
+        # precond = 1.0 / (omega.unsqueeze(-1) * (1.0 / ea_ei_flat) - 1.0 + 1e-8)  # (b,r,n)
+        # precond = torch.ones_like(eta_flat)  # no preconditioning;
+        precond = make_apply_precond_rank1(ea_ei_flat, eta_flat, xi_flat, omega)
+        jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
+        dxi2dt2_flat = compute_dxi2dt2_rankm(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
+        eta_flat = eta_flat + dxi2dt2_flat
+        print(
+            f"Iter {iter}: E = {E.squeeze().cpu().numpy()}, diff = {torch.norm(eta_flat - exact)}, "
+            f"diff_tdm = {torch.norm(torch.einsum('bmi,bria,bna->brmn', Cocc, eta_flat.view(b, r, nocc, nvirt), Cvirt) - mol.transition_density_matrices)}"
+        )
+        # # Convert to AO basis and store in mol for later use in BOMD
+        # mol.dxi2dt2 = torch.einsum(
+        #     "bmi,bria,bna->brmn", Cocc, dxi2dt2_flat.view(b, r, nocc, nvirt), Cvirt
+        # )
+    exit(0)
+
+
 def elec_energy_excited_xl(
     mol, R: torch.Tensor, w, e_mo, xl_bomd_params: Optional[Dict] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -311,7 +377,7 @@ def compute_dxi2dt2_rankm(
 
         IdentRes = torch.einsum("Bnm,Bm->Bn", Wk, alpha)  # (B,n)
         Error = vecnorm(IdentRes - dDS) / dDS_norm
-        print(f"Krylov rank {Rank_m}, max relative error in dDS fit: {torch.max(Error).item():.2e}")
+        # print(f"Krylov rank {Rank_m}, max relative error in dDS fit: {torch.max(Error).item():.2e}")
 
     if Rank_m == 0:
         raise RuntimeError("Rank-m loop did not run; check max_rank and inputs.")

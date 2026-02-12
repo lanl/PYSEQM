@@ -134,7 +134,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._cache_old = None
         self._cache_new = None
         self._hop_integral = None
-        self._last_esdriver_args = None
         self._decohere_on_hop = params["nonadiabatic"].get("decohere_on_hop", True)
         self._detect_crossings_flag = params["nonadiabatic"].get("detect_crossings", True)
         self._apc_window = int(params["nonadiabatic"].get("apc_window", 2))
@@ -209,23 +208,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         else:
             self._active_states = self._active_states.to(device=device)
         return self._active_states
-
-    def _uniform_active_state(self) -> Optional[int]:
-        """Return scalar active state if all molecules share it."""
-        if self._active_states is None:
-            init = self.initial_state
-            if torch.is_tensor(init):
-                unique = torch.unique(init)
-                if unique.numel() == 1:
-                    return int(unique.item()) - 1
-                return None
-            return int(init) - 1
-        if torch.is_tensor(self._active_states):
-            unique = torch.unique(self._active_states)
-            if unique.numel() == 1:
-                return int(unique.item())
-            return None
-        return int(self._active_states)
 
     @property
     def populations(self) -> torch.Tensor:
@@ -305,13 +287,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         return A * torch.cos(delta) - B * torch.sin(delta)
 
     def _build_state_energies(self, molecule, active_exc_index: Optional[int] = None) -> torch.Tensor:
-        if self._nstates is None:
-            raise RuntimeError("Number of states not initialized.")
         nmol = molecule.species.shape[0]
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
-        if molecule.cis_energies is None:
-            raise RuntimeError("Excited-state energies not available for nonadiabatic dynamics.")
         n_exc = min(molecule.cis_energies.shape[1], self._nstates)
         key = (nmol, self._nstates, str(device), dtype)
         state_energies = self._get_tensor(
@@ -324,12 +302,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 idx = active_exc_index.to(device=device)
                 if idx.dim() == 0:
                     idx = idx.expand(nmol)
-                if torch.any((idx < 0) | (idx >= n_exc)):
-                    raise ValueError("Active-state index out of range for cis energies.")
                 base = base - molecule.cis_energies[self._get_arange(nmol, device=device), idx]
             else:
-                if active_exc_index < 0 or active_exc_index >= n_exc:
-                    raise ValueError("Active-state index out of range for cis energies.")
                 base = base - molecule.cis_energies[:, active_exc_index]
         state_energies[:, :n_exc] = base.unsqueeze(1) + molecule.cis_energies[:, :n_exc]
         return state_energies
@@ -363,11 +337,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         molecule.active_state = target_state
         prev_nac_cfg = self._set_compute_nac(compute_nac, nac_pairs)
         esdriver_args = kwargs.pop("esdriver_args", ())
-        self._last_esdriver_args = {
-            "learned_parameters": learned_parameters,
-            "esdriver_args": esdriver_args,
-            "kwargs": dict(kwargs),
-        }
         self.esdriver(
             molecule,
             learned_parameters=learned_parameters,
@@ -390,8 +359,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         return energies
 
     def _get_nac_matrix(self, molecule):
-        if self._nstates is None:
-            return None
         nac_vec = getattr(molecule, "nac", None)
         if nac_vec is None:
             return None
@@ -1040,7 +1007,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self.prev_state = torch.full((nmol,), -1, dtype=torch.long, device=device)  # like ihopprev
 
         if self.step_offset == 0 and self._h5_writer is not None:
-            na_stride = self.output_config.get_h5_write_nonadiabatic()
+            na_stride = self._h5_writer._write_nonadiabatic
             if na_stride > 0:
                 active_states = self._active_states + 1
                 amplitudes = self._coeffs_complex()
@@ -1181,19 +1148,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             dt,
         )
 
-        def _attach_nac_dot(cache, vel):
-            if cache is None or cache.get("nac_vec") is None:
-                return cache
-            v = vel.unsqueeze(1).unsqueeze(1)  # (nmol,1,1,molsize,3)
-            nd = torch.sum(v * cache["nac_vec"], dim=(3, 4))
-            cache = dict(cache)
-            cache["nac_dot"] = nd
-            return cache
-
         if nac_dt is None:
-            cache_new = (
-                _attach_nac_dot(cache_new, molecule.velocities.detach()) if cache_new is not None else None
-            )
+            if cache_new is not None and cache_new.get("nac_vec") is not None:
+                v = molecule.velocities.detach().unsqueeze(1).unsqueeze(1)  # (nmol,1,1,molsize,3)
+                nd = torch.sum(v * cache_new["nac_vec"], dim=(3, 4))
+                cache_new = dict(cache_new)
+                cache_new["nac_dot"] = nd
         else:
             cache_new = dict(cache_new)
             cache_new["nac_dot"] = nac_dt
@@ -1217,19 +1177,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         )
 
         if self._h5_writer:
-            na_stride = self.output_config.get_h5_write_nonadiabatic()
+            na_stride = self._h5_writer._write_nonadiabatic
             if na_stride > 0 and ((i + 1) % na_stride == 0):
-                active_states = None
-                if self._active_states is not None:
-                    active_states = self._active_states + 1
-                else:
-                    uniform = self._uniform_active_state()
-                    if uniform is not None:
-                        active_states = uniform + 1
                 amplitudes = self._coeffs_complex()
                 self._h5_writer.append_nonadiabatic(
                     i + 1,
-                    active_states=active_states,
+                    active_states=self._active_states + 1,
                     amplitudes=amplitudes,
                     nac_dot=cache_new.get("nac_dot"),
                 )
@@ -1292,12 +1245,12 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         params["nonadiabatic"] = na_cfg
         super().__init__(params, *args, **kwargs)
 
-    def _attempt_hop(self, state_energies, molecule, step: int) -> List[Optional[int]]:
+    def _attempt_hop(self, state_energies, molecule) -> List[Optional[int]]:
         nmol = state_energies.shape[0]
         if self._hop_integral is None:
             return [None] * nmol
         device = molecule.coordinates.device
-        active_states = self._ensure_active_states(nmol, device)
+        active_states = self._active_states
         pop = self.populations  # (nmol, nstates)
 
         # Probabilities g_ij for each mol from active state i -> j
@@ -1331,7 +1284,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
         return hop_targets
 
-    def _rescale_velocity_along_nac(self, nac_vec, i_state, j_state, molecule, dE, step, mol_index: int):
+    def _rescale_velocity_along_nac(self, nac_vec, i_state, j_state, molecule, dE, mol_index: int):
         if nac_vec is None:
             return False
         dvec = nac_vec[mol_index, i_state, j_state]  # (molsize, 3)
@@ -1353,14 +1306,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         return True
 
     def _recompute_active_force(self, molecule):
-        if self._active_states is not None:
-            molecule.active_state = self._active_states + 1
-        else:
-            active_state_scalar = self._uniform_active_state()
-            if active_state_scalar is not None:
-                molecule.active_state = active_state_scalar + 1
-            else:
-                raise RuntimeError("Cannot determine active state for force recomputation after hop.")
+        molecule.active_state = self._active_states + 1
 
         # Recompute forces on active surfaces; NACs are skipped here for efficiency.
         grad_excited = rcis_grad_batch(
@@ -1416,7 +1362,6 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
     ):
         nmol = state_energies.shape[0]
         device = molecule.coordinates.device
-        self._ensure_active_states(nmol, device)
 
         # ---------------- Trivial crossing handling (NEXMD cross==2) ----------------
         swap_to = self._trivial_crossing_mask
@@ -1430,9 +1375,6 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
             has_swap = (swap_to >= 0).any(dim=1)
 
             if has_swap.any():
-                if self._amp_phase is None:
-                    raise RuntimeError("Electronic coefficients not initialized (amp_phase is None).")
-
                 # Apply relabeling to electronic coefficients in one shot:
                 # new_coeff[p(i)] = old_coeff[i]
                 # Build perm = identity then perm[i]=swap_to[i] where defined
@@ -1469,22 +1411,15 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
         # ---------------- end trivial crossing handling ----------------
 
-        hop_targets: List[Optional[int]]
-        if nac_dot is not None:
-            hop_targets = self._attempt_hop(
-                state_energies, molecule, step=step if step is not None else self.step_offset
-            )
-        else:
-            hop_targets = [None] * nmol
+        current_step = step if step is not None else self.step_offset
+        hop_targets: List[Optional[int]] = (
+            self._attempt_hop(state_energies, molecule) if nac_dot is not None else [None] * nmol
+        )
 
         # Suppress hop attempts for molecules whose active state had a trivial crossing
         if skip_hop_mask.any():
             for m in torch.where(skip_hop_mask)[0].tolist():
                 hop_targets[m] = None
-
-        if self._last_esdriver_args is None:
-            # Fallback for analytic models (e.g., Tully) that don't call _compute_electronic_structure
-            self._last_esdriver_args = {"learned_parameters": {}, "kwargs": {}, "esdriver_args": ()}
 
         hop_pairs = []
         for mol, target in enumerate(hop_targets):
@@ -1503,16 +1438,8 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
             exc_idx = int(self._active_states[mol].item())
             dE = float((state_energies[mol, target] - state_energies[mol, exc_idx]).item())
             success = self._rescale_velocity_along_nac(
-                nac_matrix,
-                exc_idx,
-                target,
-                molecule,
-                dE,
-                step if step is not None else self.step_offset,
-                mol_index=mol,
+                nac_matrix, exc_idx, target, molecule, dE, mol_index=mol
             )
-            if self._decohere_on_hop and self._amp_phase is None:
-                raise RuntimeError("Electronic coefficients not initialized.")
 
             if success:
                 self._active_states[mol] = target
@@ -1523,7 +1450,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
                     self._amp_phase[mol, target, 0] = 1.0
                 self.hop_log.append(
                     HopEvent(
-                        step=step + 1 if step is not None else self.step_offset + 1,
+                        step=current_step + 1,
                         from_state=exc_idx,
                         to_state=target,
                         accepted=True,
@@ -1537,7 +1464,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
                     self._amp_phase[mol, exc_idx, 0] = 1.0
                 self.hop_log.append(
                     HopEvent(
-                        step=step + 1 if step is not None else self.step_offset + 1,
+                        step=current_step + 1,
                         from_state=exc_idx,
                         to_state=target,
                         accepted=False,

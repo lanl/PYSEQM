@@ -1009,24 +1009,51 @@ class Energy(torch.nn.Module):
         # # Debug XL-ESMD
         # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
 
+        # if cis_amp is not None:
+        #     # get_exact_excited(molecule, w, e, cis_amp)
+        #     elec_energy_excited_xl(molecule, cis_amp, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None))
+        #     Cocc = molecule.molecular_orbitals[:, :, : molecule.nocc[0]]
+        #     Cvir = molecule.molecular_orbitals[:, :, molecule.nocc[0] :]
+        #     cis_tdm = torch.einsum("bmi,brmn,bna->bria", Cocc, cis_amp, Cvir)
+        #     cis_tdm = torch.einsum("bmi,bria,bna->brmn", Cocc, cis_tdm, Cvir)
+        #     # diff = molecule.transition_density_matrices[:, 0] - (cis_tdm + molecule.dxi2dt2)
+        #     diff = molecule.transition_density_matrices[:, 0] - (cis_tdm)
+        #     print("Difference in eta* - converged eta is ", torch.norm(diff))
+
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
+            cis_transition_density = cis_amp
             E_XL, molecule.transition_density_matrices = elec_energy_excited_xl(
-                molecule, cis_amp, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
+                molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
             )
-            Eexcited = E_XL[:, 0]  # TODO: get the active_state energy
+            active_idx = torch.clamp(active_states - 1, min=0)
+            Eexcited = E_XL.gather(1, active_idx.unsqueeze(1)).squeeze(1)
+
             if do_analytical_gradient[0]:
-                # if True:
+
+                def _gather_active_transition_density(amplitudes):
+                    idx = active_idx.view(-1, 1, 1, 1).expand(
+                        -1, 1, amplitudes.shape[-2], amplitudes.shape[-1]
+                    )
+                    gathered = amplitudes.gather(1, idx)
+                    return gathered
+
+                # select the amplitudes for the active states
+                cis_amp_sel = _gather_active_transition_density(cis_amp)
+                transiton_density_sel = _gather_active_transition_density(
+                    molecule.transition_density_matrices
+                )
+
                 molecule.analytical_gradient = xlesmd_rcis_grad_batch(
-                    cis_amp,
-                    molecule.transition_density_matrices,
+                    cis_amp_sel,
+                    transiton_density_sel,
                     molecule,
                     w,
                     e,
                     riXH,
                     ri,
                     P,
-                    self.seqm_parameters["scf_eps"] * 10.0,
+                    self.seqm_parameters["scf_eps"] * 100.0,
                     gam,
                     self.method,
                     parnuc,
