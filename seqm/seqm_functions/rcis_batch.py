@@ -6,6 +6,9 @@ from seqm.dynamics.active_state import active_state_tensor
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
+from .fock import fast_jk_enabled
+from .triton_rcis_jk import triton_makeA_pi_jk_batch
+from .triton_sp_common import K_IND_4, TRIL_IDX_4, WEIGHT_10
 
 # from seqm.seqm_functions.pack import packone, unpackone
 
@@ -393,62 +396,48 @@ def makeA_pi_symm_batch(mol, P0, w):
     F = torch.zeros_like(P)
     # print_memory_usage("After P_symm, and Fock_symm")
 
-    # Calculate Coulomb contribution J
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape((-1, 10))
+    tril_idx = TRIL_IDX_4.to(device=device)
+    tri_i = tril_idx[1]
+    tri_j = tril_idx[0]
+    sumK = None
 
-    Pdiag_symmetrized = P[:, :, maskd]
+    if fast_jk_enabled():
+        triton_out = triton_makeA_pi_jk_batch(P, w, maskd, mask, idxi, idxj)
+        if triton_out is not None:
+            J_A, J_B, sumK = triton_out
+            sumA = torch.zeros(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
+            sumB = torch.zeros_like(sumA)
+            sumA[..., tri_i, tri_j] = J_A
+            sumB[..., tri_i, tri_j] = J_B
+            F.index_add_(2, maskd[idxj], sumA)
+            F.index_add_(2, maskd[idxi], sumB)
+            F.index_add_(2, mask, sumK)
+            F[:, :, mask_l] += sumK.transpose(3, 4)
 
-    PA = (
-        Pdiag_symmetrized[:, :, idxi][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    )  # .unsqueeze(-1)
-    sumA = torch.zeros(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
-    sumA[..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)] = torch.einsum(
-        "nrps,npsS->nrpS", PA, w
-    )  # suma = torch.sum(PA*w[:,None,...],dim=3)
-    # sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.sum(PA*w[:,None,...],dim=3)
-    del PA
-    F.index_add_(2, maskd[idxj], sumA)
+    if sumK is None:
+        weight = WEIGHT_10.to(device=device, dtype=dtype).reshape((-1, 10))
+        Pdiag_symmetrized = P[:, :, maskd]
 
-    sumB = torch.zeros_like(sumA)
-    del sumA
-    PB = (
-        Pdiag_symmetrized[:, :, idxj][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    )  # .unsqueeze(-2)
-    del Pdiag_symmetrized
-    sumB[..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)] = torch.einsum(
-        "nrpS,npsS->nrps", PB, w
-    )  # torch.sum(PB*w[:,None,...],dim=4)
-    # sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.sum(PB*w[:,None,...],dim=4)
-    del PB
-    F.index_add_(2, maskd[idxi], sumB)
+        PA = Pdiag_symmetrized[:, :, idxi][..., tri_i, tri_j] * weight
+        sumA = torch.zeros(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
+        sumA[..., tri_i, tri_j] = torch.einsum("nrps,npsS->nrpS", PA, w)
+        F.index_add_(2, maskd[idxj], sumA)
 
-    # Calculate the Exchange contribution
-    # mu, nu in A
-    # lambda, sigma in B
-    # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
+        PB = Pdiag_symmetrized[:, :, idxj][..., tri_i, tri_j] * weight
+        sumB = torch.zeros_like(sumA)
+        sumB[..., tri_i, tri_j] = torch.einsum("nrpS,npsS->nrps", PB, w)
+        F.index_add_(2, maskd[idxi], sumB)
 
-    sumK = torch.empty_like(sumB)
-    del sumB
-
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    #   0,     1         2       3       4         5       6      7         8        9
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
-    # Pp =P[mask], P_{mu \in A, lambda \in B}
-    Pp = P[:, :, mask]  # nmol, nroots, npairs, 4, 4
-    for i in range(4):
-        for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            # sumK[...,i,j] = -0.5*torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
-            sumK[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", Pp, w[..., ind[i], :][..., :, ind[j]])
-    F.index_add_(2, mask, sumK)
-    F[:, :, mask_l] += sumK.transpose(3, 4)
-    del Pp
+        ind = K_IND_4.to(device=device)
+        Pp = P[:, :, mask]
+        sumK = torch.empty_like(sumB)
+        for i in range(4):
+            for j in range(4):
+                sumK[..., i, j] = -0.5 * torch.einsum(
+                    "nrpsS,npsS->nrp", Pp, w[..., ind[i], :][..., :, ind[j]]
+                )
+        F.index_add_(2, mask, sumK)
+        F[:, :, mask_l] += sumK.transpose(3, 4)
 
     Pptot = P[..., 1, 1] + P[..., 2, 2] + P[..., 3, 3]
 

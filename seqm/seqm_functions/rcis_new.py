@@ -7,6 +7,7 @@ from seqm.seqm_functions.pack import packone, unpackone
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
+from .fock import fast_jk_enabled
 from .rcis_batch import (
     get_occ_virt,
     getMaxSubspacesize,
@@ -14,6 +15,8 @@ from .rcis_batch import (
     orthogonalize_to_current_subspace,
     print_rcis_analysis,
 )
+from .triton_rcis_jk import triton_makeA_pi_jk_any
+from .triton_sp_common import K_IND_4, TRIL_IDX_4, WEIGHT_10
 
 
 def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
@@ -467,51 +470,50 @@ def makeA_pi_symm_any_batch(mol, P0, w):
 
     # ========== 2) Two-center Coulomb-like sums over neighbor atoms ==========
     # Pack A and B for all densities × pairs
-    tri_i = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], device=device)
-    tri_j = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], device=device)
-    weight = torch.tensor([1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device)
-    PA = (P[md_i.reshape(-1)][..., tri_i, tri_j] * weight).view(nD, npairs_pairdiag, 10, 1)
-    PB = (P[md_j.reshape(-1)][..., tri_i, tri_j] * weight).view(nD, npairs_pairdiag, 1, 10)
+    tril_idx = TRIL_IDX_4.to(device=device)
+    tri_i = tril_idx[1]
+    tri_j = tril_idx[0]
+    weight = WEIGHT_10.to(device=device, dtype=dtype)
+    mask_flat = mask_exp.reshape(-1)
+    sum_K = None
 
-    # Broadcast w over densities (no memory blow-up)
-    w_b = w.unsqueeze(0)  # (1, npairs_pairdiag, 10,10)
+    if fast_jk_enabled():
+        triton_out = triton_makeA_pi_jk_any(P, w, md_i, md_j, mask_exp)
+        if triton_out is not None:
+            J_A, J_B, sum_K = triton_out
+            sumA = torch.zeros(nD, npairs_pairdiag, 4, 4, dtype=dtype, device=device)
+            sumB = torch.zeros_like(sumA)
+            sumA[..., tri_i, tri_j] = J_A
+            sumB[..., tri_i, tri_j] = J_B
+            F.index_add_(0, md_i.reshape(-1), sumB.reshape(-1, 4, 4))
+            F.index_add_(0, md_j.reshape(-1), sumA.reshape(-1, 4, 4))
+            F.index_add_(0, mask_flat, sum_K.reshape(-1, 4, 4))
 
-    # Contractions:
-    suma = torch.sum(PA * w_b, dim=2)  # (nD, npairs_pairdiag, 10)   Σ_{μν∈A} P_A(μν) (μν|λσ)
-    sumb = torch.sum(PB * w_b, dim=3)  # (nD, npairs_pairdiag, 10)   Σ_{λσ∈B} P_B(λσ) (μν|λσ)
+    if sum_K is None:
+        PA = (P[md_i.reshape(-1)][..., tri_i, tri_j] * weight).view(nD, npairs_pairdiag, 10, 1)
+        PB = (P[md_j.reshape(-1)][..., tri_i, tri_j] * weight).view(nD, npairs_pairdiag, 1, 10)
 
-    # Unpack back to 4x4
-    sumA = torch.zeros(nD, npairs_pairdiag, 4, 4, dtype=dtype, device=device)
-    sumB = torch.zeros_like(sumA)
-    sumA[..., tri_i, tri_j] = suma
-    sumB[..., tri_i, tri_j] = sumb
+        w_b = w.unsqueeze(0)
+        suma = torch.sum(PA * w_b, dim=2)
+        sumb = torch.sum(PB * w_b, dim=3)
 
-    # Scatter-add: add Σ_B to A-diagonals, and Σ_A to B-diagonals
-    F.index_add_(0, md_i.reshape(-1), sumB.reshape(-1, 4, 4))
-    F.index_add_(0, md_j.reshape(-1), sumA.reshape(-1, 4, 4))
+        sumA = torch.zeros(nD, npairs_pairdiag, 4, 4, dtype=dtype, device=device)
+        sumB = torch.zeros_like(sumA)
+        sumA[..., tri_i, tri_j] = suma
+        sumB[..., tri_i, tri_j] = sumb
+        F.index_add_(0, md_i.reshape(-1), sumB.reshape(-1, 4, 4))
+        F.index_add_(0, md_j.reshape(-1), sumA.reshape(-1, 4, 4))
 
-    # ========== 3) Off-diagonal exchange-like AB blocks (K-type) ==========
-    # sum[...,i,j] = Σ_{ν∈A} Σ_{σ∈B} [ -0.5 P_{νσ} * (μν | λσ) ]  using your 10x10 pack map
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
-
-    mask_flat = mask_exp.reshape(-1)  # (nD*npairs_ut,)
-    Pp = -0.5 * P[mask_flat].view(nD, npairs_ut, 4, 4)  # (nD, npairs_ut, 4,4)
-    sum_K = torch.zeros_like(Pp)
-
-    # We’ll broadcast w (shape (1, npairs_ut, 10, 10)) across densities.
-    w_K = w.unsqueeze(0)
-
-    for i in range(4):
-        Wi = w_K[..., ind[i], :]  # (1, npairs_ut, 4, 10)
-        for j in range(4):
-            Wij = Wi[..., :, ind[j]]  # (1, npairs_ut, 4, 4)
-            # elementwise multiply with Pp and sum over ν,σ (the two middle dims)
-            sum_K[..., i, j] = torch.sum(Pp * Wij, dim=(2, 3))  # (nD, npairs_ut)
-
-    # Scatter-add to F at AB positions
-    F.index_add_(0, mask_flat, sum_K.reshape(-1, 4, 4))
+        ind = K_IND_4.to(device=device)
+        Pp = -0.5 * P[mask_flat].view(nD, npairs_ut, 4, 4)
+        sum_K = torch.zeros_like(Pp)
+        w_K = w.unsqueeze(0)
+        for i in range(4):
+            Wi = w_K[..., ind[i], :]
+            for j in range(4):
+                Wij = Wi[..., :, ind[j]]
+                sum_K[..., i, j] = torch.sum(Pp * Wij, dim=(2, 3))
+        F.index_add_(0, mask_flat, sum_K.reshape(-1, 4, 4))
 
     mask_l_exp = (
         mask_l.view(1, -1) + mol.pair_molid.view(1, npairs_ut) * extra_per_mol + dgrid * base_stride

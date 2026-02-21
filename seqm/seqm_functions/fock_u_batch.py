@@ -12,7 +12,46 @@ from .fock import (
     K_ind_9,
     _cached_index,
     _cached_tensor,
+    fast_jk_enabled,
 )
+from .triton_jk import triton_jk_unrestricted_sp
+
+
+def _two_center_u_sp(F, P_tot, P_spin, w, maskd, mask, idxi, idxj):
+    tril_idx = _cached_index(TRIL_IDX_4, F.device)
+    weight_tc = _cached_tensor(WEIGHT_10, F.device, F.dtype)
+    i0, i1 = tril_idx
+
+    PA = (P_tot[maskd[idxi]][:, i1, i0] * weight_tc).unsqueeze(-1)
+    PB = (P_tot[maskd[idxj]][:, i1, i0] * weight_tc).unsqueeze(-2)
+
+    J_A = (PA * w).sum(dim=1)
+    J_B = (PB * w).sum(dim=2)
+
+    B = w.shape[0]
+    sumA = torch.zeros(B, DEFAULT_NBF, DEFAULT_NBF, device=F.device, dtype=F.dtype)
+    sumB = torch.zeros_like(sumA)
+    sumA[:, i1, i0] = J_A
+    sumB[:, i1, i0] = J_B
+
+    F[0].index_add_(0, maskd[idxi], sumB)
+    F[0].index_add_(0, maskd[idxj], sumA)
+    F[1].index_add_(0, maskd[idxi], sumB)
+    F[1].index_add_(0, maskd[idxj], sumA)
+
+    ind = _cached_index(K_ind_4, F.device)
+    p_idx = ind.view(-1)
+    w1 = w[:, p_idx, :].view(B, DEFAULT_NBF, DEFAULT_NBF, -1)
+
+    Pp = -P_spin[:, mask]
+    Ksum = torch.zeros(2, B, DEFAULT_NBF, DEFAULT_NBF, device=F.device, dtype=F.dtype)
+    for j in range(DEFAULT_NBF):
+        q_idx = ind[j]
+        w2 = w1[..., q_idx]
+        Ksum[..., :, j] = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
+
+    F.index_add_(1, mask, Ksum)
+    return F
 
 
 def fock_u_batch(
@@ -202,20 +241,35 @@ def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
 
     Returns: F updated in‐place with J/K for both α and β channels.
     """
-    # pick basis‐size‐dependent parameters
-    if themethod == "PM6":
-        nbf = PM6_NBF
-        tril_idx = _cached_index(TRIL_IDX_9, F.device)
-        weight_tc = _cached_tensor(WEIGHT_45, F.device, F.dtype)
-    else:
-        nbf = DEFAULT_NBF
-        tril_idx = _cached_index(TRIL_IDX_4, F.device)
-        weight_tc = _cached_tensor(WEIGHT_10, F.device, F.dtype)
+    if themethod != "PM6":
+        if fast_jk_enabled():
+            triton_out = triton_jk_unrestricted_sp(P_tot, P_spin, w, maskd, mask, idxi, idxj)
+            if triton_out is not None:
+                tril_idx = _cached_index(TRIL_IDX_4, F.device)
+                i0, i1 = tril_idx
+                nbf = DEFAULT_NBF
+                B = w.shape[0]
+                J_A, J_B, Ksum = triton_out
+                sumA = torch.zeros(B, nbf, nbf, device=F.device, dtype=F.dtype)
+                sumB = torch.zeros_like(sumA)
+                sumA[:, i1, i0] = J_A
+                sumB[:, i1, i0] = J_B
+                F[0].index_add_(0, maskd[idxi], sumB)
+                F[0].index_add_(0, maskd[idxj], sumA)
+                F[1].index_add_(0, maskd[idxi], sumB)
+                F[1].index_add_(0, maskd[idxj], sumA)
+                F.index_add_(1, mask, Ksum)
+                return F
+        return _two_center_u_sp(F, P_tot, P_spin, w, maskd, mask, idxi, idxj)
+
+    nbf = PM6_NBF
+    tril_idx = _cached_index(TRIL_IDX_9, F.device)
+    weight_tc = _cached_tensor(WEIGHT_45, F.device, F.dtype)
 
     i0, i1 = tril_idx
 
     # neighbor‐pair ordering: A and B centers
-    idxA, idxB = (idxj, idxi) if themethod == "PM6" else (idxi, idxj)
+    idxA, idxB = idxj, idxi
 
     # ——— Coulomb (J) ———
     # pack P_tot for A and B blocks
@@ -241,7 +295,7 @@ def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
 
     # ——— Exchange (K) ———
     # prepare indirect indexing
-    ind = _cached_index(K_ind_9 if themethod == "PM6" else K_ind_4, F.device)
+    ind = _cached_index(K_ind_9, F.device)
     p_idx = ind.view(-1)  # (nbf*nbf,)
     w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)
 
@@ -250,17 +304,11 @@ def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
     Pp = -P_spin[:, mask]  # (nExPairs, nbf, nbf)
     Ksum = torch.zeros(2, B, nbf, nbf, device=F.device, dtype=F.dtype)
 
-    if themethod == "PM6":
-        Pp = Pp.transpose(2, 3)  # align for d‐orbitals
-        for j in range(nbf):
-            q_idx = ind[j]  # (nbf,)
-            w2 = w1[..., q_idx]  # (nPairs, nbf, nbf)
-            Ksum[..., j, :] = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
-    else:
-        for j in range(nbf):
-            q_idx = ind[j]
-            w2 = w1[..., q_idx]
-            Ksum[..., :, j] = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
+    Pp = Pp.transpose(2, 3)  # align for d‐orbitals
+    for j in range(nbf):
+        q_idx = ind[j]  # (nbf,)
+        w2 = w1[..., q_idx]  # (nPairs, nbf, nbf)
+        Ksum[..., j, :] = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
 
     F.index_add_(1, mask, Ksum)
 

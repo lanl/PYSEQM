@@ -487,6 +487,7 @@ class Hamiltonian(torch.nn.Module):
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
         self.eig = seqm_parameters.get("eig", True)
         self.scf_backward = seqm_parameters.get("scf_backward", 0)
+        self.fast_jk = seqm_parameters.get("fast_jk", False)
         scf_back_eps = seqm_parameters.get("scf_backward_eps", seqm_parameters["scf_eps"])
         self.scf_backward_eps = torch.nn.Parameter(torch.as_tensor(scf_back_eps), requires_grad=False)
         # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
@@ -528,6 +529,7 @@ class Hamiltonian(torch.nn.Module):
             eig=self.eig,
             scf_backward=self.scf_backward,
             scf_backward_eps=self.scf_backward_eps,
+            fast_jk=self.fast_jk,
         )
 
         return F, e, P, Hcore, w, charge, rho0xi, rho0xj, riXH, ri, notconverged, molecular_orbitals

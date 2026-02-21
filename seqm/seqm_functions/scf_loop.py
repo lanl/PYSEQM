@@ -12,6 +12,7 @@ from .diag_d import sym_eig_trunc1d, sym_eig_truncd
 from .energy import elec_energy
 from .fermi_q import Fermi_Q
 from .fock import fock as fock_restricted
+from .fock import set_fast_jk
 from .fock_u_batch import fock_u_batch
 from .G_XL_LR import G
 from .hcore import hcore
@@ -2040,6 +2041,7 @@ def scf_loop(
     eig=False,
     scf_backward=0,
     scf_backward_eps=1.0e-2,
+    fast_jk=False,
 ):
     """
     SCF loop
@@ -2049,6 +2051,7 @@ def scf_loop(
     return : F, e, P, Hcore, w, v
     """
     nmol = molecule.nHeavy.shape[0]
+    set_fast_jk(fast_jk)
     tore = molecule.const.tore
     if molecule.const.do_timing:
         t0 = time.time()

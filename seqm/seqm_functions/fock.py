@@ -1,5 +1,9 @@
 import torch
 
+from .triton_jk import triton_jk_restricted_sp
+from .triton_sp_common import K_IND_4 as K_ind_4
+from .triton_sp_common import TRIL_IDX_4, WEIGHT_10
+
 # ——— Constants —————————————————————————————————————————————————————————
 # fmt: off
 # Basis function counts
@@ -7,13 +11,8 @@ DEFAULT_NBF = 4  # s,p basis
 PM6_NBF = 9  # s,p,d basis
 
 # Precompute lower-triangle indices for packing (including diagonal)
-TRIL_IDX_4 = torch.tril_indices(DEFAULT_NBF, DEFAULT_NBF, offset=0)
 TRIL_IDX_9 = torch.tril_indices(PM6_NBF, PM6_NBF, offset=0)
 # Weight tensor to scale the lower-triangle elements by 2
-WEIGHT_10 = torch.tensor([1.0,
-                          2.0, 1.0,
-                          2.0, 2.0, 1.0,
-                          2.0, 2.0, 2.0, 1.0])
 
 WEIGHT_45 = torch.tensor([1.0,
                           2.0, 1.0,
@@ -93,12 +92,6 @@ K_ind_9 = torch.tensor([
     [28,29,30,31,32,33,34,35,43],
     [36,37,38,39,40,41,42,43,44]
 ], dtype=torch.long )
-K_ind_4 = torch.tensor([
-    [0,1,3,6],
-    [1,2,4,7],
-    [3,4,5,8],
-    [6,7,8,9]
-], dtype=torch.long)
 # fmt: on
 P_INDEX_3 = torch.tensor([1, 2, 3], dtype=torch.long)
 P_OFF_I = torch.tensor([1, 1, 2], dtype=torch.long)
@@ -106,6 +99,7 @@ P_OFF_J = torch.tensor([2, 3, 3], dtype=torch.long)
 
 _WEIGHT_CACHE = {}
 _INDEX_CACHE = {}
+_FAST_JK_ENABLED = False
 
 
 def _cached_tensor(base, device, dtype=None):
@@ -124,6 +118,59 @@ def _cached_index(base, device):
         cached = base.to(device=device)
         _INDEX_CACHE[key] = cached
     return cached
+
+
+def set_fast_jk(enabled):
+    global _FAST_JK_ENABLED
+    _FAST_JK_ENABLED = bool(enabled)
+
+
+def fast_jk_enabled():
+    return _FAST_JK_ENABLED
+
+
+def _two_center_sp(F, P, w, maskd, mask, idxi, idxj):
+    tril_idx = _cached_index(TRIL_IDX_4, P.device)
+    i0, i1 = tril_idx
+    B = w.shape[0]
+
+    if _FAST_JK_ENABLED:
+        triton_out = triton_jk_restricted_sp(P, w, maskd, mask, idxi, idxj)
+        if triton_out is not None:
+            J_A, J_B, Ksum = triton_out
+            sumA = torch.zeros(B, DEFAULT_NBF, DEFAULT_NBF, device=P.device, dtype=P.dtype)
+            sumB = torch.zeros_like(sumA)
+            sumA[:, i1, i0] = J_A
+            sumB[:, i1, i0] = J_B
+            F.index_add_(0, maskd[idxi], sumB)
+            F.index_add_(0, maskd[idxj], sumA)
+            F.index_add_(0, mask, Ksum)
+            return F
+
+    weight_tc = _cached_tensor(WEIGHT_10, P.device, P.dtype)
+    PA = (P[maskd[idxi]][:, i1, i0] * weight_tc).unsqueeze(-1)
+    PB = (P[maskd[idxj]][:, i1, i0] * weight_tc).unsqueeze(-2)
+    J_A = (PA * w).sum(dim=1)
+    J_B = (PB * w).sum(dim=2)
+
+    sumA = torch.zeros(B, DEFAULT_NBF, DEFAULT_NBF, device=P.device, dtype=P.dtype)
+    sumB = torch.zeros_like(sumA)
+    sumA[:, i1, i0] = J_A
+    sumB[:, i1, i0] = J_B
+    F.index_add_(0, maskd[idxi], sumB)
+    F.index_add_(0, maskd[idxj], sumA)
+
+    Pp = -0.5 * P[mask]
+    Ksum = torch.zeros_like(sumA)
+    ind = _cached_index(K_ind_4, P.device)
+    p_idx = ind.view(-1)
+    w1 = w[:, p_idx, :].view(B, DEFAULT_NBF, DEFAULT_NBF, -1)
+    for j in range(DEFAULT_NBF):
+        q_idx = ind[j]
+        w2 = w1[..., q_idx]
+        Ksum[:, :, j] = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
+    F.index_add_(0, mask, Ksum)
+    return F
 
 
 # ——— Main fock function ——————————————————————————————————————————————
@@ -260,21 +307,18 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
     """
     Adds two-center (neighbor-atom) J and K contributions.
     """
-    # Two-electron two-center weight factors
+    if themethod != "PM6":
+        return _two_center_sp(F, P, w, maskd, mask, idxi, idxj)
 
-    if themethod == "PM6":
-        nbf = PM6_NBF
-        tril_idx = _cached_index(TRIL_IDX_9, P.device)
-        weight_tc = _cached_tensor(WEIGHT_45, P.device, P.dtype)
-    else:
-        nbf = DEFAULT_NBF
-        tril_idx = _cached_index(TRIL_IDX_4, P.device)
-        weight_tc = _cached_tensor(WEIGHT_10, P.device, P.dtype)
+    nbf = PM6_NBF
+    tril_idx = _cached_index(TRIL_IDX_9, P.device)
+    weight_tc = _cached_tensor(WEIGHT_45, P.device, P.dtype)
 
     i0, i1 = tril_idx
 
-    # Pack intra-atomic blocks for neighbors A and B by multiplying the lower triangle blocks by 2
-    idxA, idxB = (idxj, idxi) if themethod == "PM6" else (idxi, idxj)
+    # Pack intra-atomic blocks for neighbors A and B by multiplying
+    # the lower triangle blocks by 2.
+    idxA, idxB = idxj, idxi
     PA = (P[maskd[idxA]][:, i1, i0] * weight_tc).unsqueeze(-1)  # (...,nP,1)
     PB = (P[maskd[idxB]][:, i1, i0] * weight_tc).unsqueeze(-2)  # (...,1,nP)
 
@@ -320,27 +364,21 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
     #             Ksum[..., i, j] = (Pp * wblk).sum(dim=(1,2))
 
     # This eliminates one of the for-loops but uses more memory
-    ind = _cached_index(K_ind_9 if themethod == "PM6" else K_ind_4, P.device)
+    ind = _cached_index(K_ind_9, P.device)
 
     p_idx = ind.view(-1)  # (i*ν,)
     w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)  # last dim = nP, which is the packed index that packs nbf*nbf
 
-    if themethod == "PM6":
-        # With d-orbitals, the w tensor seems to align with the
-        # upper triangle blocks of P, but Pp=P[mask] gets the
-        # blocks of the lower triangle of P. So we transpose it here
-        Pp = Pp.transpose(1, 2)
-        for j in range(9):
-            q_idx = ind[j]  # (nbf,)
-            # gather w2[b, i, ν, σ] = w1[b, i, ν, q_idx[σ]]
-            # i.e. pick out the “λσ” slot for each σ
-            w2 = w1[..., q_idx]
-            Ksum[:, j, :] = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
-    else:
-        for j in range(4):
-            q_idx = ind[j]  # (nbf,)
-            w2 = w1[..., q_idx]
-            Ksum[:, :, j] = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
+    # With d-orbitals, the w tensor seems to align with the
+    # upper triangle blocks of P, but Pp=P[mask] gets the
+    # blocks of the lower triangle of P. So we transpose it here.
+    Pp = Pp.transpose(1, 2)
+    for j in range(9):
+        q_idx = ind[j]  # (nbf,)
+        # gather w2[b, i, ν, σ] = w1[b, i, ν, q_idx[σ]]
+        # i.e. pick out the “λσ” slot for each σ
+        w2 = w1[..., q_idx]
+        Ksum[:, j, :] = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
 
     F.index_add_(0, mask, Ksum)
 
