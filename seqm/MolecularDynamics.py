@@ -882,13 +882,14 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
 
         # Setup output
-        self._do_screen = self.output_config.print_every > 0
-        self._do_xyz = self.output_config.xyz_every > 0
+        has_molid = len(self.output_config.molid) > 0
+        self._do_screen = self.output_config.print_every > 0 and has_molid
+        self._do_xyz = self.output_config.xyz_every > 0 and has_molid
         self._do_h5 = (
             self.output_config.get_h5_data_every() > 0
             or any(self.output_config.get_h5_cadence().values())
             or self.output_config.get_h5_write_nonadiabatic() > 0
-        )
+        ) and has_molid
         h5_data_every = self.output_config.get_h5_data_every()
         h5_vectors_every = self.output_config.h5_vectors_every
 
@@ -898,9 +899,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if self._do_h5:
             excited_states_params = self.seqm_parameters.get("excited_states")
             n_roots = excited_states_params["n_states"] if excited_states_params else 0
-            # With XL-ESMD, only the active state is computed
-            if isinstance(self, XL_ESMD):
-                n_roots = 1
+            # # With XL-ESMD, only the active state is computed
+            # if isinstance(self, XL_ESMD):
+            #     n_roots = 1
             self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters, self.timestep)
             self._h5_writer.open(
                 molecule,

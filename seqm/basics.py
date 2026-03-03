@@ -1010,7 +1010,7 @@ class Energy(torch.nn.Module):
         # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
 
         # if cis_amp is not None:
-        #     # get_exact_excited(molecule, w, e, cis_amp)
+        #     get_exact_excited(molecule, w, e, cis_amp)
         #     elec_energy_excited_xl(molecule, cis_amp, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None))
         #     Cocc = molecule.molecular_orbitals[:, :, : molecule.nocc[0]]
         #     Cvir = molecule.molecular_orbitals[:, :, molecule.nocc[0] :]
@@ -1026,6 +1026,7 @@ class Energy(torch.nn.Module):
             E_XL, molecule.transition_density_matrices = elec_energy_excited_xl(
                 molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
             )
+            molecule.cis_energies = E_XL
             active_idx = torch.clamp(active_states - 1, min=0)
             Eexcited = E_XL.gather(1, active_idx.unsqueeze(1)).squeeze(1)
 
