@@ -303,7 +303,6 @@ class HDF5Writer:
                     gd.create_dataset("excitation/active_state", data=int(active_states[mol].item()))
                 else:
                     gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
-                self._create_row_chunked(gd, "excitation/excitation_energy", (Tw_data, R))
                 self._create_row_chunked(gd, "excitation/state_energies", (Tw_data, R + 1))
                 self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
                 self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
@@ -364,7 +363,6 @@ class HDF5Writer:
 
             R = flags["n_excited_states"]
             if R > 0:
-                gd["excitation/excitation_energy"][i, ...] = _to_np(molecule.cis_energies[mol, :R])
                 active_mol = int(active_vals[mol]) if active_vals is not None else active_scalar
                 e0 = molecule.Etot[mol]
                 if active_mol > 0:

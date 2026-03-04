@@ -81,18 +81,17 @@ def _assert_output_files(prefix, molid, steps, expect_excited=False, n_states=No
             assert h5["forces/values"].shape[0] == expected_steps
             if expect_excited:
                 assert "excitation" in h5["data"]
-                assert "excitation_energy" in h5["data/excitation"]
+                assert "excitation_energy" not in h5["data/excitation"]
                 assert "state_energies" in h5["data/excitation"]
                 assert "oscillator_strength" in h5["data/excitation"]
                 if n_states is not None:
-                    exc = h5["data/excitation/excitation_energy"][...]
                     state = h5["data/excitation/state_energies"][...]
                     osc = h5["data/excitation/oscillator_strength"][...]
-                    assert exc.shape[1] == n_states
                     assert state.shape[1] == (n_states + 1)
                     assert osc.shape[1] == n_states
                     assert np.isfinite(state[:, 0]).all()
-                    assert_allclose(state[:, 1 : 1 + n_states], state[:, [0]] + exc, rtol=1e-5, atol=1e-5)
+                    rel = state[:, 1 : 1 + n_states] - state[:, [0]]
+                    assert np.isfinite(rel).all()
     for xyz_path in _xyz_paths(prefix, molid):
         assert xyz_path.exists()
         assert _read_xyz_frames(xyz_path) == expected_steps
