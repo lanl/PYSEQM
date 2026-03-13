@@ -101,7 +101,7 @@ def _run_velocity(
 ) -> Dict:
     torch.manual_seed(seed)
     dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-    dyn = dyn_cls(model, timestep=timestep, electronic_substeps=elec_substeps)
+    dyn = dyn_cls(model, timestep=timestep)
     mol = BatchedTullyMolecule(x0=x0, v0=[v0] * ntraj, mass=mass, dtype=torch.double)
     dyn._setup_states(mol)
     dyn._init_coeffs(mol)
@@ -328,17 +328,14 @@ def main():
     parser.add_argument("--method", default="fssh", choices=["fssh", "ehrenfest"])
     parser.add_argument("--velocities", nargs="+", type=float, default=None)
     parser.add_argument("--ntraj", type=int, default=2000, help="Trajectories per velocity (batched)")
-    parser.add_argument("--steps", type=int, default=1000, help="Steps per trajectory")
-    parser.add_argument("--timestep", type=float, default=0.25, help="Time step (fs)")
-    parser.add_argument(
-        "--elec-substeps", type=int, default=15, help="Electronic RK4 substeps per nuclear step"
-    )
+    parser.add_argument("--steps", type=int, default=6000, help="Steps per trajectory")
+    parser.add_argument("--timestep", type=float, default=0.05, help="Time step (fs)")
     parser.add_argument("--mass", type=float, default=1.0971598, help="Mass in amu")
     parser.add_argument("--x0", type=float, default=-5.0, help="Initial position")
     parser.add_argument("--outfile", default="tully_probs.png", help="Output plot filename")
     parser.add_argument("--plot-density", action="store_true", help="Plot averaged density matrix elements.")
     parser.add_argument("--density-outfile", default="tully_density.png", help="Density matrix plot filename")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed for hops")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for hops")
     parser.add_argument("--workers", type=int, default=1, help="Parallel workers (one velocity per worker)")
     args = parser.parse_args()
 
@@ -424,7 +421,6 @@ def main():
         timestep=args.timestep,
         mass=args.mass,
         x0=args.x0,
-        elec_substeps=args.elec_substeps,
         collect_density=args.plot_density,
         seed=args.seed,
         workers=max(1, args.workers),

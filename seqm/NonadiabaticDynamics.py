@@ -132,9 +132,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._cache_old = None
         self._cache_new = None
         self._hop_integral = None
-        self._decohere_on_hop = params["nonadiabatic"].get("decohere_on_hop", True)
+        self._decohere_on_hop = params["nonadiabatic"].get("decohere_on_hop", False)
         self._detect_crossings_flag = params["nonadiabatic"].get("detect_crossings", True)
-        self._apc_window = int(params["nonadiabatic"].get("apc_window", 2))
         self._trivial_crossing_mask: Optional[torch.Tensor] = None
         # Reusable per-device caches to avoid reallocations and CPU transfers each step
         self._eye_cache: Dict[tuple, torch.Tensor] = {}
@@ -396,7 +395,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         nmol, nstates, _ = ovlp.shape
         big = 1e5
-        w = self._apc_window
+        w = 2  # APC window (same as NEXMD); only allow permutations within ±2 of the diagonal
         ovlp_cpu = ovlp.detach().to("cpu")
 
         cpu = torch.device("cpu")
@@ -588,7 +587,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         diag_idx = self._get_arange(n_states, device=device)
 
         # respect the same APC/Hungarian window you use in _compute_perm_from_overlap
-        w = self._apc_window
+        w = 2  # APC window (same as NEXMD); only allow permutations within ±2 of the diagonal
         i = diag_idx.view(1, n_states, 1)
         j = diag_idx.view(1, 1, n_states)
         in_win = (j >= (i - w)) & (j <= (i + w))  # (1, n, n)

@@ -114,21 +114,6 @@ def test_hop_integral_accumulates_coupling():
     assert torch.allclose(nad._hop_integral[0, 0, 1], -nad._hop_integral[0, 1, 0], atol=1.0e-12)
 
 
-def test_apc_window_limits_assignment():
-    nad = make_dummy()
-    nad._apc_window = 0  # only allow diagonal
-    # old amplitudes: |1>,|2>
-    ref = torch.eye(2).unsqueeze(0)
-    # new amplitudes swapped
-    tgt = torch.tensor([[[0.0, 1.0], [1.0, 0.0]]])
-    perm = nad._compute_perm_from_overlap(ref, tgt).tolist()
-    assert perm == [[0, 1]]  # window prevents swap
-    # Allow wider window -> swap chosen
-    nad._apc_window = 2
-    perm2 = nad._compute_perm_from_overlap(ref, tgt).tolist()
-    assert perm2 == [[1, 0]]
-
-
 def test_crossing_detection_triggers():
     nad = make_dummy()
     ref_amp = torch.tensor([[[1.0, 0.0], [0.0, 1.0]]])
