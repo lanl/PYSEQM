@@ -3,7 +3,6 @@ import os
 import time
 
 import torch
-from scipy.optimize import linear_sum_assignment
 
 from .dynamics.active_state import active_state_tensor
 from .dynamics.nac_utils import resolve_nac_config
@@ -606,7 +605,7 @@ class Energy(torch.nn.Module):
     @staticmethod
     def _crossing_match_molecular_orbitals(new_mos, prev_mos, nocc, e_mo, verbose=False):
         if not torch.is_tensor(prev_mos) or prev_mos.shape != new_mos.shape:
-            return new_mos
+            return new_mos, e_mo
         if new_mos.dim() == 4:
             raise NotImplementedError("MO tracking for crossing not implemented yet")
 
@@ -614,12 +613,25 @@ class Energy(torch.nn.Module):
         nvir = nmo - nocc
         dev = new_mos.device
 
-        def perm_from_overlap(S):  # S: [b,r,r]
+        def greedy_unique_perm(S_abs):  # S_abs: [k,r,r]
             perms = []
-            Snp = S.detach().cpu().numpy()
-            for bi in range(b):
-                _, col = linear_sum_assignment(-Snp[bi])
-                perms.append(torch.as_tensor(col, device=dev))
+            r = S_abs.shape[1]
+            for Sbi in S_abs:
+                pref = torch.argsort(Sbi, dim=1, descending=True)
+                if r > 1:
+                    top2 = torch.gather(Sbi, 1, pref[:, :2])
+                    row_priority = top2[:, 0] - top2[:, 1]
+                else:
+                    row_priority = Sbi[:, 0]
+
+                perm = torch.empty(r, dtype=torch.long, device=dev)
+                used = torch.zeros(r, dtype=torch.bool, device=dev)
+                for row in torch.argsort(row_priority, descending=True).tolist():
+                    candidates = pref[row]
+                    col = candidates[~used[candidates]][0]
+                    perm[row] = col
+                    used[col] = True
+                perms.append(perm)
             return torch.stack(perms)
 
         def apply_perm(C, p):  # C: [b,nbas,r], p: [b,r]
@@ -642,13 +654,12 @@ class Energy(torch.nn.Module):
                 # Fast: choose best NEW for each OLD (argmax over new dim=2)
                 p = torch.argmax(S_abs, dim=2)  # [b, r] old->new candidates
 
-                # Check if p is a true permutation (bijective)
+                # If the rowwise best matches are not bijective, repair them greedily.
                 target = torch.arange(r, device=dev).expand(b, r)
-                is_perm = torch.sort(p, dim=1).values.eq(target).all(dim=1)  # [b]
+                is_perm = torch.sort(p, dim=1).values.eq(target).all(dim=1)
                 bad = ~is_perm
-
                 if bad.any():
-                    p[bad] = perm_from_overlap(S_abs[bad])
+                    p[bad] = greedy_unique_perm(S_abs[bad])
                 return p
 
             # get permutations based on overlap, by looking for the best match in each row simply
