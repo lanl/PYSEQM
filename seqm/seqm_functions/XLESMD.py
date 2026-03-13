@@ -81,7 +81,7 @@ def get_exact_excited(mol, w, e_mo, R):
 
 def elec_energy_excited_xl(
     mol, R: torch.Tensor, w, e_mo, xl_bomd_params: Optional[Dict] = None
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute excited-state electronic energy and amplitudes with XL-ESMD approach
 
@@ -101,8 +101,12 @@ def elec_energy_excited_xl(
     n = nocc * nvirt
 
     # --- Build eta = Xbar in MO (occ-virt) with r blocks ---
-    with torch.no_grad():
-        eta = torch.einsum("bmi,brmn,bna->bria", Cocc, R, Cvirt)
+    MO_basis = R.shape == (b, r, n)
+    if MO_basis:
+        eta = R.reshape(b, r, nocc, nvirt)  # assume R is in MO basis; replace with above line for AO input
+    else:
+        with torch.no_grad():
+            eta = torch.einsum("bmi,brmn,bna->bria", Cocc, R, Cvirt)
 
     # --- Define Coulomb-exchange integral function for amplitudes ---
     def G_apply(Y: torch.Tensor) -> torch.Tensor:
@@ -122,13 +126,13 @@ def elec_energy_excited_xl(
     with torch.no_grad():
         # xi_flat: (b,r,n), omega_br: (b,r)
 
-        # xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
-        if hasattr(mol, "omega_xl"):
-            omega_init = mol.omega_xl
-        else:
-            omega_init = mol.cis_energies
-        xi_flat, omega = solve_for_amplitude_omega_newton(eta_flat, ea_ei_flat, Gx_flat, omega_init)
-        mol.omega_xl = omega
+        xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
+        # if hasattr(mol, "omega_xl"):
+        #     omega_init = mol.omega_xl
+        # else:
+        #     omega_init = mol.cis_energies
+        # xi_flat, omega = solve_for_amplitude_omega_newton(eta_flat, ea_ei_flat, Gx_flat, omega_init)
+        # mol.omega_xl = omega
 
     E1 = (xi_flat * xi_flat * ea_ei_flat).sum(dim=2)  # (b,r)
     E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
@@ -146,21 +150,33 @@ def elec_energy_excited_xl(
                 # precond = make_apply_precond_rank1(ea_ei_flat, eta_flat, xi_flat, omega)
                 # precond = make_apply_precond_null()  # no preconditioning
 
-                # precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
-                # jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
+                precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
+                jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
 
-                precond = make_apply_precond_diag_full_normalized(ea_ei_flat, eta_flat, omega, Gx_flat)
-                jvp_xi = make_jvp_xi_full_normalized(
-                    ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt
-                )
+                # precond = make_apply_precond_diag_full_normalized(ea_ei_flat, eta_flat, omega, Gx_flat)
+                # jvp_xi = make_jvp_xi_full_normalized(
+                #     ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt
+                # )
 
                 dxi2dt2_flat = compute_dxi2dt2_rankm(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
                 # Convert to AO basis and store in mol for later use in BOMD
-                mol.dxi2dt2 = torch.einsum(
-                    "bmi,bria,bna->brmn", Cocc, dxi2dt2_flat.view(b, r, nocc, nvirt), Cvirt
-                )
+                if MO_basis:
+                    mol.dxi2dt2 = dxi2dt2_flat
+                else:
+                    mol.dxi2dt2 = torch.einsum(
+                        "bmi,bria,bna->brmn", Cocc, dxi2dt2_flat.view(b, r, nocc, nvirt), Cvirt
+                    )
+    # Check if xi are orthogonal in a batch
+    dot_xi = torch.einsum("brn,bRn->brR", xi_flat, xi_flat)  # (b,r,r)
+    print("Xi dot product matrix (should be close to identity):\n", dot_xi)
+    print(
+        "Deviation of xi from orthogonality (should be close to diagonal): ",
+        torch.linalg.norm(dot_xi - torch.eye(r, device=xi_flat.device).unsqueeze(0)),
+    )
+    # Check if xi is smooth with previous xi
+    print("Overlap of xi with previous xi", torch.sum(xi_flat * mol.cis_amplitudes, dim=2))  # (b,r)
 
-    return E, xi_AO
+    return E, xi_AO, xi_flat
 
 
 def make_apply_precond_null() -> Callable[[torch.Tensor], torch.Tensor]:

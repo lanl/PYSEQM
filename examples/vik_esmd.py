@@ -61,16 +61,16 @@ const = Constants().to(device)
 
 seqm_parameters = {
     "method": "AM1",
-    "scf_eps": 1.0e-8,
+    "scf_eps": 1.0e-10,
     "scf_converger": [2],
     "excited_states": {"n_states": 3, "cis_tol": 1e-9},
     "active_state": 1,
-    "scf_backward": 1,
-    # "analytical_gradient": [True],
+    # "scf_backward": 1,
+    "analytical_gradient": [True],
 }
 
 # timestep = 3.0
-timestep = 0.5
+timestep = 0.1
 md_type = "ksaxlesmd"  # "esmd", "xlbomd", "xlesmd", "ksaxlesmd"
 # md_type = "esmd"  # "esmd", "xlbomd", "xlesmd", "ksaxlesmd"
 
@@ -108,7 +108,7 @@ elif md_type == "xlbomd":
     ).to(device)
 elif md_type == "xlesmd" or md_type=="ksaxlesmd":
     if md_type=="ksaxlesmd":
-        xl_bomd_params={'k':6, 'max_rank':4, 'err_threshold':1e-14, 'T_el':1500}
+        xl_bomd_params={'k':6, 'max_rank':10, 'err_threshold':1e-3, 'T_el':1500}
     md = XL_ESMD(
         xl_bomd_params=xl_bomd_params, Temp=temp, seqm_parameters=seqm_parameters, timestep=timestep, output=output
     ).to(device)
