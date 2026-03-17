@@ -847,7 +847,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # NEXMD uses the coupling for the step; you said use nac_dt_new
         nd = nd_new
         # instantaneous vnqcorrhop = -2 * Re(conj(u_i) u_j) * d_ij
-        hop_inst = -hop_numerator(x, y, th, nd)  # OR put the minus inside hop_numerator
+        hop_inst = hop_numerator(x, y, th, nd)  # OR put the minus inside hop_numerator
         self._hop_integral = hop_inst * dt_total
         # zero diagonal
         self._hop_integral.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
@@ -1279,7 +1279,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
     def _rescale_velocity_along_nac(self, nac_vec, i_state, j_state, molecule, dE, mol_index: int):
         if nac_vec is None:
-            return False
+            raise RuntimeError("NAC vectors are required for velocity rescaling on hops.")
         dvec = nac_vec[mol_index, i_state, j_state]  # (molsize, 3)
         m_inv = molecule.mass_inverse[mol_index].squeeze(-1)  # (molsize,)
         d2_by_m = torch.sum(m_inv * torch.sum(dvec * dvec, dim=1))
@@ -1290,8 +1290,9 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         if rad <= 0:
             return False
         sqrt_rad = torch.sqrt(rad)
-        # choose solution with smaller |alpha|
-        alpha = (-v_dot_d + torch.sign(v_dot_d) * sqrt_rad) / d2_by_m
+        # # choose solution with smaller |alpha|
+        # alpha = (-v_dot_d + torch.sign(v_dot_d) * sqrt_rad) / d2_by_m
+        alpha = -(v_dot_d + sqrt_rad) / d2_by_m  # Like NEXMD
         with torch.no_grad():
             molecule.velocities[mol_index] = molecule.velocities[mol_index] + (
                 alpha * dvec * m_inv.unsqueeze(1)
