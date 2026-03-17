@@ -781,23 +781,24 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         device = self._amp_phase.device
         dtype = self._amp_phase.dtype
-        hop_shape = (self._amp_phase.shape[0], self._nstates, self._nstates)
-        if (
-            self._hop_buffer is None
-            or self._hop_buffer.shape != hop_shape
-            or self._hop_buffer.device != device
-        ):
-            self._hop_buffer = torch.zeros(hop_shape, dtype=dtype, device=device)
-        else:
-            self._hop_buffer.zero_()
-        hop_int = self._hop_buffer
-        w = self._get_simpson_weights(nsub, device=device, dtype=dtype)  # (nsub+1,)
+        # hop_shape = (self._amp_phase.shape[0], self._nstates, self._nstates)
+        # if (
+        #     self._hop_buffer is None
+        #     or self._hop_buffer.shape != hop_shape
+        #     or self._hop_buffer.device != device
+        # ):
+        #     self._hop_buffer = torch.zeros(hop_shape, dtype=dtype, device=device)
+        # else:
+        #     self._hop_buffer.zero_()
+        # hop_int = self._hop_buffer
+        # w = self._get_simpson_weights(nsub, device=device, dtype=dtype)  # (nsub+1,)
 
         x = self._amp_phase[..., 0]
         y = self._amp_phase[..., 1]
         th = self._amp_phase[..., 2]
 
-        for s in range(nsub + 1):
+        # for s in range(nsub + 1):
+        for s in range(nsub):
             base_tau = s * dt_sub / dt_total
             tau_half = base_tau + 0.5 * dt_sub / dt_total
             tau_full = base_tau + dt_sub / dt_total
@@ -805,9 +806,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             e1 = interp_energies(base_tau)
             nd1 = interp_nac(base_tau)
 
-            hop_int.add_(hop_numerator(x, y, th, nd1), alpha=float(w[s]))
-            if s == nsub:
-                break
+            # hop_int.add_(hop_numerator(x, y, th, nd1), alpha=float(w[s]))
+            # if s == nsub:
+            #     break
 
             dx1, dy1, dth1 = rhs(x, y, th, e1, nd1)
 
@@ -840,9 +841,16 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # Wrap self._amp_phase[..., 2] to [-pi, pi]
         self._amp_phase[..., 2] = torch.remainder(th + torch.pi, 2 * torch.pi) - torch.pi
 
-        hop_int.mul_(dt_sub / 3.0)
-        hop_int.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
-        self._hop_integral = hop_int
+        # hop_int.mul_(dt_sub / 3.0)
+        # hop_int.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
+        # self._hop_integral = hop_int
+        # NEXMD uses the coupling for the step; you said use nac_dt_new
+        nd = nd_new
+        # instantaneous vnqcorrhop = -2 * Re(conj(u_i) u_j) * d_ij
+        hop_inst = -hop_numerator(x, y, th, nd)  # OR put the minus inside hop_numerator
+        self._hop_integral = hop_inst * dt_total
+        # zero diagonal
+        self._hop_integral.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
 
     def _thermo_potential(self, molecule):
         if self._current_potential is not None:
@@ -1348,6 +1356,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         nmol = excitation_energies.shape[0]
         device = molecule.coordinates.device
         active_idx_ref = self._active_states.to(device).clone()
+        current_step = step if step is not None else self.step_offset
 
         # ---------------- Trivial crossing handling (NEXMD cross==2) ----------------
         swap_to = self._trivial_crossing_mask
@@ -1384,9 +1393,23 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
                 active_swapped = sel & (a2 != a)
                 if active_swapped.any():
                     active_crossed = True
+                    swapped_idx = torch.nonzero(active_swapped, as_tuple=False).squeeze(1)
+                    from_states = a[swapped_idx].tolist()
+                    to_states = a2[swapped_idx].tolist()
                     # record prev active like ihopprev
                     self.prev_state[active_swapped] = a[active_swapped]
                     self._active_states[active_swapped] = a2[active_swapped]
+                    for mol, from_state, to_state in zip(swapped_idx.tolist(), from_states, to_states):
+                        self.hop_log.append(
+                            HopEvent(
+                                step=current_step + 1,
+                                from_state=int(from_state),
+                                to_state=int(to_state),
+                                accepted=True,
+                                mol_index=mol,
+                                reason="Trivial crossing",
+                            )
+                        )
 
                     # NEXMD: deterministic relabel => do not attempt stochastic hop this step
                     skip_hop_mask[active_swapped] = True
@@ -1396,7 +1419,6 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
         # ---------------- end trivial crossing handling ----------------
 
-        current_step = step if step is not None else self.step_offset
         hop_targets: List[Optional[int]] = self._attempt_hop() if nac_dot is not None else [None] * nmol
 
         # Suppress hop attempts for molecules whose active state had a trivial crossing

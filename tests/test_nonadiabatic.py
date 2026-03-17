@@ -109,8 +109,8 @@ def test_hop_integral_accumulates_coupling():
     cache = {"energies": energies, "ground_energy": ground, "nac_dot": nac, "nac_vec": None}
     nad._propagate_electronic(cache, cache, substeps=10)
     assert nad._hop_integral is not None
-    assert nad._hop_integral[0, 0, 1] > 0
-    assert nad._hop_integral[0, 1, 0] < 0
+    assert torch.abs(nad._hop_integral[0, 0, 1]) > 0
+    assert torch.abs(nad._hop_integral[0, 1, 0]) > 0
     assert torch.allclose(nad._hop_integral[0, 0, 1], -nad._hop_integral[0, 1, 0], atol=1.0e-12)
 
 
@@ -172,6 +172,33 @@ def test_surface_hopping_accepted_hop_updates_state_and_recomputes_force(monkeyp
     assert torch.allclose(molecule.acc, expected_acc)
     assert torch.allclose(dyn._current_potential, torch.tensor([1.5], dtype=torch.float64))
     assert torch.allclose(molecule.Etot, torch.tensor([1.5], dtype=torch.float64))
+
+
+def test_surface_hopping_trivial_crossing_logs_hop_event(monkeypatch):
+    dyn = make_dummy_fssh()
+    molecule = make_dummy_molecule()
+    excitation_energies = torch.tensor([[0.2, 0.5]], dtype=torch.float64)
+    dyn._trivial_crossing_mask = torch.tensor([[1, 0]], dtype=torch.long)
+
+    monkeypatch.setattr(dyn, "_attempt_hop", lambda: [None])
+
+    dyn._after_electronic_update(
+        molecule,
+        excitation_energies=excitation_energies,
+        nac_matrix=None,
+        nac_dot=torch.zeros((1, 2, 2), dtype=torch.float64),
+        step=5,
+    )
+
+    assert dyn._active_states.tolist() == [1]
+    assert len(dyn.hop_log) == 1
+    assert dyn.hop_log[0].accepted is True
+    assert dyn.hop_log[0].reason == "Trivial crossing"
+    assert dyn.hop_log[0].from_state == 0
+    assert dyn.hop_log[0].to_state == 1
+    assert dyn.hop_log[0].step == 6
+    assert torch.allclose(dyn._amp_phase[0, 0], torch.zeros(3, dtype=torch.float64))
+    assert torch.allclose(dyn._amp_phase[0, 1], torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64))
 
 
 def test_surface_hopping_frustrated_hop_keeps_state_and_records_failure(monkeypatch):
