@@ -120,7 +120,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._dtnact = 5e-5  # small dt for finite-diff, NEXMD uses 0.002 au
         self._recompute_on_hop = bool(na_cfg.get("recompute_on_hop", False))
         self.initial_state = initial_state
-        nsub = 8
+        nsub = 10
         if nsub % 2:
             nsub += 1
         self._electronic_substeps = nsub

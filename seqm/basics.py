@@ -549,7 +549,7 @@ class Energy(torch.nn.Module):
         self.eig = seqm_parameters.get("eig", True)
         self.excited_states = seqm_parameters.get("excited_states")
         if self.excited_states is not None:
-            self.excited_states.setdefault("make_best_guess", True)
+            self.excited_states.setdefault("make_best_guess", False)
             self.excited_states.setdefault("save_tdm", False)
         # Resolve NAC configuration once at construction
         nroots = None
