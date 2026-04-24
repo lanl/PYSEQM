@@ -74,9 +74,9 @@ def rcis_batch(
             if (
                 init_amplitude_guess.shape[-1] == norb_batch[0]
             ):  # initial amplitude guess provided in AO basis, i.e. transition density matrices
-                V[:, :nroots] = torch.einsum("bmi,brmn,bna->bria", Cocc, init_amplitude_guess, Cvirt).flatten(
-                    start_dim=-2
-                )
+                V[:, :nroots] = torch.einsum(
+                    "bmi,brmn,bna->bria", Cocc, init_amplitude_guess[:, :nroots], Cvirt
+                ).flatten(start_dim=-2)
                 # need to orthonormalize, use the orthonormalization procedure below
                 # Normalize first vector
                 V[:, 0] /= torch.linalg.vector_norm(V[:, 0], dim=1, keepdim=True)
@@ -86,7 +86,7 @@ def rcis_batch(
                         if n_new < nroots:
                             raise RuntimeError("Some roots were lost while orthogonalizing, cannot proceed")
             else:  # initial amplitude guess provided in MO basis, assume orthonormalized
-                V[:, :nroots] = init_amplitude_guess
+                V[:, :nroots] = init_amplitude_guess[:, :nroots]
         nstart = nroots
 
         # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step.
