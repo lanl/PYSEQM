@@ -1040,8 +1040,6 @@ def cis_energy_from_transition_density(mol, F, R, w, D, Hcore):
     E = (R * F0).sum(dim=(1, 2))
     print(f"CIS Energy is {E}")
 
-    import matplotlib.pyplot as plt
-
     from seqm.seqm_functions.energy import elec_energy, elec_energy_xl
 
     ground = False
@@ -1102,18 +1100,6 @@ def cis_energy_from_transition_density(mol, F, R, w, D, Hcore):
         err.append(i)
         ener.append(Ei[0].item())
     exit()
-
-    import numpy as np
-
-    x = np.array(err)
-    y = np.array(ener)
-    k = np.polyfit(x, y, 2)
-    print(f"Fit is {k}")
-    p = np.poly1d(k)
-    plt.plot(err, ener, ".-", label="data")
-    plt.plot(x, p(x), label="fit")
-    plt.legend()
-    plt.show()
 
 
 def linearlized_cis_energy(mol, F, R, Q, w):

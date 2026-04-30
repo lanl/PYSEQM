@@ -16,6 +16,9 @@ PYSEQM (PYtorch based SemiEmpirical Quantum Mechanics) is is a flexible, high-pe
 - **Molecular dynamics**  
 
   Original and Extended-Lagrangian Born–Oppenheimer MD, with optional thermostats.
+- **Nonadiabatic dynamics**
+
+  Fewest-switches surface hopping over CIS excited states, including restartable trajectories and nonadiabatic coupling diagnostics.
 
 .. toctree::
    :hidden:

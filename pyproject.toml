@@ -17,23 +17,39 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Research",
   "Topic :: Quantum Chemistry",
-  "License :: BSD 3-Clause License",
+  "License :: OSI Approved :: BSD License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.7",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 dependencies = [
-  "numpy",
+  "numpy>=1.20",
   "torch>=1.9",
-  "psutil",
-  "h5py"
+  "psutil>=5",
+  "h5py>=3",
+  "scipy>=1.7",
 ]
 
 [project.optional-dependencies]
 geomopt = ["geometric"]
+hipnn = ["hippynn"]
+test = ["pytest"]
+docs = [
+  "sphinx",
+  "pydata-sphinx-theme",
+  "sphinx-copybutton",
+]
+examples = ["matplotlib"]
+dev = [
+  "pytest",
+  "ruff",
+  "sphinx",
+  "pydata-sphinx-theme",
+  "sphinx-copybutton",
+  "matplotlib",
+]
 
 [tool.setuptools]
 include-package-data = true
@@ -42,12 +58,12 @@ include-package-data = true
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-seqm = ["params/*.csv"]
+seqm = ["params/*.csv", "params/*/*.csv"]
 
 [tool.ruff]
 line-length = 110
 indent-width = 4
-target-version = "py37"
+target-version = "py39"
 extend-exclude = [
   "examples/**/*.ipynb",
   "examples/vik*.py",

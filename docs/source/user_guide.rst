@@ -23,4 +23,5 @@ User Guide
    bomd
    Feature-XLBOMD
    excited_bomd
+   nonadiabatic_dynamics
    geometry_optimization

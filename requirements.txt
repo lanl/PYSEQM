@@ -1,3 +1,5 @@
-torch
-numpy
-
+numpy>=1.20
+torch>=1.9
+psutil>=5
+h5py>=3
+scipy>=1.7

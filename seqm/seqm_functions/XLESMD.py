@@ -1,6 +1,5 @@
 from typing import Callable, Dict, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -539,6 +538,10 @@ def sample_noisy_R_energy(
         # print(f"Step {i+1}/{n_steps}: |R-Rbar| = {delta:.6e}, E = {energy_scalar:.6e}")
 
     if plot:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise RuntimeError("Plotting requires matplotlib. Install it with `pip install matplotlib`.")
         plt.figure()
         plt.plot(deltas, energies, marker="o", linestyle="-", label="data")
         plt.xlabel("|R - Rbar| (transition density error)")

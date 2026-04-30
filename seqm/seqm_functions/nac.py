@@ -6,51 +6,20 @@ from seqm.seqm_functions.rcis_batch import unpackone_batch
 from .constants import a0
 
 
-def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2, rpa=False):
-    """
-    amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the
-         state for which the gradient is required has to be selected and put together into the amp tensor
-    """
-    if rpa:
-        raise NotImplementedError(
-            "Nonadiabatic coupling vecotrs not yet implemented for RPA. Use CIS instead."
+def _state_pair_tensors(state_pairs, device):
+    state_pairs = list(state_pairs)
+    if len(state_pairs) == 0:
+        return (
+            torch.empty(0, dtype=torch.long, device=device),
+            torch.empty(0, dtype=torch.long, device=device),
         )
-    device = amp.device
-    dtype = amp.dtype
-    norb = mol.norb[0]
-    nocc = mol.nocc[0]
-    nvirt = norb - nocc
+    pair_tensor = torch.as_tensor(state_pairs, dtype=torch.long, device=device)
+    if pair_tensor.dim() != 2 or pair_tensor.shape[1] != 2:
+        raise ValueError("state_pairs must be an iterable of (state1, state2) pairs.")
+    return pair_tensor[:, 0] - 1, pair_tensor[:, 1] - 1
 
-    # CIS unrelaxed density B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j
-    C = mol.molecular_orbitals
-    Cocc = C[:, :, :nocc]
-    Cvirt = C[:, :, nocc:norb]
-    nmol = mol.nmol
-    nroots = amp.shape[1]
-    amp_ia = amp.view(nmol, nroots, nocc, nvirt)
 
-    # print(f"Going to calculate NAC vector between States {state1} and {state2}")
-    state1 = state1 - 1
-    state2 = state2 - 1
-
-    BIJ = torch.einsum(
-        "Nma,Nia,Nib,Nnb->Nmn", Cvirt, amp_ia[:, state1], amp_ia[:, state2], Cvirt
-    ) - torch.einsum("Nmi,Nia,Nja,Nnj->Nmn", Cocc, amp_ia[:, state1], amp_ia[:, state2], Cocc)
-
-    BIJ = 0.5 * (BIJ + BIJ.transpose(1, 2))
-    # Now, BIJ is the symmetrized difference density matrix between states 1 and 2
-
-    molsize = mol.molsize
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-
-    B0 = unpackone_batch(BIJ, 4 * nHeavy, nHydro, molsize * 4)
-    del BIJ
-
-    ###############################
-    # Calculate the gradient of CIS energies
-
-    # TODO: instead of repeating the calculation of gradient of the overlap matrix and the 2-e integral matrix w_x, store it and reuse it.
+def _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device):
     npairs = mol.rij.shape[0]
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
     zeta = torch.cat((mol.parameters["zeta_s"].unsqueeze(1), mol.parameters["zeta_p"].unsqueeze(1)), dim=1)
@@ -68,7 +37,7 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2, rpa=False):
         mol.const.qn_int,
     )
 
-    w_x = torch.zeros(mol.rij.shape[0], 3, 10, 10, dtype=dtype, device=device)
+    w_x = torch.zeros(npairs, 3, 10, 10, dtype=dtype, device=device)
     if riXH is not None and ri is not None:
         e1b_x, e2a_x = w_der(
             mol.const,
@@ -94,105 +63,127 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state1, state2, rpa=False):
     else:
         e1b_x, e2a_x = w_derivative_numerical(mol, Xij, w_x)
 
-    B = B0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
-    P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
-    del B0
-
-    # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
-
-    # Exchange integrals
-    # mu, nu in A
-    # lambda, sigma in B
-    # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    #   0,     1         2       3       4         5       6      7         8        9
+    # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals
+    # with the density matrix has been cribbed from fock.py.
     ind = torch.tensor(
         [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
     )
-    # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
-    # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
     overlap_KAB_x = overlap_x
     Pp = P[mol.mask].unsqueeze(1)
-    # half_multiply = 1.0 # 0.5
     for i in range(4):
         w_x_i = w_x[..., ind[i], :]
         for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
             overlap_KAB_x[..., i, j] -= torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
-    pair_grad = (B[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
-
-    # Coulomb integrals -- only on the diagonal
-    # F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
-    # as only upper triangle part is done, and put in order
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    # weight for them are
-    #  1       2       1        2        2        1        2       2        2       1
     weight = torch.tensor(
         [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
     ).reshape((-1, 10))
-    # weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
-
     indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P[mol.maskd[mol.idxi]][..., indices[0], indices[1]] * weight).unsqueeze(
-        -1
-    )  # Shape: (npairs, 10, 1)
-    PB = (P[mol.maskd[mol.idxj]][..., indices[0], indices[1]] * weight).unsqueeze(
-        -2
-    )  # Shape: (npairs, 1, 10)
+    PA = (P[mol.maskd[mol.idxi]][..., indices[0], indices[1]] * weight).unsqueeze(-1)
+    PB = (P[mol.maskd[mol.idxj]][..., indices[0], indices[1]] * weight).unsqueeze(-2)
 
-    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
-
-    # Collect in sumA and sumB tensors
-    # reususe overlap_KAB_x here instead of creating new arrays
-    # I am going to be alliasing overlap_KAB_x to sumA and then further aliasing it to sumB
-    # This seems like bad practice because I'm not allocating new memory but using the same tensor for all operations.
-    # In the future, if this code is to be edited, be careful here
-    sumA = overlap_KAB_x
-    sumA.zero_()
+    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)
+    sumA = torch.zeros_like(overlap_KAB_x)
     sumA[..., indices[0], indices[1]] = suma
     e2a_x.add_(sumA)
 
-    sumB = overlap_KAB_x
-    sumB.zero_()
-    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
+    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)
+    sumB = torch.zeros_like(overlap_KAB_x)
     sumB[..., indices[0], indices[1]] = sumb
-    del suma, sumb
     e1b_x.add_(sumB)
 
-    # Core-elecron interaction
-    # fmt: off
     scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0],
-         [0.0, 1.0, 2.0, 2.0],
-         [0.0, 0.0, 1.0, 2.0],
-         [0.0, 0.0, 0.0, 1.0]],
+        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
         dtype=dtype,
         device=device,
     )
-    # fmt: on
     e1b_x *= scale_emat
     e2a_x *= scale_emat
-    # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    # e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
+    return overlap_KAB_x, e1b_x, e2a_x
+
+
+def _contract_nac_density_batch(mol, B, overlap_KAB_x, e1b_x, e2a_x, nmol, molsize):
+    pair_grad = torch.einsum("pbxy,pcxy->pbc", B[mol.mask], overlap_KAB_x)
     pair_grad.add_(
-        (B[mol.maskd[mol.idxj], None, :, :] * e2a_x).sum(dim=(2, 3))
-        + (B[mol.maskd[mol.idxi], None, :, :] * e1b_x).sum(dim=(2, 3))
+        torch.einsum("pbxy,pcxy->pbc", B[mol.maskd[mol.idxj]], e2a_x)
+        + torch.einsum("pbxy,pcxy->pbc", B[mol.maskd[mol.idxi]], e1b_x)
     )
-    del e1b_x
 
-    # Define the gradient tensor
-    nac_cis = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
-
-    # idxi/idxj are assumed to already index the full (nmol*molsize) layout; if padding is present,
-    # map packed real-atom indices back to full indices as in anal_grad.contract_ao_derivatives_with_density.
+    nac_cis = torch.zeros(nmol * molsize, pair_grad.shape[1], 3, dtype=B.dtype, device=B.device)
     nac_cis.index_add_(0, mol.idxi, pair_grad)
     nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
+    return nac_cis.view(nmol, molsize, pair_grad.shape[1], 3).permute(0, 2, 1, 3)
 
-    nac_cis = nac_cis.view(nmol, molsize, 3)
-    nac_cis = nac_cis / (e_exc[:, state2] - e_exc[:, state1]).unsqueeze(1).unsqueeze(2)
 
-    # torch.set_printoptions(precision=9)
-    # print(f'NAC vectors between CIS states (Angstrom^-1) {state1+1} and {state2+1} is:\n{nac_cis}')
+def calc_nac(mol, amp, e_exc, P0, ri, riXH, state_pairs, rpa=False, pair_batch_size=4):
+    """
+    amp: tensor of CIS amplitudes of shape [nmol, nroots, nov].
+    state_pairs: iterable of 1-based (state1, state2) pairs.
 
+    Returns a tensor with shape [nmol, len(state_pairs), molsize, 3], ordered like state_pairs.
+    """
+    if rpa:
+        raise NotImplementedError(
+            "Nonadiabatic coupling vecotrs not yet implemented for RPA. Use CIS instead."
+        )
+    device = amp.device
+    dtype = amp.dtype
+    norb = int(mol.norb[0].item())
+    nocc = int(mol.nocc[0].item())
+    nvirt = norb - nocc
+    nmol = int(mol.nmol)
+    molsize = int(mol.molsize)
+    state_i, state_j = _state_pair_tensors(state_pairs, device)
+    n_state_pairs = int(state_i.numel())
+    if n_state_pairs == 0:
+        return torch.empty((nmol, 0, molsize, 3), dtype=dtype, device=device)
+
+    # CIS unrelaxed density:
+    # B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j
+    C = mol.molecular_orbitals
+    Cocc = C[:, :, :nocc]
+    Cvirt = C[:, :, nocc:norb]
+    nroots = amp.shape[1]
+    amp_ia = amp.view(nmol, nroots, nocc, nvirt)
+    P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+    overlap_KAB_x, e1b_x, e2a_x = _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device)
+
+    nHeavy = int(mol.nHeavy[0].item())
+    nHydro = int(mol.nHydro[0].item())
+    size_full = molsize * 4
+    pair_batch_size = max(1, int(pair_batch_size))
+    nac_cis = torch.empty((nmol, n_state_pairs, molsize, 3), dtype=dtype, device=device)
+
+    for start in range(0, n_state_pairs, pair_batch_size):
+        stop = min(start + pair_batch_size, n_state_pairs)
+        i_chunk = state_i[start:stop]
+        j_chunk = state_j[start:stop]
+        nbatch = int(i_chunk.numel())
+
+        amp_i = amp_ia.index_select(1, i_chunk)
+        amp_j = amp_ia.index_select(1, j_chunk)
+        v_i = torch.einsum("Nma,Nbia->Nbmi", Cvirt, amp_i)
+        v_j = torch.einsum("Nma,Nbia->Nbmi", Cvirt, amp_j)
+        o_i = torch.einsum("Nmi,Nbia->Nbma", Cocc, amp_i)
+        o_j = torch.einsum("Nmi,Nbia->Nbma", Cocc, amp_j)
+        Bij_chunk = torch.matmul(v_i, v_j.transpose(-1, -2)) - torch.matmul(o_i, o_j.transpose(-1, -2))
+        Bij_chunk = 0.5 * (Bij_chunk + Bij_chunk.transpose(-1, -2))
+
+        B0 = unpackone_batch(
+            Bij_chunk.reshape(nmol * nbatch, Bij_chunk.shape[2], Bij_chunk.shape[3]),
+            4 * nHeavy,
+            nHydro,
+            size_full,
+        )
+        B = (
+            B0.reshape(nmol, nbatch, molsize, 4, molsize, 4)
+            .permute(0, 2, 4, 1, 3, 5)
+            .reshape(nmol * molsize * molsize, nbatch, 4, 4)
+        )
+        nac_cis[:, start:stop] = _contract_nac_density_batch(
+            mol, B, overlap_KAB_x, e1b_x, e2a_x, nmol, molsize
+        )
+
+    denom = e_exc[:, state_j] - e_exc[:, state_i]
+    nac_cis = nac_cis / denom[:, :, None, None]
     return nac_cis

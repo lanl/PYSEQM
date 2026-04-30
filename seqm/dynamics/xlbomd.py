@@ -348,7 +348,6 @@ class EnergyXL(torch.nn.Module):
             with torch.set_grad_enabled(
                 self.excited_states is not None
             ):  # no grad tracking unless doing excited states
-                # if True:
                 if sp2[0]:
                     D = unpack(
                         SP2(pack(F, molecule.nHeavy, molecule.nHydro), molecule.nocc, sp2[1]),

@@ -591,18 +591,6 @@ class Energy(torch.nn.Module):
         return new_amp * sign
 
     @staticmethod
-    def _phase_match_molecular_orbitals(new_mos, prev_mos):
-        if not torch.is_tensor(prev_mos) or prev_mos.shape != new_mos.shape:
-            return new_mos
-        if new_mos.dim() == 4:
-            overlap = torch.einsum("nsbo,nsbo->nso", new_mos, prev_mos)
-            sign = torch.where(overlap >= 0, torch.ones_like(overlap), -torch.ones_like(overlap))
-            return new_mos * sign.unsqueeze(2)
-        overlap = torch.einsum("nbo,nbo->no", new_mos, prev_mos)
-        sign = torch.where(overlap >= 0, torch.ones_like(overlap), -torch.ones_like(overlap))
-        return new_mos * sign.unsqueeze(1)
-
-    @staticmethod
     def _crossing_match_molecular_orbitals(new_mos, prev_mos, nocc, e_mo, verbose=False):
         if not torch.is_tensor(prev_mos) or prev_mos.shape != new_mos.shape:
             return new_mos, e_mo
@@ -693,6 +681,40 @@ class Energy(torch.nn.Module):
                     print(f"[MO match] batch {bi} virt perm {pv[bi].tolist()}")
 
         return new_mos, e_mo
+
+    @staticmethod
+    def _crossing_match_molecular_orbitals_grouped(
+        new_mos, prev_mos, nocc_batch, norb_batch, e_mo, verbose=False
+    ):
+        if not torch.is_tensor(prev_mos) or prev_mos.shape != new_mos.shape:
+            return new_mos, e_mo
+        if new_mos.dim() == 4:
+            return new_mos, e_mo
+
+        matched_mos = new_mos.clone()
+        matched_e = e_mo.clone() if torch.is_tensor(e_mo) else e_mo
+
+        keys = torch.stack((nocc_batch, norb_batch), dim=1).unique(dim=0)
+        for nocc_i_t, norb_i_t in keys:
+            nocc_i = int(nocc_i_t.item())
+            norb_i = int(norb_i_t.item())
+            group_mask = (nocc_batch == nocc_i) & (norb_batch == norb_i)
+            group_idx = torch.nonzero(group_mask, as_tuple=False).squeeze(1)
+
+            group_e = matched_e[group_idx, :norb_i] if torch.is_tensor(matched_e) else matched_e
+            group_mos, group_e = Energy._crossing_match_molecular_orbitals(
+                new_mos[group_idx, :norb_i, :norb_i],
+                prev_mos[group_idx, :norb_i, :norb_i],
+                nocc_i,
+                group_e,
+                verbose=verbose,
+            )
+
+            matched_mos[group_idx, :norb_i, :norb_i] = group_mos
+            if torch.is_tensor(matched_e):
+                matched_e[group_idx, :norb_i] = group_e
+
+        return matched_mos, matched_e
 
     def _build_parnuc(self, params):
         alpha = params["alpha"]
@@ -796,13 +818,18 @@ class Energy(torch.nn.Module):
 
         prev_mos = getattr(molecule, "molecular_orbitals", None)
         all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
-        if (self.xlesmd or self.namd) and all_same_mols:
-            molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals(
-                molecular_orbitals, prev_mos, molecule.nocc[0].item(), e.clone()
-            )
-            # molecule.molecular_orbitals = self._phase_match_molecular_orbitals(molecular_orbitals, prev_mos)
+        # if (self.xlesmd or self.namd) and all_same_mols:
+        if not self.uhf:
+            if all_same_mols:
+                molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals(
+                    molecular_orbitals, prev_mos, molecule.nocc[0].item(), e.clone()
+                )
+            else:
+                molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals_grouped(
+                    molecular_orbitals, prev_mos, molecule.nocc, molecule.norb, e
+                )
         else:
-            molecule.molecular_orbitals = self._phase_match_molecular_orbitals(molecular_orbitals, prev_mos)
+            molecule.molecular_orbitals = molecular_orbitals
 
         # nuclear energy
         parnuc = self._build_parnuc(params)
@@ -994,10 +1021,11 @@ class Energy(torch.nn.Module):
                     dtype = P.dtype
                     device = P.device
                     nac_vec = torch.zeros((nmol, nroots, nroots, molsize, 3), dtype=dtype, device=device)
-                    for s1, s2 in pair_list:
-                        vec = calc_nac(
-                            molecule, exc_amps, excitation_energies, P, ri, riXH, s1, s2, rpa=method == "rpa"
-                        )
+                    pair_nac = calc_nac(
+                        molecule, exc_amps, excitation_energies, P, ri, riXH, pair_list, rpa=method == "rpa"
+                    )
+                    for pair_idx, (s1, s2) in enumerate(pair_list):
+                        vec = pair_nac[:, pair_idx]
                         nac_vec[:, s1 - 1, s2 - 1] = vec
                         nac_vec[:, s2 - 1, s1 - 1] = -vec
                     molecule.nac = nac_vec

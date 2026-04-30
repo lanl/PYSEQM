@@ -501,15 +501,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
             # helper: MO-derivative term on occupied block
             def mo_term_occ(C_view):
-                # idx = torch.arange(nocc, device=flat_c.device)
-                # Pij_14b = (-1.0) ** (idx[:, None] - idx[None, :]).abs()
-                # print("Pij_14b:", Pij_14b)
-                # dS = dSoo.transpose(1, 2) * Pij_14b.unsqueeze(0)  # (nmol, nocc, nocc)
-                dS = dSoo.transpose(1, 2)
                 # apply dSoo^T on the occ index
                 Ct = C_view.permute(0, 1, 3, 2)  # (nmol, nstates, nvirt, nocc)
-                # Ctd = torch.matmul(Ct, dSoo.transpose(1, 2).unsqueeze(1))  # (nmol, nstates, nvirt, nocc)
-                Ctd = torch.matmul(Ct, dS.unsqueeze(1))  # (nmol, nstates, nvirt, nocc)
+                Ctd = torch.matmul(Ct, dSoo.transpose(1, 2).unsqueeze(1))  # (nmol, nstates, nvirt, nocc)
                 Cd = Ctd.permute(0, 1, 3, 2)  # (nmol, nstates, nocc, nvirt)
                 Cf = C_view.reshape(nmol, C_view.shape[1], nov)
                 Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
@@ -781,24 +775,24 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         device = self._amp_phase.device
         dtype = self._amp_phase.dtype
-        # hop_shape = (self._amp_phase.shape[0], self._nstates, self._nstates)
-        # if (
-        #     self._hop_buffer is None
-        #     or self._hop_buffer.shape != hop_shape
-        #     or self._hop_buffer.device != device
-        # ):
-        #     self._hop_buffer = torch.zeros(hop_shape, dtype=dtype, device=device)
-        # else:
-        #     self._hop_buffer.zero_()
-        # hop_int = self._hop_buffer
-        # w = self._get_simpson_weights(nsub, device=device, dtype=dtype)  # (nsub+1,)
+        hop_shape = (self._amp_phase.shape[0], self._nstates, self._nstates)
+        if (
+            self._hop_buffer is None
+            or self._hop_buffer.shape != hop_shape
+            or self._hop_buffer.device != device
+        ):
+            self._hop_buffer = torch.zeros(hop_shape, dtype=dtype, device=device)
+        else:
+            self._hop_buffer.zero_()
+        hop_int = self._hop_buffer
+        w = self._get_simpson_weights(nsub, device=device, dtype=dtype)  # (nsub+1,)
 
         x = self._amp_phase[..., 0]
         y = self._amp_phase[..., 1]
         th = self._amp_phase[..., 2]
 
-        # for s in range(nsub + 1):
-        for s in range(nsub):
+        for s in range(nsub + 1):
+            # for s in range(nsub):
             base_tau = s * dt_sub / dt_total
             tau_half = base_tau + 0.5 * dt_sub / dt_total
             tau_full = base_tau + dt_sub / dt_total
@@ -806,9 +800,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             e1 = interp_energies(base_tau)
             nd1 = interp_nac(base_tau)
 
-            # hop_int.add_(hop_numerator(x, y, th, nd1), alpha=float(w[s]))
-            # if s == nsub:
-            #     break
+            hop_int.add_(hop_numerator(x, y, th, nd1), alpha=float(w[s]))
+            if s == nsub:  # For last substep, do not continue to RK4 stages
+                break
 
             dx1, dy1, dth1 = rhs(x, y, th, e1, nd1)
 
@@ -841,16 +835,16 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # Wrap self._amp_phase[..., 2] to [-pi, pi]
         self._amp_phase[..., 2] = torch.remainder(th + torch.pi, 2 * torch.pi) - torch.pi
 
-        # hop_int.mul_(dt_sub / 3.0)
-        # hop_int.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
-        # self._hop_integral = hop_int
-        # NEXMD uses the coupling for the step; you said use nac_dt_new
-        nd = nd_new
-        # instantaneous vnqcorrhop = -2 * Re(conj(u_i) u_j) * d_ij
-        hop_inst = hop_numerator(x, y, th, nd)  # OR put the minus inside hop_numerator
-        self._hop_integral = hop_inst * dt_total
-        # zero diagonal
-        self._hop_integral.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
+        hop_int.mul_(dt_sub / 3.0)
+        hop_int.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
+        self._hop_integral = hop_int
+        # NEXMD style hop_integral
+        # nd = nd_new
+        # # instantaneous vnqcorrhop = -2 * Re(conj(u_i) u_j) * d_ij
+        # hop_inst = hop_numerator(x, y, th, nd)  # OR put the minus inside hop_numerator
+        # self._hop_integral = hop_inst * dt_total
+        # # zero diagonal
+        # self._hop_integral.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
 
     def _thermo_potential(self, molecule):
         if self._current_potential is not None:
@@ -1290,9 +1284,9 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         if rad <= 0:
             return False
         sqrt_rad = torch.sqrt(rad)
-        # # choose solution with smaller |alpha|
-        # alpha = (-v_dot_d + torch.sign(v_dot_d) * sqrt_rad) / d2_by_m
-        alpha = -(v_dot_d + sqrt_rad) / d2_by_m  # Like NEXMD
+        # choose solution with smaller |alpha|
+        alpha = (-v_dot_d + torch.sign(v_dot_d) * sqrt_rad) / d2_by_m
+        # alpha = -(v_dot_d + sqrt_rad) / d2_by_m  # Like NEXMD
         with torch.no_grad():
             molecule.velocities[mol_index] = molecule.velocities[mol_index] + (
                 alpha * dvec * m_inv.unsqueeze(1)
@@ -1335,18 +1329,18 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         exc_amps = molecule.cis_amplitudes
         excitation_energies = molecule.cis_energies
         nac_vec = torch.zeros((nmol, nroots, nroots, molsize, 3), dtype=dtype, device=device)
-        for s1, s2 in pair_list:
-            vec = calc_nac(
-                molecule,
-                exc_amps,
-                excitation_energies,
-                P,
-                None,
-                None,
-                s1,
-                s2,
-                rpa=cf.excited_states["method"] == "rpa",
-            )
+        pair_nac = calc_nac(
+            molecule,
+            exc_amps,
+            excitation_energies,
+            P,
+            None,
+            None,
+            pair_list,
+            rpa=cf.excited_states["method"] == "rpa",
+        )
+        for pair_idx, (s1, s2) in enumerate(pair_list):
+            vec = pair_nac[:, pair_idx]
             nac_vec[:, s1 - 1, s2 - 1] = vec
             nac_vec[:, s2 - 1, s1 - 1] = -vec
         return nac_vec

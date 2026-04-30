@@ -111,6 +111,23 @@ written and how often using the ``output`` dictionary (see below).
     - ``/data/excitation/active_state``:
       Scalar data (int) giving the index of the active electronic excited state used during the MD run.
 
+    If you are doing nonadiabatic dynamics and set ``output['h5']['nonadiabatic']`` to a positive cadence,
+    PYSEQM also creates ``/data/nonadiabatic``:
+
+    - ``/data/nonadiabatic/steps``:
+      (Tna,) absolute MD step indices
+
+    - ``/data/nonadiabatic/active_surface``:
+      (Tna,) active FSSH surface, using 1-based excited-state labels
+
+    - ``/data/nonadiabatic/electronic_amplitudes``:
+      (Tna, Nstates, 2) real and imaginary parts of the propagated electronic amplitudes
+
+    - ``/data/nonadiabatic/NACT``:
+      (Tna, Nstates, Nstates) time-derivative nonadiabatic coupling matrix
+
+    See :doc:`nonadiabatic_dynamics` for setup, restarts, trivial crossings, and NAC vectors.
+
     If ``output['h5']['write_mo'] = True``, molecular orbital information is stored under
     ``/data/mo`` at the same cadence:
 
