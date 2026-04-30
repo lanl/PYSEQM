@@ -195,6 +195,17 @@ class _TullyDynamicsMixin:
             molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs
         )
 
+    def _setup_states(self, molecule):
+        self._nstates = _TULLY_NSTATES
+        nmol = molecule.species.shape[0]
+        device = molecule.coordinates.device
+        self._ensure_active_states(nmol, device)
+
+    def initialize_velocity(self, molecule, vel_com=True):
+        # Tully test models are single-particle 1D trajectories; removing COM motion would
+        # erase the only physical velocity component.
+        return super().initialize_velocity(molecule, vel_com=False)
+
     def _reset_density_history(self):
         self.rho_history = []
 
@@ -251,8 +262,10 @@ class _TullyDynamicsMixin:
             nac_dot[:, 1, 0] = -nac * vel
         molecule.nac = nac_vec
         molecule.nac_dot = nac_dot
+        ground_energy = torch.zeros((nmol,), dtype=dtype, device=device)
         self._cache_new = {
             "energies": torch.stack([E[:, 0], E[:, 1]], dim=1),
+            "ground_energy": ground_energy,
             "nac_vec": nac_vec,
             "nac_dot": nac_dot,
             "cis_amp": None,
@@ -268,9 +281,11 @@ class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
     def __init__(self, model: TullyModel, *, timestep=0.05):
         self._tully_init(model, timestep=timestep)
 
-    def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
+    def _after_electronic_update(
+        self, molecule, excitation_energies, nac_matrix=None, nac_dot=None, step=None
+    ):
         super()._after_electronic_update(
-            molecule, state_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
+            molecule, excitation_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
         )
         self._record_density_matrix()
 
@@ -302,9 +317,11 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
         self._current_potential = state_energies[:, exc_idx]
         molecule.Etot = self._current_potential
 
-    def _after_electronic_update(self, molecule, state_energies, nac_matrix=None, nac_dot=None, step=None):
+    def _after_electronic_update(
+        self, molecule, excitation_energies, nac_matrix=None, nac_dot=None, step=None
+    ):
         super()._after_electronic_update(
-            molecule, state_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
+            molecule, excitation_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
         )
         self._record_density_matrix()
 

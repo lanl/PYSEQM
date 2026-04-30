@@ -557,6 +557,7 @@ class Energy(torch.nn.Module):
             nroots = int(self.excited_states["n_states"])
         self.nac_config = resolve_nac_config(seqm_parameters, nroots=nroots, default_enabled=False)
         self.xlesmd = False
+        self.namd = False
         if self.uhf and self.excited_states is not None:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
 
@@ -600,6 +601,98 @@ class Energy(torch.nn.Module):
         overlap = torch.einsum("nbo,nbo->no", new_mos, prev_mos)
         sign = torch.where(overlap >= 0, torch.ones_like(overlap), -torch.ones_like(overlap))
         return new_mos * sign.unsqueeze(1)
+
+    @staticmethod
+    def _crossing_match_molecular_orbitals(new_mos, prev_mos, nocc, e_mo, verbose=False):
+        if not torch.is_tensor(prev_mos) or prev_mos.shape != new_mos.shape:
+            return new_mos, e_mo
+        if new_mos.dim() == 4:
+            raise NotImplementedError("MO tracking for crossing not implemented yet")
+
+        b, nbas, nmo = new_mos.shape
+        nvir = nmo - nocc
+        dev = new_mos.device
+
+        def greedy_unique_perm(S_abs):  # S_abs: [k,r,r]
+            perms = []
+            r = S_abs.shape[1]
+            for Sbi in S_abs:
+                pref = torch.argsort(Sbi, dim=1, descending=True)
+                if r > 1:
+                    top2 = torch.gather(Sbi, 1, pref[:, :2])
+                    row_priority = top2[:, 0] - top2[:, 1]
+                else:
+                    row_priority = Sbi[:, 0]
+
+                perm = torch.empty(r, dtype=torch.long, device=dev)
+                used = torch.zeros(r, dtype=torch.bool, device=dev)
+                for row in torch.argsort(row_priority, descending=True).tolist():
+                    candidates = pref[row]
+                    col = candidates[~used[candidates]][0]
+                    perm[row] = col
+                    used[col] = True
+                perms.append(perm)
+            return torch.stack(perms)
+
+        def apply_perm(C, p):  # C: [b,nbas,r], p: [b,r]
+            return C.gather(2, p[:, None, :].expand(-1, C.size(1), -1))
+
+        def fix_sign(Cnew, Cold):
+            with torch.no_grad():
+                s = torch.sign((Cnew * Cold).sum(1))
+                s[s == 0] = 1
+            return Cnew * s[:, None, :]
+
+        Co_new, Cv_new = new_mos[:, :, :nocc], new_mos[:, :, nocc:]
+        Co_old, Cv_old = prev_mos[:, :, :nocc], prev_mos[:, :, nocc:]
+
+        with torch.no_grad():
+            So = (Co_old.transpose(1, 2) @ Co_new).abs()
+            Sv = (Cv_old.transpose(1, 2) @ Cv_new).abs()
+
+            def fast_perm_or_fallback(S_abs, r):
+                # Fast: choose best NEW for each OLD (argmax over new dim=2)
+                p = torch.argmax(S_abs, dim=2)  # [b, r] old->new candidates
+
+                # If the rowwise best matches are not bijective, repair them greedily.
+                target = torch.arange(r, device=dev).expand(b, r)
+                is_perm = torch.sort(p, dim=1).values.eq(target).all(dim=1)
+                bad = ~is_perm
+                if bad.any():
+                    p[bad] = greedy_unique_perm(S_abs[bad])
+                return p
+
+            # get permutations based on overlap, by looking for the best match in each row simply
+            po = (
+                fast_perm_or_fallback(So, nocc) if nocc else torch.empty((b, 0), dtype=torch.long, device=dev)
+            )
+            pv = (
+                fast_perm_or_fallback(Sv, nvir) if nvir else torch.empty((b, 0), dtype=torch.long, device=dev)
+            )
+
+        Co_new = fix_sign(apply_perm(Co_new, po), Co_old)
+        Cv_new = fix_sign(apply_perm(Cv_new, pv), Cv_old)
+
+        new_mos = torch.cat([Co_new, Cv_new], dim=2)
+
+        if e_mo is not None:
+            eo = e_mo[:, :nocc].gather(1, po) if nocc else e_mo[:, :0]
+            ev = e_mo[:, nocc:].gather(1, pv) if nvir else e_mo[:, 0:0]
+            e_mo = torch.cat([eo, ev], dim=1)
+
+        if verbose:
+            if nocc > 0:
+                id_o = torch.arange(nocc, device=dev).expand(b, nocc)
+                ch_o = (po != id_o).any(1)
+                for bi in torch.where(ch_o)[0].tolist():
+                    print(f"[MO match] batch {bi} occ perm {po[bi].tolist()}")
+            if nvir > 0:
+                id_v = torch.arange(nvir, device=dev).expand(b, nvir)
+                ch_v = (pv != id_v).any(1)
+                for bi in torch.where(ch_v)[0].tolist():
+                    print(f"[MO match] batch {bi} virt perm {pv[bi].tolist()}")
+
+        return new_mos, e_mo
 
     def _build_parnuc(self, params):
         alpha = params["alpha"]
@@ -702,7 +795,14 @@ class Energy(torch.nn.Module):
             e_gap = None
 
         prev_mos = getattr(molecule, "molecular_orbitals", None)
-        molecule.molecular_orbitals = self._phase_match_molecular_orbitals(molecular_orbitals, prev_mos)
+        all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
+        if (self.xlesmd or self.namd) and all_same_mols:
+            molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals(
+                molecular_orbitals, prev_mos, molecule.nocc[0].item(), e.clone()
+            )
+            # molecule.molecular_orbitals = self._phase_match_molecular_orbitals(molecular_orbitals, prev_mos)
+        else:
+            molecule.molecular_orbitals = self._phase_match_molecular_orbitals(molecular_orbitals, prev_mos)
 
         # nuclear energy
         parnuc = self._build_parnuc(params)
@@ -811,7 +911,8 @@ class Energy(torch.nn.Module):
 
         # Calculate ground state molecular dipole
         if molecule.method not in ("PM6",):  # Not yet implemented for PM6 d-orbitals
-            calc_ground_dipole(molecule, P)
+            with torch.no_grad():
+                calc_ground_dipole(molecule, P)
 
         if excited_mask.any() and not self.excited_states and not self.xlesmd:
             raise Exception(
@@ -820,7 +921,6 @@ class Energy(torch.nn.Module):
 
         Eexcited = torch.zeros(int(molecule.nmol), dtype=Eelec.dtype, device=Eelec.device)
         if self.excited_states:
-            all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             cis_tol = self.excited_states["tolerance"]
             method = self.excited_states["method"].lower()
             orbital_window = self.excited_states.get("orbital_window", None)
@@ -1008,21 +1108,53 @@ class Energy(torch.nn.Module):
         # # Debug XL-ESMD
         # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
 
+        # if cis_amp is not None:
+        #     get_exact_excited(molecule, w, e, cis_amp)
+        #     elec_energy_excited_xl(molecule, cis_amp, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None))
+        #     Cocc = molecule.molecular_orbitals[:, :, : molecule.nocc[0]]
+        #     Cvir = molecule.molecular_orbitals[:, :, molecule.nocc[0] :]
+        #     cis_tdm = torch.einsum("bmi,brmn,bna->bria", Cocc, cis_amp, Cvir)
+        #     cis_tdm = torch.einsum("bmi,bria,bna->brmn", Cocc, cis_tdm, Cvir)
+        #     # diff = molecule.transition_density_matrices[:, 0] - (cis_tdm + molecule.dxi2dt2)
+        #     diff = molecule.transition_density_matrices[:, 0] - (cis_tdm)
+        #     print("Difference in eta* - converged eta is ", torch.norm(diff))
+
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
-            Eexcited, molecule.transition_density_matrices = elec_energy_excited_xl(molecule, cis_amp, w, e)
-            # if do_analytical_gradient[0]:
-            if True:
+            cis_transition_density = cis_amp
+            E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl(
+                molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
+            )
+            molecule.cis_energies = E_XL
+            active_idx = torch.clamp(active_states - 1, min=0)
+            Eexcited = E_XL.gather(1, active_idx.unsqueeze(1)).squeeze(1)
+
+            if do_analytical_gradient[0]:
+                # with torch.no_grad():
+
+                def _gather_active_transition_density(amplitudes):
+                    idx = active_idx.view(-1, 1, 1, 1).expand(
+                        -1, 1, amplitudes.shape[-2], amplitudes.shape[-1]
+                    )
+                    gathered = amplitudes.gather(1, idx)
+                    return gathered
+
+                # select the amplitudes for the active states
+                cis_amp_sel = _gather_active_transition_density(cis_amp)
+                transiton_density_sel = _gather_active_transition_density(
+                    molecule.transition_density_matrices
+                )
+
                 molecule.analytical_gradient = xlesmd_rcis_grad_batch(
-                    cis_amp,
-                    molecule.transition_density_matrices,
+                    cis_amp_sel,
+                    transiton_density_sel,
                     molecule,
                     w,
                     e,
                     riXH,
                     ri,
                     P,
-                    self.seqm_parameters["scf_eps"] * 10.0,
+                    self.seqm_parameters["scf_eps"] * 100.0,
                     gam,
                     self.method,
                     parnuc,

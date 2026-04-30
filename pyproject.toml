@@ -28,6 +28,8 @@ requires-python = ">=3.7"
 dependencies = [
   "numpy",
   "torch>=1.9",
+  "psutil",
+  "h5py"
 ]
 
 [project.optional-dependencies]

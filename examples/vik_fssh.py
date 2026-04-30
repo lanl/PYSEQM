@@ -38,6 +38,20 @@ coordinates = torch.tensor(
     device=device,
 )
 
+species = torch.as_tensor( [ [6, 1, 1,1,1], ], dtype=torch.long, device=device,)
+
+# fmt: off
+coordinates = torch.tensor(
+    [[
+ [-2.7878725 ,   1.3475389,    0.0000000], 
+ [-2.2590725 ,   1.5085389,    0.9359000],
+ [-2.5827725 ,   2.1715389,   -0.6786000],
+ [-2.4533725 ,   0.4161389,   -0.4496000],
+ [-3.8563725 ,   1.2938389,    0.1921000]]
+    ],
+    device=device,
+)
+
 const = Constants().to(device)
 
 seqm_parameters = {
@@ -45,17 +59,19 @@ seqm_parameters = {
     "scf_eps": 1.0e-8,
     "scf_converger": [1],
     "excited_states": {
-        "n_states": 5,
+        "n_states": 4,
         "method": "cis",
         "tolerance": 1e-6,
     },
     "analytical_gradient": [True],
-    # "nonadiabatic": {
+    "nonadiabatic": {
     #     "compute_nac": True,  # enable NAC vectors for hopping
     #     "force_mode": "active",  # forces on active surface only
     #     "recompute_on_hop": True,  # refresh forces after accepted hops
     #     "skip_first_step_prop": True,  # skip electronic propagation on step 0
-    # },
+    "tdc_method": "hamiltonian_fd",  # use finite-difference Hamiltonian approach for TDNACs
+    # "tdc_method": "overlap",  # use finite-difference Hamiltonian approach for TDNACs
+    },
 }
 
 timestep = 0.1  # fs
@@ -68,15 +84,20 @@ output = {
     "checkpoint every": 0,
 }
 
-torch.manual_seed(42)
+torch.manual_seed(422)
 molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
 # Set the same initial velocity as the NEXMD input file
 with torch.no_grad():
     molecule.velocities = torch.tensor(
-    [[-20.9603, -0.5334,  0.4491  ],  
-    [-21.2032, -0.2912, -1.8145  ],
-    [20.0957 ,-2.0413 , 7.2473   ],
-    [ 20.4869, 13.9784,  7.2473  ]],
+    # [[-20.9603, -0.5334,  0.4491  ],  
+    # [-21.2032, -0.2912, -1.8145  ],
+    # [20.0957 ,-2.0413 , 7.2473   ],
+    # [ 20.4869, 13.9784,  7.2473  ]],
+    [[-0.8053143393  ,  -4.1878833732 ,   -3.6313775837], 
+     [ 1.0294675393  ,   2.7627100918 ,    4.4006100054],
+     [-4.4870427177  ,  -1.1534294697 ,   -3.2087971501],
+     [-2.8524435043  ,   0.6142857400 ,   -1.4239264979],
+     [-2.8524435043  ,   0.6142857400 ,   -1.4239264979],],
     device=device
     )*1e-3
     molecule.velocities = molecule.velocities.unsqueeze(0).repeat(molecule.coordinates.shape[0],1,1)
@@ -92,8 +113,8 @@ dyn = SurfaceHoppingDynamics(
     output=output,
 ).to(device)
 
-steps = 2
-dyn.run(molecule, steps, reuse_P=True, remove_com=None)
+steps = 10
+dyn.run(molecule, steps, reuse_P=True, remove_com=("angular", 1))
 
 if dyn.hop_log:
     print("Hop events (step, from->to, accepted):")

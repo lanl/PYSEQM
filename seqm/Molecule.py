@@ -1,6 +1,7 @@
 # ruff: noqa: I001
 import copy
 
+from typing import Optional
 import torch
 
 from seqm.basics import *  # noqa: F403
@@ -127,55 +128,55 @@ class Molecule(torch.nn.Module):
         self.velocities = None
         self.acc = None
 
-        self.dm = None
-        self.q = None
+        self.dm: Optional[torch.Tensor] = None
+        self.q: Optional[torch.Tensor] = None
 
         # Two-electron integrals are stored in the molecule object
         # For surface hopping, when we need to recompute forces after a hop,
         # for which we need two-electron integrals,
-        self.w = None
+        self.w: Optional[torch.Tensor] = None
 
         # also needed for forces, so stored in molecule object
-        self._parnuc = None
-        self._gam = None
+        self._parnuc: Optional[tuple] = None
+        self._gam: Optional[torch.Tensor] = None
 
-        self.Hf = None
-        self.Etot = None
-        self.Eelec = None
-        self.Enuc = None
-        self.Eiso = None
-        self.e_mo = None  #
-        self.e_gap = None  #
-        self.molecular_orbitals = None
+        self.Hf: Optional[torch.Tensor] = None
+        self.Etot: Optional[torch.Tensor] = None
+        self.Eelec: Optional[torch.Tensor] = None
+        self.Enuc: Optional[torch.Tensor] = None
+        self.Eiso: Optional[torch.Tensor] = None
+        self.e_mo: Optional[torch.Tensor] = None  #
+        self.e_gap: Optional[torch.Tensor] = None  #
+        self.molecular_orbitals: Optional[torch.Tensor] = None
 
-        self.charge = None
-        self.dipole = None
+        self.charge: Optional[torch.Tensor] = None
+        self.dipole: Optional[torch.Tensor] = None
 
         self.verbose = True
 
-        self.Electronic_entropy = None
-        self.Fermi_occ = None
-        self.dP2dt2 = None
-        self.Krylov_Error = None
+        self.Electronic_entropy: Optional[torch.Tensor] = None
+        self.Fermi_occ: Optional[torch.Tensor] = None
+        self.dP2dt2: Optional[torch.Tensor] = None
+        self.Krylov_Error: Optional[torch.Tensor] = None
 
-        self.analytical_gradient = None
-        self.active_state = seqm_parameters.get("active_state", 0)
-        self.cis_amplitudes = None
-        self.cis_energies = None
-        self.transition_density_matrices = None
+        self.analytical_gradient: Optional[torch.Tensor] = None
+        self.active_state: int = seqm_parameters.get("active_state", 0)
+        self.cis_amplitudes: Optional[torch.Tensor] = None
+        self.cis_energies: Optional[torch.Tensor] = None
+        self.transition_density_matrices: Optional[torch.Tensor] = None
 
-        self.all_forces = None
-        self.all_cis_relaxed_diploles = None
-        self.all_cis_unrelaxed_diploles = None
+        self.all_forces: Optional[torch.Tensor] = None
+        self.all_cis_relaxed_diploles: Optional[torch.Tensor] = None
+        self.all_cis_unrelaxed_diploles: Optional[torch.Tensor] = None
 
-        self.old_mos = None
+        self.old_mos: Optional[torch.Tensor] = None
 
-        self.transition_dipole = None
-        self.oscillator_strength = None
-        self.cis_state_unrelaxed_dipole = None
-        self.cis_state_relaxed_dipole = None
-        self.nac = None
-        self.nac_dot = None
+        self.transition_dipole: Optional[torch.Tensor] = None
+        self.oscillator_strength: Optional[torch.Tensor] = None
+        self.cis_state_unrelaxed_dipole: Optional[torch.Tensor] = None
+        self.cis_state_relaxed_dipole: Optional[torch.Tensor] = None
+        self.nac: Optional[torch.Tensor] = None
+        self.nac_dot: Optional[torch.Tensor] = None
 
         def get_coordinates(self):
             return self.coordinates

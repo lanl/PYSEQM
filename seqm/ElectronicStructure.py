@@ -68,7 +68,12 @@ class Electronic_Structure(torch.nn.Module):
                 self.charge,
                 self.notconverged,
             ) = self.conservative_force(
-                molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs
+                molecule,
+                P0=P0,
+                learned_parameters=learned_parameters,
+                xl_bomd_params=xl_bomd_params,
+                *args,
+                **kwargs,
             )
             molecule.dm = P.detach()
 

@@ -74,9 +74,9 @@ def rcis_batch(
             if (
                 init_amplitude_guess.shape[-1] == norb_batch[0]
             ):  # initial amplitude guess provided in AO basis, i.e. transition density matrices
-                V[:, :nroots] = torch.einsum("bmi,brmn,bna->bria", Cocc, init_amplitude_guess, Cvirt).flatten(
-                    start_dim=-2
-                )
+                V[:, :nroots] = torch.einsum(
+                    "bmi,brmn,bna->bria", Cocc, init_amplitude_guess[:, :nroots], Cvirt
+                ).flatten(start_dim=-2)
                 # need to orthonormalize, use the orthonormalization procedure below
                 # Normalize first vector
                 V[:, 0] /= torch.linalg.vector_norm(V[:, 0], dim=1, keepdim=True)
@@ -86,7 +86,7 @@ def rcis_batch(
                         if n_new < nroots:
                             raise RuntimeError("Some roots were lost while orthogonalizing, cannot proceed")
             else:  # initial amplitude guess provided in MO basis, assume orthonormalized
-                V[:, :nroots] = init_amplitude_guess
+                V[:, :nroots] = init_amplitude_guess[:, :nroots]
         nstart = nroots
 
         # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step.
@@ -850,17 +850,20 @@ def make_best_guess_from_previous_amplitudes(mol, V_old, V, nocc):
     occ_mo_overlap = mol.molecular_orbitals[:, :, :nocc].transpose(1, 2) @ mol.old_mos[:, :, :nocc]
     occ_weight = V_sq.sum(dim=(1, 3)) / nroots
     occ_mo_overlap *= occ_weight.unsqueeze(1)
-    U, _, Vt = torch.linalg.svd(occ_mo_overlap)
-    rot_occ_transpose = U @ Vt
+    try:
+        U, _, Vt = torch.linalg.svd(occ_mo_overlap)
+        rot_occ_transpose = U @ Vt
 
-    virt_mo_overlap = mol.molecular_orbitals[:, :, nocc:].transpose(1, 2) @ mol.old_mos[:, :, nocc:]
-    virt_weight = V_sq.sum(dim=(1, 2)) / nroots
-    virt_mo_overlap *= virt_weight.unsqueeze(1)
-    U, _, Vt = torch.linalg.svd(virt_mo_overlap)
-    rot_virt = (U @ Vt).transpose(1, 2)
-    V[:, :nroots] = torch.einsum(
-        "Nji,Nria,Nab->Nrjb", rot_occ_transpose, V_old.view(mol.nmol, nroots, nocc, -1), rot_virt
-    ).reshape(mol.nmol, nroots, -1)
+        virt_mo_overlap = mol.molecular_orbitals[:, :, nocc:].transpose(1, 2) @ mol.old_mos[:, :, nocc:]
+        virt_weight = V_sq.sum(dim=(1, 2)) / nroots
+        virt_mo_overlap *= virt_weight.unsqueeze(1)
+        U, _, Vt = torch.linalg.svd(virt_mo_overlap)
+        rot_virt = (U @ Vt).transpose(1, 2)
+        V[:, :nroots] = torch.einsum(
+            "Nji,Nria,Nab->Nrjb", rot_occ_transpose, V_old.view(mol.nmol, nroots, nocc, -1), rot_virt
+        ).reshape(mol.nmol, nroots, -1)
+    except RuntimeError:
+        V[:, :nroots] = V_old
 
 
 def get_occ_virt(mol, orbital_window=None, e_mo=None):

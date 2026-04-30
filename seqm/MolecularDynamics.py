@@ -238,6 +238,13 @@ class HDF5Writer:
             raise RuntimeError("Resume: /data/excitation/transition_density_matrices not present.")
         if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0 and Tw_na_exist == 0:
             raise RuntimeError("Resume: /data/nonadiabatic not present.")
+        if self.flags[mol]["n_excited_states"] > 0 and Tw_data_exist > 0:
+            if "state_energies" not in h5["data/excitation"]:
+                self._create_row_chunked(
+                    h5["data"],
+                    "excitation/state_energies",
+                    (Tw_data_exist, self.flags[mol]["n_excited_states"] + 1),
+                )
 
         # Set indices (assume an initial snapshot at step 0 exists in resumed files)
         self.i_data[mol] = (step_offset // self._data_every) + 1 if self._data_every > 0 else 0
@@ -296,7 +303,7 @@ class HDF5Writer:
                     gd.create_dataset("excitation/active_state", data=int(active_states[mol].item()))
                 else:
                     gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
-                self._create_row_chunked(gd, "excitation/excitation_energy", (Tw_data, R))
+                self._create_row_chunked(gd, "excitation/state_energies", (Tw_data, R + 1))
                 self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
                 self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
 
@@ -336,6 +343,9 @@ class HDF5Writer:
         """Append scalar data (thermo, MO, excitations)."""
         do_tdm = self._write_tdm > 0 and (step_idx % self._write_tdm) == 0
         write_mo = self._write_mo
+        active = molecule.active_state
+        active_vals = _to_np(active) if torch.is_tensor(active) else None
+        active_scalar = None if active_vals is not None else int(active)
         for mol in self.config.molid:
             i = self.i_data.get(mol)
             if i is None or self.flags[mol]["Tw_data"] == 0:
@@ -353,7 +363,16 @@ class HDF5Writer:
 
             R = flags["n_excited_states"]
             if R > 0:
-                gd["excitation/excitation_energy"][i, ...] = _to_np(molecule.cis_energies[mol, :R])
+                active_mol = int(active_vals[mol]) if active_vals is not None else active_scalar
+                e0 = molecule.Etot[mol]
+                if active_mol > 0:
+                    e0 = e0 - molecule.cis_energies[mol, active_mol - 1]
+                e0 = float(e0.detach().cpu())
+                cis = _to_np(molecule.cis_energies[mol, :R])
+                row = np.empty((R + 1,), dtype=np.float64)
+                row[0] = e0
+                row[1:] = e0 + cis
+                gd["excitation/state_energies"][i, ...] = row
                 gd["excitation/transition_dipole"][i, ...] = _to_np(molecule.transition_dipole[mol, :R])
                 gd["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[mol, :R])
 
@@ -694,6 +713,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             raise RuntimeError("n_dof not set. Call initialize() first")
 
         if torch.is_tensor(molecule.velocities):
+            if vel_com:
+                self._zero_com(molecule, translate_to_origin=False, restore_kinetic_energy=False)
             return molecule.velocities
 
         if self.Temp == 0.0:
@@ -715,7 +736,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         return molecule.velocities
 
-    def _zero_com(self, molecule, remove_angular=True, translate_to_origin=False):
+    def _zero_com(
+        self, molecule, remove_angular=True, translate_to_origin=False, restore_kinetic_energy=True
+    ):
         """Remove center of mass motion."""
         mass = molecule.mass
         M = torch.sum(mass, dim=1, keepdim=True)
@@ -738,7 +761,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 ) * eye.reshape(1, 3, 3) - torch.sum(
                     mass.unsqueeze(3) * r_rel.unsqueeze(3) * r_rel.unsqueeze(2), dim=1
                 )
-                omega = (torch.linalg.pinv(I) @ L.unsqueeze(2)).squeeze(-1)
+                omega = (torch.linalg.pinv(I, hermitian=True, atol=1e-10) @ L.unsqueeze(2)).squeeze(-1)
                 molecule.velocities.sub_(
                     torch.linalg.cross(omega.unsqueeze(1).expand_as(r_rel), r_rel, dim=2)
                 )
@@ -747,8 +770,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             Ek_after = self._kinetic_energy(molecule)
             if torch.any(Ek_after < 1e-12):
                 raise RuntimeError("Zero kinetic energy after removing COM momentum")
-            alpha = torch.sqrt(Ek_initial / Ek_after)
-            molecule.velocities.mul_(alpha.reshape(-1, 1, 1))
+            if restore_kinetic_energy:
+                alpha = torch.sqrt(Ek_initial / Ek_after)
+                molecule.velocities.mul_(alpha.reshape(-1, 1, 1))
 
     def _kinetic_energy(self, molecule):
         """Calculate kinetic energy."""
@@ -842,7 +866,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             constraints = 6.0 if self.remove_com_angular else 3.0  # TODO: check if the molecule is linear
 
         self.set_dof(molecule, constraints)
-        self.initialize_velocity(molecule)
+        if self.step_offset == 0 or not torch.is_tensor(molecule.velocities):
+            self.initialize_velocity(molecule)
 
         # Calculate accelearation at t=0
         if not torch.is_tensor(molecule.force):
@@ -859,23 +884,29 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
 
         # Setup output
-        self._do_screen = self.output_config.print_every > 0
-        self._do_xyz = self.output_config.xyz_every > 0
+        has_molid = len(self.output_config.molid) > 0
+        self._do_screen = self.output_config.print_every > 0 and has_molid
+        self._do_xyz = self.output_config.xyz_every > 0 and has_molid
         self._do_h5 = (
             self.output_config.get_h5_data_every() > 0
             or any(self.output_config.get_h5_cadence().values())
             or self.output_config.get_h5_write_nonadiabatic() > 0
-        )
+        ) and has_molid
+        h5_data_every = self.output_config.get_h5_data_every()
+        h5_vectors_every = self.output_config.h5_vectors_every
 
         if steps is None:
             return
 
         if self._do_h5:
             excited_states_params = self.seqm_parameters.get("excited_states")
-            n_roots = excited_states_params["n_states"] if excited_states_params else 0
-            # With XL-ESMD, only the active state is computed
-            if isinstance(self, XL_ESMD):
-                n_roots = 1
+            n_roots = getattr(
+                self, "_nstates", excited_states_params["n_states"] if excited_states_params else 0
+            )
+            # n_roots = excited_states_params["n_states"] if excited_states_params else 0
+            # # With XL-ESMD, only the active state is computed
+            # if isinstance(self, XL_ESMD):
+            #     n_roots = 1
             self._h5_writer = HDF5Writer(self.output_config, self.seqm_parameters, self.timestep)
             self._h5_writer.open(
                 molecule,
@@ -898,9 +929,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 V0 = self._thermo_potential(molecule)
 
                 if self._do_h5:
-                    if self.output_config.get_h5_data_every() > 0:
+                    if h5_data_every > 0:
                         self._h5_writer.append_data(0, molecule, T0, Ek0, V0, molecule.e_gap)
-                    if self.output_config.h5_vectors_every:
+                    if h5_vectors_every:
                         self._h5_writer.append_vectors(0, molecule)
 
                 if self._do_xyz:
@@ -962,6 +993,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         do_screen = self._do_screen
         do_xyz = self._do_xyz
         do_h5 = self._do_h5
+        h5_data_every = self.output_config.get_h5_data_every()
+        h5_vectors_every = self.output_config.h5_vectors_every
+        print_every = self.output_config.print_every
+        xyz_every = self.output_config.xyz_every
 
         try:
             for i in range(self.step_offset, steps):
@@ -1000,22 +1035,16 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                         Ek = self._kinetic_energy(molecule)
                         T = self._calc_temperature(Ek)
 
-                    if do_screen and ((i + 1) % self.output_config.print_every == 0):
+                    if do_screen and ((i + 1) % print_every == 0):
                         self._output_to_screen(i, T, Ek, V)
 
                     if do_h5:
-                        if (
-                            self.output_config.get_h5_data_every() > 0
-                            and (i + 1) % self.output_config.get_h5_data_every() == 0
-                        ):
+                        if h5_data_every > 0 and (i + 1) % h5_data_every == 0:
                             self._h5_writer.append_data(i + 1, molecule, T, Ek, V, molecule.e_gap)
-                        if (
-                            self.output_config.h5_vectors_every
-                            and (i + 1) % self.output_config.h5_vectors_every == 0
-                        ):
+                        if h5_vectors_every and (i + 1) % h5_vectors_every == 0:
                             self._h5_writer.append_vectors(i + 1, molecule)
 
-                    if do_xyz and ((i + 1) % self.output_config.xyz_every == 0):
+                    if do_xyz and ((i + 1) % xyz_every == 0):
                         self._xyz_writer.write(i, molecule, Ek, V)
 
                     if checkpoint_every > 0 and ((i + 1) % checkpoint_every == 0):
@@ -1116,6 +1145,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 es_amp = es_amp_t[(xl_m - 1 - cindx)].clone()
             md._xl_ctx = {"P": P, "Pt": Pt, "es_amp": es_amp, "es_amp_t": es_amp_t}
 
+        Molecular_Dynamics_Basic._restore_rng(ckpt)
         md.run(molecule=molecule, steps=ckpt["steps"], reuse_P=reuse_P, remove_com=ckpt["remove_com"])
 
     @staticmethod
@@ -1139,6 +1169,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             "species": self._tensor_cpu(molecule.species),
             "coordinates": self._tensor_cpu(molecule.coordinates),
             "velocities": self._tensor_cpu(molecule.velocities),
+            "Etot": self._tensor_cpu(getattr(molecule, "Etot", None)),
             "dm": self._tensor_cpu(molecule.dm) if reuse_P else None,
             "cis_amplitudes": self._tensor_cpu(molecule.cis_amplitudes) if reuse_P else None,
             "transition_density_matrices": self._tensor_cpu(
@@ -1172,6 +1203,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def _restore_molecule_from_ckpt(mol_ckpt, molecule, reuse_P: bool, device):
         with torch.no_grad():
             molecule.velocities = mol_ckpt["velocities"].to(device)
+            if torch.is_tensor(mol_ckpt.get("Etot")):
+                molecule.Etot = mol_ckpt["Etot"].to(device)
             if "forces" in mol_ckpt:
                 molecule.force = mol_ckpt["forces"].to(device)
             if "molecular_orbitals" in mol_ckpt and torch.is_tensor(mol_ckpt["molecular_orbitals"]):
@@ -1207,10 +1240,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def _load_checkpoint_base(path: str, device=None):
         ckpt = torch.load(path, map_location="cpu", weights_only=False)
 
-        torch.random.set_rng_state(ckpt["rng"]["torch_cpu"])
-        if torch.cuda.is_available() and ckpt["rng"]["torch_cuda"]:
-            torch.cuda.set_rng_state_all(ckpt["rng"]["torch_cuda"])
-
         from seqm.Molecule import Molecule
 
         torch.set_default_dtype(ckpt["molecules"]["coordinates"].dtype)
@@ -1227,6 +1256,12 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         reuse_P = ckpt["reuse_P"]
         Molecular_Dynamics_Basic._restore_molecule_from_ckpt(ckpt["molecules"], molecule, reuse_P, device)
         return ckpt, molecule, device, reuse_P
+
+    @staticmethod
+    def _restore_rng(ckpt: Dict):
+        torch.random.set_rng_state(ckpt["rng"]["torch_cpu"])
+        if torch.cuda.is_available() and ckpt["rng"]["torch_cuda"]:
+            torch.cuda.set_rng_state_all(ckpt["rng"]["torch_cuda"])
 
 
 def _to_np(x):
@@ -1542,33 +1577,12 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
                 molecule.dP2dt2 = torch.zeros_like(molecule.dm)
             ctx = {"P": P, "Pt": Pt}
 
-            # for xl-esmd since we propagate the transition_density for only the active state, save only that
-            if do_xl_esmd:
-                active_state_vec = active_state_tensor(
-                    molecule.active_state, int(molecule.nmol), molecule.coordinates.device
-                )
-                if torch.unique(active_state_vec).numel() != 1:
-                    raise ValueError("XL-ESMD currently supports a single active state across the batch.")
-                active_idx = int(active_state_vec[0].item()) - 1  # Convert 1-indexed to 0-indexed
-                molecule.transition_density_matrices = molecule.transition_density_matrices[
-                    :, active_idx : active_idx + 1
-                ]
-                # For XL_ESMD, keep only the active state data for all excited state properties
-                # These are the properties that get saved to HDF5
-                if torch.is_tensor(molecule.cis_energies) and molecule.cis_energies.shape[1] > 1:
-                    molecule.cis_energies = molecule.cis_energies[:, active_idx : active_idx + 1]
-                if torch.is_tensor(molecule.transition_dipole) and molecule.transition_dipole.shape[1] > 1:
-                    molecule.transition_dipole = molecule.transition_dipole[:, active_idx : active_idx + 1, :]
-                if (
-                    torch.is_tensor(molecule.oscillator_strength)
-                    and molecule.oscillator_strength.shape[1] > 1
-                ):
-                    molecule.oscillator_strength = molecule.oscillator_strength[
-                        :, active_idx : active_idx + 1
-                    ]
-
             if self.move_on_excited_state:
-                es_amp = molecule.transition_density_matrices.clone()
+                if do_xl_esmd:
+                    # es_amp = molecule.cis_amplitudes.clone()
+                    es_amp = molecule.transition_density_matrices.clone()
+                else:
+                    es_amp = molecule.transition_density_matrices.clone()
                 es_amp_t = es_amp.unsqueeze(0).expand((self.m,) + es_amp.shape).clone()
                 ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)
             self._xl_ctx = ctx
@@ -1591,6 +1605,32 @@ class KSA_XL_BOMD(XL_BOMD):
 class XL_ESMD(XL_BOMD):
     """XL-BOMD for excited state MD."""
 
+    def _propagate_excited_state(self, es_amp, es_amp_t, cindx, molecule):
+        """Propagate excited state transition density matrices."""
+        if getattr(molecule, "dxi2dt2", None) is None:
+            c = 0.95
+            es_new = self.coeff_D * (
+                c * molecule.transition_density_matrices + (1.0 - c) * es_amp
+            ) + torch.sum(self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1, 1) * es_amp_t, dim=0)
+        else:
+            es_new = self.coeff_D * (molecule.dxi2dt2 + es_amp) + torch.sum(
+                self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1, 1) * es_amp_t, dim=0
+            )
+        return es_new
+
+    def _propagate_excited_amp(self, es_amp, es_amp_t, cindx, molecule):
+        """Propagate excited state transition density matrices."""
+        if getattr(molecule, "dxi2dt2", None) is None:
+            c = 0.95
+            es_new = self.coeff_D * (c * molecule.cis_amplitudes + (1.0 - c) * es_amp) + torch.sum(
+                self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1) * es_amp_t, dim=0
+            )
+        else:
+            es_new = self.coeff_D * (molecule.dxi2dt2 + es_amp) + torch.sum(
+                self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1) * es_amp_t, dim=0
+            )
+        return es_new
+
     def one_step(
         self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=dict(), *args, **kwargs
     ):
@@ -1610,6 +1650,7 @@ class XL_ESMD(XL_BOMD):
             Pt[(self.m - 1 - cindx)] = P
 
             es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
+            # es_amp = self._propagate_excited_amp(es_amp, es_amp_t, cindx, molecule)
             es_amp_t[(self.m - 1 - cindx)] = es_amp
 
             dm_prop = self.dmprop
