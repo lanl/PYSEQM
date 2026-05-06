@@ -6,6 +6,8 @@ from seqm.dynamics.active_state import active_state_tensor
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
+from .orthogonalization import orthogonalize_to_current_subspace
+from .rcis_solver import solve_rcis
 
 # from seqm.seqm_functions.pack import packone, unpackone
 
@@ -21,214 +23,114 @@ def rcis_batch(
     orbital_window=None,
     save_tdm=False,
 ):
-    torch.set_printoptions(linewidth=200)
-    """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
-       using davidson diagonalization
-       This function is called when all the molecules in the batch are the same
+    spec = _make_uniform_spec(mol, orbital_window=orbital_window)
+    excitation_energies, amplitudes, info = solve_rcis(
+        spec,
+        mol.molecular_orbitals,
+        e_mo,
+        w,
+        mol.parameters["g_ss"],
+        mol.parameters["g_pp"],
+        mol.parameters["g_sp"],
+        mol.parameters["g_p2"],
+        mol.parameters["h_sp"],
+        nroots=nroots,
+        root_tol=root_tol,
+        best_guess_from_prev=best_guess_from_prev,
+        init_amplitude_guess=init_amplitude_guess,
+    )
 
-    :param mol: Molecule Orbital Coefficients
-    :param w: 2-electron integrals
-    :param e_mo: Orbital energies
-    :param nroots: Number of CIS states requested
-    :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, and fix the descrepancy b/w 
-                                 molecular orbital signs from previous and this step. Leave it alone when doing XL-ESMD
-    :param save_tdm: save transition density matrices; this option will be used for XL-ESMD
-    :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
-    :returns: 
-
-    """
-
-    device = w.device
-    dtype = w.dtype
-
-    norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
-    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
-        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
-
-    nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window, e_mo)
-
-    nov = nocc * nvirt
-    if nroots > nov:
-        raise Exception(f"Maximum number of roots for this molecule is {nov}.")
-
-    # Energy differences
-    # ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
-
-    # Precompute energy differences (ea_ei) and form the approximate diagonal of the Hamiltonian (approxH)
-    # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
-    approxH = ea_ei.view(-1, nov)
-
-    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nmol=nmol)  # TODO: User-defined
-
-    V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
-    HV = torch.clone(V)
-
-    vector_tol = root_tol * 0.01 * math.sqrt(nov)  # Vectors whose norm is smaller than this will be discarded
-
-    if init_amplitude_guess is None:
-        nstart, nroots = make_guess(approxH, nroots, maxSubspacesize, V, nmol, nov)
-    else:
-        if best_guess_from_prev:
-            make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
-        else:
-            if (
-                init_amplitude_guess.shape[-1] == norb_batch[0]
-            ):  # initial amplitude guess provided in AO basis, i.e. transition density matrices
-                V[:, :nroots] = torch.einsum(
-                    "bmi,brmn,bna->bria", Cocc, init_amplitude_guess[:, :nroots], Cvirt
-                ).flatten(start_dim=-2)
-                # need to orthonormalize, use the orthonormalization procedure below
-                # Normalize first vector
-                V[:, 0] /= torch.linalg.vector_norm(V[:, 0], dim=1, keepdim=True)
-                if nroots > 1:
-                    for i in range(nmol):
-                        n_new = orthogonalize_to_current_subspace(V[i], V[i, 1:nroots], 1, vector_tol)
-                        if n_new < nroots:
-                            raise RuntimeError("Some roots were lost while orthogonalizing, cannot proceed")
-            else:  # initial amplitude guess provided in MO basis, assume orthonormalized
-                V[:, :nroots] = init_amplitude_guess[:, :nroots]
-        nstart = nroots
-
-        # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step.
-        # # This fails when orbitals are degenerate and switch order
-        # mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
-
-    max_iter = 100  # TODO: User-defined
-    davidson_iter = 0
-    vstart = torch.zeros(nmol, dtype=torch.long, device=device)
-    vend = torch.full((nmol,), nstart, dtype=torch.long, device=device)
-    done = torch.zeros(nmol, dtype=torch.bool, device=device)
-
-    # TODO: Test if orthogonal or nonorthogonal version is more efficient
-    nonorthogonal = False  # TODO: User-defined/fixed
-
-    # C = mol.molecular_orbitals
-    # Cocc = C[:,:,occ_idx]
-    # Cvirt = C[:,:,virt_idx]
-
-    e_val_n = torch.empty(nmol, nroots, dtype=dtype, device=device)
-    amplitude_store = torch.empty(nmol, nroots, nov, dtype=dtype, device=device)
-
-    n_collapses = torch.zeros_like(vstart)
-    n_iters = torch.zeros_like(vstart)
-    # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
-    # print("-" * len(header))
-    # print(header)
-    # print("-" * len(header))
-
-    while davidson_iter <= max_iter:  # Davidson loop
-        # Determine current subspace dimensions per molecule
-        delta = vend - vstart
-        max_v = int(delta.max().item())
-        rel_idx = torch.arange(max_v, device=device).unsqueeze(0)  # (1, max_v)
-        abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-        mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(-1, max_v)
-
-        # Gather current subspace vectors into V_batched
-        V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-        V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
-
-        # Compute the matrix-vector product in the current subspace
-        HV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
-        HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
-
-        # Make H by multiplying V.T * HV
-        vend_max = int(torch.max(vend).item())
-        H = torch.einsum("bno,bro->bnr", V[:, :vend_max], HV[:, :vend_max])
-
-        davidson_iter = davidson_iter + 1
-
-        # Diagonalize the subspace hamiltonian
-        zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
-        e_vec_n = get_subspace_eig_batched(H, nroots, zero_pad, e_val_n, done, nonorthogonal)
-
-        # Compute CIS amplitudes and the residual
-        amplitudes = torch.einsum("bvr,bvo->bro", e_vec_n, V[:, :vend_max, :])
-        residual = torch.einsum(
-            "bvr,bvo->bro", e_vec_n, HV[:, :vend_max, :]
-        ) - amplitudes * e_val_n.unsqueeze(2)
-        # resid_norm = torch.norm(residual,dim=2)
-        resid_norm = torch.linalg.vector_norm(residual, dim=2, ord=torch.inf)
-        roots_not_converged = resid_norm > root_tol
-
-        # Mark molecules with all roots converged and store amplitudes
-        mol_converged = roots_not_converged.sum(dim=1) == 0
-        done_this_loop = (~done) & mol_converged
-        done[done_this_loop] = True
-        n_iters[done_this_loop] = davidson_iter
-        amplitude_store[done_this_loop] = amplitudes[done_this_loop]
-
-        # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
-        collapse_condition = (roots_not_converged.sum(dim=1) + vend > maxSubspacesize) & (
-            maxSubspacesize != nov
+    with torch.no_grad():
+        if mol.verbose and info["n_iters"] is not None:
+            print(
+                f"Number of davidson iterations: {info['n_iters']}, number of subspace collapses: {info['n_collapses']}"
+            )
+        rcis_analysis(
+            mol,
+            excitation_energies,
+            amplitudes,
+            int(info["nroots_target"][0].item()),
+            orbital_window=orbital_window,
+            save_tdm=save_tdm,
         )
-        collapse_mask = (~done) & (~mol_converged) & collapse_condition
-        if collapse_mask.sum() > 0:
-            if davidson_iter == 1:
-                raise Exception(
-                    "Insufficient memory to perform even a single iteration of subspace expansion"
-                )
 
-            V[collapse_mask] = 0
-            V[collapse_mask, :nroots, :] = amplitudes[collapse_mask]
-            HV[collapse_mask, :nroots, :] = torch.einsum(
-                "bvr,bvo->bro", e_vec_n[collapse_mask], HV[collapse_mask, :vend_max, :]
+    return excitation_energies, amplitudes
+
+
+def _make_uniform_spec(mol, orbital_window=None):
+    def build_problem(molecular_orbitals, e_mo, w, gss, gpp, gsp, gp2, hsp):
+        nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(
+            mol, orbital_window=orbital_window, e_mo=e_mo, molecular_orbitals=molecular_orbitals
+        )
+        nmol = int(mol.nmol)
+        nov = nocc * nvirt
+        if nov <= 0:
+            raise ValueError("RCIS requires at least one occupied-virtual excitation.")
+
+        parameters = {"g_ss": gss, "g_pp": gpp, "g_sp": gsp, "g_p2": gp2, "h_sp": hsp}
+        approxH = ea_ei.reshape(nmol, nov)
+        valid_mask = torch.ones(nmol, nov, dtype=torch.bool, device=w.device)
+        chunk_plan = make_chunk_plan(w.dtype, w.device, mol)
+
+        def apply(vectors):
+            return matrix_vector_product_batched(
+                mol, vectors, w, ea_ei, Cocc, Cvirt, parameters=parameters, chunk_plan=chunk_plan
             )
-            HV[collapse_mask, nroots:] = 0
-            vstart[collapse_mask] = 0
-            vend[collapse_mask] = nroots
-            n_collapses[collapse_mask] += 1
 
-        # Orthogonalize the residual vectors for molecules
-        orthogonalize_mask = (~done) & (~mol_converged)  # & (~collapse_condition)
-        mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
-        for i in mols_to_ortho:
-            newsubspace = residual[i, roots_not_converged[i], :] / (
-                e_val_n[i, roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0)
-            )
+        def initialize_subspace(
+            V, nroots, max_subspace_size, root_tol, best_guess_from_prev, init_amplitude_guess
+        ):
+            vector_tol = torch.full((nmol,), root_tol * 0.01 * math.sqrt(nov), dtype=w.dtype, device=w.device)
+            if nroots > nov:
+                raise ValueError(f"Maximum number of RCIS roots for this batch is {nov}.")
 
-            vstart[i] = vend[i]
-            # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function.
-            # This means changes inside the function will directly modify 'V[i]'
-            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
-            if vend[i] - vstart[i] == 0:
-                done[i] = True
-                amplitude_store[i] = amplitudes[i]
-                n_iters[i] = davidson_iter
+            if init_amplitude_guess is None:
+                nstart, nroots_eff = make_guess(approxH, nroots, max_subspace_size, V, nmol, nov)
+            else:
+                if best_guess_from_prev:
+                    make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
+                elif init_amplitude_guess.shape[-1] == mol.norb[0]:
+                    V[:, :nroots] = torch.einsum(
+                        "bmi,brmn,bna->bria", Cocc, init_amplitude_guess[:, :nroots], Cvirt
+                    ).flatten(start_dim=-2)
+                    V[:, 0] /= torch.linalg.vector_norm(V[:, 0], dim=1, keepdim=True)
+                    if nroots > 1:
+                        for i in range(nmol):
+                            n_new = orthogonalize_to_current_subspace(V[i], V[i, 1:nroots], 1, vector_tol[i])
+                            if n_new < nroots:
+                                raise RuntimeError(
+                                    "Some RCIS initial roots were lost during orthogonalization."
+                                )
+                else:
+                    V[:, :nroots] = init_amplitude_guess[:, :nroots]
+                nstart = nroots
+                nroots_eff = nroots
 
-            # if davidson_iter % 5 == 0:
-            # print(f"davidson_iteration {davidson_iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
-            # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
-            # print(f"{davidson_iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
+            vend = torch.full((nmol,), nstart, dtype=torch.long, device=w.device)
+            nroots_target = torch.full((nmol,), nroots_eff, dtype=torch.long, device=w.device)
+            return vend, nroots_target, vector_tol
 
-        if torch.all(done):
-            break
-        if davidson_iter > max_iter:
-            for j in range(nmol):
-                print(
-                    f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}"
-                )
-            raise Exception("Maximum iterations reached but roots have not converged")
+        return {
+            "apply": apply,
+            "initialize_subspace": initialize_subspace,
+            "orthogonalize": orthogonalize_to_current_subspace,
+            "nmol": nmol,
+            "nov": nov,
+            "dtype": w.dtype,
+            "device": w.device,
+            "precond_diag": approxH,
+            "guess_diag": approxH,
+            "valid_transition_mask": valid_mask,
+            "max_subspace_size": getMaxSubspacesize(w.dtype, w.device, nov, nmol=nmol),
+            "max_iter": 100,
+        }
 
-    # print("-" * len(header))
-    # print("\nCIS excited states:")
-    # for j in range(nmol):
-    #     if nmol>1: print(f"\nMolecule {j+1}")
-    #     print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
-    #     for i, energy in enumerate(e_val_n[j], start=1):
-    #         print(f"State {i:3d}: {energy:.15f} eV")
-    # print("")
-
-    # Post CIS analysis
-    if mol.verbose:
-        print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol, e_val_n, amplitude_store, nroots, orbital_window=orbital_window, save_tdm=save_tdm)
-
-    return e_val_n, amplitude_store
+    return {"build_problem": build_problem, "differentiable": True}
 
 
-def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
+def matrix_vector_product_batched(
+    mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, parameters=None, chunk_plan=None
+):
     # C: Molecule Orbital Coefficients
     nmol, nNewRoots, _ = V.shape
 
@@ -240,11 +142,11 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # I often run out of memory because I calculate \sum_ia (ia||jb)V_ia in makeA_pi_batched for all the roots in V_ia
     # at once. To avoid this, we first estimate the peak memory usage and then chunk over nNewRoots.
     # TODO: Also chunk over the nmol dimension
-    need_to_chunk, chunk_size = getMemUse(V.dtype, V.device, mol, nNewRoots)
+    need_to_chunk, chunk_size = getMemUse(V.dtype, V.device, mol, nNewRoots, chunk_plan=chunk_plan)
 
     if not need_to_chunk:
         P_xi = torch.einsum("bmi,bria,bna->brmn", Cocc, Via, Cvirt)
-        F0 = makeA_pi_batched(mol, P_xi, w)
+        F0 = makeA_pi_batched(mol, P_xi, w, parameters=parameters)
         # why am I multiplying by A 2?
         A = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
         if makeB:
@@ -258,7 +160,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
             end = min(start + chunk_size, nNewRoots)
             P_xi = torch.einsum("bmi,bria,bna->brmn", Cocc, Via[:, start:end], Cvirt)
             # F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
-            P_xi = makeA_pi_batched(mol, P_xi, w)
+            P_xi = makeA_pi_batched(mol, P_xi, w, parameters=parameters)
             F0 = P_xi
             A[:, start:end, :] = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
             if makeB:
@@ -274,7 +176,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     return A
 
 
-def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
+def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False, parameters=None):
     r"""
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
@@ -305,7 +207,7 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
 
     w = w_.view(nmol, npairs_per_mol, 10, 10)
     # Compute the (ai||jb)X_jb
-    F = makeA_pi_symm_batch(mol, P0, w)
+    F = makeA_pi_symm_batch(mol, P0, w, parameters=parameters)
 
     if not allSymmetric:
         P0_antisym = 0.5 * (P0 - P0.transpose(2, 3))
@@ -334,10 +236,11 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
         del Pp
         del sumK
 
-        gsp = mol.parameters["g_sp"].view(nmol, -1)
-        gpp = mol.parameters["g_pp"].view(nmol, -1)
-        gp2 = mol.parameters["g_p2"].view(nmol, -1)
-        hsp = mol.parameters["h_sp"].view(nmol, -1)
+        params = mol.parameters if parameters is None else parameters
+        gsp = params["g_sp"].view(nmol, -1)
+        gpp = params["g_pp"].view(nmol, -1)
+        gp2 = params["g_p2"].view(nmol, -1)
+        hsp = params["h_sp"].view(nmol, -1)
 
         F2e1c = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, device=device, dtype=dtype)
         for i in range(1, 4):
@@ -368,7 +271,7 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
     return F0.view(nmol, nnewRoots, norb, norb)
 
 
-def makeA_pi_symm_batch(mol, P0, w):
+def makeA_pi_symm_batch(mol, P0, w, parameters=None):
     P0_sym = 0.5 * (P0 + P0.transpose(2, 3))
 
     molsize = mol.molsize
@@ -453,11 +356,12 @@ def makeA_pi_symm_batch(mol, P0, w):
     Pptot = P[..., 1, 1] + P[..., 2, 2] + P[..., 3, 3]
 
     # One center-two electron integrals
-    gss = mol.parameters["g_ss"].view(nmol, -1)
-    gsp = mol.parameters["g_sp"].view(nmol, -1)
-    gpp = mol.parameters["g_pp"].view(nmol, -1)
-    gp2 = mol.parameters["g_p2"].view(nmol, -1)
-    hsp = mol.parameters["h_sp"].view(nmol, -1)
+    params = mol.parameters if parameters is None else parameters
+    gss = params["g_ss"].view(nmol, -1)
+    gsp = params["g_sp"].view(nmol, -1)
+    gpp = params["g_pp"].view(nmol, -1)
+    gp2 = params["g_p2"].view(nmol, -1)
+    hsp = params["h_sp"].view(nmol, -1)
 
     F2e1c = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, device=device, dtype=dtype)
 
@@ -486,35 +390,6 @@ def makeA_pi_symm_batch(mol, P0, w):
     # F[:,:,maskd] += F[:,:,maskd].triu(1).transpose(3,4)
 
     return F
-
-
-def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
-    """Orthogonalizes the vectors in the newsubspace against the original subspace
-       with Gram-Schmidt orthogonalization. We cannot use Modified-Gram-Schmidt because
-       we want leave the original subspace vectors untouched
-
-    :V: Original subspace vectors (with pre-allocated memory for new vectors)
-    :newsubspace: vectors that have to be orthonormalized
-    :vend: original subspace size
-    :tol: the tolerance for the norm of new vectors below which the vector will be discarded
-    :returns: vend: size of the subspace after adding in the new vectors
-
-    """
-    # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
-    # See: https://doi.org/10.1016/j.camwa.2005.08.009
-    # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
-    n = newsubspace.shape[0]
-    for i in range(n):
-        vec = newsubspace[i]
-        vec -= (vec @ V[:vend].T) @ V[:vend]
-        vec -= (vec @ V[:vend].T) @ V[:vend]
-        vecnorm = torch.norm(vec)
-
-        if vecnorm > tol:
-            V[vend] = vec / vecnorm
-            vend = vend + 1
-
-    return vend
 
 
 import psutil  # to get the memory size
@@ -704,7 +579,7 @@ def print_rcis_analysis(excitation_energies, transition_dipole, oscillator_stren
         print("")
 
 
-def getMemUse(dtype, device, mol, nroots=1):
+def getMemUse(dtype, device, mol, nroots=1, chunk_plan=None):
     r"""
     Estimate the peak memory usage while calculating  \sum_ia (ia||jb)V_ia
     (contracting the roots with the two-e integrals)
@@ -718,6 +593,11 @@ def getMemUse(dtype, device, mol, nroots=1):
         chunk_size (int or None): Suggested chunk size if need_to_chunk=True, else None.
     """
 
+    if chunk_plan is not None:
+        max_roots_no_chunk = int(chunk_plan)
+        need_to_chunk = nroots > max_roots_no_chunk
+        return need_to_chunk, nroots if not need_to_chunk else max_roots_no_chunk
+
     dev_type = device.type
     if dev_type == "cpu":
         available_memory = psutil.virtual_memory().available
@@ -727,20 +607,25 @@ def getMemUse(dtype, device, mol, nroots=1):
         raise ValueError("Unsupported device type. Use 'cpu' or 'cuda'.")
 
     bytes_per_element = torch.finfo(dtype).bits // 8
-    # 200 is an approximate factor from analyzing the shape and count
-    # of all major tensors in makeA_pi_symm_batch. The factor seems to perform well while benchmarking
     mem_per_root = 200.0 * mol.nmol * (mol.molsize**2) * bytes_per_element
-    total_mem_estimate = mem_per_root * nroots
+    max_roots_no_chunk = max(1, int(available_memory // mem_per_root))
+    need_to_chunk = nroots > max_roots_no_chunk
+    return need_to_chunk, nroots if not need_to_chunk else max_roots_no_chunk
 
-    # print(f"Available: {available_memory/1073741824} GiB; Max memory used will be {total_mem_estimate/1073741824} GiB, per root: {mem_per_root/1073741824} GiB")
-    need_to_chunk = total_mem_estimate > available_memory
-    chunk_size = nroots
 
-    if need_to_chunk:
-        # Ensure at least 1, up to nroots
-        chunk_size = max(1, min(nroots, int(available_memory // mem_per_root)))
+def make_chunk_plan(dtype, device, mol):
+    dev_type = device.type
+    if dev_type == "cpu":
+        available_memory = psutil.virtual_memory().available
+    elif dev_type == "cuda":
+        available_memory, _ = torch.cuda.mem_get_info(device)
+    else:
+        raise ValueError("Unsupported device type. Use 'cpu' or 'cuda'.")
 
-    return need_to_chunk, chunk_size
+    bytes_per_element = torch.finfo(dtype).bits // 8
+    mem_per_root = 200.0 * mol.nmol * (mol.molsize**2) * bytes_per_element
+    max_roots_no_chunk = max(1, int(available_memory // mem_per_root))
+    return max_roots_no_chunk
 
 
 def make_guess(ea_ei, nroots, maxSubspacesize, V, nmol, nov):
@@ -866,8 +751,8 @@ def make_best_guess_from_previous_amplitudes(mol, V_old, V, nocc):
         V[:, :nroots] = V_old
 
 
-def get_occ_virt(mol, orbital_window=None, e_mo=None):
-    C = mol.molecular_orbitals  # (nmol, nbasis, norb_i)
+def get_occ_virt(mol, orbital_window=None, e_mo=None, molecular_orbitals=None):
+    C = mol.molecular_orbitals if molecular_orbitals is None else molecular_orbitals
     nocc_b, norb_b = mol.nocc, mol.norb  # (nmol,)
     nvirt_b = norb_b - nocc_b
     nmol, nbasis = C.shape[:2]

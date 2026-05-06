@@ -952,7 +952,15 @@ class Energy(torch.nn.Module):
             method = self.excited_states["method"].lower()
             orbital_window = self.excited_states.get("orbital_window", None)
             prev_cis_amp = molecule.cis_amplitudes if hasattr(molecule, "cis_amplitudes") else None
-            with torch.no_grad():
+            needs_cis_grad = (
+                method in ("cis", "tda")
+                and self.seqm_parameters.get("cis_backward", False)
+                and (
+                    molecule.coordinates.requires_grad
+                    or any(torch.is_tensor(v) and v.requires_grad for v in molecule.parameters.values())
+                )
+            )
+            with torch.set_grad_enabled(needs_cis_grad):
                 if all_same_mols:
                     if molecule.const.do_timing:
                         t0 = time.time()
@@ -966,7 +974,7 @@ class Energy(torch.nn.Module):
                             best_guess_from_prev=self.excited_states["make_best_guess"],
                             init_amplitude_guess=cis_amp,
                             orbital_window=orbital_window,
-                            save_tdm=self.excited_states["save_tdm"],
+                            save_tdm=self.excited_states["save_tdm"] and not needs_cis_grad,
                         )
                     elif method == "rpa":
                         excitation_energies, exc_amps = rpa(
@@ -993,45 +1001,11 @@ class Energy(torch.nn.Module):
                         )
                     else:
                         raise NotImplementedError("RPA for non-uniform batch not yet available")
-                exc_amps = self._phase_align_cis(exc_amps, prev_cis_amp, rpa=method == "rpa")
-                molecule.cis_amplitudes = exc_amps
+
+            with torch.no_grad():
+                exc_amps_aligned = self._phase_align_cis(exc_amps, prev_cis_amp, rpa=method == "rpa")
+                molecule.cis_amplitudes = exc_amps_aligned
                 molecule.cis_energies = excitation_energies
-
-                # # Verify some stuff for excited state XL-BOMD
-                # tmp = make_cis_densities(molecule, True, False, False)
-                # cis_energy_from_transition_density(molecule,F,tmp["transition_density"],w,P,Hcore)
-
-                if molecule.const.do_timing:
-                    if torch.cuda.is_available():
-                        torch.cuda.synchronize()
-                    t1 = time.time()
-                    molecule.const.timing["CIS/RPA"].append(t1 - t0)
-
-                # Nonadiabatic couplings (unified resolution)
-                nac_settings = self.nac_config
-
-                if nac_settings.enabled:
-                    nroots = self.excited_states["n_states"]
-                    pair_list = nac_settings.pairs or [
-                        (i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)
-                    ]
-
-                    nmol = molecule.nmol
-                    molsize = molecule.molsize
-                    dtype = P.dtype
-                    device = P.device
-                    nac_vec = torch.zeros((nmol, nroots, nroots, molsize, 3), dtype=dtype, device=device)
-                    pair_nac = calc_nac(
-                        molecule, exc_amps, excitation_energies, P, ri, riXH, pair_list, rpa=method == "rpa"
-                    )
-                    for pair_idx, (s1, s2) in enumerate(pair_list):
-                        vec = pair_nac[:, pair_idx]
-                        nac_vec[:, s1 - 1, s2 - 1] = vec
-                        nac_vec[:, s2 - 1, s1 - 1] = -vec
-                    molecule.nac = nac_vec
-                else:
-                    molecule.nac = None
-                molecule.nac_dot = None
 
             if excited_mask.any():
                 active_idx = torch.clamp(active_states - 1, min=0)
@@ -1096,6 +1070,48 @@ class Energy(torch.nn.Module):
                     else:
                         cis_energy = calc_cis_energy_any_batch(molecule, w, e, amp_sel, rpa=method == "rpa")
                     Eexcited[excited_mask] = cis_energy[excited_mask]
+
+            with torch.no_grad():
+                # # Verify some stuff for excited state XL-BOMD
+                # tmp = make_cis_densities(molecule, True, False, False)
+                # cis_energy_from_transition_density(molecule,F,tmp["transition_density"],w,P,Hcore)
+
+                if molecule.const.do_timing:
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    t1 = time.time()
+                    molecule.const.timing["CIS/RPA"].append(t1 - t0)
+
+                nac_settings = self.nac_config
+                if nac_settings.enabled:
+                    nroots = self.excited_states["n_states"]
+                    pair_list = nac_settings.pairs or [
+                        (i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)
+                    ]
+
+                    nmol = molecule.nmol
+                    molsize = molecule.molsize
+                    dtype = P.dtype
+                    device = P.device
+                    nac_vec = torch.zeros((nmol, nroots, nroots, molsize, 3), dtype=dtype, device=device)
+                    pair_nac = calc_nac(
+                        molecule,
+                        exc_amps_aligned,
+                        excitation_energies,
+                        P,
+                        ri,
+                        riXH,
+                        pair_list,
+                        rpa=method == "rpa",
+                    )
+                    for pair_idx, (s1, s2) in enumerate(pair_list):
+                        vec = pair_nac[:, pair_idx]
+                        nac_vec[:, s1 - 1, s2 - 1] = vec
+                        nac_vec[:, s2 - 1, s1 - 1] = -vec
+                    molecule.nac = nac_vec
+                else:
+                    molecule.nac = None
+                molecule.nac_dot = None
 
             if self.seqm_parameters.get("do_all_forces", False):
                 init_active_state = molecule.active_state

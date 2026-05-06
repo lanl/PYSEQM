@@ -1,12 +1,7 @@
 import torch
 
-from .rcis_batch import (
-    getMaxSubspacesize,
-    make_guess,
-    matrix_vector_product_batched,
-    orthogonalize_to_current_subspace,
-    rcis_analysis,
-)
+from .orthogonalization import orthogonalize_to_current_subspace
+from .rcis_batch import getMaxSubspacesize, make_guess, matrix_vector_product_batched, rcis_analysis
 
 
 def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
