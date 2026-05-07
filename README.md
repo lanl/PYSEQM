@@ -54,9 +54,11 @@ model.pt
 [Maksim Kulichenko](mailto:maxim@lanl.gov), [Guoqing Zhou](mailto:guoqingz@usc.edu), [Benjamin Nebgen](mailto:bnebgen@lanl.gov), [Vishikh Athavale](mailto:vishikh@lanl.gov), [Nikita Fedik](https://www.nikitafedik.xyz/), Nicholas Lubbers, Walter Malone, Anders M. N. Niklasson and Sergei Tretiak
 
 ## Citation:
-1. [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
-2. [Kulichenko, Maksim, et al. "Semi-Empirical Shadow Molecular Dynamics: A PyTorch implementation." *Journal of Chemical Theory and Computation* 19.11 (2023): 3209–3222.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.3c00234)
-3. [Zhou, Guoqing, et al. "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics." *Proceedings of the National Academy of Sciences* 119.27 (2022): e2120333119.](https://www.pnas.org/doi/10.1073/pnas.2120333119)
+1. [Athavale, Vishikh, et al. "PYSEQM 2.0: Accelerated Semiempirical Excited-State Calculations on Graphical Processing Units." *Journal of Chemical Theory and Computation* 21, 9498–9510 (2025).
+](https://doi.org/10.1021/acs.jctc.5c00980)
+2. [Zhou, Guoqing, et al. "Graphics processing unit-accelerated semiempirical Born Oppenheimer molecular dynamics using PyTorch." *Journal of Chemical Theory and Computation* 16.8 (2020): 4951-4962.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.0c00243)
+3. [Kulichenko, Maksim, et al. "Semi-Empirical Shadow Molecular Dynamics: A PyTorch implementation." *Journal of Chemical Theory and Computation* 19.11 (2023): 3209–3222.](https://pubs.acs.org/doi/full/10.1021/acs.jctc.3c00234)
+4. [Zhou, Guoqing, et al. "Deep learning of dynamically responsive chemical Hamiltonians with semiempirical quantum mechanics." *Proceedings of the National Academy of Sciences* 119.27 (2022): e2120333119.](https://www.pnas.org/doi/10.1073/pnas.2120333119)
 
 ## Acknowledgments:
 Los Alamos National Lab (LANL), Center for Nonlinear Studies (CNLS), T-1
