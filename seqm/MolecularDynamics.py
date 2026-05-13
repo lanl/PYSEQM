@@ -703,12 +703,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
     def initialize_velocity(self, molecule, vel_com=True):
         """Initialize velocities from Maxwell-Boltzmann distribution."""
-        # Check device compatibility
-        md_dev = self.esdriver.conservative_force.energy.packpar.p.device
-        mol_dev = molecule.coordinates.device
-        if md_dev != mol_dev:
-            raise RuntimeError(f"MD object on {md_dev}, molecule on {mol_dev}")
-
         if self.n_dof is None:
             raise RuntimeError("n_dof not set. Call initialize() first")
 
@@ -849,6 +843,15 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     ):
         """Initialize MD simulation."""
         molecule.verbose = False  # Dont print SCF and CIS/RPA results
+
+        # Check device compatibility once at initialization.
+        md_dev = getattr(self.esdriver, "device", None)
+        if md_dev is None:
+            md_dev = next(self.esdriver.parameters()).device
+        mol_dev = molecule.coordinates.device
+        if md_dev != mol_dev:
+            raise RuntimeError(f"MD object on {md_dev}, molecule on {mol_dev}")
+
         self.do_remove_com = remove_com is not None
         constraints = 0.0
         # remove_com is a tuple of (mode,stride), where mode='linear' or 'angular'

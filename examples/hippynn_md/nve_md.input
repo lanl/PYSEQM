@@ -1,0 +1,17 @@
+model_dir = ./model
+xyz_file = ./frame_77.xyz
+state_index = 0
+energy_offset = -1391.422970121047
+
+ensemble = nve
+temperature = 300.0
+timestep = 0.5
+nsteps = 50000
+random_seed = 42
+
+output_prefix = acol_s0_nve
+output_dir = ./outputs
+trajectory_interval = 10
+log_interval = 1
+
+device = auto
