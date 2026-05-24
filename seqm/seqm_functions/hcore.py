@@ -256,3 +256,52 @@ def overlap_between_geometries(molecule, coords1, coords2):
 
     overlap_matrix = di_blocks.transpose(2, 3).reshape(nmol, orb_dim * molsize, orb_dim * molsize)
     return overlap_matrix
+
+
+def _symmetric_inverse_square_root_eigh(S, eigval_tol=None):
+    S_sym = 0.5 * (S + S.transpose(-1, -2))
+    eigvals, eigvecs = torch.linalg.eigh(S_sym)
+
+    if eigval_tol is None:
+        eps = torch.finfo(S.dtype).eps
+        eigval_tol = eps * S.size(-1) * eigvals.abs().amax(dim=-1, keepdim=True)
+
+    active = eigvals > eigval_tol
+    inv_sqrt_eigvals = torch.zeros_like(eigvals)
+    inv_sqrt_eigvals[active] = torch.rsqrt(eigvals[active])
+
+    return eigvals, eigvecs, inv_sqrt_eigvals
+
+
+def _orthogonalized_overlap(S1, S12, S2, eigval_tol=None):
+    _, eigvecs1, inv_sqrt1 = _symmetric_inverse_square_root_eigh(S1, eigval_tol)
+    _, eigvecs2, inv_sqrt2 = _symmetric_inverse_square_root_eigh(S2, eigval_tol)
+
+    S12_orth = eigvecs1.transpose(-1, -2) @ S12 @ eigvecs2
+    S12_orth = S12_orth * inv_sqrt1.unsqueeze(-1) * inv_sqrt2.unsqueeze(-2)
+    return eigvecs1 @ S12_orth @ eigvecs2.transpose(-1, -2)
+
+
+def orthogonalized_overlap_between_geometries(molecule, coords1, coords2, eigval_tol=None, pack_fn=None):
+    """
+    Compute S(R1)^(-1/2)^T S(R1,R2) S(R2)^(-1/2).
+
+    This is the efficient path when the orthogonalizing matrices are only needed
+    for this product. It avoids explicitly materializing S(R1)^(-1/2) and
+    S(R2)^(-1/2). If pack_fn is provided, the three overlap matrices are packed
+    before the eigendecompositions.
+
+    coords1, coords2: (nmol, molsize, 3)
+    pack_fn: optional callable applied to S(R1), S(R1,R2), and S(R2)
+    returns: (nmol, nao, nao), where nao is the packed size if pack_fn is used
+    """
+    S1 = overlap_between_geometries(molecule, coords1, coords1)
+    S12 = overlap_between_geometries(molecule, coords1, coords2)
+    S2 = overlap_between_geometries(molecule, coords2, coords2)
+
+    if pack_fn is not None:
+        S1 = pack_fn(S1)
+        S12 = pack_fn(S12)
+        S2 = pack_fn(S2)
+
+    return _orthogonalized_overlap(S1, S12, S2, eigval_tol)

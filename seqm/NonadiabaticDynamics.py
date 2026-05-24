@@ -9,7 +9,7 @@ from seqm.seqm_functions.rcis_batch import packone_batch
 from .dynamics.nac_utils import resolve_nac_config
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
 from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
-from .seqm_functions.hcore import overlap_between_geometries
+from .seqm_functions.hcore import orthogonalized_overlap_between_geometries
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 
@@ -476,9 +476,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         with torch.no_grad():
             # AO overlap between current geometry (rows) and previous geometry (cols)
-            S_ao = overlap_between_geometries(molecule, molecule.coordinates.detach(), coords_prev.detach())
-            # S_ao has to be packed (hydrogen blocks with zero-padding have to be removed)
-            S_ao = packone_batch(S_ao, 4 * molecule.nHeavy[0], molecule.nHydro[0], norb)
+            # FIXME: this will fail for d-orbitals, will have to use packd
+            def pack_ao(S):
+                return packone_batch(S, 4 * molecule.nHeavy[0], molecule.nHydro[0], norb)
+
+            S_ao = orthogonalized_overlap_between_geometries(
+                molecule, molecule.coordinates.detach(), coords_prev.detach(), pack_fn=pack_ao
+            )
 
             # MO overlap: S_mo = C(t)^T S_ao(t,t-dt) C(t-dt)
             Cc = molecule.molecular_orbitals  # (nmol, nao, norb)
@@ -527,13 +531,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
                 # CI-derivative term in Fortran style:
                 # (X+Y)^T(X+Y) + (X-Y)^T(X-Y)  antisymmetrized between steps
-                Ap_p = Xp_f + Yp_f
-                Ap_c = Xc_f + Yc_f
-                Am_p = Xp_f - Yp_f
-                Am_c = Xc_f - Yc_f
+                # Ap_p = Xp_f + Yp_f
+                # Ap_c = Xc_f + Yc_f
+                # Am_p = Xp_f - Yp_f
+                # Am_c = Xc_f - Yc_f
 
-                ov_pc = torch.bmm(Ap_p, Ap_c.transpose(1, 2)) + torch.bmm(Am_p, Am_c.transpose(1, 2))
-                ov_cp = torch.bmm(Ap_c, Ap_p.transpose(1, 2)) + torch.bmm(Am_c, Am_p.transpose(1, 2))
+                ov_pc = torch.bmm(Xp_f, Xc_f.transpose(1, 2)) + torch.bmm(Yp_f, Yc_f.transpose(1, 2))
+                ov_cp = torch.bmm(Xc_f, Xp_f.transpose(1, 2)) + torch.bmm(Yc_f, Yp_f.transpose(1, 2))
                 coup = ov_pc - ov_cp
 
                 # MO-derivative terms: +X part +Y part (note the + sign)

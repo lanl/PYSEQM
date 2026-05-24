@@ -4,7 +4,8 @@ from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants, overlap_cutoff
 from seqm.seqm_functions.diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from seqm.seqm_functions.diat_overlapD import diatom_overlap_matrixD
-from seqm.seqm_functions.hcore import overlap_between_geometries
+from seqm.seqm_functions.hcore import orthogonalized_overlap_between_geometries, overlap_between_geometries
+from seqm.seqm_functions.rcis_batch import packone_batch
 
 
 def _build_full_overlap(mol):
@@ -142,3 +143,23 @@ def test_overlap_between_geometries_batch_mixed_sizes(device):
     s_block = full_unperm[:, :block, block : 2 * block]
 
     torch.testing.assert_close(s_cross, s_block, rtol=1e-8, atol=1e-8)
+
+
+def test_orthogonalized_overlap_between_geometries_identity_for_same_geometry(device):
+    torch.set_default_dtype(torch.float64)
+    const = Constants().to(device)
+
+    species = torch.tensor([[8, 1, 1]], dtype=torch.int64, device=device)
+    coords1 = torch.tensor(
+        [[[0.0000, 0.0000, 0.0000], [0.9584, 0.0000, 0.0000], [-0.2390, 0.9270, 0.0000]]], device=device
+    )
+    seqm_parameters = {"method": "PM6_SP", "scf_eps": 1.0e-6, "scf_converger": [1]}
+    mol = Molecule(const, seqm_parameters, coords1.clone(), species.clone()).to(device)
+
+    def pack_ao(S):
+        return packone_batch(S, 4 * mol.nHeavy[0], mol.nHydro[0], int(mol.norb[0].item()))
+
+    direct = orthogonalized_overlap_between_geometries(mol, coords1, coords1, pack_fn=pack_ao)
+    eye = torch.eye(direct.size(-1), dtype=direct.dtype, device=device).unsqueeze(0)
+
+    torch.testing.assert_close(direct, eye, rtol=1e-8, atol=1e-8)
