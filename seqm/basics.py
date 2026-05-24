@@ -557,6 +557,7 @@ class Energy(torch.nn.Module):
             nroots = int(self.excited_states["n_states"])
         self.nac_config = resolve_nac_config(seqm_parameters, nroots=nroots, default_enabled=False)
         self.xlesmd = False
+        self.md = False
         self.namd = False
         if self.uhf and self.excited_states is not None:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
@@ -732,12 +733,29 @@ class Energy(torch.nn.Module):
             return (alpha, K, L, M)
         return (alpha,)
 
-    def forward(
-        self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs
-    ):
-        """
-        get the energy terms
-        """
+    def _refresh_md_geometry(self, molecule):
+        real_atoms = getattr(molecule, "_real_atom_flat_idx", None)
+        if real_atoms is None or real_atoms.device != molecule.coordinates.device:
+            real_atoms = torch.nonzero(molecule.species.reshape(-1) > 0, as_tuple=False).squeeze(1)
+            molecule._real_atom_flat_idx = real_atoms
+        xyz = molecule.coordinates.reshape(-1, 3)[real_atoms]
+        paircoord = xyz[molecule.idxj] - xyz[molecule.idxi]
+        pairdist = torch.linalg.norm(paircoord, dim=1)
+        molecule.xij = paircoord / pairdist.unsqueeze(1)
+        molecule.rij = pairdist * molecule.const.length_conversion_factor
+
+    def _prepare_molecule_inputs(self, molecule, learned_parameters, *args, **kwargs):
+        md_static = (
+            self.md
+            and not callable(learned_parameters)
+            and not args
+            and not kwargs
+            and torch.is_tensor(getattr(molecule, "idxi", None))
+            and isinstance(getattr(molecule, "parameters", None), dict)
+        )
+        if md_static:
+            self._refresh_md_geometry(molecule)
+            return
 
         (
             molecule.nmol,
@@ -770,7 +788,6 @@ class Energy(torch.nn.Module):
             )
 
         params = molecule.parameters
-
         if molecule.method == "PM6":
             params["beta"] = torch.cat(
                 (params["beta_s"].unsqueeze(1), params["beta_p"].unsqueeze(1), params["beta_d"].unsqueeze(1)),
@@ -791,6 +808,15 @@ class Energy(torch.nn.Module):
             params["rho_core"] = zeros_uss
 
         params["Kbeta"] = params.get("Kbeta", None)
+
+    def forward(
+        self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs
+    ):
+        """
+        get the energy terms
+        """
+        self._prepare_molecule_inputs(molecule, learned_parameters, *args, **kwargs)
+        params = molecule.parameters
 
         F, e, P, Hcore, w, charge, rho0xi, rho0xj, riXH, ri, notconverged, molecular_orbitals = (
             self.hamiltonian(molecule, self.method, P0=P0)
@@ -951,6 +977,7 @@ class Energy(torch.nn.Module):
             cis_tol = self.excited_states["tolerance"]
             method = self.excited_states["method"].lower()
             orbital_window = self.excited_states.get("orbital_window", None)
+            best_guess_from_prev = self.excited_states["make_best_guess"]
             prev_cis_amp = molecule.cis_amplitudes if hasattr(molecule, "cis_amplitudes") else None
             with torch.no_grad():
                 if all_same_mols:
@@ -963,7 +990,7 @@ class Energy(torch.nn.Module):
                             e,
                             self.excited_states["n_states"],
                             cis_tol,
-                            best_guess_from_prev=self.excited_states["make_best_guess"],
+                            best_guess_from_prev=best_guess_from_prev,
                             init_amplitude_guess=cis_amp,
                             orbital_window=orbital_window,
                             save_tdm=self.excited_states["save_tdm"],
@@ -1190,8 +1217,8 @@ class Energy(torch.nn.Module):
                     calculate_dipole=True,
                 )
 
-        if self.eig and not self.uhf and self.excited_states and self.excited_states["make_best_guess"]:
-            molecule.old_mos = molecule.molecular_orbitals.clone()
+        if self.eig and not self.uhf and self.excited_states and best_guess_from_prev:
+            molecule.old_mos = molecule.molecular_orbitals.detach().clone()
 
         if all_terms:
             Etot, Enuc = total_energy(molecule.nmol, molecule.pair_molid, EnucAB, Eelec)

@@ -90,8 +90,7 @@ def test_rk4_preserves_norm_no_coupling():
     nad = make_dummy()
     energies = torch.tensor([[0.1, 0.2]], dtype=torch.float64)
     nac = torch.zeros((1, 2, 2), dtype=torch.float64)
-    ground = torch.zeros((1,), dtype=torch.float64)
-    cache = {"energies": energies, "ground_energy": ground, "nac_dot": nac, "nac_vec": None}
+    cache = {"energies": energies, "nac_dot": nac, "nac_vec": None}
     nad._propagate_electronic(cache, cache, substeps=4)
     pop = nad.populations
     assert torch.allclose(pop.sum(), torch.tensor(1.0, dtype=pop.dtype), atol=1e-12)
@@ -105,8 +104,7 @@ def test_hop_integral_accumulates_coupling():
     nac = torch.zeros((1, 2, 2), dtype=torch.float64)
     nac[0, 0, 1] = 0.05
     nac[0, 1, 0] = -0.05
-    ground = torch.zeros((1,), dtype=torch.float64)
-    cache = {"energies": energies, "ground_energy": ground, "nac_dot": nac, "nac_vec": None}
+    cache = {"energies": energies, "nac_dot": nac, "nac_vec": None}
     nad._propagate_electronic(cache, cache, substeps=10)
     assert nad._hop_integral is not None
     assert torch.abs(nad._hop_integral[0, 0, 1]) > 0

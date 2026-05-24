@@ -92,7 +92,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 n_validate = None
         if n_validate is None and nroots_cfg is not None:
             n_validate = int(nroots_cfg)
-        nac_settings = resolve_nac_config(params, nroots=n_validate, default_enabled=True)
+        nac_settings = resolve_nac_config(params, nroots=n_validate, default_enabled=False)
         na_cfg["compute_nac"] = nac_settings.enabled
         if nac_settings.pairs:
             na_cfg["nac_states"] = nac_settings.pairs
@@ -120,10 +120,11 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._dtnact = 5e-5  # small dt for finite-diff, NEXMD uses 0.002 au
         self._recompute_on_hop = bool(na_cfg.get("recompute_on_hop", False))
         self.initial_state = initial_state
-        nsub = 10
-        if nsub % 2:
-            nsub += 1
-        self._electronic_substeps = nsub
+        # nsub = 10
+        # if nsub % 2:
+        #     nsub += 1
+        # self._electronic_substeps = nsub
+        self._electronic_substeps: Optional[int] = None
         self._nstates: Optional[int] = None
         self._amp_phase: Optional[torch.Tensor] = None  # (nmol, nstates, 3): x, y, theta
         self._current_potential: Optional[torch.Tensor] = None
@@ -140,7 +141,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._arange_cache: Dict[tuple, torch.Tensor] = {}
         self._hop_buffer: Optional[torch.Tensor] = None
         self._excitation_energy_buffers: Dict[tuple, torch.Tensor] = {}
-        self._ground_energy_buffers: Dict[tuple, torch.Tensor] = {}
         self._trivial_zero_buffers: Dict[tuple, torch.Tensor] = {}
         self._trivial_swap_buffers: Dict[tuple, torch.Tensor] = {}
         self._perm_cost_buffers: Dict[tuple, torch.Tensor] = {}
@@ -282,7 +282,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         delta = theta[:, j] - theta[:, i]
         return A * torch.cos(delta) - B * torch.sin(delta)
 
-    def _build_state_energies(self, molecule) -> tuple[torch.Tensor, torch.Tensor]:
+    def _build_state_energies(self, molecule) -> torch.Tensor:
         nmol = molecule.species.shape[0]
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
@@ -292,16 +292,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             self._excitation_energy_buffers, exc_key, (nmol, self._nstates), device=device, dtype=dtype
         )
         excitation_energies[:, :n_exc] = molecule.cis_energies[:, :n_exc]
-        ground_key = (nmol, str(device), dtype)
-        ground_energy = self._get_tensor(
-            self._ground_energy_buffers, ground_key, (nmol,), device=device, dtype=dtype
-        )
-        with torch.no_grad():
-            ground_energy.copy_(molecule.Etot.reshape(nmol))
-            if self._force_mode == "active":
-                idx = self._get_arange(nmol, device=device)
-                ground_energy.sub_(excitation_energies[idx, self._active_states])
-        return excitation_energies, ground_energy
+        return excitation_energies
 
     def _set_compute_nac(self, enabled: bool, pairs=None):
         """
@@ -342,12 +333,11 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         molecule.active_state = old_state
         if prev_nac_cfg is not None:
             self._set_compute_nac(prev_nac_cfg[0], prev_nac_cfg[1])
-        energies, ground_energy = self._build_state_energies(molecule)
+        energies = self._build_state_energies(molecule)
         nac_vec = self._get_nac_matrix(molecule)
-        cache_new = self._cache_new or {}
+        cache_new = {}
         # Keep step-local references; previous-step snapshots are kept in _cache_old.
         cache_new["energies"] = energies
-        cache_new["ground_energy"] = ground_energy
         cache_new["nac_vec"] = nac_vec
         rpa = molecule.cis_amplitudes.dim() == 4 and molecule.cis_amplitudes.shape[0] == 2
         if rpa:
@@ -722,133 +712,160 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         energies_old = cache_old.get("energies")
         energies_new = cache_new.get("energies")
-        ground_old = cache_old.get("ground_energy")
-        ground_new = cache_new.get("ground_energy")
         if not torch.is_tensor(energies_old) or not torch.is_tensor(energies_new):
             raise RuntimeError("Both cache_old['energies'] and cache_new['energies'] must be tensors.")
-        if not torch.is_tensor(ground_old) or not torch.is_tensor(ground_new):
-            raise RuntimeError(
-                "Both cache_old['ground_energy'] and cache_new['ground_energy'] must be tensors."
-            )
 
-        nd_old = cache_old.get("nac_dot")
         nd_new = cache_new.get("nac_dot")
         if not torch.is_tensor(nd_new):
             raise RuntimeError("cache_new['nac_dot'] is required for electronic propagation.")
 
-        # Integrating-factor RK4: separate fast dynamical phases so the slow amplitudes
-        # evolve without the stiff diagonal term, preserving |c|^2 with larger substeps.
+        nd_old = cache_old.get("nac_dot")
+        if not torch.is_tensor(nd_old):
+            # First nuclear step only. Treat NAC as constant over the step.
+            nd_old = nd_new
+
+        amp = self._amp_phase
+        device = amp.device
+        dtype = amp.dtype
+
         dt_total = self.timestep
-        nsub = int(substeps or self._electronic_substeps)
-        dt_sub = dt_total / float(nsub)
-        total_energies_old = energies_old + ground_old.unsqueeze(1)
-        total_energies_new = energies_new + ground_new.unsqueeze(1)
 
-        def interp_energies(tau):
-            return self._interp_linear(total_energies_old, total_energies_new, tau)
+        # excitation energies
+        e0 = energies_old
+        e1 = energies_new
+        de = e1 - e0
 
-        if nd_old is None:
-            nd_const = nd_new
+        dnd = nd_new - nd_old
 
-            def interp_nac(_tau):
-                return nd_const
+        # ------------------------------------------------------------------
+        # Cheap adaptive nsub: default baseline, increase only for NAC spikes.
+        # ------------------------------------------------------------------
+        if substeps is None:
+            base = 8
+            nmax = 80
+            eta_nac = 0.25
 
+            # Dimensionless NAC severity over the nuclear step.
+            # chi = dt * max(max |D|, max |Delta D|)
+            # With dt = 0.1 fs and D = 100 fs^-1, chi = 10.
+            dmax = torch.maximum(torch.abs(nd_old), torch.abs(nd_new)).amax()
+            djump = torch.abs(dnd).amax()
+            chi = dt_total * torch.maximum(dmax, djump)
+
+            # Soft spike response:
+            #
+            # nsub = base                                if chi <= trigger
+            # nsub = base + ceil((chi-trigger)/eta_nac)  otherwise
+            extra = torch.ceil(torch.clamp((chi - 1.0) / eta_nac, min=0.0))
+            nsub = base + int(extra.to(torch.int64).item())
+            nsub = min(nsub, nmax)
         else:
+            nsub = int(substeps)
 
-            def interp_nac(tau):
-                return self._interp_linear(nd_old, nd_new, tau)
+        inv_nsub = 1.0 / float(nsub)
+        dt_sub = dt_total * inv_nsub
+        half_dt_sub = 0.5 * dt_sub
+        dt_over_hbar = dt_sub / HBAR_EV_FS
+        half_dt_over_hbar = 0.5 * dt_over_hbar
+        one_sixth_dt = dt_sub / 6.0
 
-        def rhs(x, y, theta, energies, nac_proj):
-            dtheta = -energies / HBAR_EV_FS
-            a = torch.complex(x, y)
-            p = torch.exp(1j * theta)
-            q = a * p
-            r = torch.bmm(nac_proj.to(q.dtype), q.unsqueeze(-1)).squeeze(-1)
-            c = -torch.conj(p) * r
-            return c.real, c.imag, dtheta
+        x = amp[..., 0]
+        y = amp[..., 1]
+        th = amp[..., 2]
 
-        def hop_numerator(x, y, theta, nac_proj):
-            c = torch.complex(x, y)  # (B, N)
-            p = torch.exp(1j * theta)  # (B, N)
-            u = c * p  # (B, N)
-            # Compute M_ij = Re(conj(u_i) * u_j) as an outer product
-            # outer = conj(u)[:, :, None] * u[:, None, :]  -> (B, N, N) complex
-            outer = torch.conj(u).unsqueeze(2) * u.unsqueeze(1)
-            M = outer.real  # (B, N, N) real
-            return 2.0 * nac_proj * M
+        def rhs_amp(xr, yi, theta, nac_proj):
+            """
+            Interaction-picture RHS, using real arithmetic.
 
-        device = self._amp_phase.device
-        dtype = self._amp_phase.dtype
-        hop_shape = (self._amp_phase.shape[0], self._nstates, self._nstates)
-        if (
-            self._hop_buffer is None
-            or self._hop_buffer.shape != hop_shape
-            or self._hop_buffer.device != device
-        ):
-            self._hop_buffer = torch.zeros(hop_shape, dtype=dtype, device=device)
-        else:
-            self._hop_buffer.zero_()
-        hop_int = self._hop_buffer
-        w = self._get_simpson_weights(nsub, device=device, dtype=dtype)  # (nsub+1,)
+            a_i = x_i + i y_i
+            u_i = a_i exp(i theta_i)
 
-        x = self._amp_phase[..., 0]
-        y = self._amp_phase[..., 1]
-        th = self._amp_phase[..., 2]
+            da_i/dt = - exp(-i theta_i) sum_j D_ij u_j
+            """
 
-        for s in range(nsub + 1):
-            # for s in range(nsub):
-            base_tau = s * dt_sub / dt_total
-            tau_half = base_tau + 0.5 * dt_sub / dt_total
-            tau_full = base_tau + dt_sub / dt_total
+            ct = torch.cos(theta)
+            st = torch.sin(theta)
 
-            e1 = interp_energies(base_tau)
-            nd1 = interp_nac(base_tau)
+            # u = (x + i y) exp(i theta)
+            u_re = xr * ct - yi * st
+            u_im = xr * st + yi * ct
 
-            hop_int.add_(hop_numerator(x, y, th, nd1), alpha=float(w[s]))
-            if s == nsub:  # For last substep, do not continue to RK4 stages
-                break
+            # r = D @ u, D is real.
+            r_re = torch.bmm(nac_proj, u_re.unsqueeze(-1)).squeeze(-1)
+            r_im = torch.bmm(nac_proj, u_im.unsqueeze(-1)).squeeze(-1)
 
-            dx1, dy1, dth1 = rhs(x, y, th, e1, nd1)
+            # -exp(-i theta) r
+            dx = -(ct * r_re + st * r_im)
+            dy = st * r_re - ct * r_im
 
-            x2 = x + 0.5 * dt_sub * dx1
-            y2 = y + 0.5 * dt_sub * dy1
-            th2 = th + 0.5 * dt_sub * dth1
-            e2 = interp_energies(tau_half)
-            nd2 = interp_nac(tau_half)
-            dx2, dy2, dth2 = rhs(x2, y2, th2, e2, nd2)
+            return dx, dy
 
-            x3 = x + 0.5 * dt_sub * dx2
-            y3 = y + 0.5 * dt_sub * dy2
-            th3 = th + 0.5 * dt_sub * dth2
-            e3, nd3 = e2, nd2
-            dx3, dy3, dth3 = rhs(x3, y3, th3, e3, nd3)
+        # ------------------------------------------------------------------
+        # RK4 loop
+        # ------------------------------------------------------------------
+        for s in range(nsub):
+            tau = s * inv_nsub
+            tau_half = tau + 0.5 * inv_nsub
+            tau_full = tau + inv_nsub
 
+            e1s = e0 + tau * de
+            e2s = e0 + tau_half * de
+
+            nd1 = nd_old + tau * dnd
+            nd2 = nd_old + tau_half * dnd
+            nd4 = nd_old + tau_full * dnd
+
+            # k1
+            dx1, dy1 = rhs_amp(x, y, th, nd1)
+
+            # k2
+            x2 = x + half_dt_sub * dx1
+            y2 = y + half_dt_sub * dy1
+            th2 = th - half_dt_over_hbar * e1s
+            dx2, dy2 = rhs_amp(x2, y2, th2, nd2)
+
+            # k3
+            x3 = x + half_dt_sub * dx2
+            y3 = y + half_dt_sub * dy2
+            th3 = th - half_dt_over_hbar * e2s
+            dx3, dy3 = rhs_amp(x3, y3, th3, nd2)
+
+            # k4
             x4 = x + dt_sub * dx3
             y4 = y + dt_sub * dy3
-            th4 = th + dt_sub * dth3
-            e4 = interp_energies(tau_full)
-            nd4 = interp_nac(tau_full)
-            dx4, dy4, dth4 = rhs(x4, y4, th4, e4, nd4)
+            th4 = th - dt_over_hbar * e2s
+            dx4, dy4 = rhs_amp(x4, y4, th4, nd4)
 
-            x = x + (dt_sub / 6.0) * (dx1 + 2 * dx2 + 2 * dx3 + dx4)
-            y = y + (dt_sub / 6.0) * (dy1 + 2 * dy2 + 2 * dy3 + dy4)
-            th = th + (dt_sub / 6.0) * (dth1 + 2 * dth2 + 2 * dth3 + dth4)
+            x = x + one_sixth_dt * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4)
+            y = y + one_sixth_dt * (dy1 + 2.0 * dy2 + 2.0 * dy3 + dy4)
 
-        self._amp_phase[..., 0] = x
-        self._amp_phase[..., 1] = y
-        # Wrap self._amp_phase[..., 2] to [-pi, pi]
-        self._amp_phase[..., 2] = torch.remainder(th + torch.pi, 2 * torch.pi) - torch.pi
+            # Exact for linearly interpolated E over this substep.
+            th = th - e2s * dt_over_hbar
 
-        hop_int.mul_(dt_sub / 3.0)
-        hop_int.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
+        th = torch.remainder(th + torch.pi, 2.0 * torch.pi) - torch.pi
+
+        amp[..., 0] = x
+        amp[..., 1] = y
+        amp[..., 2] = th
+
+        # ------------------------------------------------------------------
+        # Cheap final-time hop integral estimate.
+        # ------------------------------------------------------------------
+        ct = torch.cos(th)
+        st = torch.sin(th)
+
+        u_re = x * ct - y * st
+        u_im = x * st + y * ct
+
+        hop_int = u_re.unsqueeze(2) * u_re.unsqueeze(1) + u_im.unsqueeze(2) * u_im.unsqueeze(1)
+
+        hop_int.mul_(nd_new)
+        hop_int.mul_(2.0 * dt_total)
+
+        eye = self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0)
+        hop_int.mul_(1.0 - eye)
+
         self._hop_integral = hop_int
-        # NEXMD style hop_integral
-        # nd = nd_new
-        # # instantaneous vnqcorrhop = -2 * Re(conj(u_i) u_j) * d_ij
-        # hop_inst = hop_numerator(x, y, th, nd)  # OR put the minus inside hop_numerator
-        # self._hop_integral = hop_inst * dt_total
-        # # zero diagonal
-        # self._hop_integral.mul_(1.0 - self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0))
 
     def _thermo_potential(self, molecule):
         if self._current_potential is not None:
@@ -908,11 +925,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             **kwargs,
         )
         self.esdriver.conservative_force.energy.namd = True
-        excitation_energies, ground_energy = self._build_state_energies(molecule)
-        nac_vec = self._get_nac_matrix(molecule)
+        excitation_energies = self._build_state_energies(molecule)
         cache_old = self._cache_old or {}
         self._copy_cache_entry(cache_old, "energies", excitation_energies)
-        self._copy_cache_entry(cache_old, "ground_energy", ground_energy)
         cache_new = self._cache_new if isinstance(self._cache_new, dict) else {}
         cis_amp = getattr(molecule, "cis_amplitudes", None)
         if torch.is_tensor(cis_amp):
@@ -936,22 +951,14 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
 
         if self._cache_old["nac_dot"] is None:
-            if self._tdc_method == "hamiltonian_fd":
-                init_cache = {
-                    "energies": self._cache_old.get("energies"),
-                    "cis_amp": self._cache_old.get("cis_amp"),
-                }
-                vel_old = molecule.velocities.detach().clone()
-                acc_old = molecule.acc.detach().clone()
-                nd = compute_tdc_hamiltonian_fd(
-                    self, molecule, init_cache, learned_parameters, vel_old, acc_old
-                )
-                self._copy_cache_entry(self._cache_old, "nac_dot", nd)
-            elif nac_vec is not None:
-                with torch.no_grad():
-                    v = molecule.velocities.detach()
-                    nd = torch.sum(v.unsqueeze(1).unsqueeze(1) * nac_vec, dim=(3, 4))
-                    self._copy_cache_entry(self._cache_old, "nac_dot", nd)
+            init_cache = {
+                "energies": self._cache_old.get("energies"),
+                "cis_amp": self._cache_old.get("cis_amp"),
+            }
+            vel_old = molecule.velocities.detach().clone()
+            acc_old = molecule.acc.detach().clone()
+            nd = compute_tdc_hamiltonian_fd(self, molecule, init_cache, learned_parameters, vel_old, acc_old)
+            self._copy_cache_entry(self._cache_old, "nac_dot", nd)
 
         nmol = molecule.species.shape[0]
         device = molecule.coordinates.device
@@ -1132,12 +1139,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             )
 
         if torch.is_tensor(nac_dt):
-            cache_new = dict(cache_new)
             cache_new["nac_dot"] = nac_dt
         elif torch.is_tensor(cache_new.get("nac_vec")):
             v = molecule.velocities.detach().unsqueeze(1).unsqueeze(1)  # (nmol,1,1,molsize,3)
             nd = torch.sum(v * cache_new["nac_vec"], dim=(3, 4))
-            cache_new = dict(cache_new)
             cache_new["nac_dot"] = nd
         else:
             raise RuntimeError(
@@ -1176,10 +1181,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # shift caches for next step
         cache_old = self._cache_old or {}
         self._copy_cache_entry(cache_old, "energies", cache_new.get("energies"))
-        self._copy_cache_entry(cache_old, "ground_energy", cache_new.get("ground_energy"))
         self._copy_cache_entry(cache_old, "nac_dot", cache_new.get("nac_dot"))
         self._copy_cache_entry(cache_old, "cis_amp", cache_new.get("cis_amp"))
         self._cache_old = cache_old
+        self._cache_new = None
         if isinstance(self._trivial_crossing_mask, torch.Tensor):
             swap_to = self._trivial_crossing_mask
             crossing_mask = (swap_to >= 0).any(dim=1)
@@ -1359,8 +1364,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
         # ---------------- Trivial crossing handling (NEXMD cross==2) ----------------
         swap_to = self._trivial_crossing_mask
-        skip_hop_mask = torch.zeros((nmol,), dtype=torch.bool, device=device)
-        skip_hop_mask |= self.post_hop_holdoff > 0
+        skip_hop_mask = self.post_hop_holdoff > 0
         active_crossed = False
 
         # swap_to: (nmol, nstates), with -1 where no perm was computed

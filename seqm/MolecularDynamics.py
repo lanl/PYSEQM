@@ -843,6 +843,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     ):
         """Initialize MD simulation."""
         molecule.verbose = False  # Dont print SCF and CIS/RPA results
+        self.esdriver.conservative_force.energy.md = True
 
         # Check device compatibility once at initialization.
         md_dev = getattr(self.esdriver, "device", None)
@@ -1057,7 +1058,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                         )
 
                 del Ek, T
-                if i % 1000 == 0:
+                if i % 5000 == 0:
                     torch.cuda.empty_cache()
 
         finally:
