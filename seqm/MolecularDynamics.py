@@ -672,11 +672,12 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.seqm_parameters = seqm_parameters
         self.timestep = timestep
+        self.output_config = OutputConfig.from_dict(output)
+        self._sync_excited_state_output_flags()
         self.esdriver = esdriver(self.seqm_parameters)
         self.Temp = Temp
         self.step_offset = step_offset
 
-        self.output_config = OutputConfig.from_dict(output)
         self.n_dof = None
         self.remove_com_angular = False
         self.do_remove_com = False
@@ -688,6 +689,16 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self._do_screen = False
         self._do_xyz = False
         self._do_h5 = False
+
+    def _sync_excited_state_output_flags(self):
+        exc = self.seqm_parameters.get("excited_states")
+        if not isinstance(exc, dict):
+            return
+        h5 = self.output_config.h5_config if isinstance(self.output_config.h5_config, dict) else {}
+        if int(h5.get("transition_density_matrices", 0)) > 0:
+            exc["save_tdm"] = True
+        if int(h5.get("data", 0)) > 0:
+            exc["compute_transition_properties"] = True
 
     @property
     def output(self):

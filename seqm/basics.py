@@ -551,6 +551,7 @@ class Energy(torch.nn.Module):
         if self.excited_states is not None:
             self.excited_states.setdefault("make_best_guess", True)
             self.excited_states.setdefault("save_tdm", False)
+            self.excited_states.setdefault("compute_transition_properties", False)
         # Resolve NAC configuration once at construction
         nroots = None
         if self.excited_states and "n_states" in self.excited_states:
@@ -994,6 +995,9 @@ class Energy(torch.nn.Module):
                             init_amplitude_guess=cis_amp,
                             orbital_window=orbital_window,
                             save_tdm=self.excited_states["save_tdm"],
+                            compute_transition_properties=self.excited_states[
+                                "compute_transition_properties"
+                            ],
                         )
                     elif method == "rpa":
                         excitation_energies, exc_amps = rpa(
@@ -1042,19 +1046,12 @@ class Energy(torch.nn.Module):
                     pair_list = nac_settings.pairs or [
                         (i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)
                     ]
-
-                    nmol = molecule.nmol
-                    molsize = molecule.molsize
-                    dtype = P.dtype
-                    device = P.device
-                    nac_vec = torch.zeros((nmol, nroots, nroots, molsize, 3), dtype=dtype, device=device)
                     pair_nac = calc_nac(
                         molecule, exc_amps, excitation_energies, P, ri, riXH, pair_list, rpa=method == "rpa"
                     )
+                    nac_vec = {}
                     for pair_idx, (s1, s2) in enumerate(pair_list):
-                        vec = pair_nac[:, pair_idx]
-                        nac_vec[:, s1 - 1, s2 - 1] = vec
-                        nac_vec[:, s2 - 1, s1 - 1] = -vec
+                        nac_vec[(s1 - 1, s2 - 1)] = pair_nac[:, pair_idx]
                     molecule.nac = nac_vec
                 else:
                     molecule.nac = None

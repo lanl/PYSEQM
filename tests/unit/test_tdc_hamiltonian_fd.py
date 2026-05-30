@@ -56,7 +56,15 @@ def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_
             )
 
             tdc_upper = nac_dt[:, :n_states, :n_states][:, idx_i, idx_j]
-            nac_upper = molecule.nac[:, :n_states, :n_states, atom, coord][:, idx_i, idx_j]
+            nac_pairs = []
+            for i, j in zip(idx_i.tolist(), idx_j.tolist()):
+                vec = molecule.nac.get((i, j))
+                if vec is None:
+                    vec = torch.zeros(
+                        (species.shape[0], molecule.molsize, 3), dtype=tdc_upper.dtype, device=device
+                    )
+                nac_pairs.append(vec[:, atom, coord])
+            nac_upper = torch.stack(nac_pairs, dim=1)
             diff = torch.abs(tdc_upper - nac_upper)
             rel = diff / torch.clamp(torch.abs(nac_upper), min=1.0e-12)
             max_abs_diff = max(max_abs_diff, float(diff.max().item()))

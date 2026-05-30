@@ -13,7 +13,10 @@ def test_tully_cache_shapes_and_dtypes():
     assert energies.shape == (1, 2)
     cache = dyn._cache_new
     assert not cache["nac_dot"].dtype.is_complex
-    assert cache["nac_vec"].shape == (1, 2, 2, 1, 3)
+    nac_vec = cache["nac_vec"]
+    assert isinstance(nac_vec, dict)
+    assert set(nac_vec.keys()) == {(0, 1)}
+    assert nac_vec[(0, 1)].shape == (1, 1, 3)
 
 
 def test_tully_ehrenfest_population_norm():

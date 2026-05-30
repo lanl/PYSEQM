@@ -20,6 +20,7 @@ def rcis_batch(
     init_amplitude_guess=None,
     orbital_window=None,
     save_tdm=False,
+    compute_transition_properties=True,
 ):
     torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
@@ -223,7 +224,15 @@ def rcis_batch(
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol, e_val_n, amplitude_store, nroots, orbital_window=orbital_window, save_tdm=save_tdm)
+    rcis_analysis(
+        mol,
+        e_val_n,
+        amplitude_store,
+        nroots,
+        orbital_window=orbital_window,
+        save_tdm=save_tdm,
+        compute_transition_properties=compute_transition_properties,
+    )
 
     return e_val_n, amplitude_store
 
@@ -629,10 +638,22 @@ def print_memory_usage(step_description, device=0):
 
 
 def rcis_analysis(
-    mol, excitation_energies, amplitudes, nroots, rpa=False, orbital_window=None, save_tdm=False
+    mol,
+    excitation_energies,
+    amplitudes,
+    nroots,
+    rpa=False,
+    orbital_window=None,
+    save_tdm=False,
+    compute_transition_properties=True,
 ):
+    if not (compute_transition_properties or save_tdm or mol.verbose):
+        mol.transition_dipole = None
+        mol.oscillator_strength = None
+        return
     if not (
         mol.verbose
+        or save_tdm
         or torch.any(active_state_tensor(mol.active_state, int(mol.nmol), mol.coordinates.device) > 0)
     ):
         return

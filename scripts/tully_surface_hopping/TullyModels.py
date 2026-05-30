@@ -251,11 +251,8 @@ class _TullyDynamicsMixin:
         nac_vec = None
         nac_dot = None
         if want_nac:
-            nac_vec = torch.zeros(
-                (nmol, self._nstates, self._nstates, molsize, 3), dtype=dtype, device=device
-            )
-            nac_vec[:, 0, 1, 0, 0] = nac
-            nac_vec[:, 1, 0, 0, 0] = -nac
+            nac_vec = {(0, 1): torch.zeros((nmol, molsize, 3), dtype=dtype, device=device)}
+            nac_vec[(0, 1)][:, 0, 0] = nac
             nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=dtype, device=device)
             vel = molecule.velocities[:, 0, 0]
             nac_dot[:, 0, 1] = nac * vel
@@ -292,7 +289,7 @@ class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
 
 class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
     def __init__(self, model: TullyModel, *, timestep=0.05):
-        self._tully_init(model, timestep=timestep, nonadiabatic={"recompute_on_hop": True})
+        self._tully_init(model, timestep=timestep)
 
     def _compute_NACR_for_hop(self, molecule, nac_pairs):
         x = molecule.coordinates[:, 0, 0]
@@ -300,10 +297,9 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
         nmol, molsize = molecule.coordinates.shape[:2]
         device = molecule.coordinates.device
         dtype = molecule.coordinates.dtype
-        nac_vec = torch.zeros((nmol, self._nstates, self._nstates, molsize, 3), dtype=dtype, device=device)
+        nac_vec = {(0, 1): torch.zeros((nmol, molsize, 3), dtype=dtype, device=device)}
         # Tully models are 2-state; fill the only nonzero NAC element.
-        nac_vec[:, 0, 1, 0, 0] = nac
-        nac_vec[:, 1, 0, 0, 0] = -nac
+        nac_vec[(0, 1)][:, 0, 0] = nac
         molecule.nac = nac_vec
         return nac_vec
 

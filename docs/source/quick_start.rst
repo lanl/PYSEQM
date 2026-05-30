@@ -75,4 +75,3 @@ Next Steps
 - Explore :doc:`single_point_scf` for more SCF options  
 - Try :doc:`excited_states` to compute excited states  
 - See :doc:`bomd` for running MD trajectories  
-- See :doc:`nonadiabatic_dynamics` for surface hopping and nonadiabatic couplings

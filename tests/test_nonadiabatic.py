@@ -69,7 +69,6 @@ def make_dummy_fssh(nmol=1, nstates=2):
     dyn.prev_state = torch.full((nmol,), -1, dtype=torch.long)
     dyn._force_mode = "active"
     dyn._decohere_on_hop = True
-    dyn._recompute_on_hop = False
     dyn._trivial_crossing_mask = None
     dyn.hop_log = []
     return dyn
@@ -128,7 +127,6 @@ def test_crossing_detection_triggers():
 
 def test_surface_hopping_accepted_hop_updates_state_and_recomputes_force(monkeypatch):
     dyn = make_dummy_fssh()
-    dyn._recompute_on_hop = True
     molecule = make_dummy_molecule()
     molecule.force.fill_(0.1)
     excitation_energies = torch.tensor([[0.2, 0.5]], dtype=torch.float64)
@@ -179,6 +177,7 @@ def test_surface_hopping_trivial_crossing_logs_hop_event(monkeypatch):
     dyn._trivial_crossing_mask = torch.tensor([[1, 0]], dtype=torch.long)
 
     monkeypatch.setattr(dyn, "_attempt_hop", lambda: [None])
+    monkeypatch.setattr(dyn, "_recompute_active_force", lambda _molecule: None)
 
     dyn._after_electronic_update(
         molecule,
