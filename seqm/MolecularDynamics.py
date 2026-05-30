@@ -1071,7 +1071,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                         )
 
                 del Ek, T
-                if i % 5000 == 0:
+                if i % 1000 == 0:
                     torch.cuda.empty_cache()
 
         finally:

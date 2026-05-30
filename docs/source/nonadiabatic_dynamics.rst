@@ -79,7 +79,7 @@ on ``S2``. All state numbers in user input are 1-based excited-state indices.
            "n_states": 4,        # propagate S1-S4; two extra roots are added internally
            "method": "cis",
            "tolerance": 1.0e-6,
-       },
+        },
        "analytical_gradient": [True],
        "nonadiabatic": {
            "detect_crossings": True,

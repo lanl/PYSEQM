@@ -41,6 +41,10 @@ By default it is set to ``'cis'``
 
 - **cis_tolerance** (`float`): Convergence criterion for CIS/RPA excited states. By default it is set to ``1e-6``.
 
+- **max_iter** (`int`): Maximum Davidson iterations for the CIS solver.
+  By default it is set to ``200``. For large systems that fail to converge
+  within the default limit, increase this value.
+
 See :ref:`seqm-parameters` for other settings for the calculation.
 
 
@@ -82,7 +86,7 @@ Running an Excited-State Calculation
       'method': 'AM1',
       'scf_eps': 1.0e-8,
       'scf_converger': [1],
-      'excited_states': {'n_states': 10},
+      'excited_states': {'n_states': 10, 'max_iter': 200},
    }
 
    molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)

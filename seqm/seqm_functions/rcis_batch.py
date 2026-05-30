@@ -94,7 +94,7 @@ def rcis_batch(
         # # This fails when orbitals are degenerate and switch order
         # mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
 
-    max_iter = 100  # TODO: User-defined
+    max_iter = int(mol.seqm_parameters.get("excited_states", {}).get("max_iter", 200))
     davidson_iter = 0
     vstart = torch.zeros(nmol, dtype=torch.long, device=device)
     vend = torch.full((nmol,), nstart, dtype=torch.long, device=device)
@@ -207,12 +207,20 @@ def rcis_batch(
         if torch.all(done):
             break
         if davidson_iter > max_iter:
+            n_converged = torch.where(
+                done, torch.full_like(n_iters, nroots), (~roots_not_converged).sum(dim=1)
+            )
+            info = []
             for j in range(nmol):
-                print(
-                    f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, "
-                    f"number of subspace collapses: {n_collapses[j]}"
+                missing = roots_not_converged[j] & ~done[j]
+                max_err = resid_norm[j, missing].max().item() if missing.any() else 0.0
+                errs = ", ".join(f"{x:.2e}" for x in resid_norm[j].detach().cpu().tolist())
+                info.append(
+                    f"mol {j}: {n_converged[j].item()}/{nroots} roots converged, "
+                    f"max remaining error {max_err:.3e}, subspace {vend[j].item()}/{maxSubspacesize}, "
+                    f"errors [{errs}], iters {n_iters[j].item()}, collapses {n_collapses[j].item()}"
                 )
-            raise Exception("Maximum iterations reached but roots have not converged")
+            raise Exception("Maximum iterations reached but roots have not converged; " + "; ".join(info))
 
     # print("-" * len(header))
     # print("\nCIS excited states:")
@@ -548,7 +556,7 @@ def getMaxSubspacesize(dtype, device, nov, nmol=1, num_big_matrices=2):
     bytes_per_element = torch.finfo(dtype).bits // 8  # Bytes per element
 
     # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.3
+    memory_fraction = 0.4
     usable_memory = available_memory * memory_fraction
 
     # Calculate maximum n based on memory
