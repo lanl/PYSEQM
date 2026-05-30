@@ -91,22 +91,17 @@ written and how often using the ``output`` dictionary (see below).
     
     If you are doing excited state dynamics, the following are created under ``/data/excitation``:
 
-    - ``/data/excitation/excitation_energy``:
-      (Tdata, Nstates) — vertical excitation energies (eV)
+    - ``/data/excitation/state_energies``:
+      (Tdata, Nstates + 1) — absolute energies for ``S0`` and the excited states (eV)
+
+    If ``output['h5']['transition_properties'] = True``, the following are also
+    computed and written at the same cadence as ``data``:
 
     - ``/data/excitation/transition_dipole``:
       (Tdata, Nstates, 3) — transition dipole moments (a.u.)
 
     - ``/data/excitation/oscillator_strength``:
       (Tdata, Nstates) — oscillator strengths for each state
-
-    - ``/data/excitation/unrelaxed_dipole``:
-      (Tdata, 3) — dipole of the current excited state (no orbital relaxation) in a.u. . 
-      Add to ground_dipole to get total dipole.
-
-    - ``/data/excitation/relaxed_dipole``:
-      (Tdata, 3) — dipole of the current excited state, with orbital relaxation, in a.u. . 
-      Add to ground_dipole to get total dipole.
 
     - ``/data/excitation/active_state``:
       Scalar data (int) giving the index of the active electronic excited state used during the MD run.
@@ -163,11 +158,17 @@ The ``output`` dictionary controls all output behavior. It should contain the fo
   **Default:** ``100``
 
 ``'h5'`` (dict) cadences for writing to HDF5 file per molecule:
-  - ``'data'``: cadence for the ``/data`` group (thermo/properties/MO). **Default:** ``0``
+  - ``'data'``: cadence for the ``/data`` group (thermo/properties/state energies/MO). **Default:** ``0``
   - ``'coordinates'``: cadence for the ``/coordinates`` group. **Default:** ``0``
   - ``'velocities'``: cadence for the ``/velocities`` group. **Default:** ``0``
   - ``'forces'``: cadence for the ``/forces`` group. **Default:** ``0``
   - ``'write_mo'`` (bool): if ``True`` include molecular orbital info in ``/data``. **Default:** ``False``
+  - ``'transition_properties'`` (bool): if ``True`` include transition dipoles and
+    oscillator strengths in ``/data/excitation``. They are computed and written
+    at the ``'data'`` cadence. **Default:** ``False``
+  - ``'transition_density_matrices'``: cadence for transition density matrices under
+    ``/data/excitation/transition_density_matrices``. This can be very large for
+    big systems. **Default:** ``0``
 
 Initializing velocities
 -----------------------

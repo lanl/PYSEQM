@@ -1098,7 +1098,7 @@ class Energy(torch.nn.Module):
                             rpa=method == "rpa",
                             include_ground_state=True,
                             orbital_window=orbital_window,
-                            calculate_dipole=True,
+                            calculate_dipole=False,
                         )
                     finally:
                         molecule.active_state = saved_active_state

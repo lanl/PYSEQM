@@ -1194,6 +1194,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             nac_dot=cache_new.get("nac_dot"),
             step=i + self.step_offset,
         )
+        molecule.w = None
 
         if self._h5_writer:
             na_stride = self._h5_writer._write_nonadiabatic

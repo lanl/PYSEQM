@@ -139,6 +139,7 @@ def rcis_batch(
         H = torch.einsum("bno,bro->bnr", V[:, :vend_max], HV[:, :vend_max])
 
         davidson_iter = davidson_iter + 1
+        n_iters[~done] = davidson_iter
 
         # Diagonalize the subspace hamiltonian
         zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
@@ -208,7 +209,8 @@ def rcis_batch(
         if davidson_iter > max_iter:
             for j in range(nmol):
                 print(
-                    f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}"
+                    f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, "
+                    f"number of subspace collapses: {n_collapses[j]}"
                 )
             raise Exception("Maximum iterations reached but roots have not converged")
 

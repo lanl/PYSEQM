@@ -83,12 +83,11 @@ def _assert_output_files(prefix, molid, steps, expect_excited=False, n_states=No
                 assert "excitation" in h5["data"]
                 assert "excitation_energy" not in h5["data/excitation"]
                 assert "state_energies" in h5["data/excitation"]
-                assert "oscillator_strength" in h5["data/excitation"]
+                assert "transition_dipole" not in h5["data/excitation"]
+                assert "oscillator_strength" not in h5["data/excitation"]
                 if n_states is not None:
                     state = h5["data/excitation/state_energies"][...]
-                    osc = h5["data/excitation/oscillator_strength"][...]
                     assert state.shape[1] == (n_states + 1)
-                    assert osc.shape[1] == n_states
                     assert np.isfinite(state[:, 0]).all()
                     rel = state[:, 1 : 1 + n_states] - state[:, [0]]
                     assert np.isfinite(rel).all()
@@ -349,6 +348,31 @@ def test_md_excited_basic_batch(tmp_path, device, methanal_batch_data):
     ref = load_or_update_reference(ref_path, metrics)
     for current, expected in zip(metrics, ref):
         _assert_md_metrics(current, expected, tol_drift=5e-2, tol_slope=5e-2)
+
+
+def test_md_excited_transition_properties_opt_in(tmp_path, device, methanal_batch_data):
+    species, coordinates = methanal_batch_data
+    seqm_parameters = {
+        "method": "AM1",
+        "scf_eps": 1.0e-7,
+        "scf_converger": [1],
+        "excited_states": {"n_states": 4, "method": "cis"},
+        "active_state": 1,
+    }
+
+    molid = list(range(species.shape[0]))
+    prefix = str(tmp_path / "md_excited_transition_properties")
+    molecule = _build_molecule(device, species, coordinates, seqm_parameters)
+    output = _output_config(prefix, molid)
+    output["h5"]["transition_properties"] = True
+    md = Molecular_Dynamics_Basic(
+        seqm_parameters=seqm_parameters, timestep=0.5, Temp=300.0, output=output
+    ).to(device)
+
+    _run_md(md, molecule, steps=2)
+    with h5py.File(f"{prefix}.0.h5", "r") as h5:
+        assert h5["data/excitation/transition_dipole"].shape == (3, 4, 3)
+        assert h5["data/excitation/oscillator_strength"].shape == (3, 4)
 
 
 def test_md_excited_langevin_batch(tmp_path, device, methanal_batch_data):

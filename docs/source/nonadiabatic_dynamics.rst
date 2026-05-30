@@ -99,6 +99,7 @@ on ``S2``. All state numbers in user input are 1-based excited-state indices.
            "velocities": 10,
            "forces": 10,
            "nonadiabatic": 1,
+           "transition_properties": False,
        },
    }
 
@@ -200,8 +201,11 @@ particular, ``/data/excitation/state_energies`` stores absolute energies for
 For excited-state trajectories, output requests in ``output['h5']`` also drive
 what excited-state properties are computed:
 
-- If ``output['h5']['data'] > 0``, transition dipoles and oscillator strengths
-  are computed so they can be written under ``/data/excitation``.
+- If ``output['h5']['data'] > 0``, thermo data, ground dipoles, and
+  ``/data/excitation/state_energies`` are written.
+- If ``output['h5']['transition_properties'] = True``, transition dipoles and
+  oscillator strengths are also computed and written under ``/data/excitation``
+  at the ``data`` cadence.
 - If ``output['h5']['transition_density_matrices'] > 0``, transition density
   matrices are computed and written under
   ``/data/excitation/transition_density_matrices``.

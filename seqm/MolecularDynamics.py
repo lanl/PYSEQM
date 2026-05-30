@@ -90,6 +90,9 @@ class OutputConfig:
     def get_h5_write_tdm(self) -> int:
         return int(self.h5_config.get("transition_density_matrices", 0))
 
+    def get_h5_transition_properties(self) -> bool:
+        return bool(self.h5_config.get("transition_properties", False))
+
     def get_h5_write_nonadiabatic(self) -> int:
         return int(self.h5_config.get("nonadiabatic", 0))
 
@@ -112,8 +115,8 @@ class HDF5Writer:
         self._data_every = output_config.get_h5_data_every()
         self._write_mo = output_config.get_h5_write_mo()
         self._write_tdm = output_config.get_h5_write_tdm()
+        self._write_transition_properties = output_config.get_h5_transition_properties()
         self._write_nonadiabatic = output_config.get_h5_write_nonadiabatic()
-        self._save_relaxed_dipole = False
 
     @staticmethod
     def _n_timepoints(steps: int, stride: int, include_initial: bool = False) -> int:
@@ -154,9 +157,6 @@ class HDF5Writer:
         Tw_na = self._n_timepoints(steps, self._write_nonadiabatic, include_initial=include_initial)
 
         restricted = not bool(self.seqm_parameters.get("UHF", False))
-        self._save_relaxed_dipole = (
-            excited_states > 0 and molecule.seqm_parameters.get("scf_backward", 0) == 0
-        )
         active_states = active_state_tensor(
             molecule.active_state, int(molecule.nmol), molecule.coordinates.device
         )
@@ -176,6 +176,7 @@ class HDF5Writer:
                 "n_excited_states": R,
                 "write_mo": self._write_mo,
                 "write_tdm": bool(Tw_tdm > 0),
+                "write_transition_properties": self._write_transition_properties,
                 "write_nonadiabatic": bool(Tw_na_mol > 0),
                 "Tw_data": Tw_data,
                 "Tw_tdm": Tw_tdm,
@@ -236,6 +237,13 @@ class HDF5Writer:
                 raise RuntimeError(f"Resume requested but /{k} group not present in HDF5.")
         if self._write_tdm > 0 and Tw_tdm_exist == 0:
             raise RuntimeError("Resume: /data/excitation/transition_density_matrices not present.")
+        if self._write_transition_properties and (
+            Tw_data_exist == 0
+            or "excitation" not in h5["data"]
+            or "transition_dipole" not in h5["data/excitation"]
+            or "oscillator_strength" not in h5["data/excitation"]
+        ):
+            raise RuntimeError("Resume: transition_properties requested but not present in HDF5.")
         if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0 and Tw_na_exist == 0:
             raise RuntimeError("Resume: /data/nonadiabatic not present.")
         if self.flags[mol]["n_excited_states"] > 0 and Tw_data_exist > 0:
@@ -304,12 +312,9 @@ class HDF5Writer:
                 else:
                     gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
                 self._create_row_chunked(gd, "excitation/state_energies", (Tw_data, R + 1))
-                self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
-                self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
-
-                if self._save_relaxed_dipole:
-                    self._create_row_chunked(gd, "excitation/unrelaxed_dipole", (Tw_data, 3))
-                    self._create_row_chunked(gd, "excitation/relaxed_dipole", (Tw_data, 3))
+                if self._write_transition_properties:
+                    self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
+                    self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
 
                 if Tw_tdm > 0:
                     gtdm = gd["excitation"].create_group("transition_density_matrices")
@@ -373,14 +378,11 @@ class HDF5Writer:
                 row[0] = e0
                 row[1:] = e0 + cis
                 gd["excitation/state_energies"][i, ...] = row
-                gd["excitation/transition_dipole"][i, ...] = _to_np(molecule.transition_dipole[mol, :R])
-                gd["excitation/oscillator_strength"][i, ...] = _to_np(molecule.oscillator_strength[mol, :R])
-
-                if self._save_relaxed_dipole:
-                    gd["excitation/unrelaxed_dipole"][i, ...] = _to_np(
-                        molecule.cis_state_unrelaxed_dipole[mol]
+                if flags.get("write_transition_properties"):
+                    gd["excitation/transition_dipole"][i, ...] = _to_np(molecule.transition_dipole[mol, :R])
+                    gd["excitation/oscillator_strength"][i, ...] = _to_np(
+                        molecule.oscillator_strength[mol, :R]
                     )
-                    gd["excitation/relaxed_dipole"][i, ...] = _to_np(molecule.cis_state_relaxed_dipole[mol])
 
                 if flags.get("write_tdm") and do_tdm:
                     i_tdm = self.i_tdm[mol]
@@ -697,7 +699,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         h5 = self.output_config.h5_config if isinstance(self.output_config.h5_config, dict) else {}
         if int(h5.get("transition_density_matrices", 0)) > 0:
             exc["save_tdm"] = True
-        if int(h5.get("data", 0)) > 0:
+        if int(h5.get("data", 0)) > 0 and bool(h5.get("transition_properties", False)):
             exc["compute_transition_properties"] = True
 
     @property
