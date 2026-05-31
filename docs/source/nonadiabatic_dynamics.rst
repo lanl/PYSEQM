@@ -25,10 +25,6 @@ Which driver should I use?
   attempted from the active surface, and accepted hops rescale nuclear
   velocities along the nonadiabatic coupling vector.
 
-- ``EhrenfestDynamics`` (Not tested): mean-field dynamics. Nuclei move on the
-  population-weighted mean excited-state force. This requires all per-state
-  excited-state forces.
-
 For surface hopping, use CIS excited states. 
 
 Minimal FSSH run
@@ -139,7 +135,7 @@ Important FSSH inputs
   trajectories on different surfaces. For nonadiabatic dynamics,
   ``initial_state`` overrides ``seqm_parameters['active_state']`` during
   initialization. The ``active_state`` key is used for adiabatic excited-state
-  BOMD, but FSSH and Ehrenfest reset ``molecule.active_state`` from
+  BOMD, but FSSH resets ``molecule.active_state`` from
   ``initial_state`` before the first force evaluation.
 
   The electronic amplitudes are initialized as a pure adiabatic state. If
@@ -316,31 +312,6 @@ In HDF5 output this appears as a change in
 like an accepted event, but it is deterministic relabeling rather than a
 velocity-rescaled stochastic hop.
 
-.. Ehrenfest dynamics
-.. ------------------
-..
-.. ``EhrenfestDynamics`` uses the same electronic propagation machinery but
-.. replaces active-surface forces with population-weighted mean forces. It needs
-.. all excited-state gradients at each step:
-..
-.. .. code-block:: python
-..
-..    from seqm.api import EhrenfestDynamics
-..
-..    seqm_parameters["do_all_forces"] = True
-..
-..    dyn = EhrenfestDynamics(
-..        seqm_parameters=seqm_parameters,
-..        timestep=0.1,
-..        Temp=300.0,
-..        initial_state=2,
-..        output=output,
-..    ).to(device)
-..
-..    dyn.run(molecule, steps=1000, reuse_P=True, remove_com=None)
-..
-.. Because all per-state forces are evaluated, Ehrenfest dynamics is usually much
-.. more expensive than FSSH with active-surface forces.
 
 Current limitations and checks
 ------------------------------

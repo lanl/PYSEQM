@@ -19,7 +19,7 @@ def test_tully_cache_shapes_and_dtypes():
     assert nac_vec[(0, 1)].shape == (1, 1, 3)
 
 
-def test_tully_ehrenfest_population_norm():
+def test_tully_population_norm():
     model = TullyModel.single_crossing()
     dyn = TullyDynamics(model, timestep=0.05)
     mol = TullyMolecule(x0=-8.0, v0=2.0, mass=2000.0)

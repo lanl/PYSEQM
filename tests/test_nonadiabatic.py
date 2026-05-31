@@ -67,7 +67,6 @@ def make_dummy_fssh(nmol=1, nstates=2):
     dyn._active_states = torch.zeros((nmol,), dtype=torch.long)
     dyn.post_hop_holdoff = torch.zeros((nmol,), dtype=torch.long)
     dyn.prev_state = torch.full((nmol,), -1, dtype=torch.long)
-    dyn._force_mode = "active"
     dyn._decohere_on_hop = True
     dyn._trivial_crossing_mask = None
     dyn.hop_log = []
@@ -133,7 +132,7 @@ def test_surface_hopping_accepted_hop_updates_state_and_recomputes_force(monkeyp
     dyn._amp_phase[0, 0] = torch.tensor([0.8, 0.1, 0.3], dtype=torch.float64)
     dyn._amp_phase[0, 1] = torch.tensor([0.2, -0.2, -0.4], dtype=torch.float64)
 
-    monkeypatch.setattr(dyn, "_attempt_hop", lambda: [1])
+    monkeypatch.setattr(dyn, "_attempt_hop", lambda: torch.tensor([1], dtype=torch.long))
     monkeypatch.setattr(
         dyn,
         "_compute_NACR_for_hop",
@@ -149,13 +148,7 @@ def test_surface_hopping_accepted_hop_updates_state_and_recomputes_force(monkeyp
 
     monkeypatch.setattr(dyn, "_recompute_active_force", _fake_recompute_active_force)
 
-    dyn._after_electronic_update(
-        molecule,
-        excitation_energies=excitation_energies,
-        nac_matrix=None,
-        nac_dot=torch.zeros((1, 2, 2), dtype=torch.float64),
-        step=3,
-    )
+    dyn._after_electronic_update(molecule, excitation_energies=excitation_energies, step=3)
 
     assert dyn._active_states.tolist() == [1]
     assert len(dyn.hop_log) == 1
@@ -176,16 +169,10 @@ def test_surface_hopping_trivial_crossing_logs_hop_event(monkeypatch):
     excitation_energies = torch.tensor([[0.2, 0.5]], dtype=torch.float64)
     dyn._trivial_crossing_mask = torch.tensor([[1, 0]], dtype=torch.long)
 
-    monkeypatch.setattr(dyn, "_attempt_hop", lambda: [None])
+    monkeypatch.setattr(dyn, "_attempt_hop", lambda: torch.tensor([-1], dtype=torch.long))
     monkeypatch.setattr(dyn, "_recompute_active_force", lambda _molecule: None)
 
-    dyn._after_electronic_update(
-        molecule,
-        excitation_energies=excitation_energies,
-        nac_matrix=None,
-        nac_dot=torch.zeros((1, 2, 2), dtype=torch.float64),
-        step=5,
-    )
+    dyn._after_electronic_update(molecule, excitation_energies=excitation_energies, step=5)
 
     assert dyn._active_states.tolist() == [1]
     assert len(dyn.hop_log) == 1
@@ -205,7 +192,7 @@ def test_surface_hopping_frustrated_hop_keeps_state_and_records_failure(monkeypa
     dyn._amp_phase[0, 0] = torch.tensor([0.6, 0.3, 0.1], dtype=torch.float64)
     dyn._amp_phase[0, 1] = torch.tensor([0.4, -0.2, -0.2], dtype=torch.float64)
 
-    monkeypatch.setattr(dyn, "_attempt_hop", lambda: [1])
+    monkeypatch.setattr(dyn, "_attempt_hop", lambda: torch.tensor([1], dtype=torch.long))
     monkeypatch.setattr(
         dyn,
         "_compute_NACR_for_hop",
@@ -213,13 +200,7 @@ def test_surface_hopping_frustrated_hop_keeps_state_and_records_failure(monkeypa
     )
     monkeypatch.setattr(dyn, "_rescale_velocity_along_nac", lambda *args, **kwargs: False)
 
-    dyn._after_electronic_update(
-        molecule,
-        excitation_energies=excitation_energies,
-        nac_matrix=None,
-        nac_dot=torch.zeros((1, 2, 2), dtype=torch.float64),
-        step=1,
-    )
+    dyn._after_electronic_update(molecule, excitation_energies=excitation_energies, step=1)
 
     assert dyn._active_states.tolist() == [0]
     assert len(dyn.hop_log) == 1

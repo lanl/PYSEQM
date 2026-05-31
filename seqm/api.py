@@ -11,7 +11,7 @@ from .ElectronicStructure import Electronic_Structure
 from .io.xyz import read_xyz, read_xyz_trajectory, save_xyz
 from .MolecularDynamics import XL_BOMD, XL_ESMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
 from .Molecule import Molecule
-from .NonadiabaticDynamics import EhrenfestDynamics, NonadiabaticDynamicsBase, SurfaceHoppingDynamics
+from .NonadiabaticDynamics import NonadiabaticDynamicsBase, SurfaceHoppingDynamics
 from .optimization import geomeTRIC_optimization
 from .seqm_functions.constants import Constants
 
@@ -22,7 +22,6 @@ __all__ = [
     "XL_BOMD",
     "XL_ESMD",
     "Constants",
-    "EhrenfestDynamics",
     "Electronic_Structure",
     "EnergyXL",
     "ForceXL",

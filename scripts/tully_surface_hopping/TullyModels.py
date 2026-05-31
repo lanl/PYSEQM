@@ -3,7 +3,7 @@ from typing import Callable, Dict, Tuple
 
 import torch
 
-from seqm.NonadiabaticDynamics import EhrenfestDynamics, SurfaceHoppingDynamics
+from seqm.NonadiabaticDynamics import NonadiabaticDynamicsBase, SurfaceHoppingDynamics
 
 
 @dataclass
@@ -165,7 +165,7 @@ def _tully_seqm_params() -> Dict:
         "scf_eps": 1.0e-8,
         "scf_converger": [1],
         "excited_states": {"n_states": _TULLY_NSTATES},
-        "nonadiabatic": {"compute_nac": True},
+        "nonadiabatic": {"compute_nac": True, "detect_crossings": False},
     }
 
 
@@ -211,8 +211,6 @@ class _TullyDynamicsMixin:
 
     def _record_density_matrix(self):
         coeffs = self._coeffs_complex()
-        if coeffs is None:
-            return
         if coeffs.shape[1] < 2:
             return
         c0 = coeffs[:, 0]
@@ -223,9 +221,7 @@ class _TullyDynamicsMixin:
         rho = torch.stack((rho00, rho11, rho01), dim=1)
         self.rho_history.append(rho.detach().cpu())
 
-    def _compute_electronic_structure(
-        self, molecule, learned_parameters, compute_nac: bool = False, nac_pairs=None, **kwargs
-    ):
+    def _compute_electronic_structure(self, molecule, learned_parameters, **kwargs):
         x = molecule.coordinates[:, 0, 0]
         E, dE, nac = self.model.pot(x)
         nmol, molsize = molecule.coordinates.shape[:2]
@@ -233,7 +229,7 @@ class _TullyDynamicsMixin:
         dtype = molecule.coordinates.dtype
         delta = E[:, 1] - E[:, 0]
         molecule.cis_energies = torch.stack((torch.zeros_like(delta), delta), dim=1)
-        if self._force_mode == "active" and self._active_states is not None:
+        if self._active_states is not None:
             act = self._active_states.to(device=device)
             molecule.Etot = E[torch.arange(nmol, device=device), act]
         else:
@@ -247,16 +243,14 @@ class _TullyDynamicsMixin:
         self._active_state = exc_idx
         molecule.active_state = self._active_states + 1
         molecule.force = molecule.all_forces[:, exc_idx + 1]
-        want_nac = bool(self.compute_nac) or bool(compute_nac)
-        nac_vec = None
-        nac_dot = None
-        if want_nac:
-            nac_vec = {(0, 1): torch.zeros((nmol, molsize, 3), dtype=dtype, device=device)}
-            nac_vec[(0, 1)][:, 0, 0] = nac
-            nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=dtype, device=device)
-            vel = molecule.velocities[:, 0, 0]
-            nac_dot[:, 0, 1] = nac * vel
-            nac_dot[:, 1, 0] = -nac * vel
+        if not self.compute_nac:
+            raise RuntimeError("Tully dynamics requires NAC computation.")
+        nac_vec = {(0, 1): torch.zeros((nmol, molsize, 3), dtype=dtype, device=device)}
+        nac_vec[(0, 1)][:, 0, 0] = nac
+        nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=dtype, device=device)
+        vel = molecule.velocities[:, 0, 0]
+        nac_dot[:, 0, 1] = nac * vel
+        nac_dot[:, 1, 0] = -nac * vel
         molecule.nac = nac_vec
         molecule.nac_dot = nac_dot
         ground_energy = torch.zeros((nmol,), dtype=dtype, device=device)
@@ -265,25 +259,26 @@ class _TullyDynamicsMixin:
             "ground_energy": ground_energy,
             "nac_vec": nac_vec,
             "nac_dot": nac_dot,
-            "cis_amp": None,
         }
         # Provide a minimal esdriver args cache so FSSH hop recomputation paths have defaults.
         self._last_esdriver_args = {"learned_parameters": {}, "kwargs": {}, "esdriver_args": ()}
         return self._cache_new["energies"]
 
 
-class TullyDynamics(_TullyDynamicsMixin, EhrenfestDynamics):
-    """Ehrenfest dynamics over analytic Tully models."""
+class TullyDynamics(_TullyDynamicsMixin, NonadiabaticDynamicsBase):
+    """Nonadiabatic dynamics over analytic Tully models."""
 
     def __init__(self, model: TullyModel, *, timestep=0.05):
         self._tully_init(model, timestep=timestep)
 
-    def _after_electronic_update(
-        self, molecule, excitation_energies, nac_matrix=None, nac_dot=None, step=None
-    ):
-        super()._after_electronic_update(
-            molecule, excitation_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
-        )
+    def _after_electronic_update(self, molecule, excitation_energies, step=None):
+        del step
+        nmol = excitation_energies.shape[0]
+        idx = self._get_arange(nmol, device=molecule.coordinates.device)
+        active_idx = self._active_states.to(molecule.coordinates.device)
+        molecule.force = molecule.all_forces[idx, active_idx + 1]
+        self._current_potential = excitation_energies[idx, active_idx]
+        molecule.Etot = self._current_potential
         self._record_density_matrix()
 
 
@@ -313,12 +308,8 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
         self._current_potential = state_energies[:, exc_idx]
         molecule.Etot = self._current_potential
 
-    def _after_electronic_update(
-        self, molecule, excitation_energies, nac_matrix=None, nac_dot=None, step=None
-    ):
-        super()._after_electronic_update(
-            molecule, excitation_energies, nac_matrix=nac_matrix, nac_dot=nac_dot, step=step
-        )
+    def _after_electronic_update(self, molecule, excitation_energies, step=None):
+        super()._after_electronic_update(molecule, excitation_energies, step=step)
         self._record_density_matrix()
 
 
@@ -336,8 +327,7 @@ def run_tully(
             model = TullyModel.extended_coupling()
         else:
             raise ValueError(f"Unknown Tully model '{model}'")
-    dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-    dyn = dyn_cls(model, timestep=timestep)
+    dyn = TullyFSSH(model, timestep=timestep) if method == "fssh" else TullyDynamics(model, timestep=timestep)
     mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
     # Pre-initialize coefficients so initialization keeps the desired state
     dyn._setup_states(mol)

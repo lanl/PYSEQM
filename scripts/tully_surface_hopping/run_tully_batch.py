@@ -15,7 +15,7 @@ from typing import Dict, List, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from TullyModels import TullyDynamics, TullyFSSH, TullyModel
+from TullyModels import TullyFSSH, TullyModel
 
 
 def _set_single_thread():
@@ -100,8 +100,7 @@ def _run_velocity(
     seed: int,
 ) -> Dict:
     torch.manual_seed(seed)
-    dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-    dyn = dyn_cls(model, timestep=timestep)
+    dyn = TullyFSSH(model, timestep=timestep)
     mol = BatchedTullyMolecule(x0=x0, v0=[v0] * ntraj, mass=mass, dtype=torch.double)
     dyn._setup_states(mol)
     dyn._init_coeffs(mol)
@@ -111,7 +110,7 @@ def _run_velocity(
         dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
 
     final_x = mol.coordinates[:, 0, 0]
-    # Active state per trajectory; fallback to argmax(pop) if not set (Ehrenfest)
+    # Active state per trajectory; fallback to argmax(pop) if not set.
     if hasattr(mol, "active_state") and torch.is_tensor(mol.active_state):
         active_state = mol.active_state.view(-1).long()
     else:
@@ -325,7 +324,7 @@ def main():
     parser.add_argument("--x-points", type=int, default=400, help="Number of x points for energy plot")
     parser.add_argument("--energy-outfile", default="tully_energies.png", help="Energy plot filename")
     parser.add_argument("--model", default="1", help="Tully model: 1,2,3 or name")
-    parser.add_argument("--method", default="fssh", choices=["fssh", "ehrenfest"])
+    parser.add_argument("--method", default="fssh", choices=["fssh"])
     parser.add_argument("--velocities", nargs="+", type=float, default=None)
     parser.add_argument("--ntraj", type=int, default=2000, help="Trajectories per velocity (batched)")
     parser.add_argument("--steps", type=int, default=12000, help="Steps per trajectory")

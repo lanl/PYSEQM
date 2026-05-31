@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from .TullyModels import TullyDynamics, TullyFSSH, TullyModel, TullyMolecule
+from .TullyModels import TullyFSSH, TullyModel, TullyMolecule
 
 
 def _init_worker():
@@ -74,8 +74,7 @@ def _run_single_worker(
     """Worker-safe single trajectory run."""
     torch.manual_seed(seed)
     model = get_model(model_name)
-    dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-    dyn = dyn_cls(model, timestep=timestep, electronic_substeps=elec_substeps)
+    dyn = TullyFSSH(model, timestep=timestep, electronic_substeps=elec_substeps)
     mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
     dyn._setup_states(mol)
     dyn._init_coeffs(mol)
@@ -133,8 +132,7 @@ def run_ensemble(
         def _one(seed, v0):
             torch.manual_seed(seed)
             local_model = get_model(model_name) if isinstance(model_name, str) else model
-            dyn_cls = TullyDynamics if method == "ehrenfest" else TullyFSSH
-            dyn = dyn_cls(local_model, timestep=timestep, electronic_substeps=elec_substeps)
+            dyn = TullyFSSH(local_model, timestep=timestep, electronic_substeps=elec_substeps)
             mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
             dyn._setup_states(mol)
             dyn._init_coeffs(mol)
@@ -352,7 +350,7 @@ def main():
     parser.add_argument("--x-points", type=int, default=400, help="Number of x points for energy plot")
     parser.add_argument("--energy-outfile", default="tully_energies.png", help="Energy plot filename")
     parser.add_argument("--model", default="1", help="Tully model: 1,2,3 or name")
-    parser.add_argument("--method", default="fssh", choices=["fssh", "ehrenfest"])
+    parser.add_argument("--method", default="fssh", choices=["fssh"])
     parser.add_argument("--velocities", nargs="+", type=float, default=None)
     parser.add_argument("--ntraj", type=int, default=1000, help="Trajectories per velocity")
     parser.add_argument("--steps", type=int, default=800, help="Steps per trajectory")
