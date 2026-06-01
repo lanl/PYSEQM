@@ -90,6 +90,10 @@ class OutputConfig:
     def get_h5_write_tdm(self) -> int:
         return int(self.h5_config.get("transition_density_matrices", 0))
 
+    def get_h5_tdm_mode(self) -> str:
+        mode = str(self.h5_config.get("transition_density_matrices_mode", "full")).strip().lower()
+        return mode if mode in ("full", "diag", "atom_block_sq") else "full"
+
     def get_h5_transition_properties(self) -> bool:
         return bool(self.h5_config.get("transition_properties", False))
 
@@ -115,6 +119,7 @@ class HDF5Writer:
         self._data_every = output_config.get_h5_data_every()
         self._write_mo = output_config.get_h5_write_mo()
         self._write_tdm = output_config.get_h5_write_tdm()
+        self._tdm_mode = output_config.get_h5_tdm_mode()
         self._write_transition_properties = output_config.get_h5_transition_properties()
         self._write_nonadiabatic = output_config.get_h5_write_nonadiabatic()
 
@@ -237,6 +242,19 @@ class HDF5Writer:
                 raise RuntimeError(f"Resume requested but /{k} group not present in HDF5.")
         if self._write_tdm > 0 and Tw_tdm_exist == 0:
             raise RuntimeError("Resume: /data/excitation/transition_density_matrices not present.")
+        if self._write_tdm > 0 and Tw_tdm_exist > 0:
+            vals = h5["data/excitation/transition_density_matrices/values"]
+            expect_rank = 4 if self._tdm_mode == "full" else 3
+            if vals.ndim != expect_rank:
+                raise RuntimeError(
+                    f"Resume: transition_density_matrices shape rank mismatch (found {vals.ndim}, expected {expect_rank} for mode '{self._tdm_mode}')."
+                )
+            if self._tdm_mode == "atom_block_sq":
+                nat = self.flags[mol]["Nat"]
+                if vals.shape[-1] != nat:
+                    raise RuntimeError(
+                        f"Resume: transition_density_matrices last dimension mismatch for mode 'atom_block_sq' (found {vals.shape[-1]}, expected Nat={nat})."
+                    )
         if self._write_transition_properties and (
             Tw_data_exist == 0
             or "excitation" not in h5["data"]
@@ -319,7 +337,12 @@ class HDF5Writer:
                 if Tw_tdm > 0:
                     gtdm = gd["excitation"].create_group("transition_density_matrices")
                     self._create_row_chunked(gtdm, "steps", (Tw_tdm,), np.int64)
-                    self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol, Norb_mol))
+                    if self._tdm_mode == "diag":
+                        self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol))
+                    elif self._tdm_mode == "atom_block_sq":
+                        self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Nat_mol))
+                    else:
+                        self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol, Norb_mol))
 
                 if self._write_mo:
                     restricted = self.flags[mol]["restricted"]
@@ -347,6 +370,7 @@ class HDF5Writer:
     def append_data(self, step_idx: int, molecule, T, Ek, Ep, e_gap):
         """Append scalar data (thermo, MO, excitations)."""
         do_tdm = self._write_tdm > 0 and (step_idx % self._write_tdm) == 0
+        tdm_diag_mode = self._tdm_mode == "diag"
         write_mo = self._write_mo
         active = molecule.active_state
         active_vals = _to_np(active) if torch.is_tensor(active) else None
@@ -390,9 +414,17 @@ class HDF5Writer:
                         gtdm = gd["excitation/transition_density_matrices"]
                         gtdm["steps"][i_tdm] = int(step_idx)
                         Norb = flags["Norb"]
-                        gtdm["values"][i_tdm, ...] = _to_np(
-                            molecule.transition_density_matrices[mol, :R, :Norb, :Norb]
-                        )
+                        tdm = molecule.transition_density_matrices[mol, :R]
+                        if tdm_diag_mode:
+                            if tdm.dim() == 3:
+                                tdm = torch.diagonal(tdm[:, :Norb, :Norb], dim1=-2, dim2=-1)
+                            else:
+                                tdm = tdm[:, :Norb]
+                        elif self._tdm_mode == "atom_block_sq":
+                            tdm = tdm[:, : flags["Nat"]]
+                        else:
+                            tdm = tdm[:, :Norb, :Norb]
+                        gtdm["values"][i_tdm, ...] = _to_np(tdm)
                         self.i_tdm[mol] = i_tdm + 1
 
             if write_mo:
@@ -698,9 +730,34 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             return
         h5 = self.output_config.h5_config if isinstance(self.output_config.h5_config, dict) else {}
         if int(h5.get("transition_density_matrices", 0)) > 0:
-            exc["save_tdm"] = True
+            exc["save_tdm_output"] = True
+            mode = str(h5.get("transition_density_matrices_mode", "full")).strip().lower()
+            exc["transition_density_matrices_mode"] = (
+                mode if mode in ("full", "diag", "atom_block_sq") else "full"
+            )
         if int(h5.get("data", 0)) > 0 and bool(h5.get("transition_properties", False)):
             exc["compute_transition_properties"] = True
+
+    def _validate_h5_output_config(self):
+        h5 = self.output_config.h5_config if isinstance(self.output_config.h5_config, dict) else {}
+        data_every = int(h5.get("data", 0))
+        if data_every > 0:
+            return
+        if int(h5.get("transition_density_matrices", 0)) > 0:
+            raise ValueError(
+                "output.h5.transition_density_matrices requires output.h5.data > 0 "
+                "(TDM is written through append_data cadence)."
+            )
+        if bool(h5.get("transition_properties", False)):
+            raise ValueError(
+                "output.h5.transition_properties requires output.h5.data > 0 "
+                "(transition dipoles/oscillator strengths are written through append_data cadence)."
+            )
+        if bool(h5.get("write_mo", False)):
+            raise ValueError(
+                "output.h5.write_mo requires output.h5.data > 0 "
+                "(MO gaps are written through append_data cadence)."
+            )
 
     @property
     def output(self):
@@ -855,6 +912,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         **kwargs,
     ):
         """Initialize MD simulation."""
+        self._validate_h5_output_config()
         molecule.verbose = False  # Dont print SCF and CIS/RPA results
         self.esdriver.conservative_force.energy.md = True
 
@@ -1541,7 +1599,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
             active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device) > 0
         ):
             self.move_on_excited_state = True
-            self.esdriver.conservative_force.energy.excited_states["save_tdm"] = True
+            self.esdriver.conservative_force.energy.excited_states["save_tdm_xlbomd"] = True
 
         molecule.Electronic_entropy = torch.zeros(
             molecule.species.shape[0], device=molecule.coordinates.device

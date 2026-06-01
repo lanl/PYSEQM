@@ -170,11 +170,20 @@ def _tully_seqm_params() -> Dict:
 
 
 class _TullyDynamicsMixin:
-    def _tully_init(self, model: TullyModel, *, timestep: float, nonadiabatic: Dict = None):
+    def _tully_init(
+        self,
+        model: TullyModel,
+        *,
+        timestep: float,
+        electronic_substeps: int = None,
+        nonadiabatic: Dict = None,
+    ):
         params = _tully_seqm_params()
         if nonadiabatic:
             params["nonadiabatic"].update(nonadiabatic)
         super().__init__(params, timestep=timestep, output=_TULLY_OUTPUT)
+        if electronic_substeps is not None:
+            self._electronic_substeps = int(electronic_substeps)
         self.model = model
         self.initial_state = 1
         self._nstates = _TULLY_NSTATES
@@ -268,8 +277,8 @@ class _TullyDynamicsMixin:
 class TullyDynamics(_TullyDynamicsMixin, NonadiabaticDynamicsBase):
     """Nonadiabatic dynamics over analytic Tully models."""
 
-    def __init__(self, model: TullyModel, *, timestep=0.05):
-        self._tully_init(model, timestep=timestep)
+    def __init__(self, model: TullyModel, *, timestep=0.05, electronic_substeps: int = None):
+        self._tully_init(model, timestep=timestep, electronic_substeps=electronic_substeps)
 
     def _after_electronic_update(self, molecule, excitation_energies, step=None):
         del step
@@ -283,8 +292,8 @@ class TullyDynamics(_TullyDynamicsMixin, NonadiabaticDynamicsBase):
 
 
 class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
-    def __init__(self, model: TullyModel, *, timestep=0.05):
-        self._tully_init(model, timestep=timestep)
+    def __init__(self, model: TullyModel, *, timestep=0.05, electronic_substeps: int = None):
+        self._tully_init(model, timestep=timestep, electronic_substeps=electronic_substeps)
 
     def _compute_NACR_for_hop(self, molecule, nac_pairs):
         x = molecule.coordinates[:, 0, 0]
@@ -316,6 +325,8 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
 def run_tully(
     model: TullyModel, method="fssh", timestep=0.05, steps=200, x0=-8.0, v0=2.0, mass=2000.0, seed=0
 ):
+    if method != "fssh":
+        raise ValueError("Only FSSH Tully runs are supported.")
     torch.manual_seed(seed)
     if isinstance(model, str):
         name = model.lower()
@@ -327,7 +338,7 @@ def run_tully(
             model = TullyModel.extended_coupling()
         else:
             raise ValueError(f"Unknown Tully model '{model}'")
-    dyn = TullyFSSH(model, timestep=timestep) if method == "fssh" else TullyDynamics(model, timestep=timestep)
+    dyn = TullyFSSH(model, timestep=timestep)
     mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
     # Pre-initialize coefficients so initialization keeps the desired state
     dyn._setup_states(mol)

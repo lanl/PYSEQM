@@ -124,44 +124,51 @@ def run_ensemble(
     workers: int = 1,
     collect_density: bool = False,
 ) -> List[Dict]:
+    if method != "fssh":
+        raise ValueError("Only FSSH Tully runs are supported.")
     model_name = model if isinstance(model, str) else getattr(model, "name", None)
+    if model_name is None:
+        raise ValueError("Tully model must be named.")
+
+    def _one(seed, v0):
+        torch.manual_seed(seed)
+        local_model = (
+            get_model(model_name) if isinstance(model_name, str) and model_name != "custom" else model
+        )
+        dyn = TullyFSSH(local_model, timestep=timestep, electronic_substeps=elec_substeps)
+        mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
+        dyn._setup_states(mol)
+        dyn._init_coeffs(mol)
+        if collect_density and hasattr(dyn, "_reset_density_history"):
+            dyn._reset_density_history()
+        mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
+        with torch.no_grad():
+            dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
+            x_final = float(mol.coordinates[0, 0, 0])
+            is_trans = _classify_exit(x_final, x0)
+            active_state = None
+            if hasattr(mol, "active_state"):
+                act = mol.active_state
+                if torch.is_tensor(act):
+                    active_state = int(act.view(-1)[0].item())
+                else:
+                    active_state = int(act)
+            if active_state is None and hasattr(dyn, "populations"):
+                active_state = int(torch.argmax(dyn.populations[0]).item())
+            if active_state is not None:
+                if active_state == 0:
+                    raise RuntimeError(
+                        "Encountered ground-state label in Tully dynamics; expected excited-state indices only."
+                    )
+                active_state = active_state - 1
+            rho_hist = None
+            if collect_density and getattr(dyn, "rho_history", None):
+                rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
+            return is_trans, active_state, rho_hist
+
     if workers > 1 and not isinstance(model, str):
         if model_name is None or model_name == "custom":
             raise ValueError("Parallel runs require a named built-in Tully model (1,2,3).")
-
-        def _one(seed, v0):
-            torch.manual_seed(seed)
-            local_model = get_model(model_name) if isinstance(model_name, str) else model
-            dyn = TullyFSSH(local_model, timestep=timestep, electronic_substeps=elec_substeps)
-            mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
-            dyn._setup_states(mol)
-            dyn._init_coeffs(mol)
-            if collect_density and hasattr(dyn, "_reset_density_history"):
-                dyn._reset_density_history()
-            mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
-            with torch.no_grad():
-                dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
-                x_final = float(mol.coordinates[0, 0, 0])
-                is_trans = _classify_exit(x_final, x0)
-                active_state = None
-                if hasattr(mol, "active_state"):
-                    act = mol.active_state
-                    if torch.is_tensor(act):
-                        active_state = int(act.view(-1)[0].item())
-                    else:
-                        active_state = int(act)
-                if active_state is None and hasattr(dyn, "populations"):
-                    active_state = int(torch.argmax(dyn.populations[0]).item())
-                if active_state is not None:
-                    if active_state == 0:
-                        raise RuntimeError(
-                            "Encountered ground-state label in Tully dynamics; expected excited-state indices only."
-                        )
-                    active_state = active_state - 1
-                rho_hist = None
-                if collect_density and getattr(dyn, "rho_history", None):
-                    rho_hist = torch.stack(dyn.rho_history, dim=0).squeeze(1).numpy()
-                return is_trans, active_state, rho_hist
 
     stats = []
     for v0 in velocities:

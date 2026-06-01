@@ -10,6 +10,39 @@ from .dipole import calc_dipole_matrix
 # from seqm.seqm_functions.pack import packone, unpackone
 
 
+def _store_tdm_by_mode(mol, R, tdm_mode, nHeavy, nHydro):
+    if tdm_mode == "diag":
+        mol.transition_density_matrices = torch.diagonal(R, dim1=-2, dim2=-1).clone()
+        return
+    if tdm_mode == "atom_block_sq":
+        nheavy_i = int(nHeavy.item()) if torch.is_tensor(nHeavy) else int(nHeavy)
+        nhydro_i = int(nHydro.item()) if torch.is_tensor(nHydro) else int(nHydro)
+        nat = nheavy_i + nhydro_i
+        vals = torch.empty((R.shape[0], R.shape[1], nat), dtype=R.dtype, device=R.device)
+        h0 = 4 * nheavy_i
+        if nheavy_i > 0:
+            Rh = R[:, :, :h0, :h0].reshape(R.shape[0], R.shape[1], nheavy_i, 4, nheavy_i, 4)
+            blk = torch.diagonal(Rh, dim1=2, dim2=4).permute(0, 1, 4, 2, 3)
+            vals[:, :, :nheavy_i] = torch.square(blk).sum(dim=(-1, -2))
+        if nhydro_i > 0:
+            Rhh = R[:, :, h0 : (h0 + nhydro_i), h0 : (h0 + nhydro_i)]
+            vals[:, :, nheavy_i:] = torch.square(torch.diagonal(Rhh, dim1=-2, dim2=-1))
+        mol.transition_density_matrices = vals
+        return
+    mol.transition_density_matrices = R.clone()
+
+
+def _resolve_tdm_mode(mol):
+    exc_cfg = mol.seqm_parameters.get("excited_states", {}) if hasattr(mol, "seqm_parameters") else {}
+    tdm_mode = str(exc_cfg.get("transition_density_matrices_mode", "full")).strip().lower()
+    if tdm_mode not in ("full", "diag", "atom_block_sq"):
+        tdm_mode = "full"
+    # XL-BOMD propagation requires full in-memory TDM.
+    if bool(exc_cfg.get("save_tdm_xlbomd", False)):
+        return "full"
+    return tdm_mode
+
+
 def rcis_batch(
     mol,
     w,
@@ -149,14 +182,15 @@ def rcis_batch(
 
         # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
-        H = torch.einsum("bno,bro->bnr", V[:, :vend_max], HV[:, :vend_max])
+        active_mask = ~done
+        H = torch.empty(nmol, vend_max, vend_max, dtype=dtype, device=device)
+        H[active_mask] = torch.einsum("bno,bro->bnr", V[active_mask, :vend_max], HV[active_mask, :vend_max])
 
         davidson_iter = davidson_iter + 1
-        n_iters[~done] = davidson_iter
+        n_iters[active_mask] = davidson_iter
 
         # Diagonalize the subspace hamiltonian
-        zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
-        e_vec_n = get_subspace_eig_batched(H, nroots, zero_pad, e_val_n, done, nonorthogonal)
+        e_vec_n = get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal)
 
         # Compute CIS amplitudes and the residual
         amplitudes = torch.einsum("bvr,bvo->bro", e_vec_n, V[:, :vend_max, :])
@@ -438,11 +472,13 @@ def makeA_pi_symm_batch(mol, P0, w):
 
     grad_enabled = torch.is_grad_enabled()
 
+    Fdiag = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, dtype=dtype, device=device)
+
     PA = P[:, :, maskd[idxi]][..., tri_i, tri_j] * weight
     sumA = torch.zeros(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
     sumA[..., tri_i, tri_j] = torch.einsum("nrps,npsS->nrpS", PA, w)
     del PA
-    F.index_add_(2, maskd[idxj], sumA)
+    Fdiag.index_add_(2, idxj, sumA)
 
     if grad_enabled:
         sum_shape = sumA.shape
@@ -455,7 +491,7 @@ def makeA_pi_symm_batch(mol, P0, w):
     PB = P[:, :, maskd[idxj]][..., tri_i, tri_j] * weight
     sumB[..., tri_i, tri_j] = torch.einsum("nrpS,npsS->nrps", PB, w)
     del PB
-    F.index_add_(2, maskd[idxi], sumB)
+    Fdiag.index_add_(2, idxi, sumB)
 
     if grad_enabled:
         sum_shape = sumB.shape
@@ -467,8 +503,8 @@ def makeA_pi_symm_batch(mol, P0, w):
     for i in range(4):
         for j in range(4):
             sumK[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", Pp, w[..., ind[i], :][..., :, ind[j]])
-    F.index_add_(2, mask, sumK)
-    F[:, :, mask_l] += sumK.transpose(3, 4)
+    F[:, :, mask] = sumK
+    F[:, :, mask_l] = sumK.transpose(3, 4)
     del Pp
 
     Pdiag = P[:, :, maskd]
@@ -482,28 +518,26 @@ def makeA_pi_symm_batch(mol, P0, w):
     hsp = mol.parameters["h_sp"].view(nmol, -1)
 
     del sumK
-    F2e1c = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, device=device, dtype=dtype)
 
-    F2e1c[..., 0, 0] = 0.5 * Pdiag[..., 0, 0] * gss.unsqueeze(1) + Pptot_diag * (gsp - 0.5 * hsp).unsqueeze(1)
+    Fdiag[..., 0, 0] += 0.5 * Pdiag[..., 0, 0] * gss.unsqueeze(1) + Pptot_diag * (gsp - 0.5 * hsp).unsqueeze(
+        1
+    )
     for i in range(1, 4):
         # (p,p)
-        F2e1c[..., i, i] = (
+        Fdiag[..., i, i] += (
             Pdiag[..., 0, 0] * (gsp - 0.5 * hsp).unsqueeze(1)
             + 0.5 * Pdiag[..., i, i] * gpp.unsqueeze(1)
             + (Pptot_diag - Pdiag[..., i, i]) * (1.25 * gp2 - 0.25 * gpp).unsqueeze(1)
         )
         # (s,p) = (p,s) upper triangle
-        F2e1c[..., 0, i] = Pdiag[..., 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
+        Fdiag[..., 0, i] += Pdiag[..., 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
     # (p,p*)
     for i, j in [(1, 2), (1, 3), (2, 3)]:
-        F2e1c[..., i, j] = Pdiag[..., i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
+        Fdiag[..., i, j] += Pdiag[..., i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
     del Pdiag, Pptot_diag
 
-    # F.add_(F2e1c)
-    # F2e1c.add_(F2e1c.triu(1).transpose(3,4))
-    F2e1c += F[:, :, maskd]
-    F2e1c.add_(F2e1c.triu(1).transpose(3, 4))
-    F[:, :, maskd] = F2e1c
+    Fdiag.add_(Fdiag.triu(1).transpose(3, 4))
+    F[:, :, maskd] = Fdiag
     # F[:,:,maskd] += F2e1c
     # F[:,:,maskd] += F[:,:,maskd].triu(1).transpose(3,4)
 
@@ -569,7 +603,7 @@ def getMaxSubspacesize(dtype, device, nov, nmol=1, num_big_matrices=2):
     return min(n_calculated, nov)
 
 
-def get_subspace_eig_batched(H, nroots, zero_pad, e_val_n, done, nonorthogonal):
+def get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal):
     if nonorthogonal:
         raise NotImplementedError("Non-orthogonal davidson not yet implemented")
         # # Need to solve the generalized eigenvalue problem
@@ -600,19 +634,16 @@ def get_subspace_eig_batched(H, nroots, zero_pad, e_val_n, done, nonorthogonal):
         # r_evec = D_inv_sqrt_L_inv_T @ X[:,:nroots]
 
     else:
-        r_eval, r_evec = torch.linalg.eigh(H[~done])  # find the eigenvalues and the eigenvectors
-
         nmol, subspacesize = H.shape[0], H.shape[1]
         e_vec_n = torch.zeros(nmol, subspacesize, nroots, device=H.device, dtype=H.dtype)
-
         active_indices = torch.nonzero(~done, as_tuple=False).squeeze(1)
 
-        # Update eigenvalues and eigenvectors for each active molecule.
-        for j, mol_idx in enumerate(active_indices):
-            start_idx = int(zero_pad[mol_idx].item())
-            end_idx = start_idx + nroots
-            e_val_n[mol_idx] = r_eval[j, start_idx:end_idx]
-            e_vec_n[mol_idx] = r_evec[j, :, start_idx:end_idx]
+        for v in torch.unique(vend[active_indices]):
+            v_int = int(v.item())
+            group = active_indices[vend[active_indices] == v]
+            r_eval, r_evec = torch.linalg.eigh(H[group, :v_int, :v_int])
+            e_val_n[group] = r_eval[:, :nroots]
+            e_vec_n[group, :v_int] = r_evec[:, :, :nroots]
         return e_vec_n
 
 
@@ -664,15 +695,28 @@ def rcis_analysis(
         mol.transition_dipole = None
         mol.oscillator_strength = None
         return
+
     if not (
         mol.verbose
         or save_tdm
         or torch.any(active_state_tensor(mol.active_state, int(mol.nmol), mol.coordinates.device) > 0)
     ):
         return
-    dipole_mat = calc_dipole_matrix(mol)
+
+    tdm_mode = _resolve_tdm_mode(mol)
+
+    dipole_mat = calc_dipole_matrix(mol) if (compute_transition_properties or mol.verbose) else None
     transition_dipole, oscillator_strength = calc_transition_dipoles(
-        mol, amplitudes, excitation_energies, nroots, dipole_mat, rpa, orbital_window, save_tdm
+        mol,
+        amplitudes,
+        excitation_energies,
+        nroots,
+        dipole_mat,
+        rpa,
+        orbital_window,
+        save_tdm,
+        compute_transition_properties=compute_transition_properties,
+        tdm_mode=tdm_mode,
     )
     if mol.verbose:
         print_rcis_analysis(excitation_energies, transition_dipole, oscillator_strength)
@@ -680,7 +724,16 @@ def rcis_analysis(
 
 
 def calc_transition_dipoles(
-    mol, amplitudes, excitation_energies, nroots, dipole_mat, rpa=False, orbital_window=None, save_tdm=False
+    mol,
+    amplitudes,
+    excitation_energies,
+    nroots,
+    dipole_mat,
+    rpa=False,
+    orbital_window=None,
+    save_tdm=False,
+    compute_transition_properties=True,
+    tdm_mode="full",
 ):
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window)
 
@@ -693,17 +746,21 @@ def calc_transition_dipoles(
     nHeavy = mol.nHeavy[0]
     nHydro = mol.nHydro[0]
     norb = mol.norb[0]
-    dipole_mat_packed = packone_batch(
-        dipole_mat.view(3 * mol.nmol, 4 * mol.molsize, 4 * mol.molsize), 4 * nHeavy, nHydro, norb
-    ).view(mol.nmol, 3, norb, norb)
 
     # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a
     R = torch.einsum("bmi,bria,bna->brmn", Cocc, amp_ia_X, Cvirt)
     if rpa:
         R += torch.einsum("bma,bria,bni->brmn", Cvirt, amp_ia_Y, Cocc)
 
+    do_transition_props = bool(compute_transition_properties or mol.verbose)
     if save_tdm:
-        mol.transition_density_matrices = R.clone()
+        _store_tdm_by_mode(mol, R, tdm_mode, nHeavy, nHydro)
+    if not do_transition_props:
+        return None, None
+
+    dipole_mat_packed = packone_batch(
+        dipole_mat.view(3 * mol.nmol, 4 * mol.molsize, 4 * mol.molsize), 4 * nHeavy, nHydro, norb
+    ).view(mol.nmol, 3, norb, norb)
     # Transition dipole in AU as calculated in NEXMD
     transition_dipole = torch.einsum("brmn,bdmn->brd", R, dipole_mat_packed) * math.sqrt(2.0) / a0
     hartree = 27.2113962  # value used in NEXMD

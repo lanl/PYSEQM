@@ -551,6 +551,8 @@ class Energy(torch.nn.Module):
         if self.excited_states is not None:
             self.excited_states.setdefault("make_best_guess", True)
             self.excited_states.setdefault("save_tdm", False)
+            self.excited_states.setdefault("save_tdm_xlbomd", False)
+            self.excited_states.setdefault("save_tdm_output", False)
             self.excited_states.setdefault("compute_transition_properties", False)
         # Resolve NAC configuration once at construction
         nroots = None
@@ -979,6 +981,10 @@ class Energy(torch.nn.Module):
             method = self.excited_states["method"].lower()
             orbital_window = self.excited_states.get("orbital_window", None)
             best_guess_from_prev = self.excited_states["make_best_guess"]
+            need_tdm = any(
+                bool(self.excited_states.get(k, False))
+                for k in ("save_tdm_xlbomd", "save_tdm_output", "save_tdm")
+            )
             prev_cis_amp = molecule.cis_amplitudes if hasattr(molecule, "cis_amplitudes") else None
             with torch.no_grad():
                 if all_same_mols:
@@ -994,7 +1000,7 @@ class Energy(torch.nn.Module):
                             best_guess_from_prev=best_guess_from_prev,
                             init_amplitude_guess=cis_amp,
                             orbital_window=orbital_window,
-                            save_tdm=self.excited_states["save_tdm"],
+                            save_tdm=need_tdm,
                             compute_transition_properties=self.excited_states[
                                 "compute_transition_properties"
                             ],

@@ -100,7 +100,7 @@ def _run_velocity(
     seed: int,
 ) -> Dict:
     torch.manual_seed(seed)
-    dyn = TullyFSSH(model, timestep=timestep)
+    dyn = TullyFSSH(model, timestep=timestep, electronic_substeps=elec_substeps)
     mol = BatchedTullyMolecule(x0=x0, v0=[v0] * ntraj, mass=mass, dtype=torch.double)
     dyn._setup_states(mol)
     dyn._init_coeffs(mol)
