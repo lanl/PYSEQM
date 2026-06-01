@@ -112,6 +112,8 @@ def rcis_batch(
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
+    mol_idx = torch.arange(nmol, device=device)
+    subspace_idx = torch.arange(maxSubspacesize, device=device)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -120,19 +122,30 @@ def rcis_batch(
     while davidson_iter <= max_iter:  # Davidson loop
         # Determine current subspace dimensions per molecule
         delta = vend - vstart
+        delta[done] = 0
         max_v = int(delta.max().item())
-        rel_idx = torch.arange(max_v, device=device).unsqueeze(0)  # (1, max_v)
+        if max_v == 0:
+            break
+        rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
         abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
         mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(-1, max_v)
+        batch_idx = mol_idx.unsqueeze(1).expand(-1, max_v)
 
-        # Gather current subspace vectors into V_batched
-        V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-        V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
+        # Gather current subspace vectors into V_batched. If every active molecule
+        # has max_v new vectors, avoid zero-padding and boolean scatter.
+        dense_gather = bool(torch.all(mask).item())
+        if dense_gather:
+            V_batched = V[batch_idx, abs_idx, :]
+        else:
+            V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
+            V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
         HV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
-        HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
+        if dense_gather:
+            HV[batch_idx, abs_idx, :] = HV_batch
+        else:
+            HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
 
         # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
@@ -147,9 +160,8 @@ def rcis_batch(
 
         # Compute CIS amplitudes and the residual
         amplitudes = torch.einsum("bvr,bvo->bro", e_vec_n, V[:, :vend_max, :])
-        residual = torch.einsum(
-            "bvr,bvo->bro", e_vec_n, HV[:, :vend_max, :]
-        ) - amplitudes * e_val_n.unsqueeze(2)
+        residual = torch.einsum("bvr,bvo->bro", e_vec_n, HV[:, :vend_max, :])
+        residual.addcmul_(amplitudes, e_val_n.unsqueeze(2), value=-1.0)
         # resid_norm = torch.norm(residual,dim=2)
         resid_norm = torch.linalg.vector_norm(residual, dim=2, ord=torch.inf)
         roots_not_converged = resid_norm > root_tol
@@ -283,7 +295,10 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
             if makeB:
                 B[:, start:end, :] = torch.einsum("bmi,brnm,bna->bria", Cocc, F0, Cvirt) * 2.0
 
-    A += Via * ea_ei.unsqueeze(1)
+    if torch.is_grad_enabled():
+        A += Via * ea_ei.unsqueeze(1)
+    else:
+        A.addcmul_(Via, ea_ei.unsqueeze(1))
     A = A.reshape(nmol, nNewRoots, -1)
 
     if makeB:
@@ -291,6 +306,23 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
         return A, B
 
     return A
+
+
+def _rcis_constant_tensors(mol, dtype, device):
+    cache = getattr(mol, "_rcis_batch_constant_tensors", {})
+    key = (device.type, device.index, dtype)
+    if key not in cache:
+        tri_i = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], dtype=torch.long, device=device)
+        tri_j = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], dtype=torch.long, device=device)
+        weight = torch.tensor(
+            [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
+        ).reshape((-1, 10))
+        ind = torch.tensor(
+            [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.long, device=device
+        )
+        cache[key] = tri_i, tri_j, weight, ind
+        mol._rcis_batch_constant_tensors = cache
+    return cache[key]
 
 
 def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
@@ -327,19 +359,12 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
     F = makeA_pi_symm_batch(mol, P0, w)
 
     if not allSymmetric:
-        P0_antisym = 0.5 * (P0 - P0.transpose(2, 3))
-        P_anti = (
-            P0_antisym.reshape(nmol, nnewRoots, molsize, 4, molsize, 4)
-            .transpose(3, 4)
-            .reshape(nmol, nnewRoots, molsize * molsize, 4, 4)
-        )
-        del P0_antisym, P0
+        P0_blocks = P0.reshape(nmol, nnewRoots, molsize, 4, molsize, 4).transpose(3, 4)
+        P_anti = 0.5 * (P0_blocks - P0_blocks.transpose(2, 3).transpose(4, 5))
+        P_anti = P_anti.reshape(nmol, nnewRoots, molsize * molsize, 4, 4)
+        del P0_blocks, P0
 
-        # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-        #   0,     1         2       3       4         5       6      7         8        9
-        ind = torch.tensor(
-            [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-        )
+        _, _, _, ind = _rcis_constant_tensors(mol, dtype, device)
         sumK = torch.empty(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
         Pp = P_anti[:, :, mask]
         for i in range(4):
@@ -388,8 +413,6 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
 
 
 def makeA_pi_symm_batch(mol, P0, w):
-    P0_sym = 0.5 * (P0 + P0.transpose(2, 3))
-
     molsize = mol.molsize
     nnewRoots = P0.shape[1]
     dtype = P0.dtype
@@ -403,73 +426,53 @@ def makeA_pi_symm_batch(mol, P0, w):
     idxj = mol.idxj[:npairs_per_mol]
     nmol = mol.nmol
 
-    P = (
-        P0_sym.reshape(nmol, nnewRoots, molsize, 4, molsize, 4)
-        .transpose(3, 4)
-        .reshape(nmol, nnewRoots, molsize * molsize, 4, 4)
-    )
-    del P0_sym
+    P0_blocks = P0.reshape(nmol, nnewRoots, molsize, 4, molsize, 4).transpose(3, 4)
+    P = 0.5 * (P0_blocks + P0_blocks.transpose(2, 3).transpose(4, 5))
+    P = P.reshape(nmol, nnewRoots, molsize * molsize, 4, 4)
+    del P0_blocks
     F = torch.zeros_like(P)
     # print_memory_usage("After P_symm, and Fock_symm")
 
     # Calculate Coulomb contribution J
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape((-1, 10))
+    tri_i, tri_j, weight, ind = _rcis_constant_tensors(mol, dtype, device)
 
-    Pdiag_symmetrized = P[:, :, maskd]
+    grad_enabled = torch.is_grad_enabled()
 
-    PA = (
-        Pdiag_symmetrized[:, :, idxi][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    )  # .unsqueeze(-1)
+    PA = P[:, :, maskd[idxi]][..., tri_i, tri_j] * weight
     sumA = torch.zeros(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
-    sumA[..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)] = torch.einsum(
-        "nrps,npsS->nrpS", PA, w
-    )  # suma = torch.sum(PA*w[:,None,...],dim=3)
-    # sumA[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.sum(PA*w[:,None,...],dim=3)
+    sumA[..., tri_i, tri_j] = torch.einsum("nrps,npsS->nrpS", PA, w)
     del PA
     F.index_add_(2, maskd[idxj], sumA)
 
-    sumB = torch.zeros_like(sumA)
-    del sumA
-    PB = (
-        Pdiag_symmetrized[:, :, idxj][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    )  # .unsqueeze(-2)
-    del Pdiag_symmetrized
-    sumB[..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)] = torch.einsum(
-        "nrpS,npsS->nrps", PB, w
-    )  # torch.sum(PB*w[:,None,...],dim=4)
-    # sumB[...,(0,0,1,0,1,2,0,1,2,3),(0,1,1,2,2,2,3,3,3,3)] = torch.sum(PB*w[:,None,...],dim=4)
+    if grad_enabled:
+        sum_shape = sumA.shape
+        del sumA
+        sumB = torch.zeros(sum_shape, dtype=dtype, device=device)
+    else:
+        sumB = sumA
+        sumB.zero_()
+
+    PB = P[:, :, maskd[idxj]][..., tri_i, tri_j] * weight
+    sumB[..., tri_i, tri_j] = torch.einsum("nrpS,npsS->nrps", PB, w)
     del PB
     F.index_add_(2, maskd[idxi], sumB)
 
-    # Calculate the Exchange contribution
-    # mu, nu in A
-    # lambda, sigma in B
-    # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-
-    sumK = torch.empty_like(sumB)
-    del sumB
-
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    #   0,     1         2       3       4         5       6      7         8        9
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
-    # Pp =P[mask], P_{mu \in A, lambda \in B}
-    Pp = P[:, :, mask]  # nmol, nroots, npairs, 4, 4
+    if grad_enabled:
+        sum_shape = sumB.shape
+        del sumB
+        sumK = torch.empty(sum_shape, dtype=dtype, device=device)
+    else:
+        sumK = sumB
+    Pp = P[:, :, mask]
     for i in range(4):
         for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-            # sumK[...,i,j] = -0.5*torch.sum(Pp*w[...,ind[i],:][...,:,ind[j]].unsqueeze(1),dim=(3,4))
             sumK[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", Pp, w[..., ind[i], :][..., :, ind[j]])
     F.index_add_(2, mask, sumK)
     F[:, :, mask_l] += sumK.transpose(3, 4)
     del Pp
 
-    Pptot = P[..., 1, 1] + P[..., 2, 2] + P[..., 3, 3]
+    Pdiag = P[:, :, maskd]
+    Pptot_diag = Pdiag[..., 1, 1] + Pdiag[..., 2, 2] + Pdiag[..., 3, 3]
 
     # One center-two electron integrals
     gss = mol.parameters["g_ss"].view(nmol, -1)
@@ -478,23 +481,23 @@ def makeA_pi_symm_batch(mol, P0, w):
     gp2 = mol.parameters["g_p2"].view(nmol, -1)
     hsp = mol.parameters["h_sp"].view(nmol, -1)
 
+    del sumK
     F2e1c = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, device=device, dtype=dtype)
 
-    F2e1c[..., 0, 0] = 0.5 * P[..., maskd, 0, 0] * gss.unsqueeze(1) + Pptot[..., maskd] * (
-        gsp - 0.5 * hsp
-    ).unsqueeze(1)
+    F2e1c[..., 0, 0] = 0.5 * Pdiag[..., 0, 0] * gss.unsqueeze(1) + Pptot_diag * (gsp - 0.5 * hsp).unsqueeze(1)
     for i in range(1, 4):
         # (p,p)
         F2e1c[..., i, i] = (
-            P[..., maskd, 0, 0] * (gsp - 0.5 * hsp).unsqueeze(1)
-            + 0.5 * P[..., maskd, i, i] * gpp.unsqueeze(1)
-            + (Pptot[..., maskd] - P[..., maskd, i, i]) * (1.25 * gp2 - 0.25 * gpp).unsqueeze(1)
+            Pdiag[..., 0, 0] * (gsp - 0.5 * hsp).unsqueeze(1)
+            + 0.5 * Pdiag[..., i, i] * gpp.unsqueeze(1)
+            + (Pptot_diag - Pdiag[..., i, i]) * (1.25 * gp2 - 0.25 * gpp).unsqueeze(1)
         )
         # (s,p) = (p,s) upper triangle
-        F2e1c[..., 0, i] = P[..., maskd, 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
+        F2e1c[..., 0, i] = Pdiag[..., 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
     # (p,p*)
     for i, j in [(1, 2), (1, 3), (2, 3)]:
-        F2e1c[..., i, j] = P[..., maskd, i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
+        F2e1c[..., i, j] = Pdiag[..., i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
+    del Pdiag, Pptot_diag
 
     # F.add_(F2e1c)
     # F2e1c.add_(F2e1c.triu(1).transpose(3,4))
@@ -625,7 +628,7 @@ def unpackone_batch(x0, nho, nHydro, size):
 
 
 def packone_batch(x, nho, nHydro, norb):
-    x0 = torch.zeros((x.shape[0], norb, norb), dtype=x.dtype, device=x.device)
+    x0 = torch.empty((x.shape[0], norb, norb), dtype=x.dtype, device=x.device)
     x0[:, :nho, :nho] = x[:, :nho, :nho]
     x0[:, :nho, nho : (nho + nHydro)] = x[:, :nho, nho : (nho + 4 * nHydro) : 4]
     x0[:, nho : (nho + nHydro), nho : (nho + nHydro)] = x[
@@ -800,7 +803,11 @@ def make_guess(ea_ei, nroots, maxSubspacesize, V, nmol, nov):
         else max(0, maxSubspacesize - 2 * nroots)
     )
     nstart = nroots + extra_subspace
-    V[torch.arange(nmol).unsqueeze(1), torch.arange(nstart), sortedidx[:, :nstart]] = 1.0
+    V[
+        torch.arange(nmol, device=V.device).unsqueeze(1),
+        torch.arange(nstart, device=V.device),
+        sortedidx[:, :nstart],
+    ] = 1.0
 
     return nstart, nroots
 
