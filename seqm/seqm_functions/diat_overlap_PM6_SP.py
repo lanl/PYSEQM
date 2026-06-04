@@ -480,41 +480,42 @@ def aintgs(x0, jcall):
     # or pairs for same atom, then rab = 0
     t = 1.0 / th.tensor(0.0, dtype=dtype, device=device)
     x = th.where(x0 != 0, x0, t).reshape(-1, 1)
-    a1 = th.exp(-x) / x
+    inv_x = x.reciprocal()
+    a1 = th.exp(-x) * inv_x
 
-    a2 = a1 + a1 / x
+    a2 = a1 + a1 * inv_x
     # jcall >= 2
-    a3 = a1 + 2.0 * a2 / x
+    a3 = a1 + 2.0 * a2 * inv_x
     # jcall >= 3
     jcallp3 = (jcall >= 3).reshape((-1, 1))
-    a4 = th.where(jcallp3, a1 + 3.0 * a3 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a4 = th.where(jcallp3, a1 + 3.0 * a3 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
     # jcall >=4
     jcallp4 = (jcall >= 4).reshape((-1, 1))
-    a5 = th.where(jcallp4, a1 + 4.0 * a4 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a5 = th.where(jcallp4, a1 + 4.0 * a4 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp5 = (jcall >= 5).reshape((-1, 1))
-    a6 = th.where(jcallp5, a1 + 5.0 * a5 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a6 = th.where(jcallp5, a1 + 5.0 * a5 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp6 = (jcall >= 6).reshape((-1, 1))
-    a7 = th.where(jcallp6, a1 + 6.0 * a6 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a7 = th.where(jcallp6, a1 + 6.0 * a6 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp7 = (jcall >= 7).reshape((-1, 1))
-    a8 = th.where(jcallp7, a1 + 7.0 * a7 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a8 = th.where(jcallp7, a1 + 7.0 * a7 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp8 = (jcall >= 8).reshape((-1, 1))
-    a9 = th.where(jcallp8, a1 + 8.0 * a8 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a9 = th.where(jcallp8, a1 + 8.0 * a8 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp9 = (jcall >= 9).reshape((-1, 1))
-    a10 = th.where(jcallp9, a1 + 9.0 * a9 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a10 = th.where(jcallp9, a1 + 9.0 * a9 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp10 = (jcall >= 10).reshape((-1, 1))
-    a11 = th.where(jcallp10, a1 + 10.0 * a10 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a11 = th.where(jcallp10, a1 + 10.0 * a10 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp11 = (jcall >= 11).reshape((-1, 1))
-    a12 = th.where(jcallp11, a1 + 11.0 * a11 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a12 = th.where(jcallp11, a1 + 11.0 * a11 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     jcallp12 = (jcall >= 12).reshape((-1, 1))
-    a13 = th.where(jcallp12, a1 + 12.0 * a12 / x, th.tensor(0.0, dtype=dtype, device=device))
+    a13 = th.where(jcallp12, a1 + 12.0 * a12 * inv_x, th.tensor(0.0, dtype=dtype, device=device))
 
     return th.cat((a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13), dim=1)
 
@@ -542,11 +543,12 @@ def bintgs(x0, jcall):
     # tx = th.exp(x)/x    # exp(x)/x  #not working with backward
     # tx = th.where(cond1, th.exp(x)/x, th.tensor(0.0,dtype=dtype)) # not working with backward
     x_cond1 = x[cond1]
-    tx_cond1 = th.exp(x_cond1) / x_cond1
+    inv_x_cond1 = x_cond1.reciprocal()
+    tx_cond1 = th.exp(x_cond1) * inv_x_cond1
 
     # tmx = -th.exp(-x)/x # -exp(-x)/x #not working with backward
     # tmx = th.where(cond1, -th.exp(-x)/x,  th.tensor(0.0,dtype=dtype)) #not working with backward
-    tmx_cond1 = -th.exp(-x_cond1) / x_cond1
+    tmx_cond1 = -th.exp(-x_cond1) * inv_x_cond1
     # b1(x=0)=2, b2(x=0)=0,b3(x=0)=2/3,b4(x=0)=0,b5(x=0)=2/5
 
     # do some test to choose which one is faster
@@ -578,40 +580,40 @@ def bintgs(x0, jcall):
     b1_cond1 = tx_cond1 + tmx_cond1
     b1[cond1] = b1_cond1
 
-    b2_cond1 = -tx_cond1 + tmx_cond1 + b1_cond1 / x_cond1
+    b2_cond1 = -tx_cond1 + tmx_cond1 + b1_cond1 * inv_x_cond1
     b2[cond1] = b2_cond1
 
-    b3_cond1 = tx_cond1 + tmx_cond1 + 2.0 * b2_cond1 / x_cond1
+    b3_cond1 = tx_cond1 + tmx_cond1 + 2.0 * b2_cond1 * inv_x_cond1
     b3[cond1] = b3_cond1
 
-    b4_cond1 = -tx_cond1 + tmx_cond1 + 3.0 * b3_cond1 / x_cond1
+    b4_cond1 = -tx_cond1 + tmx_cond1 + 3.0 * b3_cond1 * inv_x_cond1
     b4[cond1] = b4_cond1
 
-    b5_cond1 = tx_cond1 + tmx_cond1 + 4.0 * b4_cond1 / x_cond1
+    b5_cond1 = tx_cond1 + tmx_cond1 + 4.0 * b4_cond1 * inv_x_cond1
     b5[cond1] = b5_cond1
 
-    b6_cond1 = -tx_cond1 + tmx_cond1 + 5.0 * b5_cond1 / x_cond1
+    b6_cond1 = -tx_cond1 + tmx_cond1 + 5.0 * b5_cond1 * inv_x_cond1
     b6[cond1] = b6_cond1
 
-    b7_cond1 = tx_cond1 + tmx_cond1 + 6.0 * b6_cond1 / x_cond1
+    b7_cond1 = tx_cond1 + tmx_cond1 + 6.0 * b6_cond1 * inv_x_cond1
     b7[cond1] = b7_cond1
 
-    b8_cond1 = -tx_cond1 + tmx_cond1 + 7.0 * b7_cond1 / x_cond1
+    b8_cond1 = -tx_cond1 + tmx_cond1 + 7.0 * b7_cond1 * inv_x_cond1
     b8[cond1] = b8_cond1
 
-    b9_cond1 = tx_cond1 + tmx_cond1 + 8.0 * b8_cond1 / x_cond1
+    b9_cond1 = tx_cond1 + tmx_cond1 + 8.0 * b8_cond1 * inv_x_cond1
     b9[cond1] = b9_cond1
 
-    b10_cond1 = -tx_cond1 + tmx_cond1 + 9.0 * b9_cond1 / x_cond1
+    b10_cond1 = -tx_cond1 + tmx_cond1 + 9.0 * b9_cond1 * inv_x_cond1
     b10[cond1] = b10_cond1
 
-    b11_cond1 = tx_cond1 + tmx_cond1 + 10.0 * b10_cond1 / x_cond1
+    b11_cond1 = tx_cond1 + tmx_cond1 + 10.0 * b10_cond1 * inv_x_cond1
     b11[cond1] = b11_cond1
 
-    b12_cond1 = -tx_cond1 + tmx_cond1 + 11.0 * b11_cond1 / x_cond1
+    b12_cond1 = -tx_cond1 + tmx_cond1 + 11.0 * b11_cond1 * inv_x_cond1
     b12[cond1] = b12_cond1
 
-    b13_cond1 = tx_cond1 + tmx_cond1 + 12.0 * b12_cond1 / x_cond1
+    b13_cond1 = tx_cond1 + tmx_cond1 + 12.0 * b12_cond1 * inv_x_cond1
     b13[cond1] = b13_cond1
 
     # b1 = th.where(cond1,  tx + tmx           , th.tensor(2.0, dtype=dtype))

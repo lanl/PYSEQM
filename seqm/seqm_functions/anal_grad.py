@@ -300,6 +300,7 @@ repeat_tensor = lambda x: torch.cat([x, x])
 
 def w_derivative_numerical(mol, Xij, w_x_new):
     npairs = Xij.shape[0]
+    inv_2delta = 1.0 / (2.0 * delta)
     e1b_x_new = torch.zeros(mol.rij.shape[0], 3, 4, 4, device=mol.rij.device, dtype=mol.rij.dtype)
     e2a_x_new = torch.zeros_like(e1b_x_new)
     ni_ = repeat_tensor(mol.ni)
@@ -358,9 +359,9 @@ def w_derivative_numerical(mol, Xij, w_x_new):
         )
         Xij[:, coord] -= delta
 
-        w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) / (2.0 * delta)
-        e1b_x_new[:, coord, ...] = (e1b_[:npairs] - e1b_[npairs:]) / (2.0 * delta)
-        e2a_x_new[:, coord, ...] = (e2a_[:npairs] - e2a_[npairs:]) / (2.0 * delta)
+        w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) * inv_2delta
+        e1b_x_new[:, coord, ...] = (e1b_[:npairs] - e1b_[npairs:]) * inv_2delta
+        e2a_x_new[:, coord, ...] = (e2a_[:npairs] - e2a_[npairs:]) * inv_2delta
 
     return e1b_x_new, e2a_x_new
 
@@ -454,6 +455,7 @@ def core_core_der_fd(mol, method, gam, parameters):
     alp = repeat_tensor(mol.alp)
     chi = repeat_tensor(mol.chi)
     gam_ = repeat_tensor(gam)
+    inv_2delta = 1.0 / (2.0 * delta)
 
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
@@ -485,7 +487,7 @@ def core_core_der_fd(mol, method, gam, parameters):
             parameters=parameters,
         )
         Xij[:, coord] -= delta
-        pair_grad[:, coord] = (diff_save[:npairs] - diff_save[npairs:]) / (2.0 * delta)
+        pair_grad[:, coord] = (diff_save[:npairs] - diff_save[npairs:]) * inv_2delta
 
     return pair_grad
 
@@ -536,10 +538,12 @@ def core_core_der(mol, gam, w_x, method, parameters):
     # 3~4 terms for AM1
     _, K, L, M = parameters
     # K, L , M shape (natoms,2 or 4)
-    t4 = ZAZB / rija
+    inv_rija = rija.reciprocal()
+    inv_rija3 = torch.pow(inv_rija, 3)
+    t4 = ZAZB * inv_rija
     t5 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija[:, None] - M[idxi]) ** 2), dim=1)
     t6 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija[:, None] - M[idxj]) ** 2), dim=1)
-    pair_grad.add_((ZAZB * torch.pow(rija, -3) * (t5 + t6)).unsqueeze(1) * Xij)
+    pair_grad.add_((ZAZB * inv_rija3 * (t5 + t6)).unsqueeze(1) * Xij)
     t5_der = torch.sum(
         K[idxi] * torch.exp(-L[idxi] * (rija[:, None] - M[idxi]) ** 2) * L[idxi] * (rija[:, None] - M[idxi]),
         dim=1,
@@ -548,7 +552,7 @@ def core_core_der(mol, gam, w_x, method, parameters):
         K[idxj] * torch.exp(-L[idxj] * (rija[:, None] - M[idxj]) ** 2) * L[idxj] * (rija[:, None] - M[idxj]),
         dim=1,
     )
-    pair_grad.add_((2.0 * t4 / rija * (t5_der + t6_der)).unsqueeze(1) * Xij)
+    pair_grad.add_((2.0 * t4 * inv_rija * (t5_der + t6_der)).unsqueeze(1) * Xij)
     if method == "PM3" or method == "AM1":
         return pair_grad
     # Put PM6 specific grad here
@@ -675,6 +679,7 @@ def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, ze
     #     overlap_KAB_x[:, coord, :, :] = (di_plus - di_minus) / (2.0 * delta)
     overlap_pairs = repeat_tensor(rij) <= overlap_cutoff
     di_ = torch.zeros(Xij.shape[0] * 2, 4, 4, dtype=Xij.dtype, device=Xij.device)
+    inv_2delta = 1.0 / (2.0 * delta)
     npairs = Xij.shape[0]
     ni_ = repeat_tensor(ni)
     nj_ = repeat_tensor(nj)
@@ -707,7 +712,7 @@ def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, ze
             qn_int_,
         )
         Xij[:, coord] -= delta
-        overlap_KAB_x[:, coord, :, :] = (di_[:npairs] - di_[npairs:]) / (2.0 * delta)
+        overlap_KAB_x[:, coord, :, :] = (di_[:npairs] - di_[npairs:]) * inv_2delta
 
     overlap_KAB_x[..., 0, 0] *= (beta[idxi, 0] + beta[idxj, 0]).unsqueeze(1)
     overlap_KAB_x[..., 0, 1:] *= (beta[idxi, 0:1] + beta[idxj, 1:2]).unsqueeze(1)
@@ -728,7 +733,7 @@ def der_TETCILF(
     # Hydrogen - Hydrogen
     # aeeHH = (rho0a[HH]+rho0b[HH])**2
     # # Dividing by a0^2 for gradient in eV/ang
-    term = -ev / a0 / a0 / r0.unsqueeze(1) * Xij
+    term = -ev / (a0 * a0) / r0.unsqueeze(1) * Xij
     ee = -r0 * pow((r0**2 + (rho0a + rho0b) ** 2), -1.5)
     ee_x = term * ee.unsqueeze(1)
     riHH_x = ee_x[HH, :]
@@ -1157,7 +1162,8 @@ def der_TETCILF(
     # v is -Xij/norm(Xij)
     # J_{ba} = ∂u_b/∂v_a = (δ_ba - v_b v_a/||v||) / ||Xij||
     I = torch.eye(3, device=device, dtype=dtype)  # (3,3)
-    J_uv = (I - v.unsqueeze(-1) * v.unsqueeze(-2)) / r0.unsqueeze(-1).unsqueeze(-1) / a0
+    inv_r0_a0 = (r0 * a0).reciprocal().unsqueeze(-1).unsqueeze(-1)
+    J_uv = (I - v.unsqueeze(-1) * v.unsqueeze(-2)) * inv_r0_a0
     rot_der = torch.einsum("nbij,nba->naij", rot_der, J_uv)  # (n,4,3)
 
     # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")

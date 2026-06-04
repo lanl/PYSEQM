@@ -46,7 +46,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     ea_ei = e_mo[:, nocc:norb].unsqueeze(1) - e_mo[:, :nocc].unsqueeze(2)
     approxH = ea_ei.view(-1, nov)
 
-    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, num_big_matrices=3)  # TODO: User-defined
+    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nroots, num_big_matrices=3)  # TODO: User-defined
 
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     AV = torch.empty_like(V)

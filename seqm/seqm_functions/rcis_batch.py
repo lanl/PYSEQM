@@ -92,7 +92,7 @@ def rcis_batch(
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     approxH = ea_ei.view(-1, nov)
 
-    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nmol=nmol)  # TODO: User-defined
+    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nroots=nroots, nmol=nmol)  # TODO: User-defined
 
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     HV = torch.clone(V)
@@ -576,31 +576,50 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
 import psutil  # to get the memory size
 
 
-def getMaxSubspacesize(dtype, device, nov, nmol=1, num_big_matrices=2):
+def getMaxSubspacesize(
+    dtype, device, nov, nroots, nmol=1, num_big_matrices=2, memory_fraction=0.4, retry_memory_fraction=0.65
+):
     """Calculate the maximum size of the subspace dimension
     based on available memory. The full subspace size is nov
     """
 
     device = device.type
-    # Get available memory
-    if device == "cpu":
-        available_memory = psutil.virtual_memory().available
-    elif device == "cuda":
-        available_memory, _ = torch.cuda.mem_get_info(device)
-    else:
-        raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
 
     bytes_per_element = torch.finfo(dtype).bits // 8  # Bytes per element
 
-    # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.4
-    usable_memory = available_memory * memory_fraction
+    def _candidate(frac):
+        # Get available memory
+        if device == "cpu":
+            available_memory = psutil.virtual_memory().available
+        elif device == "cuda":
+            available_memory, _ = torch.cuda.mem_get_info(device)
+        else:
+            raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
+        usable_memory = available_memory * frac
+        n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_big_matrices))
+        return max(1, min(n_calculated, nov))
 
-    # Calculate maximum n based on memory
-    n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_big_matrices))
+    maxSubspacesize = _candidate(memory_fraction)
+    if maxSubspacesize >= 3 * nroots:
+        return maxSubspacesize
 
-    # Ensure n does not exceed nmax
-    return min(n_calculated, nov)
+    if device == "cuda":
+        torch.cuda.empty_cache()
+        maxSubspacesize = _candidate(memory_fraction)
+
+    if maxSubspacesize >= 3 * nroots:
+        return maxSubspacesize
+
+    maxSubspacesize_retry = _candidate(retry_memory_fraction)
+    if maxSubspacesize_retry >= 3 * nroots:
+        return maxSubspacesize_retry
+
+    raise RuntimeError(
+        "Unable to allocate a Davidson subspace large enough for the requested roots. "
+        f"Requested at least 3*nroots={3 * nroots}, got {maxSubspacesize} at memory_fraction={memory_fraction:.2f} "
+        f"and {maxSubspacesize_retry} at memory_fraction={retry_memory_fraction:.2f} "
+        f"with nov={nov}, nmol={nmol}, num_big_matrices={num_big_matrices}."
+    )
 
 
 def get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal):

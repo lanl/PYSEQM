@@ -50,7 +50,7 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     approxH = ea_ei.view(-1, nov)
 
-    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nmol=nmol)  # TODO: User-defined
+    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nroots, nmol=nmol)  # TODO: User-defined
 
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     HV = torch.clone(V)
