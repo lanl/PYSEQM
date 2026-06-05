@@ -169,8 +169,19 @@ def pair_nuclear_energy(
         ) * ev / torch.sqrt(rij[XSiO] * rij[XSiO] + (rho0xi[XSiO] + rho0xj[XSiO]) ** 2)
 
         EnucAB = expo2 + t4 * (t5 + t6)
+    elif method == "OM1":
+        _, zeta_s, g_ss = parameters
+        from .om1_pair_backend import om1_local_pair_integrals
+
+        enuc = torch.zeros_like(rij)
+        for p in range(rij.shape[0]):
+            pair = om1_local_pair_integrals(
+                int(ni[p].item()), int(nj[p].item()), float(rij[p].item()), zeta_s, g_ss, tore
+            )
+            enuc[p] = pair["fko"] * tore[ni[p]] * tore[nj[p]] * ev / rij[p]
+        EnucAB = enuc
     else:
-        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR")
+        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR, OM1")
     return EnucAB
 
 
@@ -204,12 +215,13 @@ def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
            False, return Etot - Eiso_sum
     """
     # electronic energy for isolated atom, sum for each molecule
+    Eiso = Eiso.to(dtype=Etot.dtype, device=Etot.device)
     Eiso_sum = torch.zeros_like(Etot)
     Eiso_sum.index_add_(0, atom_molid, Eiso)
     if flag:
         # experimental heat of formation for each atom, sum for each molecule
         eheat_sum = torch.zeros_like(Etot)
-        eheat_sum.index_add_(0, atom_molid, const.eheat[Z])
+        eheat_sum.index_add_(0, atom_molid, const.eheat[Z].to(dtype=Etot.dtype, device=Etot.device))
         # Hf = Etot - Eiso_sum + eheat_sum
         return Etot - Eiso_sum + eheat_sum, Eiso_sum
     else:

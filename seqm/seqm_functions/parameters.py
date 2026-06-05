@@ -21,10 +21,10 @@ def params(
     root_dir="./params/MOPAC/",
 ):
     """
-    load parameters from AM1 PM3 MNDO
+    load method parameters from CSV files
     """
-    # method=MNDO, AM1, PM3
-    # load the parameters taken from MOPAC
+    # method=MNDO, AM1, PM3, PM6, OM1
+    # load the parameters taken from MOPAC or OMx Fortran tables
     # elements: elements needed, not checking on the type, but > 0 and <= 107
     # parameters: parameter lists
     # root_dir : directory for these parameter files
@@ -34,15 +34,24 @@ def params(
     m = max(elements)
     n = len(parameters)
     p = torch.zeros((m + 1, n))
+    requested_elements = {int(x) for x in elements if int(x) > 0}
+    found_elements = set()
     f = open(fn)
     header = f.readline().strip().replace(" ", "").split(",")
     idx = [header.index(item) for item in parameters]
     for l in f:
         t = l.strip().replace(" ", "").split(",")
         id = int(t[0])
-        if id in elements:
+        if id in requested_elements:
+            found_elements.add(id)
             p[id, :] = torch.tensor([float(t[x]) for x in idx])
     f.close()
+    if method == "OM1":
+        missing = sorted(requested_elements - found_elements)
+        if missing:
+            raise ValueError(
+                f"OM1 parameters are only available for elements with CSV entries; missing atomic numbers: {missing}"
+            )
     return torch.nn.Parameter(p, requires_grad=False)
 
 

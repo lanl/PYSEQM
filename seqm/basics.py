@@ -33,6 +33,37 @@ Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
 """
 
 parameterlist = {
+    "OM1": [
+        "U_ss",
+        "U_pp",
+        "zeta_s",
+        "zeta_p",
+        "beta_s",
+        "beta_p",
+        "g_ss",
+        "g_sp",
+        "g_pp",
+        "g_p2",
+        "h_sp",
+        "alpha",
+        "beta_pi",
+        "beta_sh",
+        "beta_ph",
+        "alpha_s",
+        "alpha_p",
+        "alpha_pi",
+        "alpha_s_h",
+        "alpha_p_h",
+        "fval1",
+        "fval2",
+        "dd_om1",
+        "qq_om1",
+        "am_om1",
+        "ad_om1",
+        "aq_om1",
+        "hyf",
+        "EISOL",
+    ],
     "AM1": [
         "U_ss",
         "U_pp",
@@ -722,6 +753,10 @@ class Energy(torch.nn.Module):
 
     def _build_parnuc(self, params):
         alpha = params["alpha"]
+        if self.method == "OM1":
+            zeta_s = self.packpar.p[:, self.packpar.required_list.index("zeta_s")]
+            g_ss = self.packpar.p[:, self.packpar.required_list.index("g_ss")]
+            return (alpha, zeta_s, g_ss)
         if self.method == "MNDO":
             return (alpha,)
         if self.method in ("AM1", "PM6", "PM6_SP", "PM6_SP_STAR"):

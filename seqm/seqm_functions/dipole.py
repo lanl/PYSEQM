@@ -39,7 +39,7 @@ def calc_dipole_matrix(mol, return_diag_dipole=False):
     isX = Z > 2  # Heavy atom
     isH = Z == 1
     dd, _ = dd_qq(qn0[isX], zetas[isX], zetap[isX])
-    dd *= a0
+    dd = dd.to(dtype=dtype, device=device) * a0
 
     valid_atom = (mol.species > 0).reshape(-1)
     n_valid_atoms = mol.maskd.numel()
