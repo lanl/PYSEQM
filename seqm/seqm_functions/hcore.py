@@ -10,6 +10,7 @@ from .om1_overlap import (
     om1_local_resonance_terms,
 )
 from .om1_pair_backend import om1_pair_hcore_terms
+from .om2_hcore import build_om2_hcore, build_om3_hcore
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
 
@@ -67,7 +68,13 @@ def hcore(molecule, doTETCI=True):
     # t0 = time.time()
     is_pm6 = molecule.method == "PM6"
     is_om1 = molecule.method == "OM1"
+    is_om2 = molecule.method == "OM2"
+    is_om3 = molecule.method == "OM3"
     orb_dim = 9 if is_pm6 else 4
+    if is_om2:
+        return build_om2_hcore(molecule, doTETCI=doTETCI)
+    if is_om3:
+        return build_om3_hcore(molecule, doTETCI=doTETCI)
     if is_pm6:
         overlap_fn = diatom_overlap_matrixD
         overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)

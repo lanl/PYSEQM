@@ -18,34 +18,145 @@ from .two_elec_two_center_int import rotate_with_quaternion
 _XX3498 = 34.9868366552497
 
 
-def _boys_series_coeff(n, x):
-    return 1.0 / (2 * n + 1) - x / (2 * n + 3) + 0.5 * x * x / (2 * n + 5)
+def _boys_series_all_0_to_4(x, n_terms=10):
+    """
+    Taylor series:
+        F_m(x) = sum_k (-x)^k / (k! * (2m + 2k + 1))
+
+    Good near x = 0.
+    """
+
+    f = [torch.zeros_like(x) for _ in range(5)]
+
+    xpow = torch.ones_like(x)
+    fact = torch.ones_like(x)
+
+    for k in range(n_terms):
+        if k > 0:
+            xpow = xpow * (-x)
+            fact = fact * k
+
+        coeff = xpow / fact
+        f[0] = f[0] + coeff / (2 * 0 + 2 * k + 1)
+        f[1] = f[1] + coeff / (2 * 1 + 2 * k + 1)
+        f[2] = f[2] + coeff / (2 * 2 + 2 * k + 1)
+        f[3] = f[3] + coeff / (2 * 3 + 2 * k + 1)
+        f[4] = f[4] + coeff / (2 * 4 + 2 * k + 1)
+
+    return tuple(f)
 
 
-def _boys_0_to_4(x):
+def _boys_erf_upward_0_to_4(x):
+    """
+    Fast middle-region evaluation using erf + upward recurrence.
+
+    This is accurate enough away from x = 0.
+    """
     dtype = x.dtype
     device = x.device
-    small = x < 1.0e-8
-    xsafe = torch.where(small, torch.ones_like(x), x)
-    sqrtx = torch.sqrt(xsafe)
-    f0 = 0.5 * torch.sqrt(torch.tensor(math.pi, dtype=dtype, device=device) / xsafe) * torch.erf(sqrtx)
-    expx = torch.exp(-xsafe)
-    f1 = (f0 - expx) / (2.0 * xsafe)
-    f2 = (3.0 * f1 - expx) / (2.0 * xsafe)
-    f3 = (5.0 * f2 - expx) / (2.0 * xsafe)
-    f4 = (7.0 * f3 - expx) / (2.0 * xsafe)
+
+    pi = torch.tensor(math.pi, dtype=dtype, device=device)
+
+    sqrtx = torch.sqrt(x)
+    expx = torch.exp(-x)
+
+    f0 = 0.5 * torch.sqrt(pi / x) * torch.erf(sqrtx)
+    f1 = (f0 - expx) / (2.0 * x)
+    f2 = (3.0 * f1 - expx) / (2.0 * x)
+    f3 = (5.0 * f2 - expx) / (2.0 * x)
+    f4 = (7.0 * f3 - expx) / (2.0 * x)
+
+    return f0, f1, f2, f3, f4
+
+
+def _boys_asymp_downward_0_to_4(x):
+    """
+    Large-x evaluation.
+
+    Compute F4 using leading asymptotic formula, then recurse downward.
+
+        F_m(x) ~ 0.5 * Gamma(m + 1/2) / x^(m + 1/2)
+
+    For F4:
+        Gamma(4.5) = 105/16 * sqrt(pi)
+    """
+    dtype = x.dtype
+    device = x.device
+
+    sqrt_pi = torch.tensor(math.sqrt(math.pi), dtype=dtype, device=device)
+    expx = torch.exp(-x)
+
+    gamma_4p5 = (105.0 / 16.0) * sqrt_pi
+
+    f4 = 0.5 * gamma_4p5 / x.pow(4.5)
+
+    # Stable downward recurrence:
+    # F_m = (2x F_{m+1} + exp(-x)) / (2m + 1)
+    f3 = (2.0 * x * f4 + expx) / 7.0
+    f2 = (2.0 * x * f3 + expx) / 5.0
+    f1 = (2.0 * x * f2 + expx) / 3.0
+    f0 = 2.0 * x * f1 + expx
+
+    return f0, f1, f2, f3, f4
+
+
+def boys_0_to_4(x, *, small_cutoff=1.0e-6, large_cutoff=40.0):
+    """
+    Robust PyTorch Boys F_0 ... F_4.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Nonnegative Boys argument.
+    small_cutoff : float or None
+        If None, chosen based on dtype.
+    large_cutoff : float
+        Above this, use asymptotic + downward recurrence.
+
+    Returns
+    -------
+    f0, f1, f2, f3, f4 : torch.Tensor
+    """
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x)
+
+    dtype = x.dtype
+
+    if dtype in (torch.float32, torch.bfloat16):
+        # float32 loses cancellation accuracy much earlier
+        default_small = 1.0e-3
+    else:
+        # float64 is safer
+        default_small = 1.0e-6
+
+    if small_cutoff is None:
+        small_cutoff = default_small
+
+    # Boys arguments should be >= 0. Clamp tiny negative roundoff.
+    x = torch.clamp(x, min=0.0)
+
+    small = x <= small_cutoff
+    large = x >= large_cutoff
+    middle = ~(small | large)
+
+    f0 = torch.empty_like(x)
+    f1 = torch.empty_like(x)
+    f2 = torch.empty_like(x)
+    f3 = torch.empty_like(x)
+    f4 = torch.empty_like(x)
+
     if small.any():
-        xx = x[small]
-        f0 = f0.clone()
-        f1 = f1.clone()
-        f2 = f2.clone()
-        f3 = f3.clone()
-        f4 = f4.clone()
-        f0[small] = _boys_series_coeff(0, xx)
-        f1[small] = _boys_series_coeff(1, xx)
-        f2[small] = _boys_series_coeff(2, xx)
-        f3[small] = _boys_series_coeff(3, xx)
-        f4[small] = _boys_series_coeff(4, xx)
+        fs = _boys_series_all_0_to_4(x[small], n_terms=10)
+        f0[small], f1[small], f2[small], f3[small], f4[small] = fs
+
+    if middle.any():
+        fm = _boys_erf_upward_0_to_4(x[middle])
+        f0[middle], f1[middle], f2[middle], f3[middle], f4[middle] = fm
+
+    if large.any():
+        fl = _boys_asymp_downward_0_to_4(x[large])
+        f0[large], f1[large], f2[large], f3[large], f4[large] = fl
+
     return f0, f1, f2, f3, f4
 
 
@@ -123,7 +234,7 @@ def _sp0000(p, q, rab):
     rab2 = rab * rab
     x = rab2 / (p["eab"] + q["ecd"].view(-1, 1))
     sq2 = 1.0 / torch.sqrt(p["gab"].view(1, -1) + q["gcd"].view(-1, 1))
-    f0, _, _, _, _ = _boys_0_to_4(x)
+    f0, _, _, _, _ = boys_0_to_4(x)
     h0000 = torch.sum(f0 * (p["dp00"].view(1, -1) * sq2), dim=1)
     g0000 = torch.sum(h0000 * (q["dq00"] * q["ecd"]) * 27.21)
     out = torch.zeros(22, dtype=torch.float64)
@@ -142,7 +253,7 @@ def _sp0011(p, q, rab):
     y = p["dp00"].view(1, -1) * sq2
     gy = gfac * y
     ggy = gfac * gy
-    f0, f1, f2, _, _ = _boys_0_to_4(x)
+    f0, f1, f2, _, _ = boys_0_to_4(x)
     h0000 = torch.sum(f0 * y, dim=1)
     h0001 = torch.sum(f1 * gy, dim=1)
     h0033 = torch.sum(f2 * ggy, dim=1)
@@ -180,7 +291,7 @@ def _sp1111(p, q, rab):
     gy = gfac * y
     ggy = gfac * gy
     gggy = gfac * ggy
-    f0, f1, f2, f3, f4 = _boys_0_to_4(x)
+    f0, f1, f2, f3, f4 = boys_0_to_4(x)
     ff0 = f0 * y
     ff1 = f1 * gy
     ff2 = f2 * ggy
@@ -307,7 +418,104 @@ def om1_local_pair_integrals(ni, nj, rij, zeta_s, g_ss, tore):
     return {"ri": ri[0], "scaled_ri": scaled_ri[0], "fko": fko[0], "rept": rept, "core_semi": core_semi}
 
 
-def om1_local_pair_corrections(ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2):
+def omx_local_pair_integrals(ni, nj, rij, zeta_s, g_ss, tore):
+    return om1_local_pair_integrals(ni, nj, rij, zeta_s, g_ss, tore)
+
+
+def _spgto2_local(atomic_number, zeta_a, zeta_b, rab):
+    device = rab.device
+    dtype = torch.float64
+
+    z = torch.tensor([atomic_number], dtype=torch.int64, device=device)
+    za = torch.as_tensor([zeta_a], dtype=dtype, device=device)
+
+    shell_type, exps, cs, cp = _lookup_basis(z, za)
+
+    shell_type = int(shell_type[0].item())
+    exps = exps[0]
+    cs = cs[0]
+    cp = cp[0]
+
+    core_exps = torch.tensor([2.227660584, 0.4057711562, 0.1098175104], dtype=dtype, device=device)
+    core_coeffs = torch.tensor([0.1543289673, 0.5353281423, 0.4446345422], dtype=dtype, device=device)
+
+    ec = core_exps * zeta_b**2
+    cc = core_coeffs * (2.0 * ec / math.pi).pow(0.75)
+
+    rab2 = rab * rab
+    s1 = torch.zeros((), dtype=dtype, device=device)
+    s2 = torch.zeros((), dtype=dtype, device=device)
+
+    for ii in range(3):
+        a = exps[ii]
+        csa = cs[ii]
+        cpa = cp[ii]
+
+        for jj in range(3):
+            b = ec[jj]
+            csb = cc[jj]
+
+            g = a + b
+            xqq = a * b * rab2 / g
+            if xqq > 60.0:
+                continue
+
+            s00 = (math.pi / g) ** 1.5 * torch.exp(-xqq)
+            s1 = s1 + csa * csb * s00
+
+            if shell_type > 0:
+                s30 = b * rab * s00 / g
+                s2 = s2 + cpa * csb * s30
+
+    return s1, s2
+
+
+def om2_corpp2_local(ni, nj, rij, om2_tables):
+    """
+    Literal OM2 CORPP2 for the current H/C/N/O/F first-row scope.
+    """
+    dtype = torch.float64
+    device = rij.device if torch.is_tensor(rij) else torch.device("cpu")
+    corpp = torch.zeros((4, 2), dtype=dtype, device=device)
+
+    ni = int(ni)
+    nj = int(nj)
+    if ni <= 2 and nj <= 2:
+        return corpp
+
+    zscor = om2_tables["zscor"]
+    fscor = om2_tables["fscor"]
+    bscor = om2_tables["bscor"]
+    ascor = om2_tables["ascor"]
+
+    for iatom, (na, nb, nshell, col) in enumerate(((ni, nj, ni, 0), (nj, ni, nj, 1))):
+        if nb <= 2:
+            continue
+        zb = zscor[nb]
+        fb = fscor[nb]
+        s1, s2 = _spgto2_local(na, om2_tables["zeta_s"][na], zb, rij)
+        bas = om2_tables["beta_s"][na]
+        aas = om2_tables["alpha_s"][na]
+        bbs = bscor[nb]
+        cbs = ascor[nb]
+        r2 = rij * rij
+        sqr = torch.sqrt(rij)
+        t1 = 0.5 * (bas + bbs) * sqr * torch.exp(-(aas + cbs) * r2)
+        corpp[0, col] = -(s1 * t1 + t1 * s1) - s1 * s1 * fb
+        if na > 2:
+            bap = om2_tables["beta_p"][na]
+            aap = om2_tables["alpha_p"][na]
+            t3 = 0.5 * (bap + bbs) * sqr * torch.exp(-(aap + cbs) * r2)
+            corpp[1, col] = -(s1 * t3 + t1 * s2) - s1 * s2 * fb
+            corpp[2, col] = -(s2 * t3 + t3 * s2) - s2 * s2 * fb
+            if col == 1:
+                corpp[1, col] = -corpp[1, col]
+    return corpp
+
+
+def omx_local_pair_corrections(
+    method, ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2, om2_tables=None
+):
     """
     Build the full native Torch OM1 local pair bundle up to, but excluding,
     the OM1 ``CORPP`` pseudopotential correction.
@@ -329,7 +537,7 @@ def om1_local_pair_corrections(ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local
         ``pen``, ``valpp_raw``, ``valpp1``, ``valpp``, and
         ``core_no_corpp``.
     """
-    pair = om1_local_pair_integrals(ni, nj, rij, zeta_s, g_ss, tore)
+    pair = omx_local_pair_integrals(ni, nj, rij, zeta_s, g_ss, tore)
     ni_t = torch.tensor([int(ni)], dtype=torch.int64)
     nj_t = torch.tensor([int(nj)], dtype=torch.int64)
     rij_t = torch.tensor([float(rij)], dtype=torch.float64)
@@ -341,8 +549,17 @@ def om1_local_pair_corrections(ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local
     valpp_raw, valpp1 = om1_valpot(
         ni_t, nj_t, pair["core_semi"].unsqueeze(0), s_local_t, t_local_t, u_ss, u_pp
     )
+    if method == "OM3":
+        valpp1 = torch.zeros_like(valpp1)
     valpp = om1_apply_valpot_scaling(ni_t, nj_t, valpp_raw, valpp1, fval1, fval2)[0]
-    corpp = om1_ppecp_local(int(ni), int(nj), float(rij), zeta_s) * pair["fko"]
+    if method == "OM1":
+        corpp = om1_ppecp_local(int(ni), int(nj), float(rij), zeta_s) * pair["fko"]
+    elif method in {"OM2", "OM3"}:
+        if om2_tables is None:
+            raise ValueError(f"{method} pair corrections require om2_tables")
+        corpp = om2_corpp2_local(int(ni), int(nj), torch.tensor(float(rij), dtype=torch.float64), om2_tables)
+    else:
+        raise ValueError(f"Unsupported method: {method}")
     core = om1_assemble_core(
         pair["core_semi"].unsqueeze(0), pen.unsqueeze(0), corpp.unsqueeze(0), valpp.unsqueeze(0)
     )[0]
@@ -452,9 +669,11 @@ def _om1_rotate_w(ri, xij):
     return w.view(10, 10)
 
 
-def om1_pair_hcore_terms(ni, nj, xij, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2):
-    pair = om1_local_pair_corrections(
-        ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2
+def omx_pair_hcore_terms(
+    method, ni, nj, xij, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2, om2_tables=None
+):
+    pair = omx_local_pair_corrections(
+        method, ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2, om2_tables
     )
     return {
         **pair,
@@ -462,3 +681,15 @@ def om1_pair_hcore_terms(ni, nj, xij, rij, zeta_s, g_ss, tore, s_local, t_local,
         "e1b": _om1_rotate_core_column(pair["core"][:, 0], xij),
         "e2a": _om1_rotate_core_column(pair["core"][:, 1], xij),
     }
+
+
+def om1_local_pair_corrections(ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2):
+    return omx_local_pair_corrections(
+        "OM1", ni, nj, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2
+    )
+
+
+def om1_pair_hcore_terms(ni, nj, xij, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2):
+    return omx_pair_hcore_terms(
+        "OM1", ni, nj, xij, rij, zeta_s, g_ss, tore, s_local, t_local, u_ss, u_pp, fval1, fval2
+    )

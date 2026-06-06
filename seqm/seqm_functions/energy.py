@@ -169,7 +169,7 @@ def pair_nuclear_energy(
         ) * ev / torch.sqrt(rij[XSiO] * rij[XSiO] + (rho0xi[XSiO] + rho0xj[XSiO]) ** 2)
 
         EnucAB = expo2 + t4 * (t5 + t6)
-    elif method == "OM1":
+    elif method == "OM1" or method == "OM2" or method == "OM3":
         _, zeta_s, g_ss = parameters
         from .om1_pair_backend import om1_local_pair_integrals
 
@@ -181,7 +181,7 @@ def pair_nuclear_energy(
             enuc[p] = pair["fko"] * tore[ni[p]] * tore[nj[p]] * ev / rij[p]
         EnucAB = enuc
     else:
-        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR, OM1")
+        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR, OM1, OM2, OM3")
     return EnucAB
 
 

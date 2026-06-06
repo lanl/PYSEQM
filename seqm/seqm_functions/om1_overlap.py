@@ -133,6 +133,10 @@ def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j):
     return out
 
 
+def omx_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j):
+    return om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j)
+
+
 def diatom_overlap_matrix_OM1(ni, nj, xij, rij, zeta_a, zeta_b):
     """
     Build the 4x4 OM1 overlap block for each atom pair in Cartesian AO order [s, px, py, pz].
@@ -255,6 +259,19 @@ def om1_local_resonance_terms(ni, nj, rij, parameters):
         out[mask_pp, 4] = 0.5 * (bai[mask_pp] + bbi[mask_pp]) * vals5
 
     return out
+
+
+def omx_local_resonance_terms(ni, nj, rij, parameters):
+    return om1_local_resonance_terms(ni, nj, rij, parameters)
+
+
+def omx_betom_terms(ni, nj, rij, parameters, zeta_i, zeta_j):
+    """
+    Return the local BETOM overlap and resonance terms in the Fortran shell order.
+    """
+    s_local = omx_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j)
+    t_local = omx_local_resonance_terms(ni, nj, rij, parameters)
+    return s_local, t_local
 
 
 def diatom_resonance_matrix_OM1(ni, nj, xij, rij, parameters):
