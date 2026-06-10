@@ -772,7 +772,7 @@ def calc_transition_dipoles(
 
 def print_rcis_analysis(excitation_energies, transition_dipole, oscillator_strength):
     print(f"Number of excited states: {excitation_energies.shape[1]}\n")
-    print("Excitation energies E (eV), Transition dipoles d (au), and Oscillator strengths f (unitless)")
+    print("Excitation energies E (eV), Transition dipoles d (au), and Oscillator strengths f (au)")
     row_format = "{:<10}   {:>10}   {:>10}   {:>10}      {:<10}"
 
     # Print header

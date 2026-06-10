@@ -19,6 +19,7 @@ from .seqm_functions.energy import (
 )
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.normal_modes import normal_modes
+from .seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas, prepare_parameters
 from .seqm_functions.parameters import PWCCT, params
 from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
@@ -36,8 +37,7 @@ parameterlist = {
     "OM1": [
         "U_ss",
         "U_pp",
-        "zeta_s",
-        "zeta_p",
+        "zeta",
         "beta_s",
         "beta_p",
         "g_ss",
@@ -67,8 +67,7 @@ parameterlist = {
     "OM2": [
         "U_ss",
         "U_pp",
-        "zeta_s",
-        "zeta_p",
+        "zeta",
         "beta_s",
         "beta_p",
         "g_ss",
@@ -108,8 +107,7 @@ parameterlist = {
     "OM3": [
         "U_ss",
         "U_pp",
-        "zeta_s",
-        "zeta_p",
+        "zeta",
         "beta_s",
         "beta_p",
         "g_ss",
@@ -416,46 +414,51 @@ class Parser(torch.nn.Module):
         maskd = (t1 + t2).reshape(-1)[real_atoms]
 
         if do_large_tensors:
+            tri_i, tri_j = torch.triu_indices(molsize, molsize, offset=1, device=device)
+
+            nat_per_mol = nonblank.sum(dim=1)
+            valid = tri_j.unsqueeze(0) < nat_per_mol.unsqueeze(1)
+
+            pair_mol = (
+                torch.arange(nmol, device=device, dtype=torch.int64).unsqueeze(1).expand_as(valid)[valid]
+            )
+            ai = tri_i.unsqueeze(0).expand_as(valid)[valid]
+            aj = tri_j.unsqueeze(0).expand_as(valid)[valid]
+
+            coords = molecule.coordinates
+            paircoord = coords[pair_mol, aj] - coords[pair_mol, ai]  # preserves original sign
+            pairdist_sq = paircoord.square().sum(dim=1)
+
+            keep = pairdist_sq < self.outercutoff**2
+            pair_mol, ai, aj = pair_mol[keep], ai[keep], aj[keep]
+            paircoord = paircoord[keep]
+            pairdist = pairdist_sq[keep].sqrt()
+
+            rij = pairdist * molecule.const.length_conversion_factor
+            xij = paircoord / pairdist.unsqueeze(1)
+
+            flat_i = pair_mol * molsize + ai
+            flat_j = pair_mol * molsize + aj
+
+            inv_real_atoms = torch.empty((nmol * molsize,), device=device, dtype=torch.int64)
+            inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device, dtype=torch.int64)
+
+            idxi = inv_real_atoms[flat_i]
+            idxj = inv_real_atoms[flat_j]
+
+            ni = Z[idxi]
+            nj = Z[idxj]
+
+            mask = flat_i * molsize + aj
+            mask_l = flat_j * molsize + ai
+            pair_molid = pair_mol
+
             atom_molid = (
                 torch.arange(nmol, device=device, dtype=torch.int64)
                 .unsqueeze(1)
                 .expand(-1, molsize)
-                .reshape(-1)[nonblank.reshape(-1) > 0]
+                .reshape(-1)[nonblank.reshape(-1)]
             )
-
-            nonblank_pairs = (nonblank.unsqueeze(1) * nonblank.unsqueeze(2)).reshape(-1)
-            pair_first = (
-                atom_index.reshape(nmol, molsize).unsqueeze(2).expand(nmol, molsize, molsize).reshape(-1)
-            )
-            #
-            pair_second = (
-                atom_index.reshape(nmol, molsize).unsqueeze(1).expand(nmol, molsize, molsize).reshape(-1)
-            )
-            #
-            paircoord_raw = (molecule.coordinates.unsqueeze(1) - molecule.coordinates.unsqueeze(2)).reshape(
-                -1, 3
-            )
-            pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
-            close_pairs = pairdist_sq < self.outercutoff**2
-
-            pairs = (pair_first < pair_second) * nonblank_pairs * close_pairs
-
-            paircoord = paircoord_raw[pairs]
-            pairdist = torch.sqrt(pairdist_sq[pairs])
-            rij = pairdist * molecule.const.length_conversion_factor
-
-            inv_real_atoms = torch.zeros((nmol * molsize,), device=device, dtype=torch.int64)
-            inv_real_atoms[real_atoms] = torch.arange(n_real_atoms, device=device, dtype=torch.int64)
-
-            idxi = inv_real_atoms[pair_first[pairs]]
-            idxj = inv_real_atoms[pair_second[pairs]]
-            ni = Z[idxi]
-            nj = Z[idxj]
-            xij = paircoord / pairdist.unsqueeze(1)
-            mask = real_atoms[idxi] * molsize + real_atoms[idxj] % molsize
-            mask_l = real_atoms[idxj] * molsize + real_atoms[idxi] % molsize
-            # mask_l = torch.sort(mask_l)[0]
-            pair_molid = atom_molid[idxi]  # doesn't matter atom_molid[idxj]
 
         else:
             atom_molid = None
@@ -533,6 +536,14 @@ class Pack_Parameters(torch.nn.Module):
         self.elements = seqm_parameters["elements"]
         self.learned_list = seqm_parameters.get("learned", [])
         self.method = seqm_parameters["method"]
+        if self.method in OMX_METHODS:
+            normalized_learned = []
+            for name in self.learned_list:
+                if name in {"zeta_s", "zeta_p"}:
+                    name = "zeta"
+                if name not in normalized_learned:
+                    normalized_learned.append(name)
+            self.learned_list = normalized_learned
         self.filedir = (
             seqm_parameters["parameter_file_dir"]
             if "parameter_file_dir" in seqm_parameters
@@ -835,10 +846,8 @@ class Energy(torch.nn.Module):
 
     def _build_parnuc(self, params):
         alpha = params["alpha"]
-        if self.method == "OM1" or self.method == "OM2" or self.method == "OM3":
-            zeta_s = self.packpar.p[:, self.packpar.required_list.index("zeta_s")]
-            g_ss = self.packpar.p[:, self.packpar.required_list.index("g_ss")]
-            return (alpha, zeta_s, g_ss)
+        if self.method in OMX_METHODS:
+            return None
         if self.method == "MNDO":
             return (alpha,)
         if self.method in ("AM1", "PM6", "PM6_SP", "PM6_SP_STAR"):
@@ -851,7 +860,7 @@ class Energy(torch.nn.Module):
             L = torch.stack([params[f"Gaussian{i}_L"] for i in range(1, 3)], dim=1)
             M = torch.stack([params[f"Gaussian{i}_M"] for i in range(1, 3)], dim=1)
             return (alpha, K, L, M)
-        return (alpha,)
+        return None
 
     def _refresh_md_geometry(self, molecule):
         real_atoms = getattr(molecule, "_real_atom_flat_idx", None)
@@ -915,17 +924,14 @@ class Energy(torch.nn.Module):
             )
         else:
             params["beta"] = torch.cat((params["beta_s"].unsqueeze(1), params["beta_p"].unsqueeze(1)), dim=1)
-            zeros_zeta = torch.zeros_like(params["zeta_s"])
-            params["zeta_d"] = zeros_zeta
-            params["s_orb_exp_tail"] = zeros_zeta
-            params["p_orb_exp_tail"] = zeros_zeta
-            params["d_orb_exp_tail"] = zeros_zeta
-
-            zeros_uss = torch.zeros_like(params["U_ss"])
-            params["U_dd"] = zeros_uss
-            params["F0SD"] = zeros_uss
-            params["G2SD"] = zeros_uss
-            params["rho_core"] = zeros_uss
+            prepare_parameters(
+                params,
+                molecule.packpar,
+                molecule.method,
+                molecule.Z,
+                dtype=molecule.coordinates.dtype,
+                device=molecule.coordinates.device,
+            )
 
         params["Kbeta"] = params.get("Kbeta", None)
 
@@ -1021,6 +1027,7 @@ class Energy(torch.nn.Module):
             # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so
             # we can save on memory since the compuational graph doesn't have to be stored.
             beta = molecule.parameters["beta"]
+            zetas, zetap = get_orbital_zetas(molecule.parameters, molecule.method)
             if molecule.const.do_timing:
                 t0 = time.time()
             with torch.no_grad():
@@ -1042,8 +1049,8 @@ class Energy(torch.nn.Module):
                         rij=molecule.rij,
                         Z=molecule.Z,
                         parnuc=parnuc,
-                        zetas=molecule.parameters["zeta_s"],
-                        zetap=molecule.parameters["zeta_p"],
+                        zetas=zetas,
+                        zetap=zetap,
                         beta=beta,
                     )
                 else:
@@ -1064,8 +1071,8 @@ class Energy(torch.nn.Module):
                         Z=molecule.Z,
                         gam=gam,
                         parnuc=parnuc,
-                        zetas=molecule.parameters["zeta_s"],
-                        zetap=molecule.parameters["zeta_p"],
+                        zetas=zetas,
+                        zetap=zetap,
                         gss=molecule.parameters["g_ss"],
                         gpp=molecule.parameters["g_pp"],
                         gp2=molecule.parameters["g_p2"],

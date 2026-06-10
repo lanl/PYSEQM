@@ -2,84 +2,12 @@ import math
 
 import torch
 
-from .two_elec_two_center_int import rotate_with_quaternion
+from .omx_basis import gather_om1_basis
 
-_FAC_S = (2.0 / math.pi) ** 0.75
-_FAC_P = 2.0 * _FAC_S
 _XQQ_CUTOFF = 60.0
 
-# GTOMIN(IGTO=0) uses STO-3G for hydrogen and ECPSET 3G for second-row sp atoms.
-# These are the unscaled primitive exponents and contraction coefficients before the
-# OM1 zeta scaling EXX <- EXX * Z**2.
-_OM1_BASIS_RAW = {
-    1: {
-        "shell_type": 0,
-        "exponents": (2.227660584, 0.4057711562, 0.1098175104),
-        "cs": (0.1543289673, 0.5353281423, 0.4446345422),
-        "cp": (0.0, 0.0, 0.0),
-    },
-    6: {
-        "shell_type": 1,
-        "exponents": (2.64486, 0.54215, 0.14466),
-        "cs": (-0.19188, 0.61628, 0.54896),
-        "cp": (0.20259, 0.55830, 0.45514),
-    },
-    7: {
-        "shell_type": 1,
-        "exponents": (3.68849, 0.77534, 0.20498),
-        "cs": (-0.19269, 0.61888, 0.54926),
-        "cp": (0.22281, 0.56032, 0.43859),
-    },
-    8: {
-        "shell_type": 1,
-        "exponents": (4.78499, 0.99860, 0.25687),
-        "cs": (-0.19248, 0.66952, 0.50270),
-        "cp": (0.24158, 0.55890, 0.43160),
-    },
-    9: {
-        "shell_type": 1,
-        "exponents": (6.01783, 1.25315, 0.31760),
-        "cs": (-0.18850, 0.69800, 0.47427),
-        "cp": (0.25667, 0.56013, 0.42139),
-    },
-}
 
-
-def _lookup_basis(atomic_numbers, zeta):
-    device = atomic_numbers.device
-    dtype = zeta.dtype
-    n = atomic_numbers.shape[0]
-
-    shell_type = torch.empty(n, dtype=torch.int64, device=device)
-    exponents = torch.empty((n, 3), dtype=dtype, device=device)
-    coeff_s = torch.empty((n, 3), dtype=dtype, device=device)
-    coeff_p = torch.empty((n, 3), dtype=dtype, device=device)
-
-    unsupported = []
-    z_list = atomic_numbers.detach().cpu().tolist()
-    for atomic_number in sorted(set(z_list)):
-        basis = _OM1_BASIS_RAW.get(int(atomic_number))
-        if basis is None:
-            unsupported.append(int(atomic_number))
-            continue
-        mask = atomic_numbers == atomic_number
-        shell_type[mask] = basis["shell_type"]
-        exponents[mask] = torch.tensor(basis["exponents"], dtype=dtype, device=device)
-        coeff_s[mask] = torch.tensor(basis["cs"], dtype=dtype, device=device)
-        coeff_p[mask] = torch.tensor(basis["cp"], dtype=dtype, device=device)
-
-    if unsupported:
-        raise ValueError(f"OM1 overlap only supports H/C/N/O/F; got atomic numbers {unsupported}")
-
-    scaled_exponents = exponents * zeta.unsqueeze(1) ** 2
-    norm_s = _FAC_S * scaled_exponents.pow(0.75)
-    norm_p = _FAC_P * scaled_exponents.pow(1.25)
-    coeff_s = coeff_s * norm_s
-    coeff_p = coeff_p * norm_p
-    return shell_type, scaled_exponents, coeff_s, coeff_p
-
-
-def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j):
+def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j, basis):
     """
     Return the local OM1 Gaussian overlap terms in the Fortran SPOVER/BETOM ordering:
     [ss, s-p_sigma, p_sigma-s, p_sigma-p_sigma, p_pi-p_pi].
@@ -87,8 +15,8 @@ def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j):
     dtype = rij.dtype
     device = rij.device
 
-    shell_i, exp_i, cs_i, cp_i = _lookup_basis(ni, zeta_i)
-    shell_j, exp_j, cs_j, cp_j = _lookup_basis(nj, zeta_j)
+    shell_i, exp_i, cs_i, cp_i = gather_om1_basis(ni, zeta_i, basis)
+    shell_j, exp_j, cs_j, cp_j = gather_om1_basis(nj, zeta_j, basis)
 
     a = exp_i.unsqueeze(2)
     b = exp_j.unsqueeze(1)
@@ -133,15 +61,11 @@ def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j):
     return out
 
 
-def omx_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j):
-    return om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j)
-
-
-def diatom_overlap_matrix_OM1(ni, nj, xij, rij, zeta_a, zeta_b):
+def diatom_overlap_matrix_OM1(ni, nj, xij, rij, zeta_i, zeta_j, direction, basis):
     """
     Build the 4x4 OM1 overlap block for each atom pair in Cartesian AO order [s, px, py, pz].
     """
-    terms = om1_local_overlap_terms(ni, nj, rij, zeta_a[:, 0], zeta_b[:, 0])
+    terms = om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j, basis)
     ss = terms[:, 0]
     sp = terms[:, 1]
     ps = terms[:, 2]
@@ -154,7 +78,6 @@ def diatom_overlap_matrix_OM1(ni, nj, xij, rij, zeta_a, zeta_b):
     di = torch.zeros((npairs, 4, 4), dtype=dtype, device=device)
     di[:, 0, 0] = ss
 
-    direction = rotate_with_quaternion(xij).transpose(1, 2)[:, :, 0]
     di[:, 0, 1:] = sp.unsqueeze(1) * direction
     di[:, 1:, 0] = ps.unsqueeze(1) * direction
 
@@ -210,15 +133,6 @@ def om1_local_resonance_terms(ni, nj, rij, parameters):
         bap[hx_i] = beta_ph[ni[hx_i]]
         aap[hx_i] = alpha_p_h[ni[hx_i]]
 
-    hx_j = (ni <= 2) & heavy_j & (nj < 86)
-    if hx_j.any():
-        bbs[hx_j] = beta_sh[nj[hx_j]]
-        bbp = bbp.clone()
-        abp = abp.clone()
-        cbs[hx_j] = alpha_s_h[nj[hx_j]]
-        bbp[hx_j] = beta_ph[nj[hx_j]]
-        abp[hx_j] = alpha_p_h[nj[hx_j]]
-
     sqrt_r = torch.sqrt(rij)
     r2 = rij * rij
 
@@ -261,20 +175,7 @@ def om1_local_resonance_terms(ni, nj, rij, parameters):
     return out
 
 
-def omx_local_resonance_terms(ni, nj, rij, parameters):
-    return om1_local_resonance_terms(ni, nj, rij, parameters)
-
-
-def omx_betom_terms(ni, nj, rij, parameters, zeta_i, zeta_j):
-    """
-    Return the local BETOM overlap and resonance terms in the Fortran shell order.
-    """
-    s_local = omx_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j)
-    t_local = omx_local_resonance_terms(ni, nj, rij, parameters)
-    return s_local, t_local
-
-
-def diatom_resonance_matrix_OM1(ni, nj, xij, rij, parameters):
+def diatom_resonance_matrix_OM1(ni, nj, xij, rij, parameters, direction):
     """
     Build the 4x4 OM1 resonance block for each atom pair in Cartesian AO order [s, px, py, pz].
     """
@@ -291,7 +192,6 @@ def diatom_resonance_matrix_OM1(ni, nj, xij, rij, parameters):
     di = torch.zeros((npairs, 4, 4), dtype=dtype, device=device)
     di[:, 0, 0] = ss
 
-    direction = rotate_with_quaternion(xij).transpose(1, 2)[:, :, 0]
     di[:, 0, 1:] = sp.unsqueeze(1) * direction
     di[:, 1:, 0] = ps.unsqueeze(1) * direction
 

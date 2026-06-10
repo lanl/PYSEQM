@@ -1,9 +1,9 @@
 import torch
 
 from .constants import ev
-from .om1_overlap import _lookup_basis
+from .omx_basis import gather_om1_basis
 
-_OM1_HEAVY_SCALE_INDICES = {"HH": (0,), "HX": (0, 4, 10, 11), "XH": (0, 1, 2, 3), "XX": tuple(range(22))}
+_OM1_HEAVY_SCALE_INDICES = {"HH": (0,), "XH": (0, 1, 2, 3), "XX": tuple(range(22))}
 
 
 def _om1_orbital_count(z):
@@ -69,18 +69,12 @@ def om1_gscale(rij, ri, ni, nj, g_ss):
     jorbs = _om1_orbital_count(nj)
 
     hh = (iorbs == 1) & (jorbs == 1)
-    hx = (iorbs == 1) & (jorbs == 4)
     xh = (iorbs == 4) & (jorbs == 1)
     xx = (iorbs == 4) & (jorbs == 4)
 
     if hh.any():
         idx = hh.nonzero(as_tuple=False).squeeze(1)
         scaled[idx[:, None], torch.tensor(_OM1_HEAVY_SCALE_INDICES["HH"], device=ri.device)] *= fko[
-            idx
-        ].unsqueeze(1)
-    if hx.any():
-        idx = hx.nonzero(as_tuple=False).squeeze(1)
-        scaled[idx[:, None], torch.tensor(_OM1_HEAVY_SCALE_INDICES["HX"], device=ri.device)] *= fko[
             idx
         ].unsqueeze(1)
     if xh.any():
@@ -95,14 +89,14 @@ def om1_gscale(rij, ri, ni, nj, g_ss):
     return scaled, fko
 
 
-def om1_corgto(atomic_numbers, zeta, rij):
+def om1_corgto(atomic_numbers, zeta, rij, basis):
     """
     Basic analytical Gaussian core-electron attraction integrals for one OM1 shell.
 
     Returns the current H / ``sp`` subset of the Fortran ``VB(4)`` array:
     ``[ss, sp_sigma, pp_sigma, pp_pi]`` in atomic units.
     """
-    shell_type, exponents, coeff_s, coeff_p = _lookup_basis(atomic_numbers, zeta)
+    shell_type, exponents, coeff_s, coeff_p = gather_om1_basis(atomic_numbers, zeta, basis)
     dtype = rij.dtype
     device = rij.device
 
@@ -147,7 +141,7 @@ def om1_corgto(atomic_numbers, zeta, rij):
     return vb
 
 
-def om1_corgau(ni, nj, rij, zeta, tore):
+def om1_corgau(ni, nj, rij, zeta_i, zeta_j, tore, basis):
     """
     Analytical OM1 core-electron attraction tensor from CORGAU.
 
@@ -157,8 +151,8 @@ def om1_corgau(ni, nj, rij, zeta, tore):
     device = rij.device
     cort = torch.zeros((ni.shape[0], 4, 2), dtype=dtype, device=device)
 
-    vb_i = om1_corgto(ni, zeta[ni], rij)
-    vb_j = om1_corgto(nj, zeta[nj], rij)
+    vb_i = om1_corgto(ni, zeta_i, rij, basis)
+    vb_j = om1_corgto(nj, zeta_j, rij, basis)
 
     # Local factors follow CORGAU conventions:
     # column 0: electrons on atom i, core of atom j
@@ -284,7 +278,6 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp):
     jorbs = _om1_orbital_count(nj)
     is_hh = (iorbs == 1) & (jorbs == 1)
     is_xh = (iorbs == 4) & (jorbs == 1)
-    is_hx = (iorbs == 1) & (jorbs == 4)
     is_xx = (iorbs == 4) & (jorbs == 4)
 
     usi = u_ss[ni] + core[:, 0, 0]
@@ -313,19 +306,6 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp):
         )
         valpp1[is_xh, 2, 0] = s3[is_xh].pow(2) * (upi[is_xh] - usj[is_xh])
         valpp1[is_xh, 1, 0] = 0.5 * s1[is_xh] * s3[is_xh] * (usi[is_xh] + upi[is_xh] - 2.0 * usj[is_xh])
-
-    if is_hx.any():
-        valpp[is_hx, 0, 0] = -s1[is_hx] * t1[is_hx] - s2[is_hx] * t2[is_hx]
-        valpp[is_hx, 0, 1] = -s1[is_hx] * t1[is_hx]
-        valpp[is_hx, 2, 1] = -s2[is_hx] * t2[is_hx]
-        valpp[is_hx, 1, 1] = -0.5 * (s1[is_hx] * t2[is_hx] + s2[is_hx] * t1[is_hx])
-
-        valpp1[is_hx, 0, 0] = s1[is_hx].pow(2) * (usi[is_hx] - usj[is_hx]) + s2[is_hx].pow(2) * (
-            usi[is_hx] - upj[is_hx]
-        )
-        valpp1[is_hx, 0, 1] = s1[is_hx].pow(2) * (usj[is_hx] - usi[is_hx])
-        valpp1[is_hx, 2, 1] = s2[is_hx].pow(2) * (upj[is_hx] - usi[is_hx])
-        valpp1[is_hx, 1, 1] = 0.5 * s2[is_hx] * s1[is_hx] * (usj[is_hx] + upj[is_hx] - 2.0 * usi[is_hx])
 
     if is_xx.any():
         valpp[is_xx, 0, 0] = -s1[is_xx] * t1[is_xx] - s2[is_xx] * t2[is_xx]

@@ -4,6 +4,7 @@ from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der, w_deriv
 from seqm.seqm_functions.rcis_batch import unpackone_batch
 
 from .constants import a0
+from .omx_utils import get_orbital_zetas
 
 
 def _state_pair_tensors(state_pairs, device):
@@ -22,7 +23,8 @@ def _state_pair_tensors(state_pairs, device):
 def _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device):
     npairs = mol.rij.shape[0]
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    zeta = torch.cat((mol.parameters["zeta_s"].unsqueeze(1), mol.parameters["zeta_p"].unsqueeze(1)), dim=1)
+    zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
+    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
     overlap_der_finiteDiff(
         overlap_x,
@@ -55,8 +57,8 @@ def _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device):
             mol.parameters["g_pp"],
             mol.parameters["g_p2"],
             mol.parameters["h_sp"],
-            mol.parameters["zeta_s"],
-            mol.parameters["zeta_p"],
+            zetas,
+            zetap,
             riXH,
             ri,
         )

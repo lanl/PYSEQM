@@ -5,6 +5,7 @@ from seqm.seqm_functions.rcis_batch import make_cis_densities, unpackone_batch
 
 from .constants import a0
 from .dispersion_am1_fs1 import dEdisp_dr
+from .omx_utils import get_orbital_zetas
 
 
 def rcis_grad_batch(
@@ -64,7 +65,8 @@ def rcis_grad_batch(
     device = B0.device
     nmol = mol.nmol
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    zeta = torch.cat((mol.parameters["zeta_s"].unsqueeze(1), mol.parameters["zeta_p"].unsqueeze(1)), dim=1)
+    zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
+    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
     overlap_der_finiteDiff(
         overlap_x,
@@ -97,8 +99,8 @@ def rcis_grad_batch(
             mol.parameters["g_pp"],
             mol.parameters["g_p2"],
             mol.parameters["h_sp"],
-            mol.parameters["zeta_s"],
-            mol.parameters["zeta_p"],
+            zetas,
+            zetap,
             riXH,
             ri,
         )

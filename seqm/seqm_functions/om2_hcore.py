@@ -1,354 +1,76 @@
 import torch
 
-from .om1_overlap import diatom_overlap_matrix_OM1, diatom_resonance_matrix_OM1, omx_betom_terms
+from .om1_overlap import (
+    diatom_overlap_matrix_OM1,
+    diatom_resonance_matrix_OM1,
+    om1_local_overlap_terms,
+    om1_local_resonance_terms,
+)
 from .om1_pair_backend import omx_pair_hcore_terms
+from .two_elec_two_center_int import rotate_with_quaternion
 
-
-def _atom_orbs(z):
-    z = int(z)
-    if z <= 0:
-        return 0
-    return 1 if z == 1 else 4
-
-
-def _atom_block_start(atom_index):
-    return int(atom_index) * 4
-
-
-def _reshape_blocks_to_square(blocks, nmol, molsize, orb_dim=4):
-    return (
-        blocks.reshape(nmol, molsize, molsize, orb_dim, orb_dim)
-        .transpose(2, 3)
-        .reshape(nmol, orb_dim * molsize, orb_dim * molsize)
-    )
-
-
-def _reshape_square_to_blocks(square, nmol, molsize, orb_dim=4):
-    return (
-        square.reshape(nmol, molsize, orb_dim, molsize, orb_dim)
-        .transpose(2, 3)
-        .reshape(nmol * molsize * molsize, orb_dim, orb_dim)
-    )
-
-
-def _sym_get(mat, r, c):
-    """
-    Read a symmetric AO matrix stored in only one triangle.
-
-    Your pair construction stores idxi < idxj blocks only. Therefore, when
-    reading the reverse direction, use mat[c, r].
-    """
-    return mat[r, c] if r <= c else mat[c, r]
-
-
-def _extract_atom_pair_vec(mat, atom_a, atom_k, aorbs, korbs, orb_dim=4):
-    """
-    Return Fortran-style 16-vector for pair A-K.
-
-    Layout matches BETORT:
-        index = mu * 4 + nu
-
-    where:
-        mu = orbital on atom A
-        nu = orbital on atom K
-
-    Thus:
-        0  = sA-sK
-        1  = sA-pxK
-        2  = sA-pyK
-        3  = sA-pzK
-        4  = pxA-sK
-        8  = pyA-sK
-        12 = pzA-sK
-    """
-    out = torch.zeros(16, dtype=mat.dtype, device=mat.device)
-
-    a0 = atom_a * orb_dim
-    k0 = atom_k * orb_dim
-
-    for mu in range(aorbs):
-        for nu in range(korbs):
-            out[mu * 4 + nu] = _sym_get(mat, a0 + mu, k0 + nu)
-
-    return out
+_OMX_HCORE_CONFIG = {
+    "OM1": {"use_cor": False, "direct_resonance": True},
+    "OM2": {"use_cor": True, "direct_resonance": False},
+    "OM3": {"use_cor": False, "direct_resonance": False},
+}
 
 
 def _build_cor_table(molecule, pair_core_semi, tables):
-    """
-    Build OM2 COR table used by BETORT.
-
-    Fortran source:
-
-        COR(IA,J) = USS(NI)+CORE(1,1)
-        COR(JA,I) = USS(NJ)+CORE(1,2)
-
-        TEMP = UPP(NI)+(CORE(3,1)+2*CORE(4,1))/3
-        COR(IA+1,J) = TEMP
-        COR(IA+2,J) = TEMP
-        COR(IA+3,J) = TEMP
-
-    Important:
-        core_semi must be CORE before COROM adds PEN/CORPP/VALPP.
-    """
     nmol, molsize = molecule.species.shape
     dtype = molecule.coordinates.dtype
     device = molecule.coordinates.device
 
     cor = torch.zeros((nmol, molsize * 4, molsize), dtype=dtype, device=device)
 
-    for p in range(molecule.ni.shape[0]):
-        mol = int(molecule.pair_molid[p].item())
+    mol = molecule.pair_molid
+    atom_i = molecule.maskd[molecule.idxi] % molsize
+    atom_j = molecule.maskd[molecule.idxj] % molsize
+    row_i = atom_i * 4
+    row_j = atom_j * 4
 
-        atom_i = int(molecule.idxi[p].item())
-        atom_j = int(molecule.idxj[p].item())
+    cor[mol, row_i + 0, atom_j] = tables["U_ss"][molecule.ni] + pair_core_semi[:, 0, 0]
+    cor[mol, row_j + 0, atom_i] = tables["U_ss"][molecule.nj] + pair_core_semi[:, 0, 1]
 
-        ni = int(molecule.ni[p].item())
-        nj = int(molecule.nj[p].item())
+    heavy_i = molecule.ni > 1
+    if heavy_i.any():
+        temp_i = (
+            tables["U_pp"][molecule.ni[heavy_i]]
+            + (pair_core_semi[heavy_i, 2, 0] + 2.0 * pair_core_semi[heavy_i, 3, 0]) / 3.0
+        )
+        cor[mol[heavy_i], row_i[heavy_i] + 1, atom_j[heavy_i]] = temp_i
+        cor[mol[heavy_i], row_i[heavy_i] + 2, atom_j[heavy_i]] = temp_i
+        cor[mol[heavy_i], row_i[heavy_i] + 3, atom_j[heavy_i]] = temp_i
 
-        core_semi = pair_core_semi[p]
-
-        row_i = _atom_block_start(atom_i)
-        row_j = _atom_block_start(atom_j)
-
-        cor[mol, row_i + 0, atom_j] = tables["U_ss"][ni] + core_semi[0, 0]
-        cor[mol, row_j + 0, atom_i] = tables["U_ss"][nj] + core_semi[0, 1]
-
-        if ni > 1:
-            temp_i = tables["U_pp"][ni] + (core_semi[2, 0] + 2.0 * core_semi[3, 0]) / 3.0
-            cor[mol, row_i + 1, atom_j] = temp_i
-            cor[mol, row_i + 2, atom_j] = temp_i
-            cor[mol, row_i + 3, atom_j] = temp_i
-
-        if nj > 1:
-            temp_j = tables["U_pp"][nj] + (core_semi[2, 1] + 2.0 * core_semi[3, 1]) / 3.0
-            cor[mol, row_j + 1, atom_i] = temp_j
-            cor[mol, row_j + 2, atom_i] = temp_j
-            cor[mol, row_j + 3, atom_i] = temp_j
+    heavy_j = molecule.nj > 1
+    if heavy_j.any():
+        temp_j = (
+            tables["U_pp"][molecule.nj[heavy_j]]
+            + (pair_core_semi[heavy_j, 2, 1] + 2.0 * pair_core_semi[heavy_j, 3, 1]) / 3.0
+        )
+        cor[mol[heavy_j], row_j[heavy_j] + 1, atom_i[heavy_j]] = temp_j
+        cor[mol[heavy_j], row_j[heavy_j] + 2, atom_i[heavy_j]] = temp_j
+        cor[mol[heavy_j], row_j[heavy_j] + 3, atom_i[heavy_j]] = temp_j
 
     return cor
 
 
-def betort_torch(H, S, B, COR, species, gval1, gval2):
-    """
-    Literal but simplified PyTorch port of Fortran BETORT.
-
-    H is accepted for API compatibility but not used.
-    S, B are padded AO square matrices with 4 slots per atom.
-    COR has shape:
-        (nmol, molsize * 4, molsize)
-
-    Returns:
-        HO, same shape as H/S/B.
-
-    The Fortran result is computed for I > J lower-triangle elements, but this
-    routine stores the transposed upper-triangle block convention used by the
-    rest of the PyTorch Hcore builder.
-    """
-    nmol, _, _ = S.shape
-    dtype = S.dtype
-    device = S.device
-
-    HO = torch.zeros_like(S)
-
-    for mol in range(nmol):
-        natoms = int((species[mol] > 0).sum().item())
-
-        for ia in range(1, natoms):
-            ni = int(species[mol, ia].item())
-            iorbs = _atom_orbs(ni)
-            ia0 = ia * 4
-
-            for ja in range(ia):
-                nj = int(species[mol, ja].item())
-                jorbs = _atom_orbs(nj)
-                ja0 = ja * 4
-
-                case1 = iorbs == 1 and jorbs == 1
-                case2 = iorbs == 1 and jorbs >= 4
-                case3 = iorbs >= 4 and jorbs == 1
-
-                ts1 = torch.zeros(16, dtype=dtype, device=device)
-                ts2 = torch.zeros(16, dtype=dtype, device=device)
-
-                # Fortran:
-                #   FT1 = PT25  *(FTS1(NI)+FTS1(NJ))
-                #   FT2 = PT625 *(FTS2(NI)+FTS2(NJ))
-                #   PT625 = 0.0625
-                ft1 = 0.25 * (gval1[ni] + gval1[nj])
-                ft2 = 0.0625 * (gval2[ni] + gval2[nj])
-
-                for k in range(natoms):
-                    if k == ia or k == ja:
-                        continue
-
-                    nk = int(species[mol, k].item())
-                    korbs = _atom_orbs(nk)
-                    if korbs == 0:
-                        continue
-
-                    ka0 = k * 4
-
-                    sik = _extract_atom_pair_vec(S[mol], ia, k, iorbs, korbs)
-                    bik = _extract_atom_pair_vec(B[mol], ia, k, iorbs, korbs)
-
-                    sjk = _extract_atom_pair_vec(S[mol], ja, k, jorbs, korbs)
-                    bjk = _extract_atom_pair_vec(B[mol], ja, k, jorbs, korbs)
-
-                    hi = torch.zeros(4, dtype=dtype, device=device)
-                    hj = torch.zeros(4, dtype=dtype, device=device)
-                    hk = torch.zeros(4, dtype=dtype, device=device)
-
-                    hi[0] = COR[mol, ia0 + 0, k]
-                    hj[0] = COR[mol, ja0 + 0, k]
-                    hk[0] = COR[mol, ka0 + 0, ia] + COR[mol, ka0 + 0, ja]
-
-                    if iorbs >= 4:
-                        hi[1] = COR[mol, ia0 + 1, k]
-                        hi[2] = hi[1]
-                        hi[3] = hi[1]
-
-                    if jorbs >= 4:
-                        hj[1] = COR[mol, ja0 + 1, k]
-                        hj[2] = hj[1]
-                        hj[3] = hj[1]
-
-                    if korbs >= 4:
-                        hk[1] = COR[mol, ka0 + 1, ia] + COR[mol, ka0 + 1, ja]
-                        hk[2] = hk[1]
-                        hk[3] = hk[1]
-
-                    # S(I)-S(J)
-                    for l in range(korbs):
-                        ts1[0] = ts1[0] + sik[l] * bjk[l] + bik[l] * sjk[l]
-                        ts2[0] = ts2[0] + sik[l] * sjk[l] * (hi[0] + hj[0] - hk[l])
-
-                    if case1:
-                        continue
-
-                    # S(I)-P(J)
-                    if case2:
-                        for l in range(korbs):
-                            ts1[1] = ts1[1] + sik[l] * bjk[l + 4] + bik[l] * sjk[l + 4]
-                            ts1[2] = ts1[2] + sik[l] * bjk[l + 8] + bik[l] * sjk[l + 8]
-                            ts1[3] = ts1[3] + sik[l] * bjk[l + 12] + bik[l] * sjk[l + 12]
-
-                            ts2[1] = ts2[1] + sik[l] * sjk[l + 4] * (hi[0] + hj[1] - hk[l])
-                            ts2[2] = ts2[2] + sik[l] * sjk[l + 8] * (hi[0] + hj[2] - hk[l])
-                            ts2[3] = ts2[3] + sik[l] * sjk[l + 12] * (hi[0] + hj[3] - hk[l])
-
-                    # P(I)-S(J)
-                    elif case3:
-                        for l in range(korbs):
-                            ts1[4] = ts1[4] + sik[l + 4] * bjk[l] + bik[l + 4] * sjk[l]
-                            ts1[8] = ts1[8] + sik[l + 8] * bjk[l] + bik[l + 8] * sjk[l]
-                            ts1[12] = ts1[12] + sik[l + 12] * bjk[l] + bik[l + 12] * sjk[l]
-
-                            ts2[4] = ts2[4] + sik[l + 4] * sjk[l] * (hi[1] + hj[0] - hk[l])
-                            ts2[8] = ts2[8] + sik[l + 8] * sjk[l] * (hi[2] + hj[0] - hk[l])
-                            ts2[12] = ts2[12] + sik[l + 12] * sjk[l] * (hi[3] + hj[0] - hk[l])
-
-                    # S/P(I)-S/P(J)
-                    else:
-                        for l in range(korbs):
-                            # TS1
-                            ts1[1] = ts1[1] + sik[l] * bjk[l + 4] + bik[l] * sjk[l + 4]
-                            ts1[2] = ts1[2] + sik[l] * bjk[l + 8] + bik[l] * sjk[l + 8]
-                            ts1[3] = ts1[3] + sik[l] * bjk[l + 12] + bik[l] * sjk[l + 12]
-
-                            ts1[4] = ts1[4] + sik[l + 4] * bjk[l] + bik[l + 4] * sjk[l]
-                            ts1[5] = ts1[5] + sik[l + 4] * bjk[l + 4] + bik[l + 4] * sjk[l + 4]
-                            ts1[6] = ts1[6] + sik[l + 4] * bjk[l + 8] + bik[l + 4] * sjk[l + 8]
-                            ts1[7] = ts1[7] + sik[l + 4] * bjk[l + 12] + bik[l + 4] * sjk[l + 12]
-
-                            ts1[8] = ts1[8] + sik[l + 8] * bjk[l] + bik[l + 8] * sjk[l]
-                            ts1[9] = ts1[9] + sik[l + 8] * bjk[l + 4] + bik[l + 8] * sjk[l + 4]
-                            ts1[10] = ts1[10] + sik[l + 8] * bjk[l + 8] + bik[l + 8] * sjk[l + 8]
-                            ts1[11] = ts1[11] + sik[l + 8] * bjk[l + 12] + bik[l + 8] * sjk[l + 12]
-
-                            ts1[12] = ts1[12] + sik[l + 12] * bjk[l] + bik[l + 12] * sjk[l]
-                            ts1[13] = ts1[13] + sik[l + 12] * bjk[l + 4] + bik[l + 12] * sjk[l + 4]
-                            ts1[14] = ts1[14] + sik[l + 12] * bjk[l + 8] + bik[l + 12] * sjk[l + 8]
-                            ts1[15] = ts1[15] + sik[l + 12] * bjk[l + 12] + bik[l + 12] * sjk[l + 12]
-
-                            # TS2
-                            ts2[1] = ts2[1] + sik[l] * sjk[l + 4] * (hi[0] + hj[1] - hk[l])
-                            ts2[2] = ts2[2] + sik[l] * sjk[l + 8] * (hi[0] + hj[2] - hk[l])
-                            ts2[3] = ts2[3] + sik[l] * sjk[l + 12] * (hi[0] + hj[3] - hk[l])
-
-                            ts2[4] = ts2[4] + sik[l + 4] * sjk[l] * (hi[1] + hj[0] - hk[l])
-                            ts2[5] = ts2[5] + sik[l + 4] * sjk[l + 4] * (hi[1] + hj[1] - hk[l])
-                            ts2[6] = ts2[6] + sik[l + 4] * sjk[l + 8] * (hi[1] + hj[2] - hk[l])
-                            ts2[7] = ts2[7] + sik[l + 4] * sjk[l + 12] * (hi[1] + hj[3] - hk[l])
-
-                            ts2[8] = ts2[8] + sik[l + 8] * sjk[l] * (hi[2] + hj[0] - hk[l])
-                            ts2[9] = ts2[9] + sik[l + 8] * sjk[l + 4] * (hi[2] + hj[1] - hk[l])
-                            ts2[10] = ts2[10] + sik[l + 8] * sjk[l + 8] * (hi[2] + hj[2] - hk[l])
-                            ts2[11] = ts2[11] + sik[l + 8] * sjk[l + 12] * (hi[2] + hj[3] - hk[l])
-
-                            ts2[12] = ts2[12] + sik[l + 12] * sjk[l] * (hi[3] + hj[0] - hk[l])
-                            ts2[13] = ts2[13] + sik[l + 12] * sjk[l + 4] * (hi[3] + hj[1] - hk[l])
-                            ts2[14] = ts2[14] + sik[l + 12] * sjk[l + 8] * (hi[3] + hj[2] - hk[l])
-                            ts2[15] = ts2[15] + sik[l + 12] * sjk[l + 12] * (hi[3] + hj[3] - hk[l])
-
-                def _put(mu, nu, q):
-                    # Fortran computes H(I_mu, J_nu), with I > J.
-                    # Your storage keeps the upper triangle, so store H(J_nu, I_mu).
-                    HO[mol, ja0 + nu, ia0 + mu] = -ft1 * ts1[q] + ft2 * ts2[q]
-
-                # Write HO block for atom pair ia-ja.
-                _put(0, 0, 0)
-
-                if case1:
-                    continue
-
-                if case2:
-                    # I has only s, J has s,p.
-                    # Fortran: H(I_s, J_px/py/pz)
-                    _put(0, 1, 1)
-                    _put(0, 2, 2)
-                    _put(0, 3, 3)
-
-                elif case3:
-                    # I has s,p, J has only s.
-                    # Fortran: H(I_px/py/pz, J_s)
-                    _put(1, 0, 4)
-                    _put(2, 0, 8)
-                    _put(3, 0, 12)
-
-                else:
-                    for mu in range(4):
-                        for nu in range(4):
-                            _put(mu, nu, mu * 4 + nu)
-
-    return HO
+def _omx_tables(molecule):
+    tables = molecule.parameters.get("_omx_tables")
+    if tables is None:
+        raise RuntimeError("OMx parameter tables have not been cached on the molecule")
+    return tables
 
 
-def _build_om_hcore(molecule, doTETCI=True, method="OM2", use_cor=True):
-    nmol, molsize = molecule.species.shape
-    orb_dim = 4
-    device = molecule.coordinates.device
-    dtype = molecule.coordinates.dtype
+def _omx_basis(molecule):
+    basis = molecule.parameters.get("_omx_basis")
+    if basis is None:
+        raise RuntimeError("OMx basis tables have not been cached on the molecule")
+    return basis
 
-    npairs = molecule.xij.size(0)
-    nblocks = nmol * molsize * molsize
 
-    H_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
-    S_blocks = torch.zeros_like(H_blocks)
-    B_blocks = torch.zeros_like(H_blocks)
-    w = torch.zeros((npairs, 10, 10), dtype=dtype, device=device)
-
-    def _table(name):
-        return molecule.packpar.p[:, molecule.packpar.required_list.index(name)]
-
-    tables = {name: _table(name) for name in molecule.packpar.required_list}
-
-    # One-center diagonal terms.
-    for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
-        H_blocks[molecule.maskd, orb, orb] = molecule.parameters[key].to(dtype=dtype, device=device)
-
-    pair_core_semi = torch.zeros((npairs, 4, 2), dtype=dtype, device=device) if use_cor else None
-
-    resonance_tables = {
+def _omx_resonance_tables(tables):
+    return {
         name: tables[name]
         for name in [
             "beta_s",
@@ -364,281 +86,388 @@ def _build_om_hcore(molecule, doTETCI=True, method="OM2", use_cor=True):
         ]
     }
 
-    for p in range(npairs):
-        ni = int(molecule.ni[p].item())
-        nj = int(molecule.nj[p].item())
 
-        idxi = molecule.idxi[p : p + 1]
-        idxj = molecule.idxj[p : p + 1]
+def _fill_omx_one_center_blocks(H_blocks, molecule):
+    for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
+        H_blocks[molecule.maskd, orb, orb] = molecule.parameters[key]
 
-        rij = molecule.rij[p : p + 1]
-        xij = molecule.xij[p : p + 1]
 
-        zeta_i_s = molecule.parameters["zeta_s"][idxi]
-        zeta_j_s = molecule.parameters["zeta_s"][idxj]
+def _prepare_pair_rotation(molecule):
+    rot = rotate_with_quaternion(molecule.xij)
+    rot_t = rot.transpose(1, 2)
+    direction = rot_t[:, :, 0]
+    return rot, rot_t, direction
 
-        # Local BETOM terms for COROM/VALPOT.
-        s_local, t_local = omx_betom_terms(
-            molecule.ni[p : p + 1], molecule.nj[p : p + 1], rij, tables, zeta_i_s, zeta_j_s
-        )
 
-        pair = omx_pair_hcore_terms(
-            method,
-            ni,
-            nj,
-            xij[0],
-            float(rij.item()),
-            tables["zeta_s"],
-            tables["g_ss"],
-            molecule.const.tore,
-            s_local[0],
-            t_local[0],
-            tables["U_ss"],
-            tables["U_pp"],
-            tables["fval1"],
-            tables["fval2"],
-            om2_tables=tables,
-        )
+def _prepare_omx_local_pair_terms(molecule, tables):
+    zeta_i = molecule.parameters["zeta"][molecule.idxi]
+    zeta_j = molecule.parameters["zeta"][molecule.idxj]
+    basis = _omx_basis(molecule)
+    return (
+        om1_local_overlap_terms(molecule.ni, molecule.nj, molecule.rij, zeta_i, zeta_j, basis),
+        om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, tables),
+    )
 
-        w[p] = pair["w"]
 
-        if use_cor:
-            pair_core_semi[p] = pair["core_semi"]
+def _prepare_omx_pair_overlap(molecule, rot_direction):
+    basis = _omx_basis(molecule)
+    return diatom_overlap_matrix_OM1(
+        molecule.ni,
+        molecule.nj,
+        molecule.xij,
+        molecule.rij,
+        molecule.parameters["zeta"][molecule.idxi],
+        molecule.parameters["zeta"][molecule.idxj],
+        rot_direction,
+        basis,
+    )
 
-        # Core-electron attraction contributions to atom i and atom j blocks.
-        H_blocks.index_add_(0, molecule.maskd[idxi], pair["e1b"].unsqueeze(0))
-        H_blocks.index_add_(0, molecule.maskd[idxj], pair["e2a"].unsqueeze(0))
 
-        # Rotated overlap S and resonance B for BETORT.
-        #
-        # This follows your existing code path. The important point is that these
-        # must match Fortran:
-        #
-        #   CALL ROTBET(..., SIJ, ..., S)
-        #   CALL ROTBET(..., T,   ..., B)
-        #
-        zeta_pair_i = torch.stack(
-            [molecule.parameters["zeta_s"][idxi], molecule.parameters["zeta_p"][idxi]], dim=1
-        )
-        zeta_pair_j = torch.stack(
-            [molecule.parameters["zeta_s"][idxj], molecule.parameters["zeta_p"][idxj]], dim=1
-        )
+def _prepare_omx_pair_resonance(molecule, resonance_tables, rot_direction):
+    return diatom_resonance_matrix_OM1(
+        molecule.ni, molecule.nj, molecule.xij, molecule.rij, resonance_tables, rot_direction
+    )
 
-        s_pair = diatom_overlap_matrix_OM1(
-            molecule.ni[p : p + 1], molecule.nj[p : p + 1], xij, rij, zeta_pair_i, zeta_pair_j
-        )[0]
 
-        b_pair = diatom_resonance_matrix_OM1(
-            molecule.ni[p : p + 1], molecule.nj[p : p + 1], xij, rij, resonance_tables
-        )[0]
+def _assemble_omx_pair_terms(molecule, method, cfg, tables, s_local, t_local, rot, rot_t):
+    use_cor = cfg["use_cor"]
+    basis = _omx_basis(molecule)
 
-        S_blocks[molecule.mask[p : p + 1]] = s_pair
-        B_blocks[molecule.mask[p : p + 1]] = b_pair
+    pair = omx_pair_hcore_terms(
+        method,
+        molecule.ni,
+        molecule.nj,
+        molecule.rij,
+        tables["zeta"],
+        tables["g_ss"],
+        molecule.const.tore,
+        s_local,
+        t_local,
+        tables["U_ss"],
+        tables["U_pp"],
+        tables["fval1"],
+        tables["fval2"],
+        rot,
+        rot_t,
+        basis,
+        om2_tables=tables,
+    )
+    return {
+        "pair_core_semi": pair["core_semi"] if use_cor else None,
+        "w": pair["w"],
+        "rho0xi": pair["fko"],
+        "e1b": pair["e1b"],
+        "e2a": pair["e2a"],
+    }
 
-    H_sq = _reshape_blocks_to_square(H_blocks, nmol, molsize, orb_dim)
-    S_sq = _reshape_blocks_to_square(S_blocks, nmol, molsize, orb_dim)
-    B_sq = _reshape_blocks_to_square(B_blocks, nmol, molsize, orb_dim)
 
-    has_three_or_more_atoms = bool(((molecule.species > 0).sum(dim=1) > 2).any().item())
+def _build_omx_hcore(molecule, doTETCI=True, method="OM2"):
+    if method not in _OMX_HCORE_CONFIG:
+        raise ValueError(f"Unsupported OMx method: {method}")
+    cfg = _OMX_HCORE_CONFIG[method]
+    use_cor = cfg["use_cor"]
+    direct_resonance = cfg["direct_resonance"]
 
-    if doTETCI and has_three_or_more_atoms:
-        if use_cor:
-            COR = _build_cor_table(molecule, pair_core_semi, tables)
-            HO_sq = betort_torch(H_sq, S_sq, B_sq, COR, molecule.species, tables["gval1"], tables["gval2"])
-            H_sq = H_sq + B_sq + HO_sq
-        else:
-            HO_sq = betor3_torch(S_sq, B_sq, molecule.species, tables["gval1"])
-            H_sq = H_sq + B_sq + HO_sq
-    else:
-        H_sq = H_sq + B_sq
+    orb_dim = 4
+    device = molecule.coordinates.device
+    dtype = molecule.coordinates.dtype
+    nblocks = molecule.nmol * molecule.molsize * molecule.molsize
+    H_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
 
-    H_blocks = _reshape_square_to_blocks(H_sq, nmol, molsize, orb_dim)
+    tables = _omx_tables(molecule)
+    _fill_omx_one_center_blocks(H_blocks, molecule)
+    resonance_tables = _omx_resonance_tables(tables)
 
-    return H_blocks, w, None, None, None, None
+    rot, rot_t, direction = _prepare_pair_rotation(molecule)
+
+    s_local, t_local = _prepare_omx_local_pair_terms(molecule, tables)
+
+    pair_data = _assemble_omx_pair_terms(molecule, method, cfg, tables, s_local, t_local, rot, rot_t)
+    H_blocks.index_add_(0, molecule.maskd[molecule.idxi], pair_data["e1b"])
+    H_blocks.index_add_(0, molecule.maskd[molecule.idxj], pair_data["e2a"])
+
+    pair_resonance = _prepare_omx_pair_resonance(molecule, resonance_tables, direction)
+
+    if direct_resonance:
+        H_blocks[molecule.mask] = pair_resonance
+        return H_blocks, pair_data["w"], pair_data["rho0xi"], None, None, None
+
+    pair_overlap = _prepare_omx_pair_overlap(molecule, direction)
+    S_blocks = torch.zeros_like(H_blocks)
+    B_blocks = torch.zeros_like(H_blocks)
+    S_blocks[molecule.mask] = pair_overlap
+    S_blocks[molecule.mask_l] = pair_overlap.transpose(-1, -2)
+    B_blocks[molecule.mask] = pair_resonance
+    B_blocks[molecule.mask_l] = pair_resonance.transpose(-1, -2)
+
+    H_blocks = _apply_omx_orthogonalization(
+        molecule, H_blocks, S_blocks, B_blocks, tables, pair_data["pair_core_semi"], use_cor, doTETCI
+    )
+    return H_blocks, pair_data["w"], pair_data["rho0xi"], None, None, None
+
+
+def build_om1_hcore(molecule, doTETCI=True):
+    return _build_omx_hcore(molecule, doTETCI=doTETCI, method="OM1")
 
 
 def build_om2_hcore(molecule, doTETCI=True):
-    return _build_om_hcore(molecule, doTETCI=doTETCI, method="OM2", use_cor=True)
+    return _build_omx_hcore(molecule, doTETCI=doTETCI, method="OM2")
 
 
 def build_om3_hcore(molecule, doTETCI=True):
-    return _build_om_hcore(molecule, doTETCI=doTETCI, method="OM3", use_cor=False)
+    return _build_omx_hcore(molecule, doTETCI=doTETCI, method="OM3")
 
 
-def betor3_torch(S, B, species, gval1, cuts=1.0e-12):
-    """
-    PyTorch port of Fortran BETOR3 for OM3.
+def build_omx_hcore(molecule, doTETCI=True):
+    return _build_omx_hcore(molecule, doTETCI=doTETCI, method=molecule.method)
 
-    Fortran:
-        CALL BETOR3(HO, S, B, B, LM2, LM4, IZERO)
 
-    Energy-evaluation behavior:
-        H_ij = -FT1 * TS1_ij
+def _add_betor_from_pairs_chunked_(
+    out_blocks,
+    S_blocks,
+    B_blocks,
+    molecule,
+    gval1,
+    COR,
+    gval2,
+    pair_chunk=2048,
+    k_chunk=32,
+    # cuts=None,
+):
+    nmol = molecule.nmol
+    molsize = molecule.molsize
+    dtype = S_blocks.dtype
+    device = S_blocks.device
 
-    where:
-        FT1 = 0.25 * (FTS1(NI) + FTS1(NJ))
+    S5 = S_blocks.reshape(nmol, molsize, molsize, 4, 4)
+    B5 = B_blocks.reshape(nmol, molsize, molsize, 4, 4)
 
-    This is the first-perturbation-sum part of BETORT only.
-    There is no COR table, no FTS2/gval2, and no TS2 contribution.
+    pair_mol = molecule.pair_molid
+    ai = (molecule.mask // molsize) % molsize
+    aj = molecule.mask % molsize
+    nat_per_mol = (molecule.species > 0).sum(dim=1)
 
-    Parameters
-    ----------
-    S, B : torch.Tensor
-        AO square matrices with shape (nmol, nao, nao), using 4 AO slots per atom.
-    species : torch.Tensor
-        Atomic numbers, shape (nmol, molsize). Padding atoms should be <= 0.
-    gval1 : torch.Tensor
-        OM3 FTS1/gval1 table indexed by atomic number.
-    cuts : float or None
-        Fortran-style ICUTS overlap-product cutoff.
-        If None, no cutoff is applied.
-        Default 1.0e-12 matches SMALLS when ICUTS <= 0.
+    CORs = COR[:, 0::4, :]
+    CORp = COR[:, 1::4, :]
+    heavy = (molecule.species > 1).to(dtype)
 
-    Returns
-    -------
-    HO : torch.Tensor
-        Orthogonalization correction matrix, same shape as S/B.
+    npairs = molecule.mask.numel()
 
-    Notes
-    -----
-    Fortran computes lower-triangle H(I_mu, J_nu) for I > J.
-    This routine follows your existing PyTorch convention and stores the
-    transposed upper-triangle block: HO[J_nu, I_mu].
-    """
-    nmol, _, _ = S.shape
-    dtype = S.dtype
-    device = S.device
+    for p0 in range(0, npairs, pair_chunk):
+        p1 = min(p0 + pair_chunk, npairs)
 
-    HO = torch.zeros_like(S)
+        mol = pair_mol[p0:p1]
+        out_i = ai[p0:p1]
+        out_j = aj[p0:p1]
 
-    for mol in range(nmol):
-        natoms = int((species[mol] > 0).sum().item())
+        # Match old orientation:
+        # old HO[upper i,j] = Hpair[j,i].T
+        src_i = out_j
+        src_j = out_i
 
-        for ia in range(1, natoms):
-            ni = int(species[mol, ia].item())
-            iorbs = _atom_orbs(ni)
-            ia0 = ia * 4
+        P = p1 - p0
 
-            for ja in range(ia):
-                nj = int(species[mol, ja].item())
-                jorbs = _atom_orbs(nj)
-                ja0 = ja * 4
+        ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
+        ts2 = torch.zeros_like(ts1) if COR is not None else None
 
-                case1 = iorbs == 1 and jorbs == 1
-                case2 = iorbs == 1 and jorbs >= 4
-                case3 = iorbs >= 4 and jorbs == 1
+        for k0 in range(0, molsize, k_chunk):
+            k1 = min(k0 + k_chunk, molsize)
+            k_ids = torch.arange(k0, k1, device=device)
+            K = k1 - k0
 
-                ts1 = torch.zeros(16, dtype=dtype, device=device)
+            valid_k = (
+                (k_ids[None, :] < nat_per_mol[mol, None])
+                & (k_ids[None, :] != src_i[:, None])
+                & (k_ids[None, :] != src_j[:, None])
+            )
 
-                # Fortran:
-                #   FT1 = PT25 * (FTS1(NI) + FTS1(NJ))
-                ft1 = 0.25 * (gval1[ni] + gval1[nj])
+            # [P, K, 4, 4]
+            Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
+            Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
+            Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
+            Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
 
-                for k in range(natoms):
-                    if k == ia or k == ja:
-                        continue
+            # if cuts is not None:
+            #     valid_k = valid_k & ((Si[..., 0, 0] * Sj[..., 0, 0]) >= cuts)
 
-                    nk = int(species[mol, k].item())
-                    korbs = _atom_orbs(nk)
-                    if korbs == 0:
-                        continue
+            vf = valid_k.to(dtype)[..., None, None]
 
-                    # Fortran cutoff:
-                    #
-                    #   IF(ICUTS.GE.0) THEN
-                    #      ...
-                    #      IF((S(IKSS)*S(JKSS)).LT.CUTS) GO TO 90
-                    #   ENDIF
-                    #
-                    # IKSS and JKSS are the s-s overlap elements for I-K and J-K.
-                    # The Fortran does not use ABS here.
-                    if cuts is not None:
-                        sik_ss = _extract_atom_pair_vec(S[mol], ia, k, iorbs, korbs)[0]
-                        sjk_ss = _extract_atom_pair_vec(S[mol], ja, k, jorbs, korbs)[0]
+            ts1 = ts1 + ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
+            ts1 = ts1 + ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
 
-                        if (sik_ss * sjk_ss).detach().item() < cuts:
-                            continue
+            hi_s = CORs[mol[:, None], src_i[:, None], k_ids[None, :]]
+            hj_s = CORs[mol[:, None], src_j[:, None], k_ids[None, :]]
 
-                    sik = _extract_atom_pair_vec(S[mol], ia, k, iorbs, korbs)
-                    bik = _extract_atom_pair_vec(B[mol], ia, k, iorbs, korbs)
+            hi_p = CORp[mol[:, None], src_i[:, None], k_ids[None, :]]
+            hj_p = CORp[mol[:, None], src_j[:, None], k_ids[None, :]]
 
-                    sjk = _extract_atom_pair_vec(S[mol], ja, k, jorbs, korbs)
-                    bjk = _extract_atom_pair_vec(B[mol], ja, k, jorbs, korbs)
+            heavy_i = heavy[mol, src_i]
+            heavy_j = heavy[mol, src_j]
+            heavy_k = heavy[mol[:, None], k_ids[None, :]]
 
-                    # S(I)-S(J)
-                    for l in range(korbs):
-                        ts1[0] = ts1[0] + sik[l] * bjk[l] + bik[l] * sjk[l]
+            hi = torch.empty((P, K, 4), dtype=dtype, device=device)
+            hj = torch.empty_like(hi)
 
-                    if case1:
-                        continue
+            hi[..., 0] = hi_s
+            hj[..., 0] = hj_s
 
-                    if case2:
-                        # S(I)-P(J)
-                        for l in range(korbs):
-                            ts1[1] = ts1[1] + sik[l] * bjk[l + 4] + bik[l] * sjk[l + 4]
-                            ts1[2] = ts1[2] + sik[l] * bjk[l + 8] + bik[l] * sjk[l + 8]
-                            ts1[3] = ts1[3] + sik[l] * bjk[l + 12] + bik[l] * sjk[l + 12]
+            hi[..., 1:] = hi_p[..., None] * heavy_i[:, None, None]
+            hj[..., 1:] = hj_p[..., None] * heavy_j[:, None, None]
 
-                    elif case3:
-                        # P(I)-S(J)
-                        for l in range(korbs):
-                            ts1[4] = ts1[4] + sik[l + 4] * bjk[l] + bik[l + 4] * sjk[l]
-                            ts1[8] = ts1[8] + sik[l + 8] * bjk[l] + bik[l + 8] * sjk[l]
-                            ts1[12] = ts1[12] + sik[l + 12] * bjk[l] + bik[l + 12] * sjk[l]
+            hk_s = (
+                CORs[mol[:, None], k_ids[None, :], src_i[:, None]]
+                + CORs[mol[:, None], k_ids[None, :], src_j[:, None]]
+            )
 
-                    else:
-                        # S/P(I)-S/P(J)
-                        for l in range(korbs):
-                            # S(I)-P(J)
-                            ts1[1] = ts1[1] + sik[l] * bjk[l + 4] + bik[l] * sjk[l + 4]
-                            ts1[2] = ts1[2] + sik[l] * bjk[l + 8] + bik[l] * sjk[l + 8]
-                            ts1[3] = ts1[3] + sik[l] * bjk[l + 12] + bik[l] * sjk[l + 12]
+            hk_p = (
+                CORp[mol[:, None], k_ids[None, :], src_i[:, None]]
+                + CORp[mol[:, None], k_ids[None, :], src_j[:, None]]
+            )
 
-                            # P(I)-S(J), P(I)-P(J)
-                            ts1[4] = ts1[4] + sik[l + 4] * bjk[l] + bik[l + 4] * sjk[l]
-                            ts1[5] = ts1[5] + sik[l + 4] * bjk[l + 4] + bik[l + 4] * sjk[l + 4]
-                            ts1[6] = ts1[6] + sik[l + 4] * bjk[l + 8] + bik[l + 4] * sjk[l + 8]
-                            ts1[7] = ts1[7] + sik[l + 4] * bjk[l + 12] + bik[l + 4] * sjk[l + 12]
+            hk = torch.empty((P, K, 4), dtype=dtype, device=device)
+            hk[..., 0] = hk_s
+            hk[..., 1:] = hk_p[..., None] * heavy_k[..., None]
 
-                            ts1[8] = ts1[8] + sik[l + 8] * bjk[l] + bik[l + 8] * sjk[l]
-                            ts1[9] = ts1[9] + sik[l + 8] * bjk[l + 4] + bik[l + 8] * sjk[l + 4]
-                            ts1[10] = ts1[10] + sik[l + 8] * bjk[l + 8] + bik[l + 8] * sjk[l + 8]
-                            ts1[11] = ts1[11] + sik[l + 8] * bjk[l + 12] + bik[l + 8] * sjk[l + 12]
+            base = Si @ Sj.transpose(-1, -2)
+            weighted = (Si * hk[..., None, :]) @ Sj.transpose(-1, -2)
 
-                            ts1[12] = ts1[12] + sik[l + 12] * bjk[l] + bik[l + 12] * sjk[l]
-                            ts1[13] = ts1[13] + sik[l + 12] * bjk[l + 4] + bik[l + 12] * sjk[l + 4]
-                            ts1[14] = ts1[14] + sik[l + 12] * bjk[l + 8] + bik[l + 12] * sjk[l + 8]
-                            ts1[15] = ts1[15] + sik[l + 12] * bjk[l + 12] + bik[l + 12] * sjk[l + 12]
+            ts2_k = base * (hi[..., :, None] + hj[..., None, :]) - weighted
+            ts2 = ts2 + (ts2_k * vf).sum(dim=1)
 
-                def _put(mu, nu, q):
-                    # Fortran computes H(I_mu, J_nu), with I > J.
-                    # Your storage keeps the upper triangle, so store H(J_nu, I_mu).
-                    HO[mol, ja0 + nu, ia0 + mu] = -ft1 * ts1[q]
+        ft1 = 0.25 * (gval1[molecule.ni[p0:p1]] + gval1[molecule.nj[p0:p1]])
 
-                # S(I)-S(J)
-                _put(0, 0, 0)
+        hsrc = -ft1[:, None, None] * ts1
 
-                if case1:
+        ft2 = 0.0625 * (gval2[molecule.ni[p0:p1]] + gval2[molecule.nj[p0:p1]])
+
+        hsrc = hsrc + ft2[:, None, None] * ts2
+
+        # Store old orientation into upper block.
+        out_blocks[molecule.mask[p0:p1]] += hsrc.transpose(-1, -2)
+
+
+def _apply_omx_orthogonalization(
+    molecule, H_blocks, S_blocks, B_blocks, tables, pair_core_semi, use_cor, doTETCI
+):
+    out = H_blocks.clone()
+
+    # Preserve upper-block-only output behavior.
+    out[molecule.mask] += B_blocks[molecule.mask]
+
+    if not doTETCI:
+        return out
+
+    nat_per_mol = (molecule.species > 0).sum(dim=1)
+    has_three_or_more_atoms = bool((nat_per_mol > 2).any().item())
+    if not has_three_or_more_atoms:
+        return out
+
+    pair_chunk = molecule.mask.numel()  # npairs
+    if use_cor:
+        COR = _build_cor_table(molecule, pair_core_semi, tables)
+        _add_betor_from_pairs_chunked_(
+            out,
+            S_blocks,
+            B_blocks,
+            molecule,
+            tables["gval1"],
+            COR=COR,
+            gval2=tables["gval2"],
+            pair_chunk=pair_chunk,
+            k_chunk=16,
+            # cuts=None,
+        )
+    else:
+        _add_betor3_from_pairs_chunked_(
+            out, S_blocks, B_blocks, molecule, tables["gval1"], pair_chunk=pair_chunk, k_chunk=32
+        )
+
+    return out
+
+
+def _add_betor3_from_pairs_chunked_(
+    out_blocks, S_blocks, B_blocks, molecule, gval1, pair_chunk=4096, k_chunk=64, cuts=1.0e-12
+):
+    nmol = molecule.nmol
+    molsize = molecule.molsize
+    dtype = S_blocks.dtype
+    device = S_blocks.device
+
+    S5 = S_blocks.reshape(nmol, molsize, molsize, 4, 4)
+    B5 = B_blocks.reshape(nmol, molsize, molsize, 4, 4)
+
+    Sss = S5[..., 0, 0]  # Cheap scalar view for screening.
+
+    nat_per_mol = (molecule.species > 0).sum(dim=1)
+    pair_mol = molecule.pair_molid
+    ai = (molecule.mask // molsize) % molsize
+    aj = molecule.mask % molsize
+
+    npairs = molecule.mask.numel()
+
+    for p0 in range(0, npairs, pair_chunk):
+        p1 = min(p0 + pair_chunk, npairs)
+
+        mol = pair_mol[p0:p1]
+        out_i = ai[p0:p1]
+        out_j = aj[p0:p1]
+
+        # Preserve orientation from old code:
+        # HO[upper i,j] = Hpair[j,i].T
+        src_i = out_j
+        src_j = out_i
+
+        P = p1 - p0
+        ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
+
+        for k0 in range(0, molsize, k_chunk):
+            k1 = min(k0 + k_chunk, molsize)
+            k_ids = torch.arange(k0, k1, device=device)
+
+            valid_k = (
+                (k_ids[None, :] < nat_per_mol[mol, None])
+                & (k_ids[None, :] != src_i[:, None])
+                & (k_ids[None, :] != src_j[:, None])
+            )
+
+            if cuts is not None:
+                ss_i = Sss[mol[:, None], src_i[:, None], k_ids[None, :]]
+                ss_j = Sss[mol[:, None], src_j[:, None], k_ids[None, :]]
+                valid_k = valid_k & ((ss_i * ss_j) >= cuts)
+
+                pk = valid_k.nonzero(as_tuple=False)
+                if pk.numel() == 0:
                     continue
 
-                if case2:
-                    # I has only s, J has s,p.
-                    # Fortran: H(I_s, J_px/py/pz)
-                    _put(0, 1, 1)
-                    _put(0, 2, 2)
-                    _put(0, 3, 3)
+                p_sel = pk[:, 0]
+                k_sel = k_ids[pk[:, 1]]
+                mol_sel = mol[p_sel]
 
-                elif case3:
-                    # I has s,p, J has only s.
-                    # Fortran: H(I_px/py/pz, J_s)
-                    _put(1, 0, 4)
-                    _put(2, 0, 8)
-                    _put(3, 0, 12)
+                si_atom = src_i[p_sel]
+                sj_atom = src_j[p_sel]
 
-                else:
-                    # Both atoms have s,p.
-                    for mu in range(4):
-                        for nu in range(4):
-                            _put(mu, nu, mu * 4 + nu)
+                Si = S5[mol_sel, si_atom, k_sel]
+                Sj = S5[mol_sel, sj_atom, k_sel]
+                Bi = B5[mol_sel, si_atom, k_sel]
+                Bj = B5[mol_sel, sj_atom, k_sel]
 
-    return HO
+                term = Si @ Bj.transpose(-1, -2)
+                term = term + Bi @ Sj.transpose(-1, -2)
+
+                ts1.index_add_(0, p_sel, term)
+
+            else:
+                Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
+                Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
+                Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
+                Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
+
+                vf = valid_k.to(dtype)[..., None, None]
+
+                ts1 += ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
+                ts1 += ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
+
+        ft1 = 0.25 * (gval1[molecule.ni[p0:p1]] + gval1[molecule.nj[p0:p1]])
+
+        hsrc = -ft1[:, None, None] * ts1
+        out_blocks[molecule.mask[p0:p1]] += hsrc.transpose(-1, -2)

@@ -2,6 +2,7 @@ import torch
 
 from seqm.seqm_functions.constants import a0, overlap_cutoff
 from seqm.seqm_functions.diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
+from seqm.seqm_functions.omx_utils import get_orbital_zetas
 from seqm.seqm_functions.rcis_batch import unpackone_batch
 from seqm.seqm_functions.two_elec_two_center_int import two_elec_two_center_int as TETCI
 
@@ -41,7 +42,8 @@ def _directional_overlap_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minu
     dtype = xij_plus.dtype
     device = xij_plus.device
 
-    zeta = torch.cat((mol.parameters["zeta_s"].unsqueeze(1), mol.parameters["zeta_p"].unsqueeze(1)), dim=1)
+    zeta_s, zeta_p = get_orbital_zetas(mol.parameters, mol.method)
+    zeta = torch.cat((zeta_s.unsqueeze(1), zeta_p.unsqueeze(1)), dim=1)
     beta = mol.parameters["beta"]
 
     di_plus = torch.zeros((npairs, 4, 4), dtype=dtype, device=device)
@@ -81,14 +83,15 @@ def _directional_overlap_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minu
 def _directional_tetci_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minus, dtnact):
     npairs = xij_plus.shape[0]
 
+    zeta_s, zeta_p = get_orbital_zetas(mol.parameters, mol.method)
     rep = lambda x: torch.cat([x, x], dim=0)
     ni_ = rep(mol.ni)
     nj_ = rep(mol.nj)
     Z_ = rep(mol.Z)
     idxi_ = rep(mol.idxi)
     idxj_ = rep(mol.idxj)
-    zeta_s_ = rep(mol.parameters["zeta_s"])
-    zeta_p_ = rep(mol.parameters["zeta_p"])
+    zeta_s_ = rep(zeta_s)
+    zeta_p_ = rep(zeta_p)
     g_ss_ = rep(mol.parameters["g_ss"])
     g_pp_ = rep(mol.parameters["g_pp"])
     g_p2_ = rep(mol.parameters["g_p2"])

@@ -6,6 +6,7 @@ import torch
 
 from seqm.basics import *  # noqa: F403
 from .basics import Pack_Parameters, Parser
+from .seqm_functions.omx_utils import prepare_parameters
 
 
 class Molecule(torch.nn.Module):
@@ -102,15 +103,14 @@ class Molecule(torch.nn.Module):
             self.parameters["beta"] = torch.cat(
                 (self.parameters["beta_s"].unsqueeze(1), self.parameters["beta_p"].unsqueeze(1)), dim=1
             )
-            self.parameters["zeta_d"] = torch.zeros_like(self.parameters["zeta_s"])
-            self.parameters["s_orb_exp_tail"] = torch.zeros_like(self.parameters["zeta_s"])
-            self.parameters["p_orb_exp_tail"] = torch.zeros_like(self.parameters["zeta_s"])
-            self.parameters["d_orb_exp_tail"] = torch.zeros_like(self.parameters["zeta_s"])
-
-            self.parameters["U_dd"] = torch.zeros_like(self.parameters["U_ss"])
-            self.parameters["F0SD"] = torch.zeros_like(self.parameters["U_ss"])
-            self.parameters["G2SD"] = torch.zeros_like(self.parameters["U_ss"])
-            self.parameters["rho_core"] = torch.zeros_like(self.parameters["U_ss"])
+            prepare_parameters(
+                self.parameters,
+                self.packpar,
+                self.method,
+                self.Z,
+                dtype=self.coordinates.dtype,
+                device=self.coordinates.device,
+            )
 
         self.parameters["Kbeta"] = self.parameters.get("Kbeta", None)
 

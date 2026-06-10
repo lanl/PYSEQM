@@ -4,6 +4,7 @@ from .anal_grad import core_core_der, overlap_der_finiteDiff, w_der
 from .cg_solver import conjugate_gradient_batch
 from .constants import a0
 from .dispersion_am1_fs1 import dEdisp_dr
+from .omx_utils import get_orbital_zetas
 from .rcis_batch import get_occ_virt, make_A_times_zvector_batched, makeA_pi_batched, unpackone_batch
 from .rcis_grad_batch import make_cis_state_dipole
 
@@ -137,7 +138,8 @@ def xlesmd_rcis_grad_batch(
     device = B0.device
     nmol = mol.nmol
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    zeta = torch.cat((mol.parameters["zeta_s"].unsqueeze(1), mol.parameters["zeta_p"].unsqueeze(1)), dim=1)
+    zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
+    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
     overlap_der_finiteDiff(
         overlap_x,
@@ -169,8 +171,8 @@ def xlesmd_rcis_grad_batch(
         mol.parameters["g_pp"],
         mol.parameters["g_p2"],
         mol.parameters["h_sp"],
-        mol.parameters["zeta_s"],
-        mol.parameters["zeta_p"],
+        zetas,
+        zetap,
         riXH,
         ri,
     )

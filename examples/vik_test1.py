@@ -20,7 +20,8 @@ species = torch.as_tensor(
         # [1,1,],
         # [1,1,0,0],
         # [8,6,],
-        [8,6,1,1],
+        # [8,6,1,1],
+        [6,6,1,1,1,1]
         # [8,8,6,0]
     ],  # zero-padding for batching
     dtype=torch.int64,
@@ -60,10 +61,16 @@ coordinates = torch.tensor(
         #  # [0.0,0.0,0.0],            # zero-padding for batching
         # ]
         
-[[0.000000 ,           0.000000 ,           0.000000 ],
-[1.216287 ,           0.000000 ,           0.000000 ],
-[1.827198 ,           0.922174 ,           0.000000 ],
-[1.827198 ,          -0.922174 ,           0.000000 ],],
+# [[0.000000 ,           0.000000 ,           0.000000 ],
+# [1.216287 ,           0.000000 ,           0.000000 ],
+# [1.827198 ,           0.922174 ,           0.000000 ],
+# [1.827198 ,          -0.922174 ,           0.000000 ],],
+[[ 0.00000 ,   0.66819 ,   0.00000],
+[ 0.00000 ,  -0.66819 ,   0.00000],
+[ 0.66414 ,   1.23830 ,  -0.64135],
+[ 0.66414 ,  -1.23830 ,   0.64135],
+[-0.66414 ,   1.23830 ,   0.64135],
+[-0.66414 ,  -1.23830 ,  -0.64135],],
 
     ],
     device=device,
@@ -78,7 +85,8 @@ const = Constants().to(device)
 active_state = 1
 
 seqm_parameters = {
-    "method": "OM1",  # AM1, MNDO, PM#
+    "method": "OM2",  # AM1, MNDO, PM#
+    # "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [2],  # converger used for scf loop
     # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew

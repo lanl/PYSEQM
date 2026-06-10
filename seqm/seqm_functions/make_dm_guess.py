@@ -12,6 +12,7 @@ from .diag import (
 )  # sym_eig_trunc, sym_eig_trunc1, pseudo_diag
 from .fock_u_batch import fock_u_batch
 from .hcore import hcore
+from .omx_utils import get_orbital_zetas
 from .pack import pack, unpack
 from .packd import packd, unpackd
 
@@ -51,12 +52,11 @@ def make_dm_guess(
         F0SD = parameters["F0SD"]
         G2SD = parameters["G2SD"]
     else:
-        zetas = parameters["zeta_s"]
-        zetap = parameters["zeta_p"]
-        zetad = torch.zeros_like(parameters["zeta_s"])
-        zs = torch.zeros_like(parameters["zeta_s"])
-        zp = torch.zeros_like(parameters["zeta_s"])
-        zd = torch.zeros_like(parameters["zeta_s"])
+        zetas, zetap = get_orbital_zetas(parameters, molecule.method)
+        zetad = torch.zeros_like(zetas)
+        zs = torch.zeros_like(zetas)
+        zp = torch.zeros_like(zetas)
+        zd = torch.zeros_like(zetas)
         gss = parameters["g_ss"]
         gsp = parameters["g_sp"]
         gpp = parameters["g_pp"]

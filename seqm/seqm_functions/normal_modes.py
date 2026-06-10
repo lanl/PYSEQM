@@ -65,7 +65,7 @@ def normal_modes(molecule, energy):
         H[i, :] = grad2_i.view(-1)
 
     # === 3) Retrieve atomic masses ===
-    masses = molecule.const.mass[molecule.species].squeeze().to(device=device, dtype=dtype)
+    masses = molecule.const.mass[molecule.species].squeeze()
 
     # === 4) Build 3N mass vector (mass repeated for x, y, z) ===
     # e.g. [m₁, m₁, m₁, m₂, m₂, m₂, ...]

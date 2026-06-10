@@ -3,14 +3,9 @@ import torch
 from .constants import overlap_cutoff
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .diat_overlapD import diatom_overlap_matrixD
-from .om1_overlap import (
-    diatom_overlap_matrix_OM1,
-    diatom_resonance_matrix_OM1,
-    om1_local_overlap_terms,
-    om1_local_resonance_terms,
-)
-from .om1_pair_backend import om1_pair_hcore_terms
-from .om2_hcore import build_om2_hcore, build_om3_hcore
+from .om1_overlap import diatom_overlap_matrix_OM1
+from .om2_hcore import build_omx_hcore
+from .omx_utils import get_orbital_zeta_tensor
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
 
@@ -67,14 +62,10 @@ def hcore(molecule, doTETCI=True):
 
     # t0 = time.time()
     is_pm6 = molecule.method == "PM6"
-    is_om1 = molecule.method == "OM1"
-    is_om2 = molecule.method == "OM2"
-    is_om3 = molecule.method == "OM3"
+    is_omx = molecule.method in {"OM1", "OM2", "OM3"}
     orb_dim = 9 if is_pm6 else 4
-    if is_om2:
-        return build_om2_hcore(molecule, doTETCI=doTETCI)
-    if is_om3:
-        return build_om3_hcore(molecule, doTETCI=doTETCI)
+    if is_omx:
+        return build_omx_hcore(molecule, doTETCI=doTETCI)
     if is_pm6:
         overlap_fn = diatom_overlap_matrixD
         overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
@@ -82,11 +73,7 @@ def hcore(molecule, doTETCI=True):
         overlap_fn = diatom_overlap_matrix_PM6_SP
         overlap_args = (molecule.const.qn_int,)
 
-    # Compute the overlap matrix (called di)
-    # Prepare the arguments for the overlap function
-    # 1) Stack zeta for s/p(/d)
-    zeta_fields = ["zeta_s", "zeta_p", "zeta_d"] if is_pm6 else ["zeta_s", "zeta_p"]
-    zeta = torch.stack([molecule.parameters[f] for f in zeta_fields], dim=1)
+    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
 
     xij, rij = molecule.xij, molecule.rij
     ni, nj = molecule.ni, molecule.nj
@@ -94,71 +81,6 @@ def hcore(molecule, doTETCI=True):
 
     npairs = xij.size(0)
     mask_ov = rij <= overlap_cutoff
-
-    if is_om1:
-
-        def _om1_table(name):
-            return molecule.packpar.p[:, molecule.packpar.required_list.index(name)]
-
-        om1_tables = {
-            name: _om1_table(name)
-            for name in [
-                "beta_s",
-                "beta_p",
-                "beta_pi",
-                "beta_sh",
-                "beta_ph",
-                "alpha_s",
-                "alpha_p",
-                "alpha_pi",
-                "alpha_s_h",
-                "alpha_p_h",
-            ]
-        }
-        resonance = torch.zeros((npairs, orb_dim, orb_dim), dtype=xij.dtype, device=xij.device)
-        resonance[mask_ov] = diatom_resonance_matrix_OM1(
-            ni[mask_ov], nj[mask_ov], xij[mask_ov], rij[mask_ov], om1_tables
-        )
-        w = torch.zeros((npairs, 10, 10), dtype=xij.dtype, device=xij.device)
-        e1b = torch.zeros((npairs, 4, 4), dtype=xij.dtype, device=xij.device)
-        e2a = torch.zeros((npairs, 4, 4), dtype=xij.dtype, device=xij.device)
-        elem_tables = {
-            name: _om1_table(name) for name in ["zeta_s", "g_ss", "U_ss", "U_pp", "fval1", "fval2"]
-        }
-        for p in range(npairs):
-            pair_terms = om1_pair_hcore_terms(
-                int(ni[p].item()),
-                int(nj[p].item()),
-                xij[p],
-                float(rij[p].item()),
-                elem_tables["zeta_s"],
-                elem_tables["g_ss"],
-                molecule.const.tore,
-                om1_local_overlap_terms(
-                    ni[p : p + 1],
-                    nj[p : p + 1],
-                    rij[p : p + 1],
-                    molecule.parameters["zeta_s"][idxi[p : p + 1]],
-                    molecule.parameters["zeta_s"][idxj[p : p + 1]],
-                )[0],
-                om1_local_resonance_terms(ni[p : p + 1], nj[p : p + 1], rij[p : p + 1], om1_tables)[0],
-                elem_tables["U_ss"],
-                elem_tables["U_pp"],
-                elem_tables["fval1"],
-                elem_tables["fval2"],
-            )
-            w[p] = pair_terms["w"]
-            e1b[p] = pair_terms["e1b"]
-            e2a[p] = pair_terms["e2a"]
-
-        Nblocks = molecule.nmol * molecule.molsize * molecule.molsize
-        M = torch.zeros((Nblocks, orb_dim, orb_dim), dtype=resonance.dtype, device=resonance.device)
-        for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
-            M[molecule.maskd, orb, orb] = molecule.parameters[key].to(dtype=M.dtype, device=M.device)
-        M.index_add_(0, molecule.maskd[idxi], e1b)
-        M.index_add_(0, molecule.maskd[idxj], e2a)
-        M[molecule.mask] = resonance
-        return M, w, None, None, None, None
 
     # 3) Compute diatomic overlaps only where rij ≤ cutoff
     di = torch.zeros((npairs, orb_dim, orb_dim), dtype=xij.dtype, device=xij.device)
@@ -271,23 +193,23 @@ def overlap_between_geometries(molecule, coords1, coords2):
         raise ValueError("coords1 and coords2 must have the same shape")
 
     is_pm6 = molecule.method == "PM6"
-    is_om1 = molecule.method == "OM1"
+    is_omx = molecule.method in {"OM1", "OM2", "OM3"}
     orb_dim = 9 if is_pm6 else 4
     if is_pm6:
         overlap_fn = diatom_overlap_matrixD
         overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
-        zeta_fields = ["zeta_s", "zeta_p", "zeta_d"]
-    elif is_om1:
+    elif is_omx:
         overlap_fn = diatom_overlap_matrix_OM1
-        overlap_args = ()
-        zeta_fields = ["zeta_s", "zeta_p"]
+        basis = molecule.parameters.get("_omx_basis")
+        if basis is None:
+            raise RuntimeError("OMx basis tables have not been cached on the molecule")
+        overlap_args = (basis,)
     else:
         overlap_fn = diatom_overlap_matrix_PM6_SP
         overlap_args = (molecule.const.qn_int,)
-        zeta_fields = ["zeta_s", "zeta_p"]
 
     # Parameters are stored only for real atoms; rebuild a padded view for indexing
-    zeta = torch.stack([molecule.parameters[f] for f in zeta_fields], dim=1)
+    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method)
     nmol, molsize = molecule.species.shape
     species = molecule.species
     device = coords1.device
@@ -295,9 +217,14 @@ def overlap_between_geometries(molecule, coords1, coords2):
 
     atom_index = torch.arange(nmol * molsize, device=device, dtype=torch.int64)
     real_atoms = atom_index[(species.reshape(-1) > 0)]
-    zeta_full = torch.zeros((nmol * molsize, zeta.shape[1]), dtype=zeta.dtype, device=zeta.device)
-    zeta_full[real_atoms] = zeta
-    zeta_full = zeta_full.view(nmol, molsize, -1)
+    if zeta.dim() == 1:
+        zeta_full = torch.zeros((nmol * molsize,), dtype=zeta.dtype, device=zeta.device)
+        zeta_full[real_atoms] = zeta
+        zeta_full = zeta_full.view(nmol, molsize)
+    else:
+        zeta_full = torch.zeros((nmol * molsize, zeta.shape[1]), dtype=zeta.dtype, device=zeta.device)
+        zeta_full[real_atoms] = zeta
+        zeta_full = zeta_full.view(nmol, molsize, -1)
 
     # Pair geometry between coords1 (row atoms) and coords2 (column atoms)
     diff = coords2.unsqueeze(1) - coords1.unsqueeze(2)  # (nmol, molsize, molsize, 3)
@@ -322,15 +249,27 @@ def overlap_between_geometries(molecule, coords1, coords2):
         nj = species.unsqueeze(1).expand(-1, molsize, -1)[valid_pairs]
         x_flat = xij[valid_pairs]
         r_flat = rij[valid_pairs]
-        zeta_i = zeta_full.unsqueeze(2).expand(-1, -1, molsize, -1)[valid_pairs]
-        zeta_j = zeta_full.unsqueeze(1).expand(-1, molsize, -1, -1)[valid_pairs]
+        if zeta.dim() == 1:
+            zeta_i = zeta_full.unsqueeze(2).expand(-1, -1, molsize)[valid_pairs]
+            zeta_j = zeta_full.unsqueeze(1).expand(-1, molsize, -1)[valid_pairs]
+        else:
+            zeta_i = zeta_full.unsqueeze(2).expand(-1, -1, molsize, -1)[valid_pairs]
+            zeta_j = zeta_full.unsqueeze(1).expand(-1, molsize, -1, -1)[valid_pairs]
 
         swap = ni < nj  # enforce ni >= nj as expected by overlap kernels
         ni_use = torch.where(swap, nj, ni)
         nj_use = torch.where(swap, ni, nj)
         x_use = torch.where(swap.unsqueeze(-1), -x_flat, x_flat)
-        zeta_i_use = torch.where(swap.unsqueeze(-1), zeta_j, zeta_i)
-        zeta_j_use = torch.where(swap.unsqueeze(-1), zeta_i, zeta_j)
+        if is_omx:
+            zeta_i_use = torch.where(swap, zeta_j, zeta_i)
+            zeta_j_use = torch.where(swap, zeta_i, zeta_j)
+            from .two_elec_two_center_int import rotate_with_quaternion
+
+            direction = rotate_with_quaternion(x_use).transpose(1, 2)[:, :, 0]
+            overlap_args = (direction, basis)
+        else:
+            zeta_i_use = torch.where(swap.unsqueeze(-1), zeta_j, zeta_i)
+            zeta_j_use = torch.where(swap.unsqueeze(-1), zeta_i, zeta_j)
 
         di_tmp = overlap_fn(ni_use, nj_use, x_use, r_flat, zeta_i_use, zeta_j_use, *overlap_args)
         di_tmp[swap] = di_tmp[swap].transpose(1, 2)

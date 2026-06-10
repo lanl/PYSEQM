@@ -2,6 +2,7 @@ import torch
 
 from .cal_par import dd_qq
 from .constants import a0, debye_to_AU, to_debye
+from .omx_utils import get_orbital_zetas
 
 
 def calc_dipole_matrix(mol, return_diag_dipole=False):
@@ -30,8 +31,7 @@ def calc_dipole_matrix(mol, return_diag_dipole=False):
     dtype = mol.rij.dtype
     device = mol.rij.device
     # for non-zero atoms
-    zetas = mol.parameters["zeta_s"]
-    zetap = mol.parameters["zeta_p"]
+    zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
     qn = mol.const.qn
     # Z is a flattened tensor of the atomic numbers of non-zero atoms across molecular batches
     Z = mol.Z
@@ -39,7 +39,7 @@ def calc_dipole_matrix(mol, return_diag_dipole=False):
     isX = Z > 2  # Heavy atom
     isH = Z == 1
     dd, _ = dd_qq(qn0[isX], zetas[isX], zetap[isX])
-    dd = dd.to(dtype=dtype, device=device) * a0
+    dd *= a0
 
     valid_atom = (mol.species > 0).reshape(-1)
     n_valid_atoms = mol.maskd.numel()

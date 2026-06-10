@@ -30,6 +30,7 @@ import time
 import torch
 
 from ..basics import Pack_Parameters, Parser
+from ..seqm_functions.omx_utils import prepare_parameters
 from ..seqm_functions.G_XL_LR import G
 from ..seqm_functions.SP2 import SP2
 from ..seqm_functions.XLESMD import elec_energy_excited_xl
@@ -129,15 +130,14 @@ class EnergyXL(torch.nn.Module):
                 (molecule.parameters["beta_s"].unsqueeze(1), molecule.parameters["beta_p"].unsqueeze(1)),
                 dim=1,
             )
-            molecule.parameters["zeta_d"] = torch.zeros_like(molecule.parameters["zeta_s"])
-            molecule.parameters["s_orb_exp_tail"] = torch.zeros_like(molecule.parameters["zeta_s"])
-            molecule.parameters["p_orb_exp_tail"] = torch.zeros_like(molecule.parameters["zeta_s"])
-            molecule.parameters["d_orb_exp_tail"] = torch.zeros_like(molecule.parameters["zeta_s"])
-
-            molecule.parameters["U_dd"] = torch.zeros_like(molecule.parameters["U_ss"])
-            molecule.parameters["F0SD"] = torch.zeros_like(molecule.parameters["U_ss"])
-            molecule.parameters["G2SD"] = torch.zeros_like(molecule.parameters["U_ss"])
-            molecule.parameters["rho_core"] = torch.zeros_like(molecule.parameters["U_ss"])
+            prepare_parameters(
+                molecule.parameters,
+                molecule.packpar,
+                molecule.method,
+                molecule.Z,
+                dtype=molecule.coordinates.dtype,
+                device=molecule.coordinates.device,
+            )
 
         molecule.parameters["Kbeta"] = molecule.parameters.get("Kbeta", None)
 
