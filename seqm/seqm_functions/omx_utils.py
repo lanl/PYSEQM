@@ -1,6 +1,6 @@
 import torch
 
-from .omx_basis import build_omx_basis_tables
+from .omx_basis import build_om1_basis_payload, build_omx_basis_tables
 
 OMX_METHODS = {"OM1", "OM2", "OM3"}
 
@@ -50,10 +50,14 @@ def prepare_parameters(parameters, packpar, method, atomic_numbers, *, dtype, de
         zeros_zeta = torch.zeros_like(parameters["zeta"])
         parameters["_omx_basis"] = build_omx_basis_tables(atomic_numbers, method, dtype=dtype, device=device)
         parameters["_omx_tables"] = build_omx_parameter_tables(packpar, parameters)
+        parameters["_omx_basis_data"] = build_om1_basis_payload(
+            atomic_numbers, parameters["zeta"], parameters["_omx_basis"]
+        )
     else:
         zeros_zeta = torch.zeros_like(parameters["zeta_s"])
         parameters.pop("_omx_basis", None)
         parameters.pop("_omx_tables", None)
+        parameters.pop("_omx_basis_data", None)
     zeros_uss = torch.zeros_like(parameters["U_ss"])
     parameters["zeta_d"] = zeros_zeta
     parameters["s_orb_exp_tail"] = zeros_zeta.clone()

@@ -85,7 +85,7 @@ const = Constants().to(device)
 active_state = 1
 
 seqm_parameters = {
-    "method": "OM2",  # AM1, MNDO, PM#
+    "method": "OM1",  # AM1, MNDO, PM#
     # "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [2],  # converger used for scf loop

@@ -1,7 +1,6 @@
 import torch
 
 from .constants import ev
-from .omx_basis import gather_om1_basis
 
 _SQPI = 1.77245385090552
 _FPI = 12.5663706143592
@@ -884,14 +883,13 @@ def _primitive_g1_vec(kd, acz, zfn, zetc, zetb, r, zlp, clp, ppecp):
     return g1
 
 
-def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
+def om1_ppecp_local_vectorized(ni, nj, rij, basis_tables, basis_i, basis_j):
     """
     Vectorized OM1 PPECP local block.
 
     Inputs:
         ni, nj:    [npair] atomic numbers
         rij:       [npair] pair distance in OM1 units
-        zeta_i/j:  [npair] shell zeta values
         basis:     basis table from build_omx_basis_tables, with basis["ppecp"]
 
     Returns:
@@ -900,7 +898,7 @@ def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
     device = rij.device
     dtype = rij.dtype
 
-    ppecp = basis["ppecp"]
+    ppecp = basis_tables["ppecp"]
 
     npair = ni.numel()
     if npair == 0:
@@ -917,13 +915,10 @@ def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
     zfn = rij.new_empty((npair, 2))
     zfn[:, 0] = -1.0
     zfn[:, 1] = 1.0
-    shell_zeta = torch.stack((zeta_i, zeta_j), dim=1)
-
     shell_z_f = shell_z.reshape(-1)
     ecp_z_f = ecp_z.reshape(-1)
     acz_f = acz.reshape(-1)
     zfn_f = zfn.reshape(-1)
-    shell_zeta_f = shell_zeta.reshape(-1)
     r_f = rij.repeat_interleave(2)
 
     # H has no ECP. Padding should also be inactive if Z<=0.
@@ -932,12 +927,10 @@ def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
     if not active.any():
         return corpp
 
-    shell_z_a = shell_z_f[active]
     ecp_z_a = ecp_z_f[active]
     acz_a = acz_f[active]
     zfn_a = zfn_f[active]
     r_a = r_f[active]
-    shell_zeta_a = shell_zeta_f[active]
     active_flat_col_idx = active.nonzero(as_tuple=False).squeeze(1)
 
     supported = ppecp["ecp_supported"]
@@ -960,7 +953,10 @@ def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
     zlp_a = ecp_zlp_table[ecp_z_a]
     clp_a = ecp_clp_table[ecp_z_a]
 
-    shell_type, exponents, coeff_s, coeff_p = gather_om1_basis(shell_z_a, shell_zeta_a, basis)
+    shell_type = torch.stack((basis_i["shell_type"], basis_j["shell_type"]), dim=1).reshape(-1)[active]
+    exponents = torch.stack((basis_i["exponents"], basis_j["exponents"]), dim=1).reshape(-1, 3)[active]
+    coeff_s = torch.stack((basis_i["coeff_s"], basis_j["coeff_s"]), dim=1).reshape(-1, 3)[active]
+    coeff_p = torch.stack((basis_i["coeff_p"], basis_j["coeff_p"]), dim=1).reshape(-1, 3)[active]
 
     # shell_type = shell_type.to(torch.long)
     # exponents = exponents.to(dtype)
@@ -980,7 +976,7 @@ def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
     cp_i_all = coeff_p[:, tri_i]
     cp_j_all = coeff_p[:, tri_j]
 
-    corpp_active = torch.zeros((shell_z_a.numel(), 4), dtype=dtype, device=device)
+    corpp_active = torch.zeros((shell_type.numel(), 4), dtype=dtype, device=device)
 
     def _run_group(mask, kd):
         if not mask.any():
@@ -1039,8 +1035,8 @@ def om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis):
     return corpp * ev
 
 
-def om1_ppecp_local(ni, nj, rij, zeta_i, zeta_j, basis):
+def om1_ppecp_local(ni, nj, rij, basis_tables, basis_i, basis_j):
     """
     Public wrapper matching the old interface.
     """
-    return om1_ppecp_local_vectorized(ni, nj, rij, zeta_i, zeta_j, basis)
+    return om1_ppecp_local_vectorized(ni, nj, rij, basis_tables, basis_i, basis_j)

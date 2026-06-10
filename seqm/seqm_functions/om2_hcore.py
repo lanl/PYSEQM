@@ -7,6 +7,7 @@ from .om1_overlap import (
     om1_local_resonance_terms,
 )
 from .om1_pair_backend import omx_pair_hcore_terms
+from .omx_basis import select_om1_basis_payload
 from .two_elec_two_center_int import rotate_with_quaternion
 
 _OMX_HCORE_CONFIG = {
@@ -69,6 +70,13 @@ def _omx_basis(molecule):
     return basis
 
 
+def _omx_basis_data(molecule):
+    basis_data = molecule.parameters.get("_omx_basis_data")
+    if basis_data is None:
+        raise RuntimeError("OMx gathered basis data have not been cached on the molecule")
+    return basis_data
+
+
 def _omx_resonance_tables(tables):
     return {
         name: tables[name]
@@ -99,28 +107,15 @@ def _prepare_pair_rotation(molecule):
     return rot, rot_t, direction
 
 
-def _prepare_omx_local_pair_terms(molecule, tables):
-    zeta_i = molecule.parameters["zeta"][molecule.idxi]
-    zeta_j = molecule.parameters["zeta"][molecule.idxj]
-    basis = _omx_basis(molecule)
+def _prepare_omx_local_pair_terms(molecule, tables, basis_i, basis_j):
     return (
-        om1_local_overlap_terms(molecule.ni, molecule.nj, molecule.rij, zeta_i, zeta_j, basis),
+        om1_local_overlap_terms(molecule.rij, basis_i, basis_j),
         om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, tables),
     )
 
 
-def _prepare_omx_pair_overlap(molecule, rot_direction):
-    basis = _omx_basis(molecule)
-    return diatom_overlap_matrix_OM1(
-        molecule.ni,
-        molecule.nj,
-        molecule.xij,
-        molecule.rij,
-        molecule.parameters["zeta"][molecule.idxi],
-        molecule.parameters["zeta"][molecule.idxj],
-        rot_direction,
-        basis,
-    )
+def _prepare_omx_pair_overlap(molecule, rot_direction, basis_i, basis_j):
+    return diatom_overlap_matrix_OM1(molecule.xij, molecule.rij, rot_direction, basis_i, basis_j)
 
 
 def _prepare_omx_pair_resonance(molecule, resonance_tables, rot_direction):
@@ -129,16 +124,16 @@ def _prepare_omx_pair_resonance(molecule, resonance_tables, rot_direction):
     )
 
 
-def _assemble_omx_pair_terms(molecule, method, cfg, tables, s_local, t_local, rot, rot_t):
+def _assemble_omx_pair_terms(
+    molecule, method, cfg, tables, basis_tables, s_local, t_local, rot, rot_t, basis_i, basis_j
+):
     use_cor = cfg["use_cor"]
-    basis = _omx_basis(molecule)
 
     pair = omx_pair_hcore_terms(
         method,
         molecule.ni,
         molecule.nj,
         molecule.rij,
-        tables["zeta"],
         tables["g_ss"],
         molecule.const.tore,
         s_local,
@@ -149,7 +144,9 @@ def _assemble_omx_pair_terms(molecule, method, cfg, tables, s_local, t_local, ro
         tables["fval2"],
         rot,
         rot_t,
-        basis,
+        basis_tables,
+        basis_i,
+        basis_j,
         om2_tables=tables,
     )
     return {
@@ -175,14 +172,20 @@ def _build_omx_hcore(molecule, doTETCI=True, method="OM2"):
     H_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
 
     tables = _omx_tables(molecule)
+    basis_tables = _omx_basis(molecule)
+    basis_data = _omx_basis_data(molecule)
+    basis_i = select_om1_basis_payload(basis_data, molecule.idxi)
+    basis_j = select_om1_basis_payload(basis_data, molecule.idxj)
     _fill_omx_one_center_blocks(H_blocks, molecule)
     resonance_tables = _omx_resonance_tables(tables)
 
     rot, rot_t, direction = _prepare_pair_rotation(molecule)
 
-    s_local, t_local = _prepare_omx_local_pair_terms(molecule, tables)
+    s_local, t_local = _prepare_omx_local_pair_terms(molecule, tables, basis_i, basis_j)
 
-    pair_data = _assemble_omx_pair_terms(molecule, method, cfg, tables, s_local, t_local, rot, rot_t)
+    pair_data = _assemble_omx_pair_terms(
+        molecule, method, cfg, tables, basis_tables, s_local, t_local, rot, rot_t, basis_i, basis_j
+    )
     H_blocks.index_add_(0, molecule.maskd[molecule.idxi], pair_data["e1b"])
     H_blocks.index_add_(0, molecule.maskd[molecule.idxj], pair_data["e2a"])
 
@@ -192,7 +195,7 @@ def _build_omx_hcore(molecule, doTETCI=True, method="OM2"):
         H_blocks[molecule.mask] = pair_resonance
         return H_blocks, pair_data["w"], pair_data["rho0xi"], None, None, None
 
-    pair_overlap = _prepare_omx_pair_overlap(molecule, direction)
+    pair_overlap = _prepare_omx_pair_overlap(molecule, direction, basis_i, basis_j)
     S_blocks = torch.zeros_like(H_blocks)
     B_blocks = torch.zeros_like(H_blocks)
     S_blocks[molecule.mask] = pair_overlap
@@ -222,7 +225,7 @@ def build_omx_hcore(molecule, doTETCI=True):
     return _build_omx_hcore(molecule, doTETCI=doTETCI, method=molecule.method)
 
 
-def _add_betor_from_pairs_chunked_(
+def _add_betor_shell_chunked_(
     out_blocks,
     S_blocks,
     B_blocks,
@@ -230,7 +233,9 @@ def _add_betor_from_pairs_chunked_(
     gval1,
     COR,
     gval2,
-    pair_chunk=2048,
+    pair_idx,
+    use_hi_p,
+    use_hj_p,
     k_chunk=32,
     # cuts=None,
 ):
@@ -249,101 +254,103 @@ def _add_betor_from_pairs_chunked_(
 
     CORs = COR[:, 0::4, :]
     CORp = COR[:, 1::4, :]
-    heavy = (molecule.species > 1).to(dtype)
+    heavy = molecule.species > 1
 
-    npairs = molecule.mask.numel()
+    mol = pair_mol[pair_idx]
+    src_i = aj[pair_idx]
+    src_j = ai[pair_idx]
+    if use_hi_p:
+        heavy_i_f = heavy[mol, src_i].to(dtype)[:, None, None]
+    if use_hj_p:
+        heavy_j_f = heavy[mol, src_j].to(dtype)[:, None, None]
 
-    for p0 in range(0, npairs, pair_chunk):
-        p1 = min(p0 + pair_chunk, npairs)
+    P = pair_idx.numel()
 
-        mol = pair_mol[p0:p1]
-        out_i = ai[p0:p1]
-        out_j = aj[p0:p1]
+    ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
+    ts2 = torch.zeros_like(ts1)
 
-        # Match old orientation:
-        # old HO[upper i,j] = Hpair[j,i].T
-        src_i = out_j
-        src_j = out_i
+    for k0 in range(0, molsize, k_chunk):
+        k1 = min(k0 + k_chunk, molsize)
+        k_ids = torch.arange(k0, k1, device=device)
+        K = k1 - k0
 
-        P = p1 - p0
+        valid_k = (
+            (k_ids[None, :] < nat_per_mol[mol, None])
+            & (k_ids[None, :] != src_i[:, None])
+            & (k_ids[None, :] != src_j[:, None])
+        )
 
-        ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
-        ts2 = torch.zeros_like(ts1) if COR is not None else None
+        Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
+        Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
+        Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
+        Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
 
-        for k0 in range(0, molsize, k_chunk):
-            k1 = min(k0 + k_chunk, molsize)
-            k_ids = torch.arange(k0, k1, device=device)
-            K = k1 - k0
+        vf = valid_k.to(dtype)[..., None, None]
 
-            valid_k = (
-                (k_ids[None, :] < nat_per_mol[mol, None])
-                & (k_ids[None, :] != src_i[:, None])
-                & (k_ids[None, :] != src_j[:, None])
-            )
+        ts1 = ts1 + ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
+        ts1 = ts1 + ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
 
-            # [P, K, 4, 4]
-            Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
-            Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
-            Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
-            Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
+        hi = torch.zeros((P, K, 4), dtype=dtype, device=device)
+        hj = torch.zeros_like(hi)
+        hi[..., 0] = CORs[mol[:, None], src_i[:, None], k_ids[None, :]]
+        hj[..., 0] = CORs[mol[:, None], src_j[:, None], k_ids[None, :]]
+        if use_hi_p:
+            hi[..., 1:] = CORp[mol[:, None], src_i[:, None], k_ids[None, :]][..., None] * heavy_i_f
+        if use_hj_p:
+            hj[..., 1:] = CORp[mol[:, None], src_j[:, None], k_ids[None, :]][..., None] * heavy_j_f
 
-            # if cuts is not None:
-            #     valid_k = valid_k & ((Si[..., 0, 0] * Sj[..., 0, 0]) >= cuts)
-
-            vf = valid_k.to(dtype)[..., None, None]
-
-            ts1 = ts1 + ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
-            ts1 = ts1 + ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
-
-            hi_s = CORs[mol[:, None], src_i[:, None], k_ids[None, :]]
-            hj_s = CORs[mol[:, None], src_j[:, None], k_ids[None, :]]
-
-            hi_p = CORp[mol[:, None], src_i[:, None], k_ids[None, :]]
-            hj_p = CORp[mol[:, None], src_j[:, None], k_ids[None, :]]
-
-            heavy_i = heavy[mol, src_i]
-            heavy_j = heavy[mol, src_j]
-            heavy_k = heavy[mol[:, None], k_ids[None, :]]
-
-            hi = torch.empty((P, K, 4), dtype=dtype, device=device)
-            hj = torch.empty_like(hi)
-
-            hi[..., 0] = hi_s
-            hj[..., 0] = hj_s
-
-            hi[..., 1:] = hi_p[..., None] * heavy_i[:, None, None]
-            hj[..., 1:] = hj_p[..., None] * heavy_j[:, None, None]
-
-            hk_s = (
-                CORs[mol[:, None], k_ids[None, :], src_i[:, None]]
-                + CORs[mol[:, None], k_ids[None, :], src_j[:, None]]
-            )
-
+        heavy_k = heavy[mol[:, None], k_ids[None, :]]
+        hk = torch.zeros((P, K, 4), dtype=dtype, device=device)
+        hk[..., 0] = (
+            CORs[mol[:, None], k_ids[None, :], src_i[:, None]]
+            + CORs[mol[:, None], k_ids[None, :], src_j[:, None]]
+        )
+        if heavy_k.any():
+            hk_sel = heavy_k.nonzero(as_tuple=False)
             hk_p = (
-                CORp[mol[:, None], k_ids[None, :], src_i[:, None]]
-                + CORp[mol[:, None], k_ids[None, :], src_j[:, None]]
+                CORp[mol[hk_sel[:, 0]], k_ids[hk_sel[:, 1]], src_i[hk_sel[:, 0]]]
+                + CORp[mol[hk_sel[:, 0]], k_ids[hk_sel[:, 1]], src_j[hk_sel[:, 0]]]
             )
+            hk[hk_sel[:, 0], hk_sel[:, 1], 1:] = hk_p[:, None]
 
-            hk = torch.empty((P, K, 4), dtype=dtype, device=device)
-            hk[..., 0] = hk_s
-            hk[..., 1:] = hk_p[..., None] * heavy_k[..., None]
+        base = Si @ Sj.transpose(-1, -2)
+        weighted = (Si * hk[..., None, :]) @ Sj.transpose(-1, -2)
 
-            base = Si @ Sj.transpose(-1, -2)
-            weighted = (Si * hk[..., None, :]) @ Sj.transpose(-1, -2)
+        ts2_k = base * (hi[..., :, None] + hj[..., None, :]) - weighted
+        ts2 = ts2 + (ts2_k * vf).sum(dim=1)
 
-            ts2_k = base * (hi[..., :, None] + hj[..., None, :]) - weighted
-            ts2 = ts2 + (ts2_k * vf).sum(dim=1)
+    ft1 = 0.25 * (gval1[molecule.ni[pair_idx]] + gval1[molecule.nj[pair_idx]])
+    hsrc = -ft1[:, None, None] * ts1
+    ft2 = 0.0625 * (gval2[molecule.ni[pair_idx]] + gval2[molecule.nj[pair_idx]])
+    hsrc = hsrc + ft2[:, None, None] * ts2
+    out_blocks[molecule.mask[pair_idx]] += hsrc.transpose(-1, -2)
 
-        ft1 = 0.25 * (gval1[molecule.ni[p0:p1]] + gval1[molecule.nj[p0:p1]])
 
-        hsrc = -ft1[:, None, None] * ts1
-
-        ft2 = 0.0625 * (gval2[molecule.ni[p0:p1]] + gval2[molecule.nj[p0:p1]])
-
-        hsrc = hsrc + ft2[:, None, None] * ts2
-
-        # Store old orientation into upper block.
-        out_blocks[molecule.mask[p0:p1]] += hsrc.transpose(-1, -2)
+def _add_betor_from_pairs_chunked_(out_blocks, S_blocks, B_blocks, molecule, gval1, COR, gval2, k_chunk=32):
+    molsize = molecule.molsize
+    heavy = molecule.species > 1
+    pair_mol = molecule.pair_molid
+    src_i = molecule.mask % molsize
+    src_j = (molecule.mask // molsize) % molsize
+    hi = heavy[pair_mol, src_i]
+    hj = heavy[pair_mol, src_j]
+    shells = ((~hi) & (~hj), (~hi) & hj, hi & hj)
+    for mask, use_hi_p, use_hj_p in zip(shells, (False, False, True), (False, True, True)):
+        if mask.any():
+            sel = mask.nonzero(as_tuple=False).squeeze(1)
+            _add_betor_shell_chunked_(
+                out_blocks,
+                S_blocks,
+                B_blocks,
+                molecule,
+                gval1,
+                COR,
+                gval2,
+                sel,
+                use_hi_p,
+                use_hj_p,
+                k_chunk=k_chunk,
+            )
 
 
 def _apply_omx_orthogonalization(
@@ -362,7 +369,6 @@ def _apply_omx_orthogonalization(
     if not has_three_or_more_atoms:
         return out
 
-    pair_chunk = molecule.mask.numel()  # npairs
     if use_cor:
         COR = _build_cor_table(molecule, pair_core_semi, tables)
         _add_betor_from_pairs_chunked_(
@@ -373,20 +379,17 @@ def _apply_omx_orthogonalization(
             tables["gval1"],
             COR=COR,
             gval2=tables["gval2"],
-            pair_chunk=pair_chunk,
             k_chunk=16,
             # cuts=None,
         )
     else:
-        _add_betor3_from_pairs_chunked_(
-            out, S_blocks, B_blocks, molecule, tables["gval1"], pair_chunk=pair_chunk, k_chunk=32
-        )
+        _add_betor3_from_pairs_chunked_(out, S_blocks, B_blocks, molecule, tables["gval1"], k_chunk=32)
 
     return out
 
 
 def _add_betor3_from_pairs_chunked_(
-    out_blocks, S_blocks, B_blocks, molecule, gval1, pair_chunk=4096, k_chunk=64, cuts=1.0e-12
+    out_blocks, S_blocks, B_blocks, molecule, gval1, k_chunk=64, cuts=1.0e-12
 ):
     nmol = molecule.nmol
     molsize = molecule.molsize
@@ -403,71 +406,51 @@ def _add_betor3_from_pairs_chunked_(
     ai = (molecule.mask // molsize) % molsize
     aj = molecule.mask % molsize
 
-    npairs = molecule.mask.numel()
+    mol = pair_mol
+    src_i = aj
+    src_j = ai
 
-    for p0 in range(0, npairs, pair_chunk):
-        p1 = min(p0 + pair_chunk, npairs)
+    P = molecule.mask.numel()
+    ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
 
-        mol = pair_mol[p0:p1]
-        out_i = ai[p0:p1]
-        out_j = aj[p0:p1]
+    for k0 in range(0, molsize, k_chunk):
+        k1 = min(k0 + k_chunk, molsize)
+        k_ids = torch.arange(k0, k1, device=device)
 
-        # Preserve orientation from old code:
-        # HO[upper i,j] = Hpair[j,i].T
-        src_i = out_j
-        src_j = out_i
+        valid_k = (
+            (k_ids[None, :] < nat_per_mol[mol, None])
+            & (k_ids[None, :] != src_i[:, None])
+            & (k_ids[None, :] != src_j[:, None])
+        )
 
-        P = p1 - p0
-        ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
+        if cuts is not None:
+            ss_i = Sss[mol[:, None], src_i[:, None], k_ids[None, :]]
+            ss_j = Sss[mol[:, None], src_j[:, None], k_ids[None, :]]
+            valid_k = valid_k & ((ss_i * ss_j) >= cuts)
 
-        for k0 in range(0, molsize, k_chunk):
-            k1 = min(k0 + k_chunk, molsize)
-            k_ids = torch.arange(k0, k1, device=device)
+            pk = valid_k.nonzero(as_tuple=False)
+            if pk.numel() == 0:
+                continue
 
-            valid_k = (
-                (k_ids[None, :] < nat_per_mol[mol, None])
-                & (k_ids[None, :] != src_i[:, None])
-                & (k_ids[None, :] != src_j[:, None])
-            )
+            p_sel = pk[:, 0]
+            k_sel = k_ids[pk[:, 1]]
+            mol_sel = mol[p_sel]
+            si_atom = src_i[p_sel]
+            sj_atom = src_j[p_sel]
+            Si = S5[mol_sel, si_atom, k_sel]
+            Sj = S5[mol_sel, sj_atom, k_sel]
+            Bi = B5[mol_sel, si_atom, k_sel]
+            Bj = B5[mol_sel, sj_atom, k_sel]
+            ts1.index_add_(0, p_sel, Si @ Bj.transpose(-1, -2) + Bi @ Sj.transpose(-1, -2))
+        else:
+            Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
+            Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
+            Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
+            Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
+            vf = valid_k.to(dtype)[..., None, None]
+            ts1 += ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
+            ts1 += ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
 
-            if cuts is not None:
-                ss_i = Sss[mol[:, None], src_i[:, None], k_ids[None, :]]
-                ss_j = Sss[mol[:, None], src_j[:, None], k_ids[None, :]]
-                valid_k = valid_k & ((ss_i * ss_j) >= cuts)
-
-                pk = valid_k.nonzero(as_tuple=False)
-                if pk.numel() == 0:
-                    continue
-
-                p_sel = pk[:, 0]
-                k_sel = k_ids[pk[:, 1]]
-                mol_sel = mol[p_sel]
-
-                si_atom = src_i[p_sel]
-                sj_atom = src_j[p_sel]
-
-                Si = S5[mol_sel, si_atom, k_sel]
-                Sj = S5[mol_sel, sj_atom, k_sel]
-                Bi = B5[mol_sel, si_atom, k_sel]
-                Bj = B5[mol_sel, sj_atom, k_sel]
-
-                term = Si @ Bj.transpose(-1, -2)
-                term = term + Bi @ Sj.transpose(-1, -2)
-
-                ts1.index_add_(0, p_sel, term)
-
-            else:
-                Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
-                Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
-                Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
-                Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
-
-                vf = valid_k.to(dtype)[..., None, None]
-
-                ts1 += ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
-                ts1 += ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
-
-        ft1 = 0.25 * (gval1[molecule.ni[p0:p1]] + gval1[molecule.nj[p0:p1]])
-
-        hsrc = -ft1[:, None, None] * ts1
-        out_blocks[molecule.mask[p0:p1]] += hsrc.transpose(-1, -2)
+    ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
+    hsrc = -ft1[:, None, None] * ts1
+    out_blocks[molecule.mask] += hsrc.transpose(-1, -2)

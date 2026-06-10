@@ -2,12 +2,10 @@ import math
 
 import torch
 
-from .omx_basis import gather_om1_basis
-
 _XQQ_CUTOFF = 60.0
 
 
-def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j, basis):
+def om1_local_overlap_terms(rij, basis_i, basis_j):
     """
     Return the local OM1 Gaussian overlap terms in the Fortran SPOVER/BETOM ordering:
     [ss, s-p_sigma, p_sigma-s, p_sigma-p_sigma, p_pi-p_pi].
@@ -15,8 +13,18 @@ def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j, basis):
     dtype = rij.dtype
     device = rij.device
 
-    shell_i, exp_i, cs_i, cp_i = gather_om1_basis(ni, zeta_i, basis)
-    shell_j, exp_j, cs_j, cp_j = gather_om1_basis(nj, zeta_j, basis)
+    shell_i, exp_i, cs_i, cp_i = (
+        basis_i["shell_type"],
+        basis_i["exponents"],
+        basis_i["coeff_s"],
+        basis_i["coeff_p"],
+    )
+    shell_j, exp_j, cs_j, cp_j = (
+        basis_j["shell_type"],
+        basis_j["exponents"],
+        basis_j["coeff_s"],
+        basis_j["coeff_p"],
+    )
 
     a = exp_i.unsqueeze(2)
     b = exp_j.unsqueeze(1)
@@ -61,11 +69,11 @@ def om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j, basis):
     return out
 
 
-def diatom_overlap_matrix_OM1(ni, nj, xij, rij, zeta_i, zeta_j, direction, basis):
+def diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j):
     """
     Build the 4x4 OM1 overlap block for each atom pair in Cartesian AO order [s, px, py, pz].
     """
-    terms = om1_local_overlap_terms(ni, nj, rij, zeta_i, zeta_j, basis)
+    terms = om1_local_overlap_terms(rij, basis_i, basis_j)
     ss = terms[:, 0]
     sp = terms[:, 1]
     ps = terms[:, 2]

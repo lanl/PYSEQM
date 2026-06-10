@@ -1,3 +1,5 @@
+import os
+
 import torch
 
 _OM1_BASIS_RAW = {
@@ -121,6 +123,7 @@ def build_omx_basis_tables(atomic_numbers, method, dtype, device):
         "exponents": exponents,
         "coeff_s": coeff_s,
         "coeff_p": coeff_p,
+        "boys_integrals": BoysInterpolationTable().to(device),
         "ppecp": _build_om1_ppecp_tensor_tables(dtype=dtype, device=device) if method == "OM1" else None,
     }
 
@@ -144,3 +147,50 @@ def gather_om1_basis(atomic_numbers, zeta, basis_tables):
     coeff_s = coeff_s * norm_s
     coeff_p = coeff_p * norm_p
     return shell_type, scaled_exponents, coeff_s, coeff_p
+
+
+def build_om1_basis_payload(atomic_numbers, zeta, basis_tables):
+    shell_type, exponents, coeff_s, coeff_p = gather_om1_basis(atomic_numbers, zeta, basis_tables)
+    return {"shell_type": shell_type, "exponents": exponents, "coeff_s": coeff_s, "coeff_p": coeff_p}
+
+
+def select_om1_basis_payload(basis_payload, idx):
+    return {name: values[idx] for name, values in basis_payload.items()}
+
+
+class BoysInterpolationTable(torch.nn.Module):
+    def __init__(self, table_path="fortran_boys_table.pt"):
+        super().__init__()
+        current_dir = os.path.dirname(__file__)
+        table_path = os.path.join(current_dir, "..", "params", "boys_integral_table.pt")
+        tab = torch.load(table_path, map_location="cpu")
+
+        self.register_buffer("A", tab["A"])
+        self.register_buffer("B", tab["B"])
+        self.register_buffer("C", tab["C"])
+
+        self.maxfmt = int(tab["MAXFMT"])
+        self.xmax = float(tab["XMAX"])
+        self.xlim = float(tab["XLIM"])
+
+    def forward(self, x, m_count=5):
+        """
+        Table interpolation for X < XMAX.
+        Returns tuple F0...F_{m_count-1}.
+        """
+        qq = x * 20.0
+        n = torch.floor(qq).to(torch.long).clamp(0, self.maxfmt - 2)
+        th = qq - n.to(x.dtype)
+
+        th2 = th * (th - 1.0)
+        th3 = th2 * (th - 2.0)
+        th4 = th2 * (th + 1.0)
+
+        vals = (
+            self.A[n, :m_count]
+            + th[..., None] * self.B[n, :m_count]
+            - th3[..., None] * self.C[n, :m_count]
+            + th4[..., None] * self.C[n + 1, :m_count]
+        )
+
+        return tuple(vals[..., m] for m in range(m_count))

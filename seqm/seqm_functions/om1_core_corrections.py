@@ -1,7 +1,6 @@
 import torch
 
 from .constants import ev
-from .omx_basis import gather_om1_basis
 
 _OM1_HEAVY_SCALE_INDICES = {"HH": (0,), "XH": (0, 1, 2, 3), "XX": tuple(range(22))}
 
@@ -10,30 +9,36 @@ def _om1_orbital_count(z):
     return torch.where(z == 1, torch.ones_like(z), torch.full_like(z, 4))
 
 
-def _boys_f012(x):
-    dtype = x.dtype
-    device = x.device
-    eps = torch.tensor(1.0e-10, dtype=dtype, device=device)
-    small = x < 1.0e-8
-    safe_x = torch.where(small, eps, x)
-    sqrt_x = torch.sqrt(safe_x)
-    exp_mx = torch.exp(-safe_x)
+def _corgto_f012(x, boys_table):
+    """
+    Fortran CORGTO AUXG2:
+      X < XMAX  : stored interpolation table
+      X > XLIM  : CORGTO asymptotic branch
+      else      : FMTGEN(X, M=3)
+    """
+    table = x < boys_table.xmax
+    asymp = x > boys_table.xlim
+    direct = ~(table | asymp)
 
-    f0 = 0.5 * torch.sqrt(torch.tensor(torch.pi, dtype=dtype, device=device) / safe_x) * torch.erf(sqrt_x)
-    f1 = (f0 - exp_mx) / (2.0 * safe_x)
-    f2 = (3.0 * f1 - exp_mx) / (2.0 * safe_x)
+    f0 = torch.empty_like(x)
+    f1 = torch.empty_like(x)
+    f2 = torch.empty_like(x)
 
-    if small.any():
-        xs = x[small]
-        f0_small = 1.0 - xs / 3.0 + xs * xs / 10.0
-        f1_small = 1.0 / 3.0 - xs / 5.0 + xs * xs / 14.0
-        f2_small = 1.0 / 5.0 - xs / 7.0 + xs * xs / 18.0
-        f0 = f0.clone()
-        f1 = f1.clone()
-        f2 = f2.clone()
-        f0[small] = f0_small
-        f1[small] = f1_small
-        f2[small] = f2_small
+    if bool(table.any()):
+        ft0, ft1, ft2 = boys_table(x[table], 3)
+        f0[table], f1[table], f2[table] = ft0, ft1, ft2
+
+    if bool(asymp.any()):
+        xa = x[asymp]
+        fa0 = 0.5 * torch.sqrt(torch.pi / xa)
+        fa1 = 0.5 * fa0 / xa
+        fa2 = 1.5 * fa1 / xa
+        f0[asymp], f1[asymp], f2[asymp] = fa0, fa1, fa2
+
+    if bool(direct.any()):
+        fd = _fmtgen_fortran(x[direct], 3)
+        f0[direct], f1[direct], f2[direct] = fd[..., 0], fd[..., 1], fd[..., 2]
+
     return f0, f1, f2
 
 
@@ -89,14 +94,17 @@ def om1_gscale(rij, ri, ni, nj, g_ss):
     return scaled, fko
 
 
-def om1_corgto(atomic_numbers, zeta, rij, basis):
+def om1_corgto(basis_payload, rij, basis_tables):
     """
     Basic analytical Gaussian core-electron attraction integrals for one OM1 shell.
 
     Returns the current H / ``sp`` subset of the Fortran ``VB(4)`` array:
     ``[ss, sp_sigma, pp_sigma, pp_pi]`` in atomic units.
     """
-    shell_type, exponents, coeff_s, coeff_p = gather_om1_basis(atomic_numbers, zeta, basis)
+    shell_type = basis_payload["shell_type"]
+    exponents = basis_payload["exponents"]
+    coeff_s = basis_payload["coeff_s"]
+    coeff_p = basis_payload["coeff_p"]
     dtype = rij.dtype
     device = rij.device
 
@@ -110,9 +118,11 @@ def om1_corgto(atomic_numbers, zeta, rij, basis):
     g = a + b
     rr = rij.view(-1, 1, 1).pow(2)
     x = g * rr
-    f0, f1, f2 = _boys_f012(x)
+    # f0, f1, f2 = _boys_f012(x)
+    boys_table = basis_tables["boys_integrals"]
+    f0, f1, f2 = _corgto_f012(x, boys_table)
 
-    vb = torch.zeros((atomic_numbers.shape[0], 4), dtype=dtype, device=device)
+    vb = torch.zeros((shell_type.shape[0], 4), dtype=dtype, device=device)
 
     ss_mask = shell_type == 0
     if ss_mask.any():
@@ -141,7 +151,7 @@ def om1_corgto(atomic_numbers, zeta, rij, basis):
     return vb
 
 
-def om1_corgau(ni, nj, rij, zeta_i, zeta_j, tore, basis):
+def om1_corgau(ni, nj, rij, tore, basis_tables, basis_i, basis_j):
     """
     Analytical OM1 core-electron attraction tensor from CORGAU.
 
@@ -151,8 +161,8 @@ def om1_corgau(ni, nj, rij, zeta_i, zeta_j, tore, basis):
     device = rij.device
     cort = torch.zeros((ni.shape[0], 4, 2), dtype=dtype, device=device)
 
-    vb_i = om1_corgto(ni, zeta_i, rij, basis)
-    vb_j = om1_corgto(nj, zeta_j, rij, basis)
+    vb_i = om1_corgto(basis_i, rij, basis_tables)
+    vb_j = om1_corgto(basis_j, rij, basis_tables)
 
     # Local factors follow CORGAU conventions:
     # column 0: electrons on atom i, core of atom j
@@ -164,8 +174,8 @@ def om1_corgau(ni, nj, rij, zeta_i, zeta_j, tore, basis):
     cort[:, 0, 0] = vb_i[:, 0] * fj
     cort[:, 0, 1] = vb_j[:, 0] * fi
 
-    heavy_i = _om1_orbital_count(ni) >= 4
-    heavy_j = _om1_orbital_count(nj) >= 4
+    heavy_i = basis_i["shell_type"] == 1
+    heavy_j = basis_j["shell_type"] == 1
 
     cort[heavy_i, 1, 0] = vb_i[heavy_i, 1] * fj[heavy_i]
     cort[heavy_i, 2, 0] = vb_i[heavy_i, 2] * fj[heavy_i]
@@ -377,3 +387,119 @@ def om1_apply_valpot_scaling(ni, nj, valpp, valpp1, fval1, fval2):
         scaled[both_heavy, 3, 1] * fsj[both_heavy] + valpp1[both_heavy, 3, 1] * fpj[both_heavy] * 0.25
     )
     return scaled
+
+
+CUTZS = 0.0
+CUTSM = 10.0
+CUTML = 42.0
+TOLFM = 1.0e-9
+
+
+def _fmtgen_fortran(t, m_count):
+    """
+    Vectorized FMTGEN.
+    Returns [..., m_count] = F_0(t) ... F_{m_count-1}(t).
+    """
+    t = t.to(dtype=t.dtype)
+    out = t.new_empty(t.shape + (m_count,))
+    at = torch.abs(t)
+
+    zero = at <= CUTZS
+    small = (~zero) & (at < CUTSM)
+    medium = (~zero) & (at >= CUTSM) & (at < CUTML)
+    large = (~zero) & (at >= CUTML)
+
+    if bool(zero.any()):
+        vals = [1.0 / float(2 * m + 1) for m in range(m_count)]
+        out[zero] = torch.tensor(vals, dtype=t.dtype, device=t.device)
+
+    if bool(small.any()):
+        ts = t[small]
+        top = _fmt_small_top_fortran(ts, m_count)
+        out[small] = _downward_from_top(ts, top, m_count, torch.exp(-ts))
+
+    if bool(medium.any()):
+        tm = t[medium]
+        top = _fmt_medium_top_fortran(tm, m_count)
+        out[medium] = _downward_from_top(tm, top, m_count, torch.exp(-tm))
+
+    if bool(large.any()):
+        tl = t[large]
+        ga = _ga_fortran(m_count, t.dtype, t.device)
+        top = 0.5 * ga / tl.pow(float(m_count) - 0.5)
+        out[large] = _downward_from_top(tl, top, m_count, torch.zeros_like(tl))
+
+    return out
+
+
+def _ga_fortran(m_count, dtype, device):
+    # GA(1)=sqrt(pi); GA(I)=GA(I-1)*0.5*(2I-3)
+    SQRT_PI = 1.772453850905516
+    g = torch.tensor(SQRT_PI, dtype=dtype, device=device)
+    for i in range(2, m_count + 1):
+        g = g * (0.5 * (2 * i - 3))
+    return g
+
+
+def _downward_from_top(t, ftop, m_count, texp):
+    vals = [None] * m_count
+    vals[-1] = ftop
+    cur = ftop
+    for m in range(m_count - 2, -1, -1):
+        cur = (2.0 * t * cur + texp) / float(2 * m + 1)
+        vals[m] = cur
+    return torch.stack(vals, dim=-1)
+
+
+def _fmt_small_top_fortran(t, m_count):
+    a = torch.full_like(t, float(m_count - 1) + 0.5)
+    term = 1.0 / a
+    s = term.clone()
+    active = torch.ones_like(t, dtype=torch.bool)
+
+    for _ in range(2, 401):
+        if not bool(active.any()):
+            break
+        an = a + 1.0
+        termn = term * t / an
+        sn = s + termn
+        conv = torch.abs(termn / sn) < TOLFM
+
+        a = torch.where(active, an, a)
+        term = torch.where(active, termn, term)
+        s = torch.where(active, sn, s)
+        active = active & (~conv)
+
+    return 0.5 * s * torch.exp(-t)
+
+
+def _fmt_medium_top_fortran(t, m_count):
+    tx = 1.0 / t
+    approx = 0.5 * _ga_fortran(1, t.dtype, t.device) * torch.sqrt(tx) * tx.pow(m_count - 1)
+    for i in range(2, m_count + 1):
+        approx = approx * (float(m_count - i) + 0.5)
+
+    texp = torch.exp(-t)
+    fimult = 0.5 * texp * tx
+    fiprop = fimult / approx
+
+    term = torch.ones_like(t)
+    s = torch.ones_like(t)
+    notrms = torch.trunc(t).to(torch.long) + m_count - 1
+    max_terms = int(notrms.max().item()) if t.numel() else 1
+
+    active = fimult != 0.0
+    for i in range(2, max_terms + 1):
+        active_i = active & (i <= notrms)
+        if not bool(active_i.any()):
+            continue
+
+        termn = term * tx * (float(m_count - i) + 0.5)
+        sn = s + termn
+        conv = torch.abs(termn * fiprop / sn) <= TOLFM
+
+        term = torch.where(active_i, termn, term)
+        s = torch.where(active_i, sn, s)
+        active = active & (~(active_i & conv))
+
+    return approx - fimult * s
