@@ -321,17 +321,18 @@ def aintgs(x0, jcall):
     # or pairs for same atom, then rab = 0
     t = 1.0 / torch.tensor(0.0, dtype=dtype, device=device)
     x = torch.where(x0 != 0, x0, t).reshape(-1, 1)
+    inv_x = x.reciprocal()
 
-    a1 = torch.exp(-x) / x
-    a2 = a1 + a1 / x
+    a1 = torch.exp(-x) * inv_x
+    a2 = a1 + a1 * inv_x
     # jcall >= 2
-    a3 = a1 + 2.0 * a2 / x
+    a3 = a1 + 2.0 * a2 * inv_x
     # jcall >= 3
     jcallp3 = (jcall >= 3).reshape((-1, 1))
-    a4 = torch.where(jcallp3, a1 + 3.0 * a3 / x, torch.tensor(0.0, dtype=dtype, device=device))
+    a4 = torch.where(jcallp3, a1 + 3.0 * a3 * inv_x, torch.tensor(0.0, dtype=dtype, device=device))
     # jcall >=4
     jcallp4 = (jcall >= 4).reshape((-1, 1))
-    a5 = torch.where(jcallp4, a1 + 4.0 * a4 / x, torch.tensor(0.0, dtype=dtype, device=device))
+    a5 = torch.where(jcallp4, a1 + 4.0 * a4 * inv_x, torch.tensor(0.0, dtype=dtype, device=device))
 
     return torch.cat((a1, a2, a3, a4, a5), dim=1)
 
@@ -360,11 +361,12 @@ def bintgs(x0, jcall):
     # tx = torch.exp(x)/x    # exp(x)/x  #not working with backward
     # tx = torch.where(cond1, torch.exp(x)/x, torch.tensor(0.0,dtype=dtype)) # not working with backward
     x_cond1 = x[cond1]
-    tx_cond1 = torch.exp(x_cond1) / x_cond1
+    inv_x_cond1 = x_cond1.reciprocal()
+    tx_cond1 = torch.exp(x_cond1) * inv_x_cond1
 
     # tmx = -torch.exp(-x)/x # -exp(-x)/x #not working with backward
     # tmx = torch.where(cond1, -torch.exp(-x)/x,  torch.tensor(0.0,dtype=dtype)) #not working with backward
-    tmx_cond1 = -torch.exp(-x_cond1) / x_cond1
+    tmx_cond1 = -torch.exp(-x_cond1) * inv_x_cond1
     # b1(x=0)=2, b2(x=0)=0,b3(x=0)=2/3,b4(x=0)=0,b5(x=0)=2/5
 
     # do some test to choose which one is faster
@@ -386,13 +388,13 @@ def bintgs(x0, jcall):
     b5 = torch.ones_like(x) * (2.0 / 5.0)
     b1_cond1 = tx_cond1 + tmx_cond1
     b1[cond1] = b1_cond1
-    b2_cond1 = -tx_cond1 + tmx_cond1 + b1_cond1 / x_cond1
+    b2_cond1 = -tx_cond1 + tmx_cond1 + b1_cond1 * inv_x_cond1
     b2[cond1] = b2_cond1
-    b3_cond1 = tx_cond1 + tmx_cond1 + 2.0 * b2_cond1 / x_cond1
+    b3_cond1 = tx_cond1 + tmx_cond1 + 2.0 * b2_cond1 * inv_x_cond1
     b3[cond1] = b3_cond1
-    b4_cond1 = -tx_cond1 + tmx_cond1 + 3.0 * b3_cond1 / x_cond1
+    b4_cond1 = -tx_cond1 + tmx_cond1 + 3.0 * b3_cond1 * inv_x_cond1
     b4[cond1] = b4_cond1
-    b5_cond1 = tx_cond1 + tmx_cond1 + 4.0 * b4_cond1 / x_cond1
+    b5_cond1 = tx_cond1 + tmx_cond1 + 4.0 * b4_cond1 * inv_x_cond1
     b5[cond1] = b5_cond1
 
     # b1 = torch.where(cond1,  tx + tmx           , torch.tensor(2.0, dtype=dtype))

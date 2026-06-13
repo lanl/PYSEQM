@@ -92,7 +92,7 @@ def rcis_batch(
     # ea_ei contains the list of orbital energy difference between the virtual and occupied orbitals
     approxH = ea_ei.view(-1, nov)
 
-    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nmol=nmol)  # TODO: User-defined
+    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nroots=nroots, nmol=nmol)  # TODO: User-defined
 
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     HV = torch.clone(V)
@@ -544,63 +544,138 @@ def makeA_pi_symm_batch(mol, P0, w):
     return F
 
 
+# def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
+#     """Orthogonalizes the vectors in the newsubspace against the original subspace
+#        with Gram-Schmidt orthogonalization. We cannot use Modified-Gram-Schmidt because
+#        we want leave the original subspace vectors untouched
+#
+#     :V: Original subspace vectors (with pre-allocated memory for new vectors)
+#     :newsubspace: vectors that have to be orthonormalized
+#     :vend: original subspace size
+#     :tol: the tolerance for the norm of new vectors below which the vector will be discarded
+#     :returns: vend: size of the subspace after adding in the new vectors
+#
+#     """
+#     # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
+#     # See: https://doi.org/10.1016/j.camwa.2005.08.009
+#     # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
+#     n = newsubspace.shape[0]
+#     for i in range(n):
+#         vec = newsubspace[i]
+#         vec -= (vec @ V[:vend].T) @ V[:vend]
+#         vec -= (vec @ V[:vend].T) @ V[:vend]
+#         vecnorm = torch.norm(vec)
+#
+#         if vecnorm > tol:
+#             V[vend] = vec / vecnorm
+#             vend = vend + 1
+#
+#     return vend
+
+
 def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
-    """Orthogonalizes the vectors in the newsubspace against the original subspace
-       with Gram-Schmidt orthogonalization. We cannot use Modified-Gram-Schmidt because
-       we want leave the original subspace vectors untouched
-
-    :V: Original subspace vectors (with pre-allocated memory for new vectors)
-    :newsubspace: vectors that have to be orthonormalized
-    :vend: original subspace size
-    :tol: the tolerance for the norm of new vectors below which the vector will be discarded
-    :returns: vend: size of the subspace after adding in the new vectors
-
     """
-    # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
-    # See: https://doi.org/10.1016/j.camwa.2005.08.009
-    # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
-    n = newsubspace.shape[0]
-    for i in range(n):
-        vec = newsubspace[i]
-        vec -= (vec @ V[:vend].T) @ V[:vend]
-        vec -= (vec @ V[:vend].T) @ V[:vend]
-        vecnorm = torch.norm(vec)
+    Block orthogonalize newsubspace against V[:vend], then append an
+    orthonormal basis for the surviving new directions.
 
-        if vecnorm > tol:
-            V[vend] = vec / vecnorm
-            vend = vend + 1
+    V, newsubspace have row vectors.
+    """
 
-    return vend
+    V_old = V[:vend]
+
+    # Project the whole new block against the existing subspace.
+    W = newsubspace
+
+    W = W - (W @ V_old.T) @ V_old
+    # Reorthogonalization for numerical stability of Gram-Schmidt
+    W = W - (W @ V_old.T) @ V_old
+
+    # Drop rows that do not survive projection against the old subspace.
+    row_norms = torch.linalg.vector_norm(W, dim=1)
+    W = W[row_norms > tol]
+
+    if W.shape[0] == 0:
+        return vend
+
+    # Robustly get an orthonormal basis for the row span of W. QR factorization without pivoting is problematic.
+    # Vh rows are orthonormal right singular vectors, i.e. basis vectors
+    # in the same ambient space as rows of V.
+    _, s, Vh = torch.linalg.svd(W, full_matrices=False)
+
+    keep = s > tol
+    Q_new = Vh[keep]
+
+    if Q_new.shape[0] == 0:
+        return vend
+
+    # Optional but useful: clean up against old V again in finite precision.
+    overlap = Q_new @ V_old.T
+    max_leak = overlap.abs().max()
+    orth_atol = 1e-13 if Q_new.dtype == torch.float64 else 1e-5
+
+    if max_leak > orth_atol:
+        Q_new -= (Q_new @ V[:vend].T) @ V[:vend]
+        Q_new -= (Q_new @ V[:vend].T) @ V[:vend]
+        # Re-orthonormalize after cleanup.
+        _, s2, Vh2 = torch.linalg.svd(Q_new, full_matrices=False)
+        Q_new = Vh2[s2 > tol]
+
+    k = Q_new.shape[0]
+
+    if vend + k > V.shape[0]:
+        raise ValueError(f"Not enough space in V: need {vend + k} rows, but V only has {V.shape[0]} rows.")
+
+    V[vend : vend + k] = Q_new
+    return vend + k
 
 
 import psutil  # to get the memory size
 
 
-def getMaxSubspacesize(dtype, device, nov, nmol=1, num_big_matrices=2):
+def getMaxSubspacesize(
+    dtype, device, nov, nroots, nmol=1, num_big_matrices=2, memory_fraction=0.4, retry_memory_fraction=0.65
+):
     """Calculate the maximum size of the subspace dimension
     based on available memory. The full subspace size is nov
     """
 
     device = device.type
-    # Get available memory
-    if device == "cpu":
-        available_memory = psutil.virtual_memory().available
-    elif device == "cuda":
-        available_memory, _ = torch.cuda.mem_get_info(device)
-    else:
-        raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
 
     bytes_per_element = torch.finfo(dtype).bits // 8  # Bytes per element
 
-    # Define a memory fraction to use (e.g., 50% of available memory)
-    memory_fraction = 0.4
-    usable_memory = available_memory * memory_fraction
+    def _candidate(frac):
+        # Get available memory
+        if device == "cpu":
+            available_memory = psutil.virtual_memory().available
+        elif device == "cuda":
+            available_memory, _ = torch.cuda.mem_get_info(device)
+        else:
+            raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
+        usable_memory = available_memory * frac
+        n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_big_matrices))
+        return max(1, min(n_calculated, nov))
 
-    # Calculate maximum n based on memory
-    n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_big_matrices))
+    maxSubspacesize = _candidate(memory_fraction)
+    if maxSubspacesize >= 3 * nroots:
+        return maxSubspacesize
 
-    # Ensure n does not exceed nmax
-    return min(n_calculated, nov)
+    if device == "cuda":
+        torch.cuda.empty_cache()
+        maxSubspacesize = _candidate(memory_fraction)
+
+    if maxSubspacesize >= 3 * nroots:
+        return maxSubspacesize
+
+    maxSubspacesize_retry = _candidate(retry_memory_fraction)
+    if maxSubspacesize_retry >= 3 * nroots:
+        return maxSubspacesize_retry
+
+    raise RuntimeError(
+        "Unable to allocate a Davidson subspace large enough for the requested roots. "
+        f"Requested at least 3*nroots={3 * nroots}, got {maxSubspacesize} at memory_fraction={memory_fraction:.2f} "
+        f"and {maxSubspacesize_retry} at memory_fraction={retry_memory_fraction:.2f} "
+        f"with nov={nov}, nmol={nmol}, num_big_matrices={num_big_matrices}."
+    )
 
 
 def get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal):
