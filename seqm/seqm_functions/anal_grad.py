@@ -6,6 +6,7 @@ from .constants import a0, ev
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .dispersion_am1_fs1 import dEdisp_dr
 from .energy import pair_nuclear_energy
+from .om2_hcore import build_omx_pair_context
 from .two_elec_two_center_int import rotate_with_quaternion
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
@@ -253,6 +254,11 @@ def scf_grad(
     The gradient is calculated in a pseudo-numerical fashion. The derivatives of the overlap, the core-core repulsions and the two-electron integrals in
     the atomic orbital basis are calculated using finite-differnce.
     """
+    # if method == "OM1":
+    #     return scf_grad_om1(P0, molecule, molsize, mask, maskd)
+    # if method in {"OM2", "OM3"}:
+    #     raise NotImplementedError("Fast finite-difference gradients are implemented for OM1 only")
+
     # torch.set_printoptions(precision=6)
     # torch.set_printoptions(linewidth=110)
 
@@ -266,20 +272,36 @@ def scf_grad(
 
     # I will use this tensor to store the gradient of the overlap matrix, and then that of the exchange integrals
     overlap_KAB_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-
-    # overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij)
-    # We will use finite-differnce for the overlap derivative because analytical expression for derivatives of
-    # the overlap of slater orbitals is v complicated
-    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
-    overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int)
-
     w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
-    e1b_x_new, e2a_x_new = w_derivative_numerical(molecule, Xij, w_x_new)
-    pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
-    if molecule.seqm_parameters.get("dispersion", False) and method == "AM1":
-        pair_grad += dEdisp_dr(molecule)
 
-    return contract_ao_derivatives_with_density(
+    # if method == "OM1":
+    if method in {"OM1", "OM2", "OM3"}:
+        e1b_x_new, e2a_x_new, fko_x, omx_orthogonalization_grad = omx_fd(
+            molecule, overlap_KAB_x, w_x_new, Xij, ni, nj, idxi, idxj, method, P0
+        )
+
+        tore = const.tore  # Charges
+        ZAZB = tore[ni] * tore[nj]
+        fko = gam
+        pair_grad = (
+            ZAZB.unsqueeze(1)
+            * ev
+            * (fko_x / rij.unsqueeze(1) + fko.unsqueeze(1) * Xij / (a0 * a0 * torch.pow(rij, 3)).unsqueeze(1))
+        )
+
+    else:
+        # overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij)
+        # We will use finite-differnce for the overlap derivative because analytical expression for derivatives of
+        # the overlap of slater orbitals is v complicated
+        zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
+        overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int)
+
+        e1b_x_new, e2a_x_new = w_derivative_numerical(molecule, Xij, w_x_new)
+        pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
+        if molecule.seqm_parameters.get("dispersion", False) and method == "AM1":
+            pair_grad += dEdisp_dr(molecule)
+
+    grad = contract_ao_derivatives_with_density(
         P0,
         molecule,
         molsize,
@@ -293,6 +315,91 @@ def scf_grad(
         idxi,
         idxj,
     )
+
+    if method in {"OM2", "OM3"}:
+        grad += omx_orthogonalization_grad
+
+    return grad
+
+
+from .om2_hcore import (
+    choose_k_chunk,
+    diatom_overlap_matrix_OM1,
+    diatom_resonance_matrix_OM1,
+    om1_local_resonance_terms,
+    select_om1_basis_payload,
+)
+
+
+def omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x):
+    # Save S_blocks, B_blocks, core_semi instead of rebuilding here. At least core_semi
+    orb_dim = 4
+    device = molecule.coordinates.device
+    dtype = molecule.coordinates.dtype
+    nblocks = molecule.nmol * molecule.molsize * molecule.molsize
+    method = molecule.method
+
+    tables = molecule.parameters.get("_omx_tables")
+    basis_data = molecule.parameters.get("_omx_basis_data")
+
+    basis_i = select_om1_basis_payload(basis_data, molecule.idxi)
+    basis_j = select_om1_basis_payload(basis_data, molecule.idxj)
+
+    rot = rotate_with_quaternion(molecule.xij)
+    rot_t = rot.transpose(1, 2)
+    direction = rot_t[:, :, 0]
+
+    t_local = om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, tables)
+
+    pair_resonance = diatom_resonance_matrix_OM1(molecule.xij, t_local, direction)
+    pair_overlap = diatom_overlap_matrix_OM1(molecule.xij, molecule.rij, direction, basis_i, basis_j)
+
+    S_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
+    B_blocks = torch.zeros_like(S_blocks)
+    S_blocks[molecule.mask] = pair_overlap
+    S_blocks[molecule.mask_l] = pair_overlap.transpose(-1, -2)
+    B_blocks[molecule.mask] = pair_resonance
+    B_blocks[molecule.mask_l] = pair_resonance.transpose(-1, -2)
+
+    S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
+    B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
+
+    if P0.dim() == 4:
+        Ptot = P0[:, 0] + P0[:, 1]
+    else:
+        Ptot = P0
+    molsize = molecule.molsize
+    P_blocks = (
+        Ptot.reshape(molecule.nmol, molsize, 4, molsize, 4)
+        .transpose(2, 3)
+        .reshape(molecule.nmol * molsize * molsize, 4, 4)
+    )
+    if method == "OM3":
+        k_chunk = choose_k_chunk(
+            molecule.mask.numel(), molecule.molsize, S5.dtype, S5.device, min_chunk=8, mat_equiv=24
+        )
+        omx_orthogonalization_grad = betor3_grad_compact(
+            P_blocks, S5, B5, S_x, B_x, molecule, tables["gval1"], k_chunk=k_chunk
+        )
+    else:
+        COR = molecule.om2_COR
+        k_chunk = choose_k_chunk(
+            molecule.mask.numel(), molecule.molsize, S5.dtype, S5.device, min_chunk=8, mat_equiv=48
+        )
+        omx_orthogonalization_grad = betor_grad_compact(
+            P_blocks,
+            S5,
+            B5,
+            S_x,
+            B_x,
+            pair_core_semi_x,
+            COR,
+            molecule,
+            tables["gval1"],
+            tables["gval2"],
+            k_chunk=k_chunk,
+        )
+    return omx_orthogonalization_grad
 
 
 repeat_tensor = lambda x: torch.cat([x, x])
@@ -1603,3 +1710,323 @@ def der_TETCILF(
     w_x_final[HH, :, 0, 0] = riHH_x
     w_x_final[XH, :, :, 0] = wXH_x
     w_x_final[XX, ...] = w_x.reshape(ri.shape[0], 3, 10, 10)
+
+
+def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=None):
+    npairs = Xij.shape[0]
+    ni_ = repeat_tensor(ni)
+    nj_ = repeat_tensor(nj)
+    idxi_ = repeat_tensor(idxi)
+    idxj_ = repeat_tensor(idxj)
+    e1b_x = torch.zeros((npairs, 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
+    e2a_x = torch.zeros((npairs, 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
+    fko_x = torch.zeros((npairs, 3), dtype=w_x.dtype, device=w_x.device)
+    one_over_twodelta = 1.0 / (2.0 * delta)
+    need_threebody_grad = method in {"OM2", "OM3"} and torch.is_tensor(P0)
+    method_is_om2 = method == "OM2"
+    B_x = overlap_KAB_x
+    pair_core_semi_x = None
+    if need_threebody_grad:
+        S_x = torch.zeros_like(B_x)
+        if method_is_om2:
+            pair_core_semi_x = torch.zeros(npairs, 3, 4, 2, device=w_x.device, dtype=w_x.dtype)
+
+    for coord in range(3):
+        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
+        Xij[:, coord] -= delta
+        rij_plus = torch.norm(Xij, dim=1)
+        xij_plus = Xij / rij_plus.unsqueeze(1)
+        rij_plus = rij_plus / a0
+
+        Xij[:, coord] += 2.0 * delta
+        rij_minus = torch.norm(Xij, dim=1)
+        xij_minus = Xij / rij_minus.unsqueeze(1)
+        rij_minus = rij_minus / a0
+
+        rij_ = torch.cat([rij_plus, rij_minus])
+        xij_ = torch.cat([xij_plus, xij_minus])
+
+        ctx = build_omx_pair_context(
+            molecule, method=method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
+        )
+        pair = ctx["pair"]
+        B_ = ctx["pair_resonance"]
+
+        Xij[:, coord] -= delta
+
+        B_x[:, coord, :, :] = (B_[:npairs] - B_[npairs:]) * one_over_twodelta
+
+        w_x[:, coord, :, :] = (pair["w"][:npairs] - pair["w"][npairs:]) * one_over_twodelta
+        e1b_x[:, coord, :, :] = (pair["e1b"][:npairs] - pair["e1b"][npairs:]) * one_over_twodelta
+        e2a_x[:, coord, :, :] = (pair["e2a"][:npairs] - pair["e2a"][npairs:]) * one_over_twodelta
+        fko_x[:, coord] = (pair["fko"][:npairs] - pair["fko"][npairs:]) * one_over_twodelta
+
+        if need_threebody_grad:
+            S_ = ctx["pair_overlap"]
+            S_x[:, coord] = (S_[:npairs] - S_[npairs:]) * one_over_twodelta
+
+            if method == "OM2":
+                pair_core_semi_x[:, coord] = (
+                    pair["core_semi"][:npairs] - pair["core_semi"][npairs:]
+                ) * one_over_twodelta
+
+    omx_orthogonalization_grad = None
+    if need_threebody_grad:
+        omx_orthogonalization_grad = omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x)
+
+    # Hcore derivative needs to have upper and lower triangle contribution, multiply by 2.0, since Hcore is symmetric and will be contracted with a symmetric P0.
+    overlap_KAB_x *= 2.0
+
+    return e1b_x, e2a_x, fko_x, omx_orthogonalization_grad
+
+
+def betor3_grad_compact(P_blocks, S5, B5, S_x, B_x, molecule, gval1, k_chunk=16):
+    molsize = molecule.molsize
+    device, dtype = S5.device, S5.dtype
+    npairs = molecule.mask.numel()
+
+    mol = molecule.pair_molid
+    i = (molecule.mask // molsize) % molsize
+    j = molecule.mask % molsize
+
+    # lookup: oriented edge (a,b) -> compact pair row
+    pair_id = torch.full((molecule.nmol, molsize, molsize), -1, dtype=torch.long, device=device)
+    fwd = torch.zeros((molecule.nmol, molsize, molsize), dtype=torch.bool, device=device)
+
+    p = torch.arange(npairs, device=device)
+    pair_id[mol, i, j] = p
+    pair_id[mol, j, i] = p
+    fwd[mol, i, j] = True
+    fwd[mol, j, i] = False
+
+    # since energy sums upper + lower and P/H are symmetric
+    W = 2.0 * P_blocks[molecule.mask]
+
+    ft = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
+    F = -ft[:, None, None] * W
+    FT = F.transpose(-1, -2)
+
+    grad = torch.zeros((molecule.nmol * molsize, 3), dtype=dtype, device=device)
+    flat_i = mol * molsize + i
+    flat_j = mol * molsize + j
+
+    def gather(D, src, k_ids):
+        rows = pair_id[mol[:, None], src[:, None], k_ids[None, :]]
+        ori = fwd[mol[:, None], src[:, None], k_ids[None, :]]
+
+        out = torch.zeros((npairs, k_ids.numel(), 3, 4, 4), dtype=dtype, device=device)
+
+        ok = rows >= 0
+        if ok.any():
+            vals = D[rows[ok]]
+            vals = torch.where(ori[ok][:, None, None, None], vals, -vals.transpose(-1, -2))
+            out[ok] = vals
+        return out
+
+    for k0 in range(0, molsize, k_chunk):
+        k_ids = torch.arange(k0, min(k0 + k_chunk, molsize), device=device)
+        K = k_ids.numel()
+
+        Si = S5[mol[:, None], i[:, None], k_ids[None, :]]
+        Sj = S5[mol[:, None], j[:, None], k_ids[None, :]]
+        Bi = B5[mol[:, None], i[:, None], k_ids[None, :]]
+        Bj = B5[mol[:, None], j[:, None], k_ids[None, :]]
+
+        dSi = gather(S_x, i, k_ids)
+        dBi = gather(B_x, i, k_ids)
+        dSj = gather(S_x, j, k_ids)
+        dBj = gather(B_x, j, k_ids)
+
+        qik = ((F[:, None] @ Bj)[:, :, None] * dSi).sum((-1, -2)) + ((F[:, None] @ Sj)[:, :, None] * dBi).sum(
+            (-1, -2)
+        )
+
+        qjk = ((FT[:, None] @ Bi)[:, :, None] * dSj).sum((-1, -2)) + (
+            (FT[:, None] @ Si)[:, :, None] * dBj
+        ).sum((-1, -2))
+
+        flat_k = mol[:, None] * molsize + k_ids[None, :]
+
+        grad.index_add_(0, flat_i[:, None].expand(npairs, K).reshape(-1), qik.reshape(-1, 3))
+        grad.index_add_(0, flat_k.reshape(-1), -qik.reshape(-1, 3))
+
+        grad.index_add_(0, flat_j[:, None].expand(npairs, K).reshape(-1), qjk.reshape(-1, 3))
+        grad.index_add_(0, flat_k.reshape(-1), -qjk.reshape(-1, 3))
+
+    return grad.reshape(molecule.nmol, molsize, 3)
+
+
+def betor_grad_compact(
+    P_blocks,
+    S5,
+    B5,
+    S_x,  # [npairs, 3, 4, 4], dS_ab/dR_a
+    B_x,  # [npairs, 3, 4, 4], dB_ab/dR_a
+    pair_core_semi_x,  # [npairs, 3, 4, 2], d pair_core_semi / dR_a
+    COR,  # [nmol, molsize*4, molsize]
+    molecule,
+    gval1,
+    gval2,
+    k_chunk=16,
+):
+    molsize = molecule.molsize
+    device, dtype = S5.device, S5.dtype
+    npairs = molecule.mask.numel()
+
+    mol = molecule.pair_molid
+    a = (molecule.mask // molsize) % molsize
+    b = molecule.mask % molsize
+
+    # BETOR code computes in reversed orientation u=b, v=a,
+    # then writes hsrc.T into H[mask].
+    u = b
+    v = a
+
+    # edge lookup
+    p = torch.arange(npairs, device=device)
+    pair_id = torch.full((molecule.nmol, molsize, molsize), -1, dtype=torch.long, device=device)
+    fwd = torch.zeros((molecule.nmol, molsize, molsize), dtype=torch.bool, device=device)
+
+    pair_id[mol, a, b] = p
+    pair_id[mol, b, a] = p
+    fwd[mol, a, b] = True
+    fwd[mol, b, a] = False
+
+    # compact COR derivative vectors: [npairs, 3, 4]
+    # col 0 belongs to atom a, col 1 belongs to atom b
+    Cx0 = torch.zeros((npairs, 3, 4), dtype=dtype, device=device)
+    Cx1 = torch.zeros_like(Cx0)
+
+    Cx0[:, :, 0] = pair_core_semi_x[:, :, 0, 0]
+    Cx1[:, :, 0] = pair_core_semi_x[:, :, 0, 1]
+
+    Cx0_p = (pair_core_semi_x[:, :, 2, 0] + 2.0 * pair_core_semi_x[:, :, 3, 0]) / 3.0
+    Cx1_p = (pair_core_semi_x[:, :, 2, 1] + 2.0 * pair_core_semi_x[:, :, 3, 1]) / 3.0
+
+    heavy_a = (molecule.species[mol, a] > 1).to(dtype)[:, None]
+    heavy_b = (molecule.species[mol, b] > 1).to(dtype)[:, None]
+
+    Cx0[:, :, 1:] = Cx0_p[:, :, None] * heavy_a[:, :, None]
+    Cx1[:, :, 1:] = Cx1_p[:, :, None] * heavy_b[:, :, None]
+
+    def gather_mat(D, src, dst):
+        src, dst = torch.broadcast_tensors(src, dst)
+        mm = mol[:, None].expand_as(src)
+        rows = pair_id[mm, src, dst]
+        ori = fwd[mm, src, dst]
+
+        out = torch.zeros((*src.shape, 3, 4, 4), dtype=dtype, device=device)
+        ok = rows >= 0
+        if ok.any():
+            vals = D[rows[ok]]
+            vals = torch.where(ori[ok][:, None, None, None], vals, -vals.transpose(-1, -2))
+            out[ok] = vals
+        return out
+
+    def gather_cor_x(src, dst):
+        src, dst = torch.broadcast_tensors(src, dst)
+        mm = mol[:, None].expand_as(src)
+        rows = pair_id[mm, src, dst]
+        ori = fwd[mm, src, dst]
+
+        out = torch.zeros((*src.shape, 3, 4), dtype=dtype, device=device)
+        ok = rows >= 0
+        if ok.any():
+            vals = torch.where(ori[ok][:, None, None], Cx0[rows[ok]], -Cx1[rows[ok]])
+            out[ok] = vals
+        return out
+
+    COR4 = COR.reshape(molecule.nmol, molsize, 4, molsize).permute(0, 1, 3, 2)
+
+    # Since H[mask] gets hsrc.T, energy adjoint wrt hsrc is transpose.
+    W = 2.0 * P_blocks[molecule.mask].transpose(-1, -2)
+
+    ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
+    ft2 = 0.0625 * (gval2[molecule.ni] + gval2[molecule.nj])
+
+    G1 = -ft1[:, None, None] * W
+    G2 = ft2[:, None, None] * W
+
+    grad = torch.zeros((molecule.nmol * molsize, 3), dtype=dtype, device=device)
+
+    flat_u = mol * molsize + u
+    flat_v = mol * molsize + v
+
+    for k0 in range(0, molsize, k_chunk):
+        k_ids = torch.arange(k0, min(k0 + k_chunk, molsize), device=device)
+        K = k_ids.numel()
+
+        src_u = u[:, None]
+        src_v = v[:, None]
+        src_k = k_ids[None, :]
+
+        Si = S5[mol[:, None], src_u, src_k]
+        Sj = S5[mol[:, None], src_v, src_k]
+        Bi = B5[mol[:, None], src_u, src_k]
+        Bj = B5[mol[:, None], src_v, src_k]
+
+        hi = COR4[mol[:, None], src_u, src_k]  # [P,K,4]
+        hj = COR4[mol[:, None], src_v, src_k]
+        hk = COR4[mol[:, None], src_k, src_u] + COR4[mol[:, None], src_k, src_v]
+
+        # ----- adjoints from ts1 -----
+        adj_Si = G1[:, None] @ Bj
+        adj_Bi = G1[:, None] @ Sj
+        adj_Sj = G1.transpose(-1, -2)[:, None] @ Bi
+        adj_Bj = G1.transpose(-1, -2)[:, None] @ Si
+
+        # ----- adjoints from ts2 -----
+        base = Si @ Sj.transpose(-1, -2)
+        Hfac = hi[..., :, None] + hj[..., None, :]
+
+        GH = G2[:, None] * Hfac
+
+        adj_Si = adj_Si + GH @ Sj - (G2[:, None] @ Sj) * hk[..., None, :]
+        adj_Sj = adj_Sj + GH.transpose(-1, -2) @ Si - (G2.transpose(-1, -2)[:, None] @ Si) * hk[..., None, :]
+
+        adj_hi = (G2[:, None] * base).sum(dim=-1)
+        adj_hj = (G2[:, None] * base).sum(dim=-2)
+
+        adj_hk = -(Si.transpose(-1, -2) @ G2[:, None] @ Sj).diagonal(dim1=-2, dim2=-1)
+
+        # ----- pair derivative contractions -----
+        dSi = gather_mat(S_x, src_u, src_k)
+        dBi = gather_mat(B_x, src_u, src_k)
+        dSj = gather_mat(S_x, src_v, src_k)
+        dBj = gather_mat(B_x, src_v, src_k)
+
+        dhi = gather_cor_x(src_u, src_k)
+        dhj = gather_cor_x(src_v, src_k)
+
+        dhk_u = gather_cor_x(src_k, src_u)
+        dhk_v = gather_cor_x(src_k, src_v)
+
+        q_u = (
+            (adj_Si[:, :, None] * dSi).sum((-1, -2))
+            + (adj_Bi[:, :, None] * dBi).sum((-1, -2))
+            + (adj_hi[:, :, None] * dhi).sum(-1)
+        )
+
+        q_v = (
+            (adj_Sj[:, :, None] * dSj).sum((-1, -2))
+            + (adj_Bj[:, :, None] * dBj).sum((-1, -2))
+            + (adj_hj[:, :, None] * dhj).sum(-1)
+        )
+
+        q_ku = (adj_hk[:, :, None] * dhk_u).sum(-1)
+        q_kv = (adj_hk[:, :, None] * dhk_v).sum(-1)
+
+        flat_k = mol[:, None] * molsize + k_ids[None, :]
+
+        grad.index_add_(0, flat_u[:, None].expand(npairs, K).reshape(-1), q_u.reshape(-1, 3))
+        grad.index_add_(0, flat_k.reshape(-1), -q_u.reshape(-1, 3))
+
+        grad.index_add_(0, flat_v[:, None].expand(npairs, K).reshape(-1), q_v.reshape(-1, 3))
+        grad.index_add_(0, flat_k.reshape(-1), -q_v.reshape(-1, 3))
+
+        # hk is COR(k,u) + COR(k,v), so its source atom is k.
+        grad.index_add_(0, flat_k.reshape(-1), (q_ku + q_kv).reshape(-1, 3))
+        grad.index_add_(0, flat_u[:, None].expand(npairs, K).reshape(-1), -q_ku.reshape(-1, 3))
+        grad.index_add_(0, flat_v[:, None].expand(npairs, K).reshape(-1), -q_kv.reshape(-1, 3))
+
+    return grad.reshape(molecule.nmol, molsize, 3)

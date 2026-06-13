@@ -35,7 +35,8 @@ coordinates = torch.tensor(
     device=device,
 )
 
-species, coordinates = read_xyz(["../../Downloads/23ppe-min.xyz"])
+# species, coordinates = read_xyz(["../../Downloads/23ppe-min.xyz"])
+species, coordinates = read_xyz(["/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/23ppe/234ppe.xyz"])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
 
@@ -45,7 +46,7 @@ const = Constants().to(device)
 seqm_parameters = {
     "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
-    "scf_converger": [0, 0.1],  # converger used for scf loop
+    "scf_converger": [1],  # converger used for scf loop
     # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
     # [1], adaptive mixing
     # [2], adaptive mixing, then pulay

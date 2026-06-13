@@ -1,3 +1,4 @@
+import psutil
 import torch
 
 from .om1_overlap import (
@@ -56,84 +57,34 @@ def _build_cor_table(molecule, pair_core_semi, tables):
     return cor
 
 
-def _omx_tables(molecule):
+def build_omx_pair_context(molecule, method, idxi, idxj, ni, nj, xij, rij):
+    # if method not in _OMX_HCORE_CONFIG:
+    #     raise ValueError(f"Unsupported OMx method: {method}")
+
     tables = molecule.parameters.get("_omx_tables")
-    if tables is None:
-        raise RuntimeError("OMx parameter tables have not been cached on the molecule")
-    return tables
-
-
-def _omx_basis(molecule):
-    basis = molecule.parameters.get("_omx_basis")
-    if basis is None:
-        raise RuntimeError("OMx basis tables have not been cached on the molecule")
-    return basis
-
-
-def _omx_basis_data(molecule):
+    # if tables is None:
+    #     raise RuntimeError("OMx parameter tables have not been cached on the molecule")
+    basis_tables = molecule.parameters.get("_omx_basis")
+    # if basis_tables is None:
+    #     raise RuntimeError("OMx basis tables have not been cached on the molecule")
     basis_data = molecule.parameters.get("_omx_basis_data")
-    if basis_data is None:
-        raise RuntimeError("OMx gathered basis data have not been cached on the molecule")
-    return basis_data
+    # if basis_data is None:
+    #     raise RuntimeError("OMx gathered basis data have not been cached on the molecule")
 
+    basis_i = select_om1_basis_payload(basis_data, idxi)
+    basis_j = select_om1_basis_payload(basis_data, idxj)
 
-def _omx_resonance_tables(tables):
-    return {
-        name: tables[name]
-        for name in [
-            "beta_s",
-            "beta_p",
-            "beta_pi",
-            "beta_sh",
-            "beta_ph",
-            "alpha_s",
-            "alpha_p",
-            "alpha_pi",
-            "alpha_s_h",
-            "alpha_p_h",
-        ]
-    }
-
-
-def _fill_omx_one_center_blocks(H_blocks, molecule):
-    for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
-        H_blocks[molecule.maskd, orb, orb] = molecule.parameters[key]
-
-
-def _prepare_pair_rotation(molecule):
-    rot = rotate_with_quaternion(molecule.xij)
+    rot = rotate_with_quaternion(xij)
     rot_t = rot.transpose(1, 2)
     direction = rot_t[:, :, 0]
-    return rot, rot_t, direction
 
-
-def _prepare_omx_local_pair_terms(molecule, tables, basis_i, basis_j):
-    return (
-        om1_local_overlap_terms(molecule.rij, basis_i, basis_j),
-        om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, tables),
-    )
-
-
-def _prepare_omx_pair_overlap(molecule, rot_direction, basis_i, basis_j):
-    return diatom_overlap_matrix_OM1(molecule.xij, molecule.rij, rot_direction, basis_i, basis_j)
-
-
-def _prepare_omx_pair_resonance(molecule, resonance_tables, rot_direction):
-    return diatom_resonance_matrix_OM1(
-        molecule.ni, molecule.nj, molecule.xij, molecule.rij, resonance_tables, rot_direction
-    )
-
-
-def _assemble_omx_pair_terms(
-    molecule, method, cfg, tables, basis_tables, s_local, t_local, rot, rot_t, basis_i, basis_j
-):
-    use_cor = cfg["use_cor"]
-
+    s_local = om1_local_overlap_terms(rij, basis_i, basis_j)
+    t_local = om1_local_resonance_terms(ni, nj, rij, tables)
     pair = omx_pair_hcore_terms(
         method,
-        molecule.ni,
-        molecule.nj,
-        molecule.rij,
+        ni,
+        nj,
+        rij,
         tables["g_ss"],
         molecule.const.tore,
         s_local,
@@ -149,18 +100,16 @@ def _assemble_omx_pair_terms(
         basis_j,
         om2_tables=tables,
     )
-    return {
-        "pair_core_semi": pair["core_semi"] if use_cor else None,
-        "w": pair["w"],
-        "rho0xi": pair["fko"],
-        "e1b": pair["e1b"],
-        "e2a": pair["e2a"],
-    }
+
+    pair_resonance = diatom_resonance_matrix_OM1(xij, t_local, direction)
+    context = {"pair": pair, "pair_resonance": pair_resonance, "pair_overlap": None}
+    if method in {"OM2", "OM3"}:
+        context["pair_overlap"] = diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j, s_local)
+    return context
 
 
-def _build_omx_hcore(molecule, doTETCI=True, method="OM2"):
-    if method not in _OMX_HCORE_CONFIG:
-        raise ValueError(f"Unsupported OMx method: {method}")
+def build_omx_hcore(molecule):
+    method = molecule.method
     cfg = _OMX_HCORE_CONFIG[method]
     use_cor = cfg["use_cor"]
     direct_resonance = cfg["direct_resonance"]
@@ -171,31 +120,24 @@ def _build_omx_hcore(molecule, doTETCI=True, method="OM2"):
     nblocks = molecule.nmol * molecule.molsize * molecule.molsize
     H_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
 
-    tables = _omx_tables(molecule)
-    basis_tables = _omx_basis(molecule)
-    basis_data = _omx_basis_data(molecule)
-    basis_i = select_om1_basis_payload(basis_data, molecule.idxi)
-    basis_j = select_om1_basis_payload(basis_data, molecule.idxj)
-    _fill_omx_one_center_blocks(H_blocks, molecule)
-    resonance_tables = _omx_resonance_tables(tables)
-
-    rot, rot_t, direction = _prepare_pair_rotation(molecule)
-
-    s_local, t_local = _prepare_omx_local_pair_terms(molecule, tables, basis_i, basis_j)
-
-    pair_data = _assemble_omx_pair_terms(
-        molecule, method, cfg, tables, basis_tables, s_local, t_local, rot, rot_t, basis_i, basis_j
+    context = build_omx_pair_context(
+        molecule, method, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij
     )
+    tables = molecule.parameters.get("_omx_tables")
+    pair_data = context["pair"]
+
+    for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
+        H_blocks[molecule.maskd, orb, orb] = molecule.parameters[key]
     H_blocks.index_add_(0, molecule.maskd[molecule.idxi], pair_data["e1b"])
     H_blocks.index_add_(0, molecule.maskd[molecule.idxj], pair_data["e2a"])
 
-    pair_resonance = _prepare_omx_pair_resonance(molecule, resonance_tables, direction)
+    pair_resonance = context["pair_resonance"]
+    H_blocks[molecule.mask] = pair_resonance
 
-    if direct_resonance:
-        H_blocks[molecule.mask] = pair_resonance
-        return H_blocks, pair_data["w"], pair_data["rho0xi"], None, None, None
+    if direct_resonance or molecule.molsize < 3:
+        return H_blocks, pair_data["w"], pair_data["fko"], None, None, None
 
-    pair_overlap = _prepare_omx_pair_overlap(molecule, direction, basis_i, basis_j)
+    pair_overlap = context["pair_overlap"]
     S_blocks = torch.zeros_like(H_blocks)
     B_blocks = torch.zeros_like(H_blocks)
     S_blocks[molecule.mask] = pair_overlap
@@ -203,32 +145,16 @@ def _build_omx_hcore(molecule, doTETCI=True, method="OM2"):
     B_blocks[molecule.mask] = pair_resonance
     B_blocks[molecule.mask_l] = pair_resonance.transpose(-1, -2)
 
-    H_blocks = _apply_omx_orthogonalization(
-        molecule, H_blocks, S_blocks, B_blocks, tables, pair_data["pair_core_semi"], use_cor, doTETCI
+    _apply_omx_orthogonalization(
+        molecule, H_blocks, S_blocks, B_blocks, tables, pair_data.get("core_semi"), use_cor
     )
-    return H_blocks, pair_data["w"], pair_data["rho0xi"], None, None, None
-
-
-def build_om1_hcore(molecule, doTETCI=True):
-    return _build_omx_hcore(molecule, doTETCI=doTETCI, method="OM1")
-
-
-def build_om2_hcore(molecule, doTETCI=True):
-    return _build_omx_hcore(molecule, doTETCI=doTETCI, method="OM2")
-
-
-def build_om3_hcore(molecule, doTETCI=True):
-    return _build_omx_hcore(molecule, doTETCI=doTETCI, method="OM3")
-
-
-def build_omx_hcore(molecule, doTETCI=True):
-    return _build_omx_hcore(molecule, doTETCI=doTETCI, method=molecule.method)
+    return H_blocks, pair_data["w"], pair_data["fko"], None, None, None
 
 
 def _add_betor_shell_chunked_(
     out_blocks,
-    S_blocks,
-    B_blocks,
+    S5,
+    B5,
     molecule,
     gval1,
     COR,
@@ -239,30 +165,29 @@ def _add_betor_shell_chunked_(
     k_chunk=32,
     # cuts=None,
 ):
-    nmol = molecule.nmol
     molsize = molecule.molsize
-    dtype = S_blocks.dtype
-    device = S_blocks.device
-
-    S5 = S_blocks.reshape(nmol, molsize, molsize, 4, 4)
-    B5 = B_blocks.reshape(nmol, molsize, molsize, 4, 4)
+    dtype = S5.dtype
+    device = S5.device
 
     pair_mol = molecule.pair_molid
     ai = (molecule.mask // molsize) % molsize
     aj = molecule.mask % molsize
-    nat_per_mol = (molecule.species > 0).sum(dim=1)
 
     CORs = COR[:, 0::4, :]
     CORp = COR[:, 1::4, :]
     heavy = molecule.species > 1
 
     mol = pair_mol[pair_idx]
+    # Since ni >= nj, ai is the heavier/equal atom and aj is the lighter/equal atom.
+    # The COR BETOR implementation assumes src_i <= src_j in atomic number,
+    # so use reversed atom order and transpose before writing to the stored block.
     src_i = aj[pair_idx]
     src_j = ai[pair_idx]
-    if use_hi_p:
-        heavy_i_f = heavy[mol, src_i].to(dtype)[:, None, None]
-    if use_hj_p:
-        heavy_j_f = heavy[mol, src_j].to(dtype)[:, None, None]
+
+    # if use_hi_p:
+    #     heavy_i_f = heavy[mol, src_i].to(dtype)[:, None, None]
+    # if use_hj_p:
+    #     heavy_j_f = heavy[mol, src_j].to(dtype)[:, None, None]
 
     P = pair_idx.numel()
 
@@ -274,30 +199,30 @@ def _add_betor_shell_chunked_(
         k_ids = torch.arange(k0, k1, device=device)
         K = k1 - k0
 
-        valid_k = (
-            (k_ids[None, :] < nat_per_mol[mol, None])
-            & (k_ids[None, :] != src_i[:, None])
-            & (k_ids[None, :] != src_j[:, None])
-        )
+        # valid_k = (
+        #     (k_ids[None, :] < nat_per_mol[mol, None])
+        #     & (k_ids[None, :] != src_i[:, None])
+        #     & (k_ids[None, :] != src_j[:, None])
+        # )
 
         Si = S5[mol[:, None], src_i[:, None], k_ids[None, :]]
         Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
         Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
         Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
 
-        vf = valid_k.to(dtype)[..., None, None]
+        # vf = valid_k.to(dtype)[..., None, None]
 
-        ts1 = ts1 + ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
-        ts1 = ts1 + ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
+        ts1 += (Si @ Bj.transpose(-1, -2)).sum(dim=1)
+        ts1 += (Bi @ Sj.transpose(-1, -2)).sum(dim=1)
 
         hi = torch.zeros((P, K, 4), dtype=dtype, device=device)
         hj = torch.zeros_like(hi)
         hi[..., 0] = CORs[mol[:, None], src_i[:, None], k_ids[None, :]]
         hj[..., 0] = CORs[mol[:, None], src_j[:, None], k_ids[None, :]]
         if use_hi_p:
-            hi[..., 1:] = CORp[mol[:, None], src_i[:, None], k_ids[None, :]][..., None] * heavy_i_f
+            hi[..., 1:] = CORp[mol[:, None], src_i[:, None], k_ids[None, :]][..., None]  # * heavy_i_f
         if use_hj_p:
-            hj[..., 1:] = CORp[mol[:, None], src_j[:, None], k_ids[None, :]][..., None] * heavy_j_f
+            hj[..., 1:] = CORp[mol[:, None], src_j[:, None], k_ids[None, :]][..., None]  # * heavy_j_f
 
         heavy_k = heavy[mol[:, None], k_ids[None, :]]
         hk = torch.zeros((P, K, 4), dtype=dtype, device=device)
@@ -317,7 +242,7 @@ def _add_betor_shell_chunked_(
         weighted = (Si * hk[..., None, :]) @ Sj.transpose(-1, -2)
 
         ts2_k = base * (hi[..., :, None] + hj[..., None, :]) - weighted
-        ts2 = ts2 + (ts2_k * vf).sum(dim=1)
+        ts2 = ts2 + (ts2_k).sum(dim=1)
 
     ft1 = 0.25 * (gval1[molecule.ni[pair_idx]] + gval1[molecule.nj[pair_idx]])
     hsrc = -ft1[:, None, None] * ts1
@@ -326,7 +251,7 @@ def _add_betor_shell_chunked_(
     out_blocks[molecule.mask[pair_idx]] += hsrc.transpose(-1, -2)
 
 
-def _add_betor_from_pairs_chunked_(out_blocks, S_blocks, B_blocks, molecule, gval1, COR, gval2, k_chunk=32):
+def _add_betor_from_pairs_chunked_(out_blocks, S5, B5, molecule, gval1, COR, gval2, k_chunk=32):
     molsize = molecule.molsize
     heavy = molecule.species > 1
     pair_mol = molecule.pair_molid
@@ -339,76 +264,54 @@ def _add_betor_from_pairs_chunked_(out_blocks, S_blocks, B_blocks, molecule, gva
         if mask.any():
             sel = mask.nonzero(as_tuple=False).squeeze(1)
             _add_betor_shell_chunked_(
-                out_blocks,
-                S_blocks,
-                B_blocks,
-                molecule,
-                gval1,
-                COR,
-                gval2,
-                sel,
-                use_hi_p,
-                use_hj_p,
-                k_chunk=k_chunk,
+                out_blocks, S5, B5, molecule, gval1, COR, gval2, sel, use_hi_p, use_hj_p, k_chunk=k_chunk
             )
 
 
-def _apply_omx_orthogonalization(
-    molecule, H_blocks, S_blocks, B_blocks, tables, pair_core_semi, use_cor, doTETCI
-):
-    out = H_blocks.clone()
-
-    # Preserve upper-block-only output behavior.
-    out[molecule.mask] += B_blocks[molecule.mask]
-
-    if not doTETCI:
-        return out
-
-    nat_per_mol = (molecule.species > 0).sum(dim=1)
-    has_three_or_more_atoms = bool((nat_per_mol > 2).any().item())
-    if not has_three_or_more_atoms:
-        return out
-
+def _apply_omx_orthogonalization(molecule, H_blocks, S_blocks, B_blocks, tables, pair_core_semi, use_cor):
+    S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
+    B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
     if use_cor:
         COR = _build_cor_table(molecule, pair_core_semi, tables)
+        # Save COR to use for gradients
+        molecule.om2_COR = COR
+        k_chunk = choose_k_chunk(
+            molecule.mask.numel(), molecule.molsize, S5.dtype, S5.device, min_chunk=16, mat_equiv=16
+        )
         _add_betor_from_pairs_chunked_(
-            out,
-            S_blocks,
-            B_blocks,
+            H_blocks,
+            S5,
+            B5,
             molecule,
             tables["gval1"],
             COR=COR,
             gval2=tables["gval2"],
-            k_chunk=16,
+            k_chunk=k_chunk,
             # cuts=None,
         )
     else:
-        _add_betor3_from_pairs_chunked_(out, S_blocks, B_blocks, molecule, tables["gval1"], k_chunk=32)
+        k_chunk = choose_k_chunk(
+            molecule.mask.numel(), molecule.molsize, S5.dtype, S5.device, min_chunk=32, mat_equiv=8
+        )
+        _add_betor3_from_pairs_chunked_(
+            H_blocks, S5, B5, molecule, tables["gval1"], k_chunk=k_chunk, cuts=None
+        )
 
-    return out
 
-
-def _add_betor3_from_pairs_chunked_(
-    out_blocks, S_blocks, B_blocks, molecule, gval1, k_chunk=64, cuts=1.0e-12
-):
-    nmol = molecule.nmol
+def _add_betor3_from_pairs_chunked_(out_blocks, S5, B5, molecule, gval1, k_chunk=64, cuts=1.0e-12):
     molsize = molecule.molsize
-    dtype = S_blocks.dtype
-    device = S_blocks.device
-
-    S5 = S_blocks.reshape(nmol, molsize, molsize, 4, 4)
-    B5 = B_blocks.reshape(nmol, molsize, molsize, 4, 4)
+    dtype = S5.dtype
+    device = S5.device
 
     Sss = S5[..., 0, 0]  # Cheap scalar view for screening.
 
-    nat_per_mol = (molecule.species > 0).sum(dim=1)
     pair_mol = molecule.pair_molid
     ai = (molecule.mask // molsize) % molsize
     aj = molecule.mask % molsize
 
     mol = pair_mol
-    src_i = aj
-    src_j = ai
+    src_i = ai
+    src_j = aj
 
     P = molecule.mask.numel()
     ts1 = torch.zeros((P, 4, 4), dtype=dtype, device=device)
@@ -417,16 +320,17 @@ def _add_betor3_from_pairs_chunked_(
         k1 = min(k0 + k_chunk, molsize)
         k_ids = torch.arange(k0, k1, device=device)
 
-        valid_k = (
-            (k_ids[None, :] < nat_per_mol[mol, None])
-            & (k_ids[None, :] != src_i[:, None])
-            & (k_ids[None, :] != src_j[:, None])
-        )
+        # valid_k = (
+        #     (k_ids[None, :] < nat_per_mol[mol, None])
+        #     & (k_ids[None, :] != src_i[:, None])
+        #     & (k_ids[None, :] != src_j[:, None])
+        # )
 
         if cuts is not None:
             ss_i = Sss[mol[:, None], src_i[:, None], k_ids[None, :]]
             ss_j = Sss[mol[:, None], src_j[:, None], k_ids[None, :]]
-            valid_k = valid_k & ((ss_i * ss_j) >= cuts)
+            valid_k = (ss_i * ss_j) >= cuts
+            # valid_k = valid_k & ((ss_i * ss_j) >= cuts)
 
             pk = valid_k.nonzero(as_tuple=False)
             if pk.numel() == 0:
@@ -447,10 +351,38 @@ def _add_betor3_from_pairs_chunked_(
             Sj = S5[mol[:, None], src_j[:, None], k_ids[None, :]]
             Bi = B5[mol[:, None], src_i[:, None], k_ids[None, :]]
             Bj = B5[mol[:, None], src_j[:, None], k_ids[None, :]]
-            vf = valid_k.to(dtype)[..., None, None]
-            ts1 += ((Si @ Bj.transpose(-1, -2)) * vf).sum(dim=1)
-            ts1 += ((Bi @ Sj.transpose(-1, -2)) * vf).sum(dim=1)
+            ts1 += (Si @ Bj.transpose(-1, -2)).sum(dim=1)
+            ts1 += (Bi @ Sj.transpose(-1, -2)).sum(dim=1)
 
     ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
     hsrc = -ft1[:, None, None] * ts1
-    out_blocks[molecule.mask] += hsrc.transpose(-1, -2)
+    out_blocks[molecule.mask] += hsrc
+
+
+def choose_k_chunk(P_active, molsize, dtype, device, min_chunk=1, safety=0.35, mat_equiv=48):
+    """
+    Estimate safe k_chunk for BETOR-like [P_active, K, ...] temporaries.
+
+    mat_equiv = approximate number of live [P,K,4,4] tensors.
+    Use ~24 for BETOR3, ~40-64 for full BETOR depending on implementation.
+    """
+    dev = torch.device(device)
+    elem = torch.empty((), dtype=dtype).element_size()
+
+    if dev.type == "cuda":
+        with torch.cuda.device(dev):
+            free_mem, _ = torch.cuda.mem_get_info()
+    else:
+        free_mem = psutil.virtual_memory().available
+
+    usable = int(free_mem * safety)
+
+    bytes_per_k = P_active * 16 * elem * mat_equiv
+
+    k = usable // max(bytes_per_k, 1)
+    if k < min_chunk:
+        torch.cuda.empty_cache()
+
+    k = int(max(min_chunk, min(molsize, k)))
+
+    return k

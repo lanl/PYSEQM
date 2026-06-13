@@ -66,7 +66,7 @@ def hcore(molecule, doTETCI=True):
     is_omx = molecule.method in {"OM1", "OM2", "OM3"}
     orb_dim = 9 if is_pm6 else 4
     if is_omx:
-        return build_omx_hcore(molecule, doTETCI=doTETCI)
+        return build_omx_hcore(molecule)
     if is_pm6:
         overlap_fn = diatom_overlap_matrixD
         overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)

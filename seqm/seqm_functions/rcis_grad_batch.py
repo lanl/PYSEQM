@@ -1,9 +1,15 @@
 import torch
 
-from seqm.seqm_functions.anal_grad import core_core_der, overlap_der_finiteDiff, w_der, w_derivative_numerical
+from seqm.seqm_functions.anal_grad import (
+    core_core_der,
+    omx_fd,
+    overlap_der_finiteDiff,
+    w_der,
+    w_derivative_numerical,
+)
 from seqm.seqm_functions.rcis_batch import make_cis_densities, unpackone_batch
 
-from .constants import a0
+from .constants import a0, ev
 from .dispersion_am1_fs1 import dEdisp_dr
 from .omx_utils import get_orbital_zetas
 
@@ -65,59 +71,80 @@ def rcis_grad_batch(
     device = B0.device
     nmol = mol.nmol
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
-    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
-    overlap_der_finiteDiff(
-        overlap_x,
-        mol.idxi,
-        mol.idxj,
-        mol.rij,
-        Xij,
-        mol.parameters["beta"],
-        mol.ni,
-        mol.nj,
-        zeta,
-        mol.const.qn_int,
-    )
-
     w_x = torch.zeros(mol.rij.shape[0], 3, 10, 10, dtype=dtype, device=device)
-    if riXH is not None and ri is not None:
-        e1b_x, e2a_x = w_der(
-            mol.const,
-            mol.Z,
-            mol.const.tore,
-            mol.ni,
-            mol.nj,
-            w_x,
-            mol.rij,
-            mol.xij,
-            Xij,
+    omx_orthogonalization_grad = None
+
+    if method in {"OM1", "OM2", "OM3"}:
+        ortho_density = B0 if not include_ground_state else B0 + P0
+        e1b_x, e2a_x, fko_x, omx_orthogonalization_grad = omx_fd(
+            mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, method, ortho_density
+        )
+
+        tore = mol.const.tore
+        ZAZB = tore[mol.ni] * tore[mol.nj]
+        pair_grad = torch.zeros_like(Xij)
+        if include_ground_state:
+            pair_grad = (
+                ZAZB.unsqueeze(1)
+                * ev
+                * (
+                    fko_x / mol.rij.unsqueeze(1)
+                    + gam.unsqueeze(1) * Xij / (a0 * a0 * torch.pow(mol.rij, 3)).unsqueeze(1)
+                )
+            )
+    else:
+        zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
+        zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
+        overlap_der_finiteDiff(
+            overlap_x,
             mol.idxi,
             mol.idxj,
-            mol.parameters["g_ss"],
-            mol.parameters["g_pp"],
-            mol.parameters["g_p2"],
-            mol.parameters["h_sp"],
-            zetas,
-            zetap,
-            riXH,
-            ri,
+            mol.rij,
+            Xij,
+            mol.parameters["beta"],
+            mol.ni,
+            mol.nj,
+            zeta,
+            mol.const.qn_int,
         )
-    else:
-        e1b_x, e2a_x = w_derivative_numerical(mol, Xij, w_x)
+        if riXH is not None and ri is not None:
+            e1b_x, e2a_x = w_der(
+                mol.const,
+                mol.Z,
+                mol.const.tore,
+                mol.ni,
+                mol.nj,
+                w_x,
+                mol.rij,
+                mol.xij,
+                Xij,
+                mol.idxi,
+                mol.idxj,
+                mol.parameters["g_ss"],
+                mol.parameters["g_pp"],
+                mol.parameters["g_p2"],
+                mol.parameters["h_sp"],
+                zetas,
+                zetap,
+                riXH,
+                ri,
+            )
+        else:
+            e1b_x, e2a_x = w_derivative_numerical(mol, Xij, w_x)
 
+        if include_ground_state:
+            pair_grad = core_core_der(mol, gam, w_x, method, parnuc)
+            if mol.seqm_parameters.get("dispersion", False) and method == "AM1":
+                pair_grad += dEdisp_dr(mol)
     B = B0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     if include_ground_state:
-        pair_grad = core_core_der(mol, gam, w_x, method, parnuc)
-        if mol.seqm_parameters.get("dispersion", False) and method == "AM1":
-            pair_grad += dEdisp_dr(mol)
         B += 0.5 * P
-        # Typically you add ground state density to excited state density if you want to include gradient of ground state energy in the gradient of excited state energy.
-        # But there is a factor of 2 when contracting excited state density with two-electron gradient matrix (not sure why), but not for ground state density.
-        # That's why I add 0.5 times the ground state density to the excited state density.
-        # In doing so, I have to also add 0.5 time the contraction of ground state density with the one-electron gradient matrix. I add 0.5 time the overlap contribution here and 0.5 time core-valence term e1b_x and e2a_x below.
+        # To include the total excited-state gradient, add the ground-state gradient to the excited-state correction.
+        # The Fock-like derivative matrices below contain one-electron terms plus density-contracted two-electron terms.
+        # Ground-state energy has coefficient 1 for the one-electron derivative but 1/2 for the two-electron derivative.
+        # Therefore add only 0.5*P to B, and add the missing 0.5*P one-electron overlap/core terms explicitly.
         pair_grad += 0.5 * (P[mol.mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3))
     else:
         pair_grad = torch.zeros_like(Xij)
@@ -286,6 +313,9 @@ def rcis_grad_batch(
     grad_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
 
     grad_cis = grad_cis.view(nmol, molsize, 3)
+
+    if omx_orthogonalization_grad is not None:
+        grad_cis += omx_orthogonalization_grad
 
     # torch.set_printoptions(precision=15)
     # print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')

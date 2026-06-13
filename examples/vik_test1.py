@@ -85,7 +85,7 @@ const = Constants().to(device)
 active_state = 1
 
 seqm_parameters = {
-    "method": "OM1",  # AM1, MNDO, PM#
+    "method": "OM3",  # AM1, MNDO, PM#
     # "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [2],  # converger used for scf loop
@@ -93,7 +93,7 @@ seqm_parameters = {
     # [1], adaptive mixing
     # [2], adaptive mixing, then pulay
     # 'uhf' : True,
-    # "excited_states": {"n_states": 9, "method": "cis"},
+    "excited_states": {"n_states": 9, "method": "cis"},
     # "active_state": active_state,
     # 'scf_backward': 1,
     # "analytical_gradient": [True],

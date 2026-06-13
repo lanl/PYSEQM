@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from seqm.dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
@@ -8,7 +9,8 @@ from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
 
-def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_molecule_data):
+@pytest.mark.parametrize("method", ["AM1", "OM1", "OM2", "OM3"])
+def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_molecule_data, method):
     species_1, coordinates_1 = methane_molecule_data
     const = Constants().to(device)
 
@@ -20,7 +22,7 @@ def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_
 
     n_states = 4
     seqm_parameters = {
-        "method": "AM1",
+        "method": method,
         "scf_eps": 1.0e-7,
         "scf_converger": [1],
         "excited_states": {"n_states": n_states, "method": "cis", "tolerance": 1.0e-6},

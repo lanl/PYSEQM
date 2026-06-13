@@ -986,7 +986,9 @@ class Energy(torch.nn.Module):
         # nuclear energy
         parnuc = self._build_parnuc(params)
 
-        if "g_ss_nuc" in molecule.parameters:
+        if self.method in {"OM1", "OM2", "OM3"}:
+            gam = rho0xi  # rho0xi store fko for OMx
+        elif "g_ss_nuc" in molecule.parameters:
             g = molecule.parameters["g_ss_nuc"]
             rho0a = 0.5 * ev / g[molecule.idxi]
             rho0b = 0.5 * ev / g[molecule.idxj]
@@ -1031,7 +1033,10 @@ class Energy(torch.nn.Module):
             if molecule.const.do_timing:
                 t0 = time.time()
             with torch.no_grad():
-                if len(do_analytical_gradient) > 1 and do_analytical_gradient[1].lower() == "numerical":
+                use_fd_grad = molecule.method in {"OM1", "OM2", "OM3"} or (
+                    len(do_analytical_gradient) > 1 and do_analytical_gradient[1].lower() == "numerical"
+                )
+                if use_fd_grad:
                     grad_ground = scf_grad(
                         P0=P,
                         molecule=molecule,

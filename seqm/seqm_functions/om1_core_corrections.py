@@ -252,7 +252,7 @@ def om1_assemble_core(core_semi, pen, corpp=None, valpp=None):
     return out
 
 
-def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp):
+def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp, need_valpp1=True):
     """
     Evaluate the OMx VALPOT second-order pseudopotential tensors.
 
@@ -276,13 +276,13 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp):
     -------
     valpp : (npairs, 4, 2) tensor
         First-type orthogonalization terms from resonance integrals.
-    valpp1 : (npairs, 4, 2) tensor
+    valpp1 : (npairs, 4, 2) tensor or None
         Second-type orthogonalization terms involving local Hcore terms.
     """
     dtype = core.dtype
     device = core.device
     valpp = torch.zeros((ni.shape[0], 4, 2), dtype=dtype, device=device)
-    valpp1 = torch.zeros_like(valpp)
+    valpp1 = torch.zeros_like(valpp) if need_valpp1 else None
 
     iorbs = _om1_orbital_count(ni)
     jorbs = _om1_orbital_count(nj)
@@ -310,12 +310,13 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp):
         valpp[is_xh, 2, 0] = -s3[is_xh] * t3[is_xh]
         valpp[is_xh, 1, 0] = -0.5 * (s1[is_xh] * t3[is_xh] + s3[is_xh] * t1[is_xh])
 
-        valpp1[is_xh, 0, 0] = s1[is_xh].pow(2) * (usi[is_xh] - usj[is_xh])
-        valpp1[is_xh, 0, 1] = s1[is_xh].pow(2) * (usj[is_xh] - usi[is_xh]) + s3[is_xh].pow(2) * (
-            usj[is_xh] - upi[is_xh]
-        )
-        valpp1[is_xh, 2, 0] = s3[is_xh].pow(2) * (upi[is_xh] - usj[is_xh])
-        valpp1[is_xh, 1, 0] = 0.5 * s1[is_xh] * s3[is_xh] * (usi[is_xh] + upi[is_xh] - 2.0 * usj[is_xh])
+        if valpp1 is not None:
+            valpp1[is_xh, 0, 0] = s1[is_xh].pow(2) * (usi[is_xh] - usj[is_xh])
+            valpp1[is_xh, 0, 1] = s1[is_xh].pow(2) * (usj[is_xh] - usi[is_xh]) + s3[is_xh].pow(2) * (
+                usj[is_xh] - upi[is_xh]
+            )
+            valpp1[is_xh, 2, 0] = s3[is_xh].pow(2) * (upi[is_xh] - usj[is_xh])
+            valpp1[is_xh, 1, 0] = 0.5 * s1[is_xh] * s3[is_xh] * (usi[is_xh] + upi[is_xh] - 2.0 * usj[is_xh])
 
     if is_xx.any():
         valpp[is_xx, 0, 0] = -s1[is_xx] * t1[is_xx] - s2[is_xx] * t2[is_xx]
@@ -331,28 +332,29 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp):
             s1[is_xx] * t2[is_xx] + s2[is_xx] * t1[is_xx] + s3[is_xx] * t4[is_xx] + s4[is_xx] * t3[is_xx]
         )
 
-        valpp1[is_xx, 0, 0] = s1[is_xx].pow(2) * (usi[is_xx] - usj[is_xx]) + s2[is_xx].pow(2) * (
-            usi[is_xx] - upj[is_xx]
-        )
-        valpp1[is_xx, 0, 1] = s1[is_xx].pow(2) * (usj[is_xx] - usi[is_xx]) + s3[is_xx].pow(2) * (
-            usj[is_xx] - upi[is_xx]
-        )
-        valpp1[is_xx, 2, 0] = s3[is_xx].pow(2) * (upi[is_xx] - usj[is_xx]) + s4[is_xx].pow(2) * (
-            upi[is_xx] - upj[is_xx]
-        )
-        valpp1[is_xx, 2, 1] = s2[is_xx].pow(2) * (upj[is_xx] - usi[is_xx]) + s4[is_xx].pow(2) * (
-            upj[is_xx] - upi[is_xx]
-        )
-        valpp1[is_xx, 3, 0] = s5[is_xx].pow(2) * (uppi[is_xx] - uppj[is_xx])
-        valpp1[is_xx, 3, 1] = -valpp1[is_xx, 3, 0]
-        valpp1[is_xx, 1, 0] = 0.5 * (
-            s3[is_xx] * s1[is_xx] * (usi[is_xx] + upi[is_xx] - 2.0 * usj[is_xx])
-            + s2[is_xx] * s4[is_xx] * (usi[is_xx] + upi[is_xx] - 2.0 * upj[is_xx])
-        )
-        valpp1[is_xx, 1, 1] = 0.5 * (
-            s1[is_xx] * s2[is_xx] * (usj[is_xx] + upj[is_xx] - 2.0 * usi[is_xx])
-            + s3[is_xx] * s4[is_xx] * (usj[is_xx] + upj[is_xx] - 2.0 * upi[is_xx])
-        )
+        if valpp1 is not None:
+            valpp1[is_xx, 0, 0] = s1[is_xx].pow(2) * (usi[is_xx] - usj[is_xx]) + s2[is_xx].pow(2) * (
+                usi[is_xx] - upj[is_xx]
+            )
+            valpp1[is_xx, 0, 1] = s1[is_xx].pow(2) * (usj[is_xx] - usi[is_xx]) + s3[is_xx].pow(2) * (
+                usj[is_xx] - upi[is_xx]
+            )
+            valpp1[is_xx, 2, 0] = s3[is_xx].pow(2) * (upi[is_xx] - usj[is_xx]) + s4[is_xx].pow(2) * (
+                upi[is_xx] - upj[is_xx]
+            )
+            valpp1[is_xx, 2, 1] = s2[is_xx].pow(2) * (upj[is_xx] - usi[is_xx]) + s4[is_xx].pow(2) * (
+                upj[is_xx] - upi[is_xx]
+            )
+            valpp1[is_xx, 3, 0] = s5[is_xx].pow(2) * (uppi[is_xx] - uppj[is_xx])
+            valpp1[is_xx, 3, 1] = -valpp1[is_xx, 3, 0]
+            valpp1[is_xx, 1, 0] = 0.5 * (
+                s3[is_xx] * s1[is_xx] * (usi[is_xx] + upi[is_xx] - 2.0 * usj[is_xx])
+                + s2[is_xx] * s4[is_xx] * (usi[is_xx] + upi[is_xx] - 2.0 * upj[is_xx])
+            )
+            valpp1[is_xx, 1, 1] = 0.5 * (
+                s1[is_xx] * s2[is_xx] * (usj[is_xx] + upj[is_xx] - 2.0 * usi[is_xx])
+                + s3[is_xx] * s4[is_xx] * (usj[is_xx] + upj[is_xx] - 2.0 * upi[is_xx])
+            )
 
     return valpp, valpp1
 
@@ -369,23 +371,30 @@ def om1_apply_valpot_scaling(ni, nj, valpp, valpp1, fval1, fval2):
     fpi = fval2[ni]
     fpj = fval2[nj]
 
-    scaled[:, 0, 0] = scaled[:, 0, 0] * fsi + valpp1[:, 0, 0] * fpi * 0.25
-    scaled[:, 0, 1] = scaled[:, 0, 1] * fsj + valpp1[:, 0, 1] * fpj * 0.25
-
     heavy_i = iorbs >= 4
     heavy_j = jorbs >= 4
     both_heavy = heavy_i & heavy_j
 
-    scaled[heavy_i, 1, 0] = scaled[heavy_i, 1, 0] * fsi[heavy_i] + valpp1[heavy_i, 1, 0] * fpi[heavy_i] * 0.25
-    scaled[heavy_i, 2, 0] = scaled[heavy_i, 2, 0] * fsi[heavy_i] + valpp1[heavy_i, 2, 0] * fpi[heavy_i] * 0.25
-    scaled[heavy_j, 1, 1] = scaled[heavy_j, 1, 1] * fsj[heavy_j] + valpp1[heavy_j, 1, 1] * fpj[heavy_j] * 0.25
-    scaled[heavy_j, 2, 1] = scaled[heavy_j, 2, 1] * fsj[heavy_j] + valpp1[heavy_j, 2, 1] * fpj[heavy_j] * 0.25
-    scaled[both_heavy, 3, 0] = (
-        scaled[both_heavy, 3, 0] * fsi[both_heavy] + valpp1[both_heavy, 3, 0] * fpi[both_heavy] * 0.25
-    )
-    scaled[both_heavy, 3, 1] = (
-        scaled[both_heavy, 3, 1] * fsj[both_heavy] + valpp1[both_heavy, 3, 1] * fpj[both_heavy] * 0.25
-    )
+    scaled[:, 0, 0] = scaled[:, 0, 0] * fsi
+    scaled[:, 0, 1] = scaled[:, 0, 1] * fsj
+    scaled[heavy_i, 1, 0] = scaled[heavy_i, 1, 0] * fsi[heavy_i]
+    scaled[heavy_i, 2, 0] = scaled[heavy_i, 2, 0] * fsi[heavy_i]
+    scaled[heavy_j, 1, 1] = scaled[heavy_j, 1, 1] * fsj[heavy_j]
+    scaled[heavy_j, 2, 1] = scaled[heavy_j, 2, 1] * fsj[heavy_j]
+    scaled[both_heavy, 3, 0] = scaled[both_heavy, 3, 0] * fsi[both_heavy]
+    scaled[both_heavy, 3, 1] = scaled[both_heavy, 3, 1] * fsj[both_heavy]
+
+    if valpp1 is None:
+        return scaled
+
+    scaled[:, 0, 0] += valpp1[:, 0, 0] * fpi * 0.25
+    scaled[:, 0, 1] += valpp1[:, 0, 1] * fpj * 0.25
+    scaled[heavy_i, 1, 0] += valpp1[heavy_i, 1, 0] * fpi[heavy_i] * 0.25
+    scaled[heavy_i, 2, 0] += valpp1[heavy_i, 2, 0] * fpi[heavy_i] * 0.25
+    scaled[heavy_j, 1, 1] += valpp1[heavy_j, 1, 1] * fpj[heavy_j] * 0.25
+    scaled[heavy_j, 2, 1] += valpp1[heavy_j, 2, 1] * fpj[heavy_j] * 0.25
+    scaled[both_heavy, 3, 0] += valpp1[both_heavy, 3, 0] * fpi[both_heavy] * 0.25
+    scaled[both_heavy, 3, 1] += valpp1[both_heavy, 3, 1] * fpj[both_heavy] * 0.25
     return scaled
 
 

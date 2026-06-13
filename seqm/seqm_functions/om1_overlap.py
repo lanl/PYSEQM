@@ -69,11 +69,12 @@ def om1_local_overlap_terms(rij, basis_i, basis_j):
     return out
 
 
-def diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j):
+def diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j, terms=None):
     """
     Build the 4x4 OM1 overlap block for each atom pair in Cartesian AO order [s, px, py, pz].
     """
-    terms = om1_local_overlap_terms(rij, basis_i, basis_j)
+    if terms is None:
+        terms = om1_local_overlap_terms(rij, basis_i, basis_j)
     ss = terms[:, 0]
     sp = terms[:, 1]
     ps = terms[:, 2]
@@ -183,11 +184,11 @@ def om1_local_resonance_terms(ni, nj, rij, parameters):
     return out
 
 
-def diatom_resonance_matrix_OM1(ni, nj, xij, rij, parameters, direction):
+def diatom_resonance_matrix_OM1(xij, terms, direction):
     """
     Build the 4x4 OM1 resonance block for each atom pair in Cartesian AO order [s, px, py, pz].
     """
-    terms = om1_local_resonance_terms(ni, nj, rij, parameters)
+    # terms = om1_local_resonance_terms(ni, nj, rij, parameters)
     ss = terms[:, 0]
     sp = terms[:, 1]
     ps = terms[:, 2]

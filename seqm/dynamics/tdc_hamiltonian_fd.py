@@ -2,7 +2,8 @@ import torch
 
 from seqm.seqm_functions.constants import a0, overlap_cutoff
 from seqm.seqm_functions.diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
-from seqm.seqm_functions.omx_utils import get_orbital_zetas
+from seqm.seqm_functions.om2_hcore import build_omx_pair_context
+from seqm.seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas
 from seqm.seqm_functions.rcis_batch import unpackone_batch
 from seqm.seqm_functions.two_elec_two_center_int import two_elec_two_center_int as TETCI
 
@@ -35,6 +36,36 @@ def _pair_geometry_from_coords(mol, coords):
     xij = Xij / dist.unsqueeze(1)
     rij = dist / a0
     return xij, rij
+
+
+def _directional_omx_derivatives(mol, xij_plus, rij_plus, xij_minus, rij_minus, dtnact):
+    npairs = xij_plus.shape[0]
+    dtype = xij_plus.dtype
+    device = xij_plus.device
+
+    if npairs == 0:
+        empty_mat = torch.zeros((0, 4, 4), dtype=dtype, device=device)
+        empty_vec = torch.zeros((0, 3), dtype=dtype, device=device)
+        return empty_mat.clone(), empty_vec, empty_mat.clone(), empty_mat.clone()
+
+    idxi_ = torch.cat((mol.idxi, mol.idxi), dim=0)
+    idxj_ = torch.cat((mol.idxj, mol.idxj), dim=0)
+    ni_ = torch.cat((mol.ni, mol.ni), dim=0)
+    nj_ = torch.cat((mol.nj, mol.nj), dim=0)
+    xij_ = torch.cat((xij_plus, xij_minus), dim=0)
+    rij_ = torch.cat((rij_plus, rij_minus), dim=0)
+
+    # Mirror the OMx finite-difference path used by omx_fd in anal_grad.py.
+    ctx = build_omx_pair_context(
+        mol, method=mol.method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
+    )
+    pair = ctx["pair"]
+    resonance_t = (ctx["pair_resonance"][:npairs] - ctx["pair_resonance"][npairs:]) / (2.0 * dtnact)
+    resonance_t.mul_(2.0)
+    w_t = (pair["w"][:npairs] - pair["w"][npairs:]) / (2.0 * dtnact)
+    e1b_t = (pair["e1b"][:npairs] - pair["e1b"][npairs:]) / (2.0 * dtnact)
+    e2a_t = (pair["e2a"][:npairs] - pair["e2a"][npairs:]) / (2.0 * dtnact)
+    return resonance_t, w_t, e1b_t, e2a_t
 
 
 def _directional_overlap_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minus, dtnact):
@@ -220,10 +251,17 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
 
     xij_plus, rij_plus = _pair_geometry_from_coords(molecule, R_plus)
     xij_minus, rij_minus = _pair_geometry_from_coords(molecule, R_minus)
-    overlap_t = _directional_overlap_derivative(molecule, xij_plus, rij_plus, xij_minus, rij_minus, dtnact)
-    w_t, e1b_t, e2a_t = _directional_tetci_derivative(
-        molecule, xij_plus, rij_plus, xij_minus, rij_minus, dtnact
-    )
+    if molecule.method in OMX_METHODS:
+        overlap_t, w_t, e1b_t, e2a_t = _directional_omx_derivatives(
+            molecule, xij_plus, rij_plus, xij_minus, rij_minus, dtnact
+        )
+    else:
+        overlap_t = _directional_overlap_derivative(
+            molecule, xij_plus, rij_plus, xij_minus, rij_minus, dtnact
+        )
+        w_t, e1b_t, e2a_t = _directional_tetci_derivative(
+            molecule, xij_plus, rij_plus, xij_minus, rij_minus, dtnact
+        )
 
     nmol = int(molecule.nmol)
     molsize = int(molecule.molsize)

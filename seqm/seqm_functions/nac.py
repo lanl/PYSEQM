@@ -1,10 +1,10 @@
 import torch
 
-from seqm.seqm_functions.anal_grad import overlap_der_finiteDiff, w_der, w_derivative_numerical
+from seqm.seqm_functions.anal_grad import omx_fd, overlap_der_finiteDiff, w_der, w_derivative_numerical
 from seqm.seqm_functions.rcis_batch import unpackone_batch
 
 from .constants import a0
-from .omx_utils import get_orbital_zetas
+from .omx_utils import OMX_METHODS, get_orbital_zetas
 
 
 def _state_pair_tensors(state_pairs, device):
@@ -20,50 +20,55 @@ def _state_pair_tensors(state_pairs, device):
     return pair_tensor[:, 0] - 1, pair_tensor[:, 1] - 1
 
 
-def _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device):
+def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device):
     npairs = mol.rij.shape[0]
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
     zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
     zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
-    overlap_der_finiteDiff(
-        overlap_x,
-        mol.idxi,
-        mol.idxj,
-        mol.rij,
-        Xij,
-        mol.parameters["beta"],
-        mol.ni,
-        mol.nj,
-        zeta,
-        mol.const.qn_int,
-    )
-
     w_x = torch.zeros(npairs, 3, 10, 10, dtype=dtype, device=device)
-    if riXH is not None and ri is not None:
-        e1b_x, e2a_x = w_der(
-            mol.const,
-            mol.Z,
-            mol.const.tore,
-            mol.ni,
-            mol.nj,
-            w_x,
-            mol.rij,
-            mol.xij,
-            Xij,
-            mol.idxi,
-            mol.idxj,
-            mol.parameters["g_ss"],
-            mol.parameters["g_pp"],
-            mol.parameters["g_p2"],
-            mol.parameters["h_sp"],
-            zetas,
-            zetap,
-            riXH,
-            ri,
+    if mol.method in OMX_METHODS:
+        e1b_x, e2a_x, _, _ = omx_fd(
+            mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, mol.method, None
         )
     else:
-        e1b_x, e2a_x = w_derivative_numerical(mol, Xij, w_x)
+        overlap_der_finiteDiff(
+            overlap_x,
+            mol.idxi,
+            mol.idxj,
+            mol.rij,
+            Xij,
+            mol.parameters["beta"],
+            mol.ni,
+            mol.nj,
+            zeta,
+            mol.const.qn_int,
+        )
+
+        if riXH is not None and ri is not None:
+            e1b_x, e2a_x = w_der(
+                mol.const,
+                mol.Z,
+                mol.const.tore,
+                mol.ni,
+                mol.nj,
+                w_x,
+                mol.rij,
+                mol.xij,
+                Xij,
+                mol.idxi,
+                mol.idxj,
+                mol.parameters["g_ss"],
+                mol.parameters["g_pp"],
+                mol.parameters["g_p2"],
+                mol.parameters["h_sp"],
+                zetas,
+                zetap,
+                riXH,
+                ri,
+            )
+        else:
+            e1b_x, e2a_x = w_derivative_numerical(mol, Xij, w_x)
 
     # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals
     # with the density matrix has been cribbed from fock.py.
@@ -71,6 +76,11 @@ def _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device):
         [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
     )
     overlap_KAB_x = overlap_x
+    P = (
+        P0.reshape(mol.nmol, mol.molsize, 4, mol.molsize, 4)
+        .transpose(2, 3)
+        .reshape(mol.nmol * mol.molsize * mol.molsize, 4, 4)
+    )
     Pp = P[mol.mask].unsqueeze(1)
     for i in range(4):
         w_x_i = w_x[..., ind[i], :]
@@ -147,8 +157,7 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state_pairs, rpa=False, pair_batch_s
     Cvirt = C[:, :, nocc:norb]
     nroots = amp.shape[1]
     amp_ia = amp.view(nmol, nroots, nocc, nvirt)
-    P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
-    overlap_KAB_x, e1b_x, e2a_x = _build_nac_derivative_operators(mol, P, ri, riXH, dtype, device)
+    overlap_KAB_x, e1b_x, e2a_x = _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device)
 
     nHeavy = int(mol.nHeavy[0].item())
     nHydro = int(mol.nHydro[0].item())

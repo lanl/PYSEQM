@@ -110,7 +110,7 @@ def pair_nuclear_energy(
 
     if method == "OM1" or method == "OM2" or method == "OM3":
         # For OMx, rho0xi stores fko
-        EnucAB = rho0xi * tore[ni] * tore[nj] * ev / rij
+        EnucAB = gam * tore[ni] * tore[nj] * ev / rij
         return EnucAB
 
     alpha = parameters[0]

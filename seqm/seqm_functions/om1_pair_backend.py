@@ -598,10 +598,11 @@ def omx_local_pair_corrections(
     pair = om1_local_pair_integrals_batch(ni, nj, rij, g_ss, tore, basis_i, basis_j, basis_tables)
     cort = om1_corgau(ni, nj, rij, tore, basis_tables, basis_i, basis_j)
     pen = om1_penetration(cort, pair["rept"], pair["fko"])
-    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, u_ss, u_pp)
-    if method == "OM3":
-        valpp1 = torch.zeros_like(valpp1)
-    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, valpp1, fval1, fval2)
+    need_valpp1 = method != "OM3"
+    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, u_ss, u_pp, need_valpp1)
+    if not need_valpp1:
+        valpp1 = torch.zeros_like(valpp_raw)
+    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, None if not need_valpp1 else valpp1, fval1, fval2)
     if method == "OM1":
         corpp = om1_ppecp_local(ni, nj, rij, basis_tables, basis_i, basis_j) * pair["fko"].view(-1, 1, 1)
     elif method in {"OM2", "OM3"}:
@@ -721,7 +722,7 @@ def _om1_rotate_w_batch(ri, rot):
     return w.view(bsz, 10, 10)
 
 
-def _omx_pair_hcore_terms_impl(
+def omx_pair_hcore_terms(
     method,
     ni,
     nj,
@@ -744,10 +745,11 @@ def _omx_pair_hcore_terms_impl(
     pair = om1_local_pair_integrals_batch(ni, nj, rij, g_ss, tore, basis_i, basis_j, basis_tables)
     cort = om1_corgau(ni, nj, rij, tore, basis_tables, basis_i, basis_j)
     pen = om1_penetration(cort, pair["rept"], pair["fko"])
-    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, u_ss, u_pp)
-    if method == "OM3":
-        valpp1 = torch.zeros_like(valpp1)
-    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, valpp1, fval1, fval2)
+    need_valpp1 = method != "OM3"
+    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, u_ss, u_pp, need_valpp1)
+    if not need_valpp1:
+        valpp1 = torch.zeros_like(valpp_raw)
+    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, None if not need_valpp1 else valpp1, fval1, fval2)
 
     if method == "OM1":
         corpp = om1_ppecp_local(ni, nj, rij, basis_tables, basis_i, basis_j) * pair["fko"].view(-1, 1, 1)
@@ -764,51 +766,6 @@ def _omx_pair_hcore_terms_impl(
     e2a = _om1_rotate_core_columns_batch(core[:, :, 1], rot_t)
 
     out = {"w": w, "e1b": e1b, "e2a": e2a, "fko": pair["fko"]}
-    if method != "OM1":
+    if method == "OM2":
         out["core_semi"] = pair["core_semi"]
     return out
-
-
-def omx_pair_hcore_terms(
-    method,
-    ni,
-    nj,
-    rij,
-    g_ss,
-    tore,
-    s_local,
-    t_local,
-    u_ss,
-    u_pp,
-    fval1,
-    fval2,
-    rot,
-    rot_t,
-    basis_tables,
-    basis_i,
-    basis_j,
-    om2_tables=None,
-):
-    """
-    Batched OMx pair builder for all pairs.
-    """
-    return _omx_pair_hcore_terms_impl(
-        method,
-        ni,
-        nj,
-        rij,
-        g_ss,
-        tore,
-        s_local,
-        t_local,
-        u_ss,
-        u_pp,
-        fval1,
-        fval2,
-        rot,
-        rot_t,
-        basis_tables,
-        basis_i,
-        basis_j,
-        om2_tables=om2_tables,
-    )
