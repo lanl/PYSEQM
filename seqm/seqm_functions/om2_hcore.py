@@ -359,7 +359,7 @@ def _add_betor3_from_pairs_chunked_(out_blocks, S5, B5, molecule, gval1, k_chunk
     out_blocks[molecule.mask] += hsrc
 
 
-def choose_k_chunk(P_active, molsize, dtype, device, min_chunk=1, safety=0.35, mat_equiv=48):
+def choose_k_chunk(P_active, molsize, dtype, device, min_chunk=8, safety=0.35, mat_equiv=48):
     """
     Estimate safe k_chunk for BETOR-like [P_active, K, ...] temporaries.
 
@@ -383,6 +383,6 @@ def choose_k_chunk(P_active, molsize, dtype, device, min_chunk=1, safety=0.35, m
     if k < min_chunk:
         torch.cuda.empty_cache()
 
-    k = int(max(min_chunk, min(molsize, k)))
-
+    k = int(min(molsize, max(min_chunk, k)))
+    
     return k
