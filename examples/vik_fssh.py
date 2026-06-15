@@ -5,7 +5,7 @@ but using nonadiabatic dynamics.
 
 import torch
 
-from seqm.api import Constants, Molecule, SurfaceHoppingDynamics
+from seqm.api import Constants, Molecule, SurfaceHoppingDynamics, read_xyz
 
 torch.set_default_dtype(torch.float64)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -51,6 +51,10 @@ coordinates = torch.tensor(
     ],
     device=device,
 )
+# species, coordinates = read_xyz(["/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/23ppe/23ppe.xyz"])
+species, coordinates = read_xyz(["./23ppe_opt.xyz"])
+species = torch.as_tensor(species, dtype=torch.int64, device=device)
+coordinates = torch.as_tensor(coordinates, device=device)
 
 const = Constants().to(device)
 
@@ -86,21 +90,21 @@ output = {
 
 torch.manual_seed(422)
 molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
-# Set the same initial velocity as the NEXMD input file
-with torch.no_grad():
-    molecule.velocities = torch.tensor(
-    # [[-20.9603, -0.5334,  0.4491  ],  
-    # [-21.2032, -0.2912, -1.8145  ],
-    # [20.0957 ,-2.0413 , 7.2473   ],
-    # [ 20.4869, 13.9784,  7.2473  ]],
-    [[-0.8053143393  ,  -4.1878833732 ,   -3.6313775837], 
-     [ 1.0294675393  ,   2.7627100918 ,    4.4006100054],
-     [-4.4870427177  ,  -1.1534294697 ,   -3.2087971501],
-     [-2.8524435043  ,   0.6142857400 ,   -1.4239264979],
-     [-2.8524435043  ,   0.6142857400 ,   -1.4239264979],],
-    device=device
-    )*1e-3
-    molecule.velocities = molecule.velocities.unsqueeze(0).repeat(molecule.coordinates.shape[0],1,1)
+# # Set the same initial velocity as the NEXMD input file
+# with torch.no_grad():
+#     molecule.velocities = torch.tensor(
+#     # [[-20.9603, -0.5334,  0.4491  ],  
+#     # [-21.2032, -0.2912, -1.8145  ],
+#     # [20.0957 ,-2.0413 , 7.2473   ],
+#     # [ 20.4869, 13.9784,  7.2473  ]],
+#     [[-0.8053143393  ,  -4.1878833732 ,   -3.6313775837], 
+#      [ 1.0294675393  ,   2.7627100918 ,    4.4006100054],
+#      [-4.4870427177  ,  -1.1534294697 ,   -3.2087971501],
+#      [-2.8524435043  ,   0.6142857400 ,   -1.4239264979],
+#      [-2.8524435043  ,   0.6142857400 ,   -1.4239264979],],
+#     device=device
+#     )*1e-3
+#     molecule.velocities = molecule.velocities.unsqueeze(0).repeat(molecule.coordinates.shape[0],1,1)
 
 
 initial_excited_state = 3  # 1-based (1 -> S1, 2 -> S2, ...)

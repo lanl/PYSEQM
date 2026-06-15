@@ -163,7 +163,7 @@ class BoysInterpolationTable(torch.nn.Module):
         super().__init__()
         current_dir = os.path.dirname(__file__)
         table_path = os.path.join(current_dir, "..", "params", "boys_integral_table.pt")
-        tab = torch.load(table_path, map_location="cpu")
+        tab = torch.load(table_path, map_location="cpu", weights_only=True)
 
         self.register_buffer("A", tab["A"])
         self.register_buffer("B", tab["B"])

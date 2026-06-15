@@ -656,18 +656,19 @@ def getMaxSubspacesize(
         return max(1, min(n_calculated, nov))
 
     maxSubspacesize = _candidate(memory_fraction)
-    if maxSubspacesize >= 3 * nroots:
+    min_required_subspace = min(nov, 3 * nroots)
+    if maxSubspacesize >= min_required_subspace:
         return maxSubspacesize
 
     if device == "cuda":
         torch.cuda.empty_cache()
         maxSubspacesize = _candidate(memory_fraction)
 
-    if maxSubspacesize >= 3 * nroots:
+    if maxSubspacesize >= min_required_subspace:
         return maxSubspacesize
 
     maxSubspacesize_retry = _candidate(retry_memory_fraction)
-    if maxSubspacesize_retry >= 3 * nroots:
+    if maxSubspacesize_retry >= min_required_subspace:
         return maxSubspacesize_retry
 
     raise RuntimeError(

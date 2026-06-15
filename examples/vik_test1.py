@@ -94,7 +94,7 @@ seqm_parameters = {
     # [2], adaptive mixing, then pulay
     # 'uhf' : True,
     "excited_states": {"n_states": 9, "method": "cis"},
-    # "active_state": active_state,
+    "active_state": 1,
     # 'scf_backward': 1,
     # "analytical_gradient": [True],
 }
