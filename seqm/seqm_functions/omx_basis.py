@@ -48,6 +48,34 @@ from .om1_ppecp_tables import (
 )
 
 
+def _make_horner_table(coeffs, ifirst, ilast):
+    """
+    Build [n_interval, max_poly_len] table in Horner order.
+
+    Original scalar evaluation:
+        val = c[end]
+        for idx = end - 1 ... start:
+            val = c[idx] + x * val
+
+    Stored row:
+        [0, ..., c[end], c[end-1], ..., c[start]]
+    """
+    n_interval = ifirst.numel()
+    lengths = ilast - ifirst + 1
+    max_len = int(lengths.max().item())
+
+    table = coeffs.new_zeros((n_interval, max_len))
+
+    for i in range(n_interval):
+        start = int(ifirst[i].item()) - 1
+        end = int(ilast[i].item()) - 1
+
+        vals = coeffs[start : end + 1].flip(0)  # c[end], ..., c[start]
+        table[i, -vals.numel() :] = vals
+
+    return table
+
+
 def _build_om1_ppecp_tensor_tables(*, dtype, device):
     """
     Build static tensor tables used by vectorized OM1 PPECP.
@@ -75,15 +103,28 @@ def _build_om1_ppecp_tensor_tables(*, dtype, device):
     tri_offdiag = torch.ones((1, tri_i.numel()), dtype=dtype, device=device)
     tri_offdiag[:, tri_same] = 0.0
 
+    dawf_c = torch.tensor(DAWF_C, dtype=dtype, device=device)
+    dawf_ifirst = torch.tensor(DAWF_IFIRST, dtype=torch.long, device=device)
+    dawf_ilast = torch.tensor(DAWF_ILAST, dtype=torch.long, device=device)
+
+    dawerf_c = torch.tensor(DAWERF_C, dtype=dtype, device=device)
+    dawerf_ifirst = torch.tensor(DAWERF_IFIRST, dtype=torch.long, device=device)
+    dawerf_ilast = torch.tensor(DAWERF_ILAST, dtype=torch.long, device=device)
+
+    dawf_table = _make_horner_table(dawf_c, dawf_ifirst, dawf_ilast)
+    dawerf_table = _make_horner_table(dawerf_c, dawerf_ifirst, dawerf_ilast)
+
     return {
-        "dawf_c": torch.tensor(DAWF_C, dtype=dtype, device=device),
-        "dawf_ifirst": torch.tensor(DAWF_IFIRST, dtype=torch.long, device=device),
-        "dawf_ilast": torch.tensor(DAWF_ILAST, dtype=torch.long, device=device),
+        "dawf_c": dawf_c,
+        "dawf_ifirst": dawf_ifirst,
+        "dawf_ilast": dawf_ilast,
         "dawf_h": DAWF_H,
-        "dawerf_c": torch.tensor(DAWERF_C, dtype=dtype, device=device),
-        "dawerf_ifirst": torch.tensor(DAWERF_IFIRST, dtype=torch.long, device=device),
-        "dawerf_ilast": torch.tensor(DAWERF_ILAST, dtype=torch.long, device=device),
+        "dawf_table": dawf_table,
+        "dawerf_c": dawerf_c,
+        "dawerf_ifirst": dawerf_ifirst,
+        "dawerf_ilast": dawerf_ilast,
         "dawerf_h": DAWERF_H,
+        "dawerf_table": dawerf_table,
         "ecp_supported": ecp_supported,
         "ecp_zlp": ecp_zlp,
         "ecp_clp": ecp_clp,
@@ -91,6 +132,12 @@ def _build_om1_ppecp_tensor_tables(*, dtype, device):
         "tri_j": tri_j,
         "tri_sym": tri_sym,
         "tri_offdiag": tri_offdiag,
+        # Useful tiny constants to avoid rebuilding Python lists in hot funcs.
+        "fctrl": torch.tensor([1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0], dtype=dtype, device=device),
+        "dfctrl": torch.tensor(
+            [1.0, 1.0, 3.0, 15.0, 105.0, 945.0, 10395.0, 135135.0], dtype=dtype, device=device
+        ),
+        "fjps_dfctrl": torch.tensor([1.0, 3.0, 15.0, 105.0], dtype=dtype, device=device),
     }
 
 

@@ -114,18 +114,7 @@ written and how often using the ``output`` dictionary (see below).
       ``output['h5']['transition_density_matrices_mode'] = 'full'`` (default),
       or ``(Ttdm, Nstates, Norb)`` when
       ``output['h5']['transition_density_matrices_mode'] = 'diag'``,
-      or ``(Ttdm, Nstates, Natoms)`` when
-      ``output['h5']['transition_density_matrices_mode'] = 'atom_block_sq'``
-      where each atom value is the squared Frobenius norm of the on-atom TDM block:
-
-      .. math::
-
-         q_A = \sum_{\mu \in A}\sum_{\nu \in A} \left(T_{\mu\nu}\right)^2
-
-      Here :math:`T` is the transition density matrix for one state and one MD
-      step, and :math:`\mu,\nu \in A` run over AO indices on atom :math:`A`.
-      So ``atom_block_sq`` is per-atom and nonnegative, and is not the same as
-      storing the TDM diagonal.
+      where ``diag`` stores only the diagonal TDM elements.
 
     - ``/data/excitation/active_state``:
       Scalar data (int) giving the index of the active electronic excited state used during the MD run.
@@ -194,7 +183,7 @@ The ``output`` dictionary controls all output behavior. It should contain the fo
     ``/data/excitation/transition_density_matrices``. This can be very large for
     big systems. **Default:** ``0``
   - ``'transition_density_matrices_mode'``: storage mode for transition-density output.
-    Options: ``'full'`` (default), ``'diag'``, or ``'atom_block_sq'``.
+    Options: ``'full'`` (default) or ``'diag'``.
   - ``'data'`` must be ``> 0`` when any of
     ``'transition_density_matrices'``, ``'transition_properties'``, or ``'write_mo'``
     are enabled, because those datasets are written through the ``/data`` cadence.
@@ -263,7 +252,7 @@ Getting started: a minimal BOMD run
            'forces':      10,      # /forces cadence
            'write_mo': False,      # include MO info in /data (optional)
            'transition_density_matrices': 20,          # optional TDM cadence
-           'transition_density_matrices_mode': 'atom_block_sq', # 'full'|'diag'|'atom_block_sq'
+           'transition_density_matrices_mode': 'diag', # 'full'|'diag'
            'transition_properties': False,             # keep False for cheapest diag-only TDM path
        },
        'checkpoint every': 100,    # write restart file every 100 steps

@@ -10,39 +10,6 @@ from .dipole import calc_dipole_matrix
 # from seqm.seqm_functions.pack import packone, unpackone
 
 
-def _store_tdm_by_mode(mol, R, tdm_mode, nHeavy, nHydro):
-    if tdm_mode == "diag":
-        mol.transition_density_matrices = torch.diagonal(R, dim1=-2, dim2=-1).clone()
-        return
-    if tdm_mode == "atom_block_sq":
-        nheavy_i = int(nHeavy.item()) if torch.is_tensor(nHeavy) else int(nHeavy)
-        nhydro_i = int(nHydro.item()) if torch.is_tensor(nHydro) else int(nHydro)
-        nat = nheavy_i + nhydro_i
-        vals = torch.empty((R.shape[0], R.shape[1], nat), dtype=R.dtype, device=R.device)
-        h0 = 4 * nheavy_i
-        if nheavy_i > 0:
-            Rh = R[:, :, :h0, :h0].reshape(R.shape[0], R.shape[1], nheavy_i, 4, nheavy_i, 4)
-            blk = torch.diagonal(Rh, dim1=2, dim2=4).permute(0, 1, 4, 2, 3)
-            vals[:, :, :nheavy_i] = torch.square(blk).sum(dim=(-1, -2))
-        if nhydro_i > 0:
-            Rhh = R[:, :, h0 : (h0 + nhydro_i), h0 : (h0 + nhydro_i)]
-            vals[:, :, nheavy_i:] = torch.square(torch.diagonal(Rhh, dim1=-2, dim2=-1))
-        mol.transition_density_matrices = vals
-        return
-    mol.transition_density_matrices = R.clone()
-
-
-def _resolve_tdm_mode(mol):
-    exc_cfg = mol.seqm_parameters.get("excited_states", {}) if hasattr(mol, "seqm_parameters") else {}
-    tdm_mode = str(exc_cfg.get("transition_density_matrices_mode", "full")).strip().lower()
-    if tdm_mode not in ("full", "diag", "atom_block_sq"):
-        tdm_mode = "full"
-    # XL-BOMD propagation requires full in-memory TDM.
-    if bool(exc_cfg.get("save_tdm_xlbomd", False)):
-        return "full"
-    return tdm_mode
-
-
 def rcis_batch(
     mol,
     w,
@@ -757,6 +724,24 @@ def print_memory_usage(step_description, device=0):
     print(f"  Max Reserved Memory: {max_reserved:.2f} MB\n")
 
 
+def _store_tdm_by_mode(mol, R, tdm_mode):
+    if tdm_mode == "diag":
+        mol.transition_density_matrices = torch.diagonal(R, dim1=-2, dim2=-1).clone()
+        return
+    if tdm_mode != "full":
+        raise ValueError("transition_density_matrices_mode only supports 'full' and 'diag'.")
+    mol.transition_density_matrices = R.clone()
+
+
+def _resolve_tdm_mode(mol):
+    exc_cfg = mol.seqm_parameters["excited_states"]
+    tdm_mode = str(exc_cfg.get("transition_density_matrices_mode", "full")).strip().lower()
+    # XL-BOMD propagation requires full in-memory TDM.
+    if bool(exc_cfg.get("save_tdm_xlbomd", False)):
+        return "full"
+    return tdm_mode
+
+
 def rcis_analysis(
     mol,
     excitation_energies,
@@ -830,7 +815,7 @@ def calc_transition_dipoles(
 
     do_transition_props = bool(compute_transition_properties or mol.verbose)
     if save_tdm:
-        _store_tdm_by_mode(mol, R, tdm_mode, nHeavy, nHydro)
+        _store_tdm_by_mode(mol, R, tdm_mode)
     if not do_transition_props:
         return None, None
 

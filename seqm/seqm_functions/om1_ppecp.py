@@ -12,113 +12,183 @@ _BIGEXP = 50.0
 _TOL = 12 * 2.302585093
 
 
-def _horner_piecewise_vec(x, coeffs_t, ifirst_t, ilast_t, h):
-    """
-    Vectorized table/Horner evaluator.
+_FCTRL = (1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0)
+_DFCTRL = (1.0, 1.0, 3.0, 15.0, 105.0, 945.0, 10395.0, 135135.0)
+_DFCTRL_FJ = (1.0, 3.0, 15.0, 105.0)
 
-    coeffs_t, ifirst_t, ilast_t are already tensors on the correct device.
-    """
+
+def _horner_piecewise_table(x, table, h):
     if x.numel() == 0:
         return x.clone()
 
-    nx = (x / h).to(torch.long) + 1
-    out = torch.empty_like(x)
+    shape = x.shape
+    xf = x.reshape(-1)
 
-    # Loop only over unique table intervals, not over molecules/pairs/primitives.
-    for nx_val in torch.unique(nx.detach()).cpu().tolist():
-        m = nx == int(nx_val)
-        if not m.any():
-            continue
+    interval = (xf / h).to(torch.long)
+    interval.clamp_(0, table.shape[0] - 1)
 
-        start = int(ifirst_t[nx_val - 1].item()) - 1
-        end = int(ilast_t[nx_val - 1].item()) - 1
+    coeff = table.index_select(0, interval)
 
-        xm = x[m]
-        val = coeffs_t[end].expand_as(xm)
-        for idx in range(end - 1, start - 1, -1):
-            val = coeffs_t[idx] + xm * val
+    val = coeff[:, 0]
+    for k in range(1, table.shape[1]):
+        val = coeff[:, k] + xf * val
 
-        out[m] = val
+    return val.reshape(shape)
 
+
+def _stack2(d, n0, n1, z):
+    out = z.new_zeros((*z.shape, n0, n1))
+    for (i, j), v in d.items():
+        if 0 <= i < n0 and 0 <= j < n1:
+            out[..., i, j] = v
+    return out
+
+
+def _stack3(d, n0, n1, n2, z):
+    out = z.new_zeros((*z.shape, n0, n1, n2))
+    for (i, j, k), v in d.items():
+        if 0 <= i < n0 and 0 <= j < n1 and 0 <= k < n2:
+            out[..., i, j, k] = v
     return out
 
 
 def _dawf_vec(y, ppecp):
-    """
-    Vectorized Dawson-like helper matching scalar _dawf.
-    """
     x = y.abs()
+
+    if x.is_cuda:
+        # GPU path: avoid mask.any() host syncs.
+        xs = x.clamp_max(10.0)
+        small_val = _horner_piecewise_table(xs, ppecp["dawf_table"], ppecp["dawf_h"])
+
+        xl = x.clamp_min(10.0)
+        txt = 0.5 / (xl * xl)
+        large_val = (txt * xl) * (1.0 + txt * (1.0 + txt * (3.0 + txt * (15.0 + 105.0 * txt))))
+
+        out = torch.where(x < 10.0, small_val, large_val)
+        return torch.where(y < 0.0, -out, out)
+
+    # CPU path: avoid computing both branches.
     out = torch.empty_like(x)
 
     small = x < 10.0
     if small.any():
-        out[small] = _horner_piecewise_vec(
-            x[small], ppecp["dawf_c"], ppecp["dawf_ifirst"], ppecp["dawf_ilast"], ppecp["dawf_h"]
-        )
+        out[small] = _horner_piecewise_table(x[small], ppecp["dawf_table"], ppecp["dawf_h"])
 
     large = ~small
     if large.any():
         xl = x[large]
         txt = 0.5 / (xl * xl)
-        tx = txt * xl
-        out[large] = tx * (1.0 + txt * (1.0 + txt * (3.0 + txt * (15.0 + 105.0 * txt))))
+        out[large] = (txt * xl) * (1.0 + txt * (1.0 + txt * (3.0 + txt * (15.0 + 105.0 * txt))))
 
-    neg = y < 0.0
-    if neg.any():
-        out[neg] = -out[neg]
-
-    return out
+    return torch.where(y < 0.0, -out, out)
 
 
 def _dawerf_vec(y, ppecp):
-    """
-    Vectorized helper matching scalar _dawerf.
-    """
     x = y.abs()
+
+    if x.is_cuda:
+        # GPU path: avoid mask.any() host syncs.
+        xs = x.clamp_max(10.0)
+        small_val = _horner_piecewise_table(xs, ppecp["dawerf_table"], ppecp["dawerf_h"])
+
+        xl = x.clamp_min(10.0)
+        txt = 0.5 / (xl * xl)
+        large_val = (txt * xl) * (
+            1.0 + txt * (1.0 + txt * (3.0 + txt * (15.0 + txt * (105.0 + 945.0 * txt))))
+        )
+
+        return torch.where(x < 10.0, small_val, large_val)
+
+    # CPU path: avoid computing both branches.
     out = torch.empty_like(x)
 
     small = x < 10.0
     if small.any():
-        out[small] = _horner_piecewise_vec(
-            x[small], ppecp["dawerf_c"], ppecp["dawerf_ifirst"], ppecp["dawerf_ilast"], ppecp["dawerf_h"]
-        )
+        out[small] = _horner_piecewise_table(x[small], ppecp["dawerf_table"], ppecp["dawerf_h"])
 
     large = ~small
     if large.any():
         xl = x[large]
         txt = 0.5 / (xl * xl)
-        tx = txt * xl
-        out[large] = tx * (1.0 + txt * (1.0 + txt * (3.0 + txt * (15.0 + txt * (105.0 + 945.0 * txt)))))
+        out[large] = (txt * xl) * (
+            1.0 + txt * (1.0 + txt * (3.0 + txt * (15.0 + txt * (105.0 + 945.0 * txt))))
+        )
 
     return out
 
 
 def _fsips_vec(n, l, alfa, xp0):
-    fctrl = [1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0]
-    dfctrl = [1.0, 1.0, 3.0, 15.0, 105.0, 945.0, 10395.0, 135135.0]
-
     nl = n + l
 
     if nl % 2 == 0:
         lam = nl // 2
         x = alfa * alfa
         l2 = 2 * l + 1
-        term = torch.full_like(alfa, dfctrl[lam] / dfctrl[l + 1])
+
+        term = torch.full_like(alfa, _DFCTRL[lam] / _DFCTRL[l + 1])
         total = term.clone()
+
         for k in range(1, 11):
             term = (term * x * (2 * k + nl - 1)) / (k * (2 * k + l2))
             total = total + term
+
         return total * _SQPI * xp0 * (2.0**lam) * (alfa**l)
 
     lam = (nl - 1) // 2
     x = 2.0 * alfa * alfa
     l2 = 2 * l + 1
-    term = torch.full_like(alfa, fctrl[lam] / dfctrl[l + 1])
+
+    term = torch.full_like(alfa, _FCTRL[lam] / _DFCTRL[l + 1])
     total = term.clone()
+
     for k in range(1, 11):
         term = (term * x * (k + lam)) / (k * (2 * k + l2))
         total = total + term
+
     return total * xp0 * (2.0**nl) * (alfa**l)
+
+
+def _fjps_vec(n, lalf, lbet, alf, bet, xi, si):
+    out = torch.empty_like(alf)
+    scale = (0.5 * xi) ** (n + 1)
+
+    m = alf > bet
+    if m.any():
+        b = bet[m]
+        si_m = si[m]
+
+        x = b * b
+        term = (b**lbet) / _DFCTRL_FJ[lbet]
+        l1 = lalf + 1
+        l2 = lbet + n + 1
+        l3 = 2 * lbet + 1
+
+        total = term * si_m[..., l2, l1]
+        for k in range(1, 11):
+            term = term * x / (2.0 * k * (2.0 * k + l3))
+            total = total + term * si_m[..., 2 * k + l2, l1]
+
+        out[m] = total * scale[m]
+
+    m = ~m
+    if m.any():
+        a = alf[m]
+        si_m = si[m]
+
+        x = a * a
+        term = (a**lalf) / _DFCTRL_FJ[lalf]
+        l1 = lbet + 1
+        l2 = lalf + n + 1
+        l3 = 2 * lalf + 1
+
+        total = term * si_m[..., l2, l1]
+        for k in range(1, 11):
+            term = term * x / (2.0 * k * (2.0 * k + l3))
+            total = total + term * si_m[..., 2 * k + l2, l1]
+
+        out[m] = total * scale[m]
+
+    return out
 
 
 def _fsi0_vec(n, alfa, xp0, xp1, ppecp):
@@ -204,24 +274,6 @@ def _get3(d, i, j, k, z):
     return d.get((i, j, k), z)
 
 
-def _stack2(d, n0, n1, z):
-    return torch.stack(
-        [torch.stack([d.get((i, j), z) for j in range(n1)], dim=-1) for i in range(n0)], dim=-2
-    )
-
-
-def _stack3(d, n0, n1, n2, z):
-    return torch.stack(
-        [
-            torch.stack(
-                [torch.stack([d.get((i, j, k), z) for k in range(n2)], dim=-1) for j in range(n1)], dim=-2
-            )
-            for i in range(n0)
-        ],
-        dim=-3,
-    )
-
-
 def _recur_si_cache(si, nmin, nmax, lmax, x, z):
     tx = 2.0 * x
     for n in range(nmin, nmax + 1, 2):
@@ -235,13 +287,9 @@ def _recur_si_cache(si, nmin, nmax, lmax, x, z):
 def _sitabl_vec(lemax, lomax, alfj, betj, xpls, xmns, xp, ppecp):
     alfj, betj, xpls, xmns, xp = torch.broadcast_tensors(alfj, betj, xpls, xmns, xp)
 
-    alfa = alfj.clone()
-    xp1 = xpls.clone()
-
     m = alfj <= betj
-    if m.any():
-        alfa[m] = betj[m]
-        xp1[m] = xmns[m]
+    alfa = torch.where(m, betj, alfj)
+    xp1 = torch.where(m, xmns, xpls)
 
     x = alfa
     xp0 = xp
@@ -264,233 +312,18 @@ def _sitabl_vec(lemax, lomax, alfj, betj, xpls, xmns, xp, ppecp):
     return _stack2(si, 27, 5, z)
 
 
-def _fm_vec(l, a, b, xpls, xmns):
-    t = 2.0 * a * b
-    est = 0.5 * (xpls - xmns)
-    ect = 0.5 * (xpls + xmns)
+def _exp_neg_cutoff(x, cutoff=_BIGEXP):
+    m = x < cutoff
 
-    if l == -1:
-        return t
-    if l == 0:
-        return est / t
-    if l == 1:
-        return (-est / t + ect) / t
+    if x.is_cuda:
+        # Avoid GPU sync from `if m.any()`.
+        safe_x = torch.where(m, x, torch.zeros_like(x))
+        return torch.where(m, torch.exp(-safe_x), torch.zeros_like(x))
 
-    raise NotImplementedError("OM1 PPECP current scope only needs FM(-1:1)")
-
-
-def _fjps_vec(n, lalf, lbet, alf, bet, xi, si):
-    dfctrl = [1.0, 3.0, 15.0, 105.0]
-
-    out = torch.empty_like(alf)
-
-    m = alf > bet
+    # CPU path: avoid computing exp on inactive values.
+    out = torch.zeros_like(x)
     if m.any():
-        b = bet[m]
-        si_m = si[m]
-
-        x = b * b
-        term = (b**lbet) / dfctrl[lbet]
-        l1 = lalf + 1
-        l2 = lbet + n + 1
-        l3 = 2 * lbet + 1
-
-        total = term * si_m[..., l2, l1]
-        for k in range(1, 11):
-            term = term * x / (2.0 * k * (2.0 * k + l3))
-            total = total + term * si_m[..., 2 * k + l2, l1]
-
-        out[m] = total * (0.5 * xi[m]) ** (n + 1)
-
-    m = alf <= bet
-    if m.any():
-        a = alf[m]
-        si_m = si[m]
-
-        x = a * a
-        term = (a**lalf) / dfctrl[lalf]
-        l1 = lbet + 1
-        l2 = lalf + n + 1
-        l3 = 2 * lalf + 1
-
-        total = term * si_m[..., l2, l1]
-        for k in range(1, 11):
-            term = term * x / (2.0 * k * (2.0 * k + l3))
-            total = total + term * si_m[..., 2 * k + l2, l1]
-
-        out[m] = total * (0.5 * xi[m]) ** (n + 1)
-
-    return out
-
-
-def _fj00_vec(n, a, b, xi, xpls, xmns, xp, si, ppecp):
-    out = torch.empty_like(a)
-
-    small = a * b <= _ABLIM
-    if small.any():
-        if si is None:
-            raise RuntimeError("_fj00_vec needs si for small a*b branch")
-        out[small] = _fjps_vec(n, 0, 0, a[small], b[small], xi[small], si[small])
-
-    large = ~small
-    if large.any():
-        aa = a[large]
-        bb = b[large]
-        xpls_l = xpls[large]
-        xmns_l = xmns[large]
-        xi_l = xi[large]
-
-        tab = _fm_vec(-1, aa, bb, xpls_l, xmns_l)
-
-        if n == 1:
-            tp = xpls_l * _dawf_vec(aa + bb, ppecp)
-            tm = xmns_l * _dawf_vec(aa - bb, ppecp)
-            hm = tp - tm
-            out[large] = _SQPI * xi_l * xi_l * hm / (4.0 * tab)
-        else:
-            tp = xpls_l * _dawf_vec(aa + bb, ppecp)
-            tm = xmns_l * _dawf_vec(aa - bb, ppecp)
-            dp = tp + tm
-            dm = tp - tm
-            out[large] = (
-                _SQPI * xi_l * (aa * dm + bb * dp - tab * _fm_vec(0, aa, bb, xpls_l, xmns_l)) / (2.0 * tab)
-            )
-
-    return out
-
-
-def _fj10_vec(n, a, b, xi, xpls, xmns, xp, si, ppecp):
-    out = torch.empty_like(a)
-
-    small = a * b <= _ABLIM
-    if small.any():
-        if si is None:
-            raise RuntimeError("_fj10_vec needs si for small a*b branch")
-        out[small] = _fjps_vec(n, 1, 0, a[small], b[small], xi[small], si[small])
-
-    large = ~small
-    if large.any():
-        aa = a[large]
-        bb = b[large]
-        xpls_l = xpls[large]
-        xmns_l = xmns[large]
-        xi_l = xi[large]
-        xp_l = xp[large]
-
-        tp = xpls_l * torch.erf(aa + bb)
-        tm = xmns_l * torch.erf(aa - bb)
-        ep = tp + tm
-        em = tp - tm
-        hm = xpls_l * _dawerf_vec(aa + bb, ppecp) - xmns_l * _dawerf_vec(aa - bb, ppecp)
-        tab = _fm_vec(-1, aa, bb, xpls_l, xmns_l)
-
-        if n == 1:
-            dp = xpls_l * _dawf_vec(aa + bb, ppecp) + xmns_l * _dawf_vec(aa - bb, ppecp)
-            out[large] = (
-                _SQPI * xi_l * xi_l * (2.0 * _fm_vec(0, aa, bb, xpls_l, xmns_l) - dp / aa) / (8.0 * aa)
-            )
-        else:
-            out[large] = xi_l * (
-                _SQPI * ((1.0 + 2.0 * (aa + bb) * (aa - bb)) * hm + bb * ep - aa * em) / (8.0 * aa * tab)
-                - xp_l / (4.0 * aa)
-            )
-
-    return out
-
-
-def _fj01_vec(n, a, b, xi, xpls, xmns, xp, si, ppecp):
-    out = torch.empty_like(a)
-
-    small = a * b <= _ABLIM
-    if small.any():
-        if si is None:
-            raise RuntimeError("_fj01_vec needs si for small a*b branch")
-        out[small] = _fjps_vec(n, 0, 1, a[small], b[small], xi[small], si[small])
-
-    large = ~small
-    if large.any():
-        aa = a[large]
-        bb = b[large]
-        xpls_l = xpls[large]
-        xmns_l = xmns[large]
-        xi_l = xi[large]
-        xp_l = xp[large]
-
-        tp = xpls_l * torch.erf(aa + bb)
-        tm = xmns_l * torch.erf(aa - bb)
-        ep = tp + tm
-        em = tp - tm
-        hm = xpls_l * _dawerf_vec(aa + bb, ppecp) - xmns_l * _dawerf_vec(aa - bb, ppecp)
-        tab = _fm_vec(-1, aa, bb, xpls_l, xmns_l)
-
-        if n == 1:
-            dm = xpls_l * _dawf_vec(aa + bb, ppecp) - xmns_l * _dawf_vec(aa - bb, ppecp)
-            out[large] = (
-                _SQPI * xi_l * xi_l * (2.0 * _fm_vec(0, aa, bb, xpls_l, xmns_l) - dm / bb) / (8.0 * bb)
-            )
-        else:
-            out[large] = xi_l * (
-                _SQPI * ((1.0 - 2.0 * (aa + bb) * (aa - bb)) * hm - bb * ep + aa * em) / (8.0 * bb * tab)
-                - xp_l / (4.0 * bb)
-            )
-
-    return out
-
-
-def _fj11_vec(n, a, b, xi, xpls, xmns, xp, si, ppecp):
-    out = torch.empty_like(a)
-
-    small = a * b <= _ABLIM
-    if small.any():
-        if si is None:
-            raise RuntimeError("_fj11_vec needs si for small a*b branch")
-        out[small] = _fjps_vec(n, 1, 1, a[small], b[small], xi[small], si[small])
-
-    large = ~small
-    if large.any():
-        aa = a[large]
-        bb = b[large]
-        xpls_l = xpls[large]
-        xmns_l = xmns[large]
-        xi_l = xi[large]
-        xp_l = xp[large]
-
-        tp = xpls_l * _dawf_vec(aa + bb, ppecp)
-        tm = xmns_l * _dawf_vec(aa - bb, ppecp)
-        dp = tp + tm
-        dm = tp - tm
-        tab = _fm_vec(-1, aa, bb, xpls_l, xmns_l)
-
-        if n == 1:
-            tp = xpls_l * torch.erf(aa + bb)
-            tm = xmns_l * torch.erf(aa - bb)
-            ep = tp + tm
-            em = tp - tm
-            hm = xpls_l * _dawerf_vec(aa + bb, ppecp) - xmns_l * _dawerf_vec(aa - bb, ppecp)
-
-            out[large] = (
-                xi_l
-                * xi_l
-                * (
-                    _SQPI * (aa * em + bb * ep - (1.0 + 2.0 * (aa * aa + bb * bb)) * hm) / (8.0 * tab)
-                    - xp_l / (4.0 * tab)
-                )
-            )
-        else:
-            a2 = aa * aa
-            b2 = bb * bb
-            out[large] = (
-                _SQPI
-                * xi_l
-                * (
-                    2.0 * (a2 + b2) * _fm_vec(0, aa, bb, xpls_l, xmns_l)
-                    - tab * _fm_vec(1, aa, bb, xpls_l, xmns_l)
-                    - b2 * dp / aa
-                    - a2 * dm / bb
-                )
-                / (6.0 * tab)
-            )
-
+        out[m] = torch.exp(-x[m])
     return out
 
 
@@ -511,10 +344,7 @@ def _fiprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
     alfa_all = zetcb * r_f
     xalfa = alfa_all * r_f
 
-    xp0_all = torch.zeros_like(xalfa)
-    m_exp = xalfa < _BIGEXP
-    if m_exp.any():
-        xp0_all[m_exp] = torch.exp(-xalfa[m_exp])
+    xp0_all = _exp_neg_cutoff(xalfa)
 
     xi_all = 1.0 / torch.sqrt(zetcb + zlp_f)
     alf_all = alfa_all * xi_all
@@ -663,11 +493,9 @@ def _fjprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
     beta_all = zetb_f * r_f
     zetcb = zetc_f + zetb_f
 
-    alfbet_all = alfa_all * r_f + beta_all * r_f
-    xpb_all = torch.zeros_like(alfbet_all)
-    m_xpb = alfbet_all < _BIGEXP
-    if m_xpb.any():
-        xpb_all[m_xpb] = torch.exp(-alfbet_all[m_xpb])
+    alfbet_all = (alfa_all + beta_all) * r_f
+
+    xpb_all = _exp_neg_cutoff(alfbet_all)
 
     zeta = zetcb + zlp_f
     dumtol = zlp_f * (((alfa_all + beta_all) ** 2) / zetcb) / zeta
@@ -686,7 +514,7 @@ def _fjprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
     alfbet1 = alfbet_all[idx1]
     xpb1 = xpb_all[idx1]
 
-    xi1 = 1.0 / torch.sqrt(zetcb1 + zlp1)
+    xi1 = torch.rsqrt(zetcb1 + zlp1)
     alef1 = alfa1 * xi1
     beit1 = beta1 * xi1
     ab1 = alef1 * beit1
@@ -695,14 +523,18 @@ def _fjprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
     dum2 = torch.empty_like(ab1)
 
     large_ab = ab1 > _ABLIM
-    if large_ab.any():
-        dum1[large_ab] = alfbet1[large_ab] - (alef1[large_ab] + beit1[large_ab]) ** 2
-        dum2[large_ab] = alfbet1[large_ab] - (alef1[large_ab] - beit1[large_ab]) ** 2
 
-    small_ab = ~large_ab
-    if small_ab.any():
-        dum1[small_ab] = alfbet1[small_ab] - alef1[small_ab] * alef1[small_ab]
-        dum2[small_ab] = alfbet1[small_ab] - beit1[small_ab] * beit1[small_ab]
+    ap = alef1 + beit1
+    am = alef1 - beit1
+
+    dum1_large = alfbet1 - ap * ap
+    dum2_large = alfbet1 - am * am
+
+    dum1_small = alfbet1 - alef1 * alef1
+    dum2_small = alfbet1 - beit1 * beit1
+
+    dum1 = torch.where(large_ab, dum1_large, dum1_small)
+    dum2 = torch.where(large_ab, dum2_large, dum2_small)
 
     active2 = (dum1 < _BIGEXP) | (dum2 < _BIGEXP)
     if not active2.any():
@@ -718,39 +550,26 @@ def _fjprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
     dum1 = dum1[active2]
     dum2 = dum2[active2]
 
-    xpls = torch.zeros_like(dum1)
-    xmns = torch.zeros_like(dum2)
-
-    m = dum1 < _BIGEXP
-    if m.any():
-        xpls[m] = torch.exp(-dum1[m])
-
-    m = dum2 < _BIGEXP
-    if m.any():
-        xmns[m] = torch.exp(-dum2[m])
+    xpls = _exp_neg_cutoff(dum1)
+    xmns = _exp_neg_cutoff(dum2)
 
     nmx = nij - 1 + nlpk
     xa = xi * alef
     xb = xi * beit
-    xx = xi * xi * 0.5
+    xx = 0.5 * xi * xi
 
     z = torch.zeros_like(alef)
     f = {}
 
-    si = None
-    if (alef * beit <= _ABLIM).any():
-        if nlpk % 2 == 0:
-            si = _sitabl_vec(2, -1, alef, beit, xpls, xmns, xpb, ppecp)
-        else:
-            si = _sitabl_vec(-1, 2, alef, beit, xpls, xmns, xpb, ppecp)
-
     if nlpk % 2 == 0:
-        f[(1, 1, 1)] = _fj00_vec(0, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
-        f[(1, 2, 2)] = _fj11_vec(0, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
+        f111, f122, f221, f212 = _fj_base_even_vec(nmx, alef, beit, xi, xpls, xmns, xpb, ppecp)
+
+        f[(1, 1, 1)] = f111
+        f[(1, 2, 2)] = f122
 
         if nmx >= 1:
-            f[(2, 2, 1)] = _fj10_vec(1, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
-            f[(2, 1, 2)] = _fj01_vec(1, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
+            f[(2, 2, 1)] = f221
+            f[(2, 1, 2)] = f212
 
             for n in range(2, nmx + 1, 2):
                 np1 = n + 1
@@ -776,10 +595,12 @@ def _fjprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
                 )
 
     else:
-        f[(1, 2, 1)] = _fj10_vec(0, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
-        f[(1, 1, 2)] = _fj01_vec(0, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
-        f[(2, 1, 1)] = _fj00_vec(1, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
-        f[(2, 2, 2)] = _fj11_vec(1, alef, beit, xi, xpls, xmns, xpb, si, ppecp)
+        f121, f112, f211, f222 = _fj_base_odd_vec(nmx, alef, beit, xi, xpls, xmns, xpb, ppecp)
+
+        f[(1, 2, 1)] = f121
+        f[(1, 1, 2)] = f112
+        f[(2, 1, 1)] = f211
+        f[(2, 2, 2)] = f222
 
         for n in range(2, nmx + 1, 2):
             np1 = n + 1
@@ -803,23 +624,208 @@ def _fjprep_vec(nlpk, nij, zetc, zetb, r, zlp, clp, ppecp):
     rr = {}
 
     for n in range(1, nij + 1, 2):
-        rr[(n, 1, 1)] = _get3(rr, n, 1, 1, z) + _get3(f, n + nlpk, 1, 1, z) * clp_a
+        rr[(n, 1, 1)] = _get3(f, n + nlpk, 1, 1, z) * clp_a
 
     if lijc > 1 and lijb > 1:
         for n in range(1, nij + 1, 2):
-            rr[(n, 2, 2)] = _get3(rr, n, 2, 2, z) + _get3(f, n + nlpk, 2, 2, z) * clp_a
+            rr[(n, 2, 2)] = _get3(f, n + nlpk, 2, 2, z) * clp_a
 
     if lijb > 1:
         for n in range(2, nij + 1, 2):
-            rr[(n, 1, 2)] = _get3(rr, n, 1, 2, z) + _get3(f, n + nlpk, 1, 2, z) * clp_a
+            rr[(n, 1, 2)] = _get3(f, n + nlpk, 1, 2, z) * clp_a
 
     if lijc > 1:
         for n in range(2, nij + 1, 2):
-            rr[(n, 2, 1)] = _get3(rr, n, 2, 1, z) + _get3(f, n + nlpk, 2, 1, z) * clp_a
+            rr[(n, 2, 1)] = _get3(f, n + nlpk, 2, 1, z) * clp_a
 
     rr_a = _stack3(rr, nij + 1, lijc + 1, lijb + 1, z)
     rr_full = full_zero.index_copy(0, idx, rr_a)
     return rr_full.reshape((*lead_shape, nij + 1, lijc + 1, lijb + 1))
+
+
+def _fj_base_even_vec(nmx, a, b, xi, xpls, xmns, xp, ppecp):
+    """
+    Computes the even-nlpk base FJ values in one fused pass.
+
+    Returns:
+        f111 = fj00(n=0)
+        f122 = fj11(n=0)
+        f221 = fj10(n=1), or None if nmx < 1
+        f212 = fj01(n=1), or None if nmx < 1
+    """
+    need_extra = nmx >= 1
+
+    f111 = a.new_zeros(a.shape)
+    f122 = a.new_zeros(a.shape)
+    f221 = a.new_zeros(a.shape) if need_extra else None
+    f212 = a.new_zeros(a.shape) if need_extra else None
+
+    small = a * b <= _ABLIM
+
+    if small.any():
+        idx = small.nonzero(as_tuple=False).squeeze(1)
+
+        aa = a[idx]
+        bb = b[idx]
+        xx = xi[idx]
+        xp_p = xpls[idx]
+        xp_m = xmns[idx]
+        xp0 = xp[idx]
+
+        si = _sitabl_vec(2, -1, aa, bb, xp_p, xp_m, xp0, ppecp)
+
+        f111 = f111.index_copy(0, idx, _fjps_vec(0, 0, 0, aa, bb, xx, si))
+        f122 = f122.index_copy(0, idx, _fjps_vec(0, 1, 1, aa, bb, xx, si))
+
+        if need_extra:
+            f221 = f221.index_copy(0, idx, _fjps_vec(1, 1, 0, aa, bb, xx, si))
+            f212 = f212.index_copy(0, idx, _fjps_vec(1, 0, 1, aa, bb, xx, si))
+
+    large = ~small
+
+    if large.any():
+        idx = large.nonzero(as_tuple=False).squeeze(1)
+
+        aa = a[idx]
+        bb = b[idx]
+        xx = xi[idx]
+        xp_p = xpls[idx]
+        xp_m = xmns[idx]
+
+        ap = aa + bb
+        am = aa - bb
+
+        tab = 2.0 * aa * bb
+        est = 0.5 * (xp_p - xp_m)
+        ect = 0.5 * (xp_p + xp_m)
+
+        fm0 = est / tab
+        fm1 = (-fm0 + ect) / tab
+
+        dawfp = _dawf_vec(ap, ppecp)
+        dawfm = _dawf_vec(am, ppecp)
+
+        tp = xp_p * dawfp
+        tm = xp_m * dawfm
+
+        dp = tp + tm
+        dm = tp - tm
+
+        aa2 = aa * aa
+        bb2 = bb * bb
+
+        v111 = _SQPI * xx * (aa * dm + bb * dp - tab * fm0) / (2.0 * tab)
+
+        v122 = (
+            _SQPI * xx * (2.0 * (aa2 + bb2) * fm0 - tab * fm1 - bb2 * dp / aa - aa2 * dm / bb) / (6.0 * tab)
+        )
+
+        f111 = f111.index_copy(0, idx, v111)
+        f122 = f122.index_copy(0, idx, v122)
+
+        if need_extra:
+            xx2 = xx * xx
+
+            v221 = _SQPI * xx2 * (2.0 * fm0 - dp / aa) / (8.0 * aa)
+            v212 = _SQPI * xx2 * (2.0 * fm0 - dm / bb) / (8.0 * bb)
+
+            f221 = f221.index_copy(0, idx, v221)
+            f212 = f212.index_copy(0, idx, v212)
+
+    return f111, f122, f221, f212
+
+
+def _fj_base_odd_vec(nmx, a, b, xi, xpls, xmns, xp, ppecp):
+    """
+    Computes the odd-nlpk base FJ values in one fused pass.
+
+    Returns:
+        f121 = fj10(n=0)
+        f112 = fj01(n=0)
+        f211 = fj00(n=1)
+        f222 = fj11(n=1)
+    """
+    f121 = a.new_zeros(a.shape)
+    f112 = a.new_zeros(a.shape)
+    f211 = a.new_zeros(a.shape)
+    f222 = a.new_zeros(a.shape)
+
+    small = a * b <= _ABLIM
+
+    if small.any():
+        idx = small.nonzero(as_tuple=False).squeeze(1)
+
+        aa = a[idx]
+        bb = b[idx]
+        xx = xi[idx]
+        xp_p = xpls[idx]
+        xp_m = xmns[idx]
+        xp0 = xp[idx]
+
+        si = _sitabl_vec(-1, 2, aa, bb, xp_p, xp_m, xp0, ppecp)
+
+        f121 = f121.index_copy(0, idx, _fjps_vec(0, 1, 0, aa, bb, xx, si))
+        f112 = f112.index_copy(0, idx, _fjps_vec(0, 0, 1, aa, bb, xx, si))
+        f211 = f211.index_copy(0, idx, _fjps_vec(1, 0, 0, aa, bb, xx, si))
+        f222 = f222.index_copy(0, idx, _fjps_vec(1, 1, 1, aa, bb, xx, si))
+
+    large = ~small
+
+    if large.any():
+        idx = large.nonzero(as_tuple=False).squeeze(1)
+
+        aa = a[idx]
+        bb = b[idx]
+        xx = xi[idx]
+        xp_p = xpls[idx]
+        xp_m = xmns[idx]
+        xp0 = xp[idx]
+
+        ap = aa + bb
+        am = aa - bb
+        apam = ap * am
+
+        tab = 2.0 * aa * bb
+
+        dawfp = _dawf_vec(ap, ppecp)
+        dawfm = _dawf_vec(am, ppecp)
+
+        tp_daw = xp_p * dawfp
+        tm_daw = xp_m * dawfm
+        dm_daw = tp_daw - tm_daw
+
+        tp_erf = xp_p * torch.erf(ap)
+        tm_erf = xp_m * torch.erf(am)
+
+        ep = tp_erf + tm_erf
+        em = tp_erf - tm_erf
+
+        hm = xp_p * _dawerf_vec(ap, ppecp) - xp_m * _dawerf_vec(am, ppecp)
+
+        aa2 = aa * aa
+        bb2 = bb * bb
+        xx2 = xx * xx
+
+        v121 = xx * (
+            _SQPI * ((1.0 + 2.0 * apam) * hm + bb * ep - aa * em) / (8.0 * aa * tab) - xp0 / (4.0 * aa)
+        )
+
+        v112 = xx * (
+            _SQPI * ((1.0 - 2.0 * apam) * hm - bb * ep + aa * em) / (8.0 * bb * tab) - xp0 / (4.0 * bb)
+        )
+
+        v211 = _SQPI * xx2 * dm_daw / (4.0 * tab)
+
+        v222 = xx2 * (
+            _SQPI * (aa * em + bb * ep - (1.0 + 2.0 * (aa2 + bb2)) * hm) / (8.0 * tab) - xp0 / (4.0 * tab)
+        )
+
+        f121 = f121.index_copy(0, idx, v121)
+        f112 = f112.index_copy(0, idx, v112)
+        f211 = f211.index_copy(0, idx, v211)
+        f222 = f222.index_copy(0, idx, v222)
+
+    return f121, f112, f211, f222
 
 
 def _primitive_g1_vec(kd, acz, zfn, zetc, zetb, r, zlp, clp, ppecp):
@@ -979,41 +985,42 @@ def om1_ppecp_local_vectorized(ni, nj, rij, basis_tables, basis_i, basis_j):
     corpp_active = torch.zeros((shell_type.numel(), 4), dtype=dtype, device=device)
 
     def _run_group(mask, kd):
-        if not mask.any():
+        idxg = mask.nonzero(as_tuple=False).squeeze(1)
+        if idxg.numel() == 0:
             return
 
-        zetc = zetc_all[mask]
-        zetb = zetb_all[mask]
+        zetc = zetc_all.index_select(0, idxg)
+        zetb = zetb_all.index_select(0, idxg)
 
         g1 = _primitive_g1_vec(
             kd=kd,
-            acz=acz_a[mask].unsqueeze(1),
-            zfn=zfn_a[mask].unsqueeze(1),
+            acz=acz_a.index_select(0, idxg).unsqueeze(1),
+            zfn=zfn_a.index_select(0, idxg).unsqueeze(1),
             zetc=zetc,
             zetb=zetb,
-            r=r_a[mask].unsqueeze(1),
-            zlp=zlp_a[mask],
-            clp=clp_a[mask],
+            r=r_a.index_select(0, idxg).unsqueeze(1),
+            zlp=zlp_a.index_select(0, idxg),
+            clp=clp_a.index_select(0, idxg),
             ppecp=ppecp,
         )
 
-        cs_i = cs_i_all[mask]
-        cs_j = cs_j_all[mask]
-        cp_i = cp_i_all[mask]
-        cp_j = cp_j_all[mask]
+        cs_i = cs_i_all.index_select(0, idxg)
+        cs_j = cs_j_all.index_select(0, idxg)
+        cp_i = cp_i_all.index_select(0, idxg)
+        cp_j = cp_j_all.index_select(0, idxg)
 
-        ngrp = cs_i.shape[0]
-        out = torch.zeros((ngrp, 4), dtype=dtype, device=device)
+        out = torch.zeros((idxg.numel(), 4), dtype=dtype, device=device)
 
         out[:, 0] = (sym * cs_i * cs_j * g1[..., 1]).sum(dim=1)
 
         if kd > 1:
             out[:, 1] = (cs_i * cp_j * g1[..., 2] + offdiag * cs_j * cp_i * g1[..., 3]).sum(dim=1)
 
-            out[:, 2] = (sym * cp_i * cp_j * g1[..., 4]).sum(dim=1)
-            out[:, 3] = (sym * cp_i * cp_j * g1[..., 5]).sum(dim=1)
+            pp = sym * cp_i * cp_j
+            out[:, 2] = (pp * g1[..., 4]).sum(dim=1)
+            out[:, 3] = (pp * g1[..., 5]).sum(dim=1)
 
-        corpp_active[mask] = out
+        corpp_active.index_copy_(0, idxg, out)
 
     # H shell: s only, kd=1.
     _run_group(shell_type == 0, kd=1)

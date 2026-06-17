@@ -96,7 +96,7 @@ on ``S2``. All state numbers in user input are 1-based excited-state indices.
            "forces": 10,
            "nonadiabatic": 1,
            "transition_density_matrices": 20,
-           "transition_density_matrices_mode": "atom_block_sq",
+           "transition_density_matrices_mode": "diag",
            "transition_properties": False,
        },
    }
@@ -207,22 +207,12 @@ what excited-state properties are computed:
 - If ``output['h5']['transition_density_matrices'] > 0``, transition density
   matrices are computed and written under
   ``/data/excitation/transition_density_matrices``.
-  Use ``output['h5']['transition_density_matrices_mode']`` to select storage:
-  ``'full'`` (default, shape ``(T, R, Norb, Norb)``) or ``'diag'`` (shape
-  ``(T, R, Norb)``) or ``'atom_block_sq'`` (shape ``(T, R, Natoms)``) where
-  each atom value is the squared Frobenius norm of the on-atom TDM block:
-
-  .. math::
-
-     q_A = \sum_{\mu \in A}\sum_{\nu \in A}\left(T_{\mu\nu}\right)^2
-
-  for each state and timepoint. Here :math:`T` is the transition-density matrix,
-  and :math:`\mu,\nu \in A` are AO indices belonging to atom :math:`A`. This
-  gives a compact per-atom, nonnegative measure of on-atom transition-density
-  magnitude.
-  If ``'diag'`` is used together with
-  ``output['h5']['transition_properties'] = False``, only diagonal TDM elements
-  are computed (no full TDM build), which is cheaper for large systems.
+   Use ``output['h5']['transition_density_matrices_mode']`` to select storage:
+   ``'full'`` (default, shape ``(T, R, Norb, Norb)``) or ``'diag'`` (shape
+   ``(T, R, Norb)``), where ``diag`` stores only the diagonal TDM elements.
+   If ``'diag'`` is used together with
+   ``output['h5']['transition_properties'] = False``, only diagonal TDM elements
+   are computed (no full TDM build), which is cheaper for large systems.
 
 Configuration constraints:
 

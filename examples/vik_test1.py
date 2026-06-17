@@ -76,8 +76,8 @@ coordinates = torch.tensor(
     device=device,
 )
 # species, coordinates = read_xyz(["/Users/vishikh/onedrive/calculations/CNT_10.xyz"])
-# species, coordinates = read_xyz(['./examples/methane.xyz'])
-# species, coordinates = read_xyz(['./methane.xyz'])
+species, coordinates = read_xyz(['./examples/methane.xyz'])
+# species, coordinates = read_xyz(['./234ppe.xyz'])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
 
@@ -85,7 +85,7 @@ const = Constants().to(device)
 active_state = 1
 
 seqm_parameters = {
-    "method": "OM3",  # AM1, MNDO, PM#
+    "method": "OM1",  # AM1, MNDO, PM#
     # "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [2],  # converger used for scf loop
@@ -93,7 +93,7 @@ seqm_parameters = {
     # [1], adaptive mixing
     # [2], adaptive mixing, then pulay
     # 'uhf' : True,
-    "excited_states": {"n_states": 9, "method": "cis"},
+    "excited_states": {"n_states": 4, "method": "cis"},
     "active_state": 1,
     # 'scf_backward': 1,
     # "analytical_gradient": [True],

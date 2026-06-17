@@ -92,7 +92,9 @@ class OutputConfig:
 
     def get_h5_tdm_mode(self) -> str:
         mode = str(self.h5_config.get("transition_density_matrices_mode", "full")).strip().lower()
-        return mode if mode in ("full", "diag", "atom_block_sq") else "full"
+        if mode not in ("full", "diag"):
+            raise ValueError("output.h5.transition_density_matrices_mode only supports 'full' and 'diag'.")
+        return mode
 
     def get_h5_transition_properties(self) -> bool:
         return bool(self.h5_config.get("transition_properties", False))
@@ -249,12 +251,6 @@ class HDF5Writer:
                 raise RuntimeError(
                     f"Resume: transition_density_matrices shape rank mismatch (found {vals.ndim}, expected {expect_rank} for mode '{self._tdm_mode}')."
                 )
-            if self._tdm_mode == "atom_block_sq":
-                nat = self.flags[mol]["Nat"]
-                if vals.shape[-1] != nat:
-                    raise RuntimeError(
-                        f"Resume: transition_density_matrices last dimension mismatch for mode 'atom_block_sq' (found {vals.shape[-1]}, expected Nat={nat})."
-                    )
         if self._write_transition_properties and (
             Tw_data_exist == 0
             or "excitation" not in h5["data"]
@@ -339,8 +335,6 @@ class HDF5Writer:
                     self._create_row_chunked(gtdm, "steps", (Tw_tdm,), np.int64)
                     if self._tdm_mode == "diag":
                         self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol))
-                    elif self._tdm_mode == "atom_block_sq":
-                        self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Nat_mol))
                     else:
                         self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol, Norb_mol))
 
@@ -420,8 +414,6 @@ class HDF5Writer:
                                 tdm = torch.diagonal(tdm[:, :Norb, :Norb], dim1=-2, dim2=-1)
                             else:
                                 tdm = tdm[:, :Norb]
-                        elif self._tdm_mode == "atom_block_sq":
-                            tdm = tdm[:, : flags["Nat"]]
                         else:
                             tdm = tdm[:, :Norb, :Norb]
                         gtdm["values"][i_tdm, ...] = _to_np(tdm)
@@ -731,10 +723,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         h5 = self.output_config.h5_config if isinstance(self.output_config.h5_config, dict) else {}
         if int(h5.get("transition_density_matrices", 0)) > 0:
             exc["save_tdm_output"] = True
-            mode = str(h5.get("transition_density_matrices_mode", "full")).strip().lower()
-            exc["transition_density_matrices_mode"] = (
-                mode if mode in ("full", "diag", "atom_block_sq") else "full"
-            )
+            exc["transition_density_matrices_mode"] = self.output_config.get_h5_tdm_mode()
         if int(h5.get("data", 0)) > 0 and bool(h5.get("transition_properties", False)):
             exc["compute_transition_properties"] = True
 
