@@ -10,7 +10,7 @@ from .om2_hcore import build_omx_pair_context
 from .two_elec_two_center_int import rotate_with_quaternion
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
-delta = 1e-5  # delta for finite difference calcs
+delta = 5e-6  # delta for finite difference calcs
 
 
 # @profile
@@ -323,7 +323,6 @@ def scf_grad(
 
 
 from .om2_hcore import (
-    choose_k_chunk,
     diatom_overlap_matrix_OM1,
     diatom_resonance_matrix_OM1,
     om1_local_resonance_terms,
@@ -375,29 +374,20 @@ def omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x):
         .reshape(molecule.nmol * molsize * molsize, 4, 4)
     )
     if method == "OM3":
-        k_chunk = choose_k_chunk(
-            molecule.mask.numel(), molecule.molsize, S5.dtype, S5.device, min_chunk=8, mat_equiv=24
-        )
-        omx_orthogonalization_grad = betor3_grad_compact(
-            P_blocks, S5, B5, S_x, B_x, molecule, tables["gval1"], k_chunk=k_chunk
-        )
+        omx_orthogonalization_grad = betor_grad_dense(P_blocks, S5, B5, S_x, B_x, molecule, tables["gval1"])
     else:
         COR = molecule.om2_COR
-        k_chunk = choose_k_chunk(
-            molecule.mask.numel(), molecule.molsize, S5.dtype, S5.device, min_chunk=8, mat_equiv=48
-        )
-        omx_orthogonalization_grad = betor_grad_compact(
+        omx_orthogonalization_grad = betor_grad_dense(
             P_blocks,
             S5,
             B5,
             S_x,
             B_x,
-            pair_core_semi_x,
-            COR,
             molecule,
             tables["gval1"],
-            tables["gval2"],
-            k_chunk=k_chunk,
+            COR=COR,
+            gval2=tables["gval2"],
+            pair_core_semi_x=pair_core_semi_x,
         )
     return omx_orthogonalization_grad
 
@@ -471,65 +461,6 @@ def w_derivative_numerical(mol, Xij, w_x_new):
         e2a_x_new[:, coord, ...] = (e2a_[:npairs] - e2a_[npairs:]) * inv_2delta
 
     return e1b_x_new, e2a_x_new
-
-
-# def overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij):
-#     if torch.any(qn_int[ni]>1):
-#         raise Exception("Not yet implemented for molecules with non-Hydrogen atoms")
-#     a0_sq = a0*a0
-#
-#     # (sA|sB) overlap
-#     C_times_C = torch.einsum('bi,bj->bij',sto6g_coeff[qn_int[ni]-1,0],sto6g_coeff[qn_int[nj]-1,0])
-#
-#     alpha1 = sto6g_exponent[qn_int[ni]-1,0,:]*(zetas[idxi].unsqueeze(1)**2)
-#     alpha2 = sto6g_exponent[qn_int[nj]-1,0,:]*(zetas[idxj].unsqueeze(1)**2)
-#
-#     # alpha_i*alpha_j/(alpha_i+alpha_j)
-#     alpha_product = alpha1.unsqueeze(2) * alpha2.unsqueeze(1)  # Shape: (batch_size, vector_size, vector_size)
-#     alpha_sum = alpha1[..., None] + alpha2[..., None, :]
-#     alphas_1 = alpha_product / alpha_sum  # Shape: (batch_size, vector_size, vector_size)
-#
-#     # <sA|sB>ij
-#     # From MOPAC the arugment of the exponential is not allowed to exceed -35 (presumably because exp(-35) ~ double precision minimum)
-#     sij = ((2.0*torch.div(torch.sqrt(alpha_product),alpha_sum))**(3/2))*torch.exp(-1.0*(alphas_1*(rij[:,None,None]**2)).clamp_(max=35.0))
-#
-#     # d/dx of <sA|sB>
-#     sAsB = 2.0*alphas_1*sij
-#
-#     # Dividing with a0^2 beacuse we want gradients in ev/ang. Remember, alpha(gaussian exponent) has units of (bohr)^-2
-#     # There is no dividing beta_mu+beta_nu by 2. Found this out during debugging.
-#     # Possibly because here we're only going over unique pairs, but in the total energy
-#     # expression the overlap term appears on the upper and lower triangle of Hcore
-#     # and hence needs to be multiplied by 2.
-#     overlap_KAB_x[:,:,0,0] = ((beta[idxi,0]+beta[idxj,0])*torch.sum(C_times_C*sAsB,dim=(1,2))).unsqueeze(1)*Xij[:,:]/a0_sq
-#
-#     '''
-#     #(px|s)
-#     C_times_C = torch.einsum('bi,bj->bij',sto6g_coeff[qn_int[ni]-1,1],sto6g_coeff[qn_int[nj]-1,0])
-#
-#     alpha1 = sto6g_exponent[qn_int[ni]-1,1,:]*(zetas[idxi].unsqueeze(1)**2)
-#     alpha2 = sto6g_exponent[qn_int[nj]-1,0,:]*(zetas[idxj].unsqueeze(1)**2)
-#
-#     # alpha_i*alpha_j/(alpha_i+alpha_j)
-#     alpha_product = alpha1.unsqueeze(2) * alpha2.unsqueeze(1)  # Shape: (batch_size, vector_size, vector_size)
-#     alpha_sum = alpha1[..., None] + alpha2[..., None, :]
-#     alphas_1 = alpha_product / alpha_sum  # Shape: (batch_size, vector_size, vector_size)
-#
-#     # <sA|sB>ij
-#     # From MOPAC the arugment of the exponential is not allowed to exceed -35 (presumably because exp(-35) ~ double precision minimum)
-#     sij = ((2.0*torch.div(torch.sqrt(alpha_product),alpha_sum))**(3/2))*torch.exp(-1.0*(alphas_1*(rij[:,None,None]**2)).clamp_(max=35.0))
-#
-#     # d/dx of <sA|sB>
-#     sAsB = 2.0*alphas_1*sij
-#
-#     # Dividing with a0^2 beacuse we want gradients in ev/ang. Remember, alpha(gaussian exponent) has units of (bohr)^-2
-#     # There is no dividing beta_mu+beta_nu by 2. Found this out during debugging.
-#     # Possibly because here we're only going over unique pairs, but in the total energy
-#     # expression the overlap term appears on the upper and lower triangle of Hcore
-#     # and hence needs to be multiplied by 2.
-#     overlap_KAB_x[:,:,0,0] = ((beta[idxi,0]+beta[idxj,0])*torch.sum(C_times_C*sAsB,dim=(1,2))).unsqueeze(1)*Xij[:,:]/a0_sq
-#     '''
-#     print(f'overlap_x from gaussians is \n{overlap_KAB_x}')
 
 
 def core_core_der_fd(mol, method, gam, parameters):
@@ -1786,253 +1717,109 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
     return e1b_x, e2a_x, fko_x, omx_orthogonalization_grad
 
 
-def betor3_grad_compact(P_blocks, S5, B5, S_x, B_x, molecule, gval1, k_chunk=16):
-    molsize = molecule.molsize
-    device, dtype = S5.device, S5.dtype
-    npairs = molecule.mask.numel()
-
-    mol = molecule.pair_molid
-    i = (molecule.mask // molsize) % molsize
-    j = molecule.mask % molsize
-
-    # lookup: oriented edge (a,b) -> compact pair row
-    pair_id = torch.full((molecule.nmol, molsize, molsize), -1, dtype=torch.long, device=device)
-    fwd = torch.zeros((molecule.nmol, molsize, molsize), dtype=torch.bool, device=device)
-
-    p = torch.arange(npairs, device=device)
-    pair_id[mol, i, j] = p
-    pair_id[mol, j, i] = p
-    fwd[mol, i, j] = True
-    fwd[mol, j, i] = False
-
-    # since energy sums upper + lower and P/H are symmetric
-    W = 2.0 * P_blocks[molecule.mask]
-
-    ft = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
-    F = -ft[:, None, None] * W
-    FT = F.transpose(-1, -2)
-
-    grad = torch.zeros((molecule.nmol * molsize, 3), dtype=dtype, device=device)
-    flat_i = mol * molsize + i
-    flat_j = mol * molsize + j
-
-    def gather(D, src, k_ids):
-        rows = pair_id[mol[:, None], src[:, None], k_ids[None, :]]
-        ori = fwd[mol[:, None], src[:, None], k_ids[None, :]]
-
-        out = torch.zeros((npairs, k_ids.numel(), 3, 4, 4), dtype=dtype, device=device)
-
-        ok = rows >= 0
-        if ok.any():
-            vals = D[rows[ok]]
-            vals = torch.where(ori[ok][:, None, None, None], vals, -vals.transpose(-1, -2))
-            out[ok] = vals
-        return out
-
-    for k0 in range(0, molsize, k_chunk):
-        k_ids = torch.arange(k0, min(k0 + k_chunk, molsize), device=device)
-        K = k_ids.numel()
-
-        Si = S5[mol[:, None], i[:, None], k_ids[None, :]]
-        Sj = S5[mol[:, None], j[:, None], k_ids[None, :]]
-        Bi = B5[mol[:, None], i[:, None], k_ids[None, :]]
-        Bj = B5[mol[:, None], j[:, None], k_ids[None, :]]
-
-        dSi = gather(S_x, i, k_ids)
-        dBi = gather(B_x, i, k_ids)
-        dSj = gather(S_x, j, k_ids)
-        dBj = gather(B_x, j, k_ids)
-
-        qik = ((F[:, None] @ Bj)[:, :, None] * dSi).sum((-1, -2)) + ((F[:, None] @ Sj)[:, :, None] * dBi).sum(
-            (-1, -2)
-        )
-
-        qjk = ((FT[:, None] @ Bi)[:, :, None] * dSj).sum((-1, -2)) + (
-            (FT[:, None] @ Si)[:, :, None] * dBj
-        ).sum((-1, -2))
-
-        flat_k = mol[:, None] * molsize + k_ids[None, :]
-
-        grad.index_add_(0, flat_i[:, None].expand(npairs, K).reshape(-1), qik.reshape(-1, 3))
-        grad.index_add_(0, flat_k.reshape(-1), -qik.reshape(-1, 3))
-
-        grad.index_add_(0, flat_j[:, None].expand(npairs, K).reshape(-1), qjk.reshape(-1, 3))
-        grad.index_add_(0, flat_k.reshape(-1), -qjk.reshape(-1, 3))
-
-    return grad.reshape(molecule.nmol, molsize, 3)
+def _flat(X):
+    M, N = X.shape[:2]
+    return X.permute(0, 1, 3, 2, 4).reshape(M, 4 * N, 4 * N)
 
 
-def betor_grad_compact(
-    P_blocks,
-    S5,
-    B5,
-    S_x,  # [npairs, 3, 4, 4], dS_ab/dR_a
-    B_x,  # [npairs, 3, 4, 4], dB_ab/dR_a
-    pair_core_semi_x,  # [npairs, 3, 4, 2], d pair_core_semi / dR_a
-    COR,  # [nmol, molsize*4, molsize]
-    molecule,
-    gval1,
-    gval2,
-    k_chunk=16,
+def _unflat(X, N):
+    M = X.shape[0]
+    return X.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
+
+
+def _dense_from_pairs(M, N, mol, i, j, blocks):
+    W = blocks.new_zeros((M, 4 * N, 4 * N))
+    W5 = W.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
+    W5[mol, i, j] = blocks
+    return W
+
+
+def betor_grad_dense(
+    P_blocks, S5, B5, S_x, B_x, molecule, gval1, COR=None, gval2=None, pair_core_semi_x=None
 ):
-    molsize = molecule.molsize
-    device, dtype = S5.device, S5.dtype
-    npairs = molecule.mask.numel()
+    M, N = S5.shape[:2]
+    dtype, device = S5.dtype, S5.device
 
+    mask = molecule.mask
     mol = molecule.pair_molid
-    a = (molecule.mask // molsize) % molsize
-    b = molecule.mask % molsize
+    a = (mask // N) % N
+    b = mask % N
+    P = mask.numel()
 
-    # BETOR code computes in reversed orientation u=b, v=a,
-    # then writes hsrc.T into H[mask].
-    u = b
-    v = a
+    W = 2.0 * P_blocks[mask]
 
-    # edge lookup
-    p = torch.arange(npairs, device=device)
-    pair_id = torch.full((molecule.nmol, molsize, molsize), -1, dtype=torch.long, device=device)
-    fwd = torch.zeros((molecule.nmol, molsize, molsize), dtype=torch.bool, device=device)
-
-    pair_id[mol, a, b] = p
-    pair_id[mol, b, a] = p
-    fwd[mol, a, b] = True
-    fwd[mol, b, a] = False
-
-    # compact COR derivative vectors: [npairs, 3, 4]
-    # col 0 belongs to atom a, col 1 belongs to atom b
-    Cx0 = torch.zeros((npairs, 3, 4), dtype=dtype, device=device)
-    Cx1 = torch.zeros_like(Cx0)
-
-    Cx0[:, :, 0] = pair_core_semi_x[:, :, 0, 0]
-    Cx1[:, :, 0] = pair_core_semi_x[:, :, 0, 1]
-
-    Cx0_p = (pair_core_semi_x[:, :, 2, 0] + 2.0 * pair_core_semi_x[:, :, 3, 0]) / 3.0
-    Cx1_p = (pair_core_semi_x[:, :, 2, 1] + 2.0 * pair_core_semi_x[:, :, 3, 1]) / 3.0
-
-    heavy_a = (molecule.species[mol, a] > 1).to(dtype)[:, None]
-    heavy_b = (molecule.species[mol, b] > 1).to(dtype)[:, None]
-
-    Cx0[:, :, 1:] = Cx0_p[:, :, None] * heavy_a[:, :, None]
-    Cx1[:, :, 1:] = Cx1_p[:, :, None] * heavy_b[:, :, None]
-
-    def gather_mat(D, src, dst):
-        src, dst = torch.broadcast_tensors(src, dst)
-        mm = mol[:, None].expand_as(src)
-        rows = pair_id[mm, src, dst]
-        ori = fwd[mm, src, dst]
-
-        out = torch.zeros((*src.shape, 3, 4, 4), dtype=dtype, device=device)
-        ok = rows >= 0
-        if ok.any():
-            vals = D[rows[ok]]
-            vals = torch.where(ori[ok][:, None, None, None], vals, -vals.transpose(-1, -2))
-            out[ok] = vals
-        return out
-
-    def gather_cor_x(src, dst):
-        src, dst = torch.broadcast_tensors(src, dst)
-        mm = mol[:, None].expand_as(src)
-        rows = pair_id[mm, src, dst]
-        ori = fwd[mm, src, dst]
-
-        out = torch.zeros((*src.shape, 3, 4), dtype=dtype, device=device)
-        ok = rows >= 0
-        if ok.any():
-            vals = torch.where(ori[ok][:, None, None], Cx0[rows[ok]], -Cx1[rows[ok]])
-            out[ok] = vals
-        return out
-
-    COR4 = COR.reshape(molecule.nmol, molsize, 4, molsize).permute(0, 1, 3, 2)
-
-    # Since H[mask] gets hsrc.T, energy adjoint wrt hsrc is transpose.
-    W = 2.0 * P_blocks[molecule.mask].transpose(-1, -2)
+    S2 = _flat(S5)
+    B2 = _flat(B5)
 
     ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
-    ft2 = 0.0625 * (gval2[molecule.ni] + gval2[molecule.nj])
-
     G1 = -ft1[:, None, None] * W
-    G2 = ft2[:, None, None] * W
 
-    grad = torch.zeros((molecule.nmol * molsize, 3), dtype=dtype, device=device)
+    W1 = _dense_from_pairs(M, N, mol, a, b, G1)
+    W1 = W1 + W1.transpose(1, 2)
 
-    flat_u = mol * molsize + u
-    flat_v = mol * molsize + v
+    adjS2 = torch.bmm(W1, B2)
+    adjB2 = torch.bmm(W1, S2)
 
-    for k0 in range(0, molsize, k_chunk):
-        k_ids = torch.arange(k0, min(k0 + k_chunk, molsize), device=device)
-        K = k_ids.numel()
+    if COR is not None:
+        ft2 = 0.0625 * (gval2[molecule.ni] + gval2[molecule.nj])
+        G2 = ft2[:, None, None] * W
 
-        src_u = u[:, None]
-        src_v = v[:, None]
-        src_k = k_ids[None, :]
+        W2 = _dense_from_pairs(M, N, mol, a, b, G2)
+        W2 = W2 + W2.transpose(1, 2)
 
-        Si = S5[mol[:, None], src_u, src_k]
-        Sj = S5[mol[:, None], src_v, src_k]
-        Bi = B5[mol[:, None], src_u, src_k]
-        Bj = B5[mol[:, None], src_v, src_k]
+        COR4 = COR.reshape(M, N, 4, N).permute(0, 1, 3, 2)  # [M,N,N,4]
+        F = COR4.unsqueeze(-1) - COR4.transpose(1, 2).unsqueeze(-2)
 
-        hi = COR4[mol[:, None], src_u, src_k]  # [P,K,4]
-        hj = COR4[mol[:, None], src_v, src_k]
-        hk = COR4[mol[:, None], src_k, src_u] + COR4[mol[:, None], src_k, src_v]
+        D = S5 * F
+        D2 = _flat(D)
 
-        # ----- adjoints from ts1 -----
-        adj_Si = G1[:, None] @ Bj
-        adj_Bi = G1[:, None] @ Sj
-        adj_Sj = G1.transpose(-1, -2)[:, None] @ Bi
-        adj_Bj = G1.transpose(-1, -2)[:, None] @ Si
+        adjD2 = torch.bmm(W2, S2)
+        adjS2 = adjS2 + torch.bmm(W2, D2)
 
-        # ----- adjoints from ts2 -----
-        base = Si @ Sj.transpose(-1, -2)
-        Hfac = hi[..., :, None] + hj[..., None, :]
+        adjD = _unflat(adjD2, N)
+        adjS = _unflat(adjS2, N) + adjD * F
+        adjB = _unflat(adjB2, N)
 
-        GH = G2[:, None] * Hfac
+        adjF = adjD * S5
+        adjCOR = adjF.sum(-1) - adjF.sum(-2).transpose(1, 2)
+    else:
+        adjS = _unflat(adjS2, N)
+        adjB = _unflat(adjB2, N)
+        adjCOR = None
 
-        adj_Si = adj_Si + GH @ Sj - (G2[:, None] @ Sj) * hk[..., None, :]
-        adj_Sj = adj_Sj + GH.transpose(-1, -2) @ Si - (G2.transpose(-1, -2)[:, None] @ Si) * hk[..., None, :]
+    grad = torch.zeros((M * N, 3), dtype=dtype, device=device)
+    fa = mol * N + a
+    fb = mol * N + b
 
-        adj_hi = (G2[:, None] * base).sum(dim=-1)
-        adj_hj = (G2[:, None] * base).sum(dim=-2)
+    q_ab = (adjS[mol, a, b][:, None] * S_x).sum((-1, -2)) + (adjB[mol, a, b][:, None] * B_x).sum((-1, -2))
 
-        adj_hk = -(Si.transpose(-1, -2) @ G2[:, None] @ Sj).diagonal(dim1=-2, dim2=-1)
+    q_ba = (adjS[mol, b, a][:, None] * (-S_x.transpose(-1, -2))).sum((-1, -2)) + (
+        adjB[mol, b, a][:, None] * (-B_x.transpose(-1, -2))
+    ).sum((-1, -2))
 
-        # ----- pair derivative contractions -----
-        dSi = gather_mat(S_x, src_u, src_k)
-        dBi = gather_mat(B_x, src_u, src_k)
-        dSj = gather_mat(S_x, src_v, src_k)
-        dBj = gather_mat(B_x, src_v, src_k)
+    if COR is not None:
+        Cx0 = torch.zeros((P, 3, 4), dtype=dtype, device=device)
+        Cx1 = torch.zeros_like(Cx0)
 
-        dhi = gather_cor_x(src_u, src_k)
-        dhj = gather_cor_x(src_v, src_k)
+        Cx0[:, :, 0] = pair_core_semi_x[:, :, 0, 0]
+        Cx1[:, :, 0] = pair_core_semi_x[:, :, 0, 1]
 
-        dhk_u = gather_cor_x(src_k, src_u)
-        dhk_v = gather_cor_x(src_k, src_v)
+        Cx0p = (pair_core_semi_x[:, :, 2, 0] + 2 * pair_core_semi_x[:, :, 3, 0]) / 3
+        Cx1p = (pair_core_semi_x[:, :, 2, 1] + 2 * pair_core_semi_x[:, :, 3, 1]) / 3
 
-        q_u = (
-            (adj_Si[:, :, None] * dSi).sum((-1, -2))
-            + (adj_Bi[:, :, None] * dBi).sum((-1, -2))
-            + (adj_hi[:, :, None] * dhi).sum(-1)
-        )
+        ha = (molecule.species[mol, a] > 1).to(dtype)[:, None]
+        hb = (molecule.species[mol, b] > 1).to(dtype)[:, None]
 
-        q_v = (
-            (adj_Sj[:, :, None] * dSj).sum((-1, -2))
-            + (adj_Bj[:, :, None] * dBj).sum((-1, -2))
-            + (adj_hj[:, :, None] * dhj).sum(-1)
-        )
+        Cx0[:, :, 1:] = Cx0p[:, :, None] * ha[:, :, None]
+        Cx1[:, :, 1:] = Cx1p[:, :, None] * hb[:, :, None]
 
-        q_ku = (adj_hk[:, :, None] * dhk_u).sum(-1)
-        q_kv = (adj_hk[:, :, None] * dhk_v).sum(-1)
+        q_ab = q_ab + (adjCOR[mol, a, b][:, None, :] * Cx0).sum(-1)
+        q_ba = q_ba + (adjCOR[mol, b, a][:, None, :] * (-Cx1)).sum(-1)
 
-        flat_k = mol[:, None] * molsize + k_ids[None, :]
+    grad.index_add_(0, fa, q_ab)
+    grad.index_add_(0, fb, -q_ab)
 
-        grad.index_add_(0, flat_u[:, None].expand(npairs, K).reshape(-1), q_u.reshape(-1, 3))
-        grad.index_add_(0, flat_k.reshape(-1), -q_u.reshape(-1, 3))
+    grad.index_add_(0, fb, q_ba)
+    grad.index_add_(0, fa, -q_ba)
 
-        grad.index_add_(0, flat_v[:, None].expand(npairs, K).reshape(-1), q_v.reshape(-1, 3))
-        grad.index_add_(0, flat_k.reshape(-1), -q_v.reshape(-1, 3))
-
-        # hk is COR(k,u) + COR(k,v), so its source atom is k.
-        grad.index_add_(0, flat_k.reshape(-1), (q_ku + q_kv).reshape(-1, 3))
-        grad.index_add_(0, flat_u[:, None].expand(npairs, K).reshape(-1), -q_ku.reshape(-1, 3))
-        grad.index_add_(0, flat_v[:, None].expand(npairs, K).reshape(-1), -q_kv.reshape(-1, 3))
-
-    return grad.reshape(molecule.nmol, molsize, 3)
+    return grad.reshape(M, N, 3)

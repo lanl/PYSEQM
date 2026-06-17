@@ -81,7 +81,7 @@ species, coordinates = read_xyz(['./examples/methane.xyz'])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
 
-const = Constants().to(device)
+const = Constants(do_timing=True).to(device)
 active_state = 1
 
 seqm_parameters = {
@@ -93,10 +93,10 @@ seqm_parameters = {
     # [1], adaptive mixing
     # [2], adaptive mixing, then pulay
     # 'uhf' : True,
-    "excited_states": {"n_states": 4, "method": "cis"},
-    "active_state": 1,
+    # "excited_states": {"n_states": 4, "method": "cis"},
+    # "active_state": 1,
     # 'scf_backward': 1,
-    # "analytical_gradient": [True],
+    "analytical_gradient": [True],
 }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -104,7 +104,7 @@ molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
 ### Create electronic structure driver:
 esdriver = Electronic_Structure(seqm_parameters).to(device)
 
-esdriver(molecules,do_force=False)
+esdriver(molecules,do_force=True)
 
 print(' Total Energy (eV):\n', molecules.Etot)
 # print(f"Dipoles\n{molecules.dipole}")
@@ -112,4 +112,5 @@ print(' Total Energy (eV):\n', molecules.Etot)
 print('\n Electronic Energy (eV): ', molecules.Eelec)
 print('\n Nuclear Energy (eV):\n', molecules.Enuc)
 print('\n Heat of Formation (ev):\n', molecules.Hf)
-print('\n Orbital energies (eV):\n', molecules.e_mo)
+print("Timing is \n",const.timing)
+# print('\n Orbital energies (eV):\n', molecules.e_mo)
