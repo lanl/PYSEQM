@@ -45,32 +45,30 @@ def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_
     idx_i, idx_j = torch.triu_indices(n_states, n_states, offset=1, device=device)
     real_atoms = (species[0] > 0).nonzero(as_tuple=False).squeeze(1)
 
-    max_abs_diff = 0.0
-    max_rel_diff = 0.0
-    for atom in real_atoms.tolist():
-        for coord in range(3):
-            vel_old = torch.zeros_like(molecule.coordinates)
-            acc_old = torch.zeros_like(molecule.coordinates)
-            vel_old[:, atom, coord] = 1.0
+    vel_old = torch.zeros_like(molecule.coordinates)
+    acc_old = torch.zeros_like(molecule.coordinates)
+    velocity_rows = torch.tensor(
+        [[1.0, -0.25, 0.50], [-0.40, 0.20, 0.10], [0.30, -0.10, 0.70]], dtype=vel_old.dtype, device=device
+    )
+    for atom, row in zip(real_atoms[: velocity_rows.shape[0]].tolist(), velocity_rows):
+        vel_old[:, atom, :] = row
 
-            nac_dt = compute_tdc_hamiltonian_fd(
-                nad, molecule, cache_new, learned_parameters={}, vel_old=vel_old, acc_old=acc_old
-            )
+    nac_dt = compute_tdc_hamiltonian_fd(
+        nad, molecule, cache_new, learned_parameters={}, vel_old=vel_old, acc_old=acc_old
+    )
 
-            tdc_upper = nac_dt[:, :n_states, :n_states][:, idx_i, idx_j]
-            nac_pairs = []
-            for i, j in zip(idx_i.tolist(), idx_j.tolist()):
-                vec = molecule.nac.get((i, j))
-                if vec is None:
-                    vec = torch.zeros(
-                        (species.shape[0], molecule.molsize, 3), dtype=tdc_upper.dtype, device=device
-                    )
-                nac_pairs.append(vec[:, atom, coord])
-            nac_upper = torch.stack(nac_pairs, dim=1)
-            diff = torch.abs(tdc_upper - nac_upper)
-            rel = diff / torch.clamp(torch.abs(nac_upper), min=1.0e-12)
-            max_abs_diff = max(max_abs_diff, float(diff.max().item()))
-            max_rel_diff = max(max_rel_diff, float(rel.max().item()))
+    tdc_upper = nac_dt[:, :n_states, :n_states][:, idx_i, idx_j]
+    expected_pairs = []
+    for i, j in zip(idx_i.tolist(), idx_j.tolist()):
+        vec = molecule.nac.get((i, j))
+        if vec is None:
+            vec = torch.zeros((species.shape[0], molecule.molsize, 3), dtype=tdc_upper.dtype, device=device)
+        expected_pairs.append((vec * vel_old).sum(dim=(1, 2)))
+    expected_upper = torch.stack(expected_pairs, dim=1)
+    diff = torch.abs(tdc_upper - expected_upper)
+    rel = diff / torch.clamp(torch.abs(expected_upper), min=1.0e-12)
+    max_abs_diff = float(diff.max().item())
+    max_rel_diff = float(rel.max().item())
 
     assert max_abs_diff < 1.0e-4, f"Max abs diff too large: {max_abs_diff:.6e}"
     assert max_rel_diff < 1.0e-6, f"Max rel diff too large: {max_rel_diff:.6e}"

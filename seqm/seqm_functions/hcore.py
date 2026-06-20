@@ -211,7 +211,7 @@ def overlap_between_geometries(molecule, coords1, coords2):
         overlap_args = (molecule.const.qn_int,)
 
     # Parameters are stored only for real atoms; rebuild a padded view for indexing
-    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method)
+    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
     nmol, molsize = molecule.species.shape
     species = molecule.species
     device = coords1.device
@@ -313,6 +313,11 @@ def _orthogonalized_overlap(S1, S12, S2, eigval_tol=None):
     S12_orth = eigvecs1.transpose(-1, -2) @ S12 @ eigvecs2
     S12_orth = S12_orth * inv_sqrt1.unsqueeze(-1) * inv_sqrt2.unsqueeze(-2)
     return eigvecs1 @ S12_orth @ eigvecs2.transpose(-1, -2)
+
+
+def orthogonalized_overlap_from_matrices(S1, S12, S2, eigval_tol=None):
+    """Orthogonalize a precomputed overlap triple without rebuilding AO overlaps."""
+    return _orthogonalized_overlap(S1, S12, S2, eigval_tol)
 
 
 def orthogonalized_overlap_between_geometries(molecule, coords1, coords2, eigval_tol=None, pack_fn=None):

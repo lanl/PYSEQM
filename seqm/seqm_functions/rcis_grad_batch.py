@@ -77,7 +77,7 @@ def rcis_grad_batch(
 
     if method in {"OM1", "OM2", "OM3"}:
         ortho_density = B0 if not include_ground_state else B0 + P0
-        e1b_x, e2a_x, fko_x, omx_orthogonalization_grad = omx_fd(
+        e1b_x, e2a_x, fko_x, omx_orthogonalization_grad, _ = omx_fd(
             mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, method, ortho_density
         )
 

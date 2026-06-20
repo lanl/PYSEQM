@@ -48,8 +48,10 @@ class OutputConfig:
     @classmethod
     def from_dict(cls, config: Optional[Dict] = None) -> "OutputConfig":
         """Create OutputConfig from dictionary with backward compatibility."""
-        if config is None:
-            config = {}
+        if not config:
+            return cls(
+                molid=[], print_every=0, checkpoint_every=0, xyz_every=0, h5_config={}, h5_vectors_every=None
+            )
 
         # Backward compatibility
         if "thermo" in config and "print_every" not in config:
@@ -60,7 +62,8 @@ class OutputConfig:
             config.setdefault("h5", {}).setdefault("data", dump)
 
         wanted_vectors = {"coordinates", "velocities", "forces"}
-        vals = [v for k, v in config["h5"].items() if k in wanted_vectors and isinstance(v, int) and v > 0]
+        h5 = config.get("h5", {}) or {}
+        vals = [v for k, v in h5.items() if k in wanted_vectors and isinstance(v, int) and v > 0]
         vectors_every = min(vals, default=None)
 
         return cls(

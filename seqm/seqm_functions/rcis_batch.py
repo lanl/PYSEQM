@@ -1074,20 +1074,29 @@ def get_occ_virt(mol, orbital_window=None, e_mo=None):
 
 
 def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
-    nmol = mol.nmol
-    norb = mol.norb[0]
-    nocc = mol.nocc[0]
+    nmol = int(mol.nmol)
+    norb = int(mol.norb[0])
+    nocc = int(mol.nocc[0])
     nvirt = norb - nocc
 
-    Via = z.view(nmol, nocc, nvirt)
-    P_xi = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, Via, Cvirt)
-    P_xi = P_xi + P_xi.transpose(1, 2)
+    # if z.dim() != 2:
+    #     raise ValueError("z must have shape [batch, nocc * nvirt].")
+    # if z.shape[1] != nocc * nvirt:
+    #     raise ValueError("z has incompatible orbital dimension.")
+    # if z.shape[0] % nmol != 0:
+    #     raise ValueError("z batch size must be a multiple of mol.nmol.")
 
-    F0 = makeA_pi_batched(mol, P_xi.unsqueeze(1), w, allSymmetric=True)
-    A = torch.einsum("Nmi,Nmn,Nna->Nia", Cocc, F0.squeeze(1), Cvirt) * 2.0
-    A += Via * ea_ei
+    nroots = z.shape[0] // nmol
+    Via = z.reshape(nmol, nroots, nocc, nvirt)
+    P_xi = torch.einsum("Nmi,Nria,Nna->Nrmn", Cocc, Via, Cvirt)
+    P_xi = P_xi + P_xi.transpose(-1, -2)
 
-    return A.reshape(nmol, -1)
+    F0 = makeA_pi_batched(mol, P_xi, w, allSymmetric=True)
+    A = torch.einsum("Nmi,Nrmn,Nna->Nria", Cocc, F0, Cvirt) * 2.0
+
+    A += Via * ea_ei[:, None]
+
+    return A.reshape(nmol * nroots, nocc * nvirt)
 
 
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
@@ -1150,7 +1159,7 @@ def make_cis_densities(
         if do_relaxed_density:
             # Calculate z-vector
             # make RHS of the CPSCF equation:
-            B_pi = makeA_pi_batched(mol, B.unsqueeze(1), w).squeeze(1) * 2.0
+            B_pi = makeA_pi_batched(mol, B.unsqueeze(1), w, allSymmetric=True).squeeze(1) * 2.0
             R_pi = makeA_pi_batched(mol, R.unsqueeze(1), w).squeeze(1) * 2.0
             RHS = -torch.einsum("Nni,Nmn,Nma->Nia", Cocc, B_pi, Cvirt)
             RHS -= torch.einsum("Nni,Nmn,Nma->Nia", B_virt, R_pi, Cvirt)
@@ -1163,19 +1172,13 @@ def make_cis_densities(
             del B_occ, B_virt
             RHS = RHS.reshape(nmol, nocc * nvirt)
             ea_ei = e_mo[:, nocc:norb].unsqueeze(1) - e_mo[:, :nocc].unsqueeze(2)
+            ea_flat = ea_ei.reshape(nmol, nocc * nvirt)
+            rhs0 = RHS / ea_flat
 
-            # Ad_inv_b = RHS/ea_ei
-            # x1 = make_A_times_zvector(mol,Ad_inv_b,w,e_mo)
+            def applyA(z):
+                return make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt)
 
-            def setup_applyA(mol, w, ea_ei, Cocc, Cvirt):
-                def applyA(z):
-                    Az = make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt)
-                    return Az
-
-                return applyA
-
-            A = setup_applyA(mol, w, ea_ei, Cocc, Cvirt)
-            zvec = conjugate_gradient_batch(A, RHS, ea_ei.view(nmol, nocc * nvirt), tol=zvec_tolerance)
+            zvec = conjugate_gradient_batch(applyA, RHS, ea_flat, tol=zvec_tolerance, x0=rhs0)
 
             z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
             D = B + z_ao + z_ao.transpose(1, 2)  # Now this contains the relaxed density

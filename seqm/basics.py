@@ -1182,7 +1182,16 @@ class Energy(torch.nn.Module):
                         (i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)
                     ]
                     pair_nac = calc_nac(
-                        molecule, exc_amps, excitation_energies, P, ri, riXH, pair_list, rpa=method == "rpa"
+                        molecule,
+                        exc_amps,
+                        excitation_energies,
+                        P,
+                        ri,
+                        riXH,
+                        pair_list,
+                        rpa=method == "rpa",
+                        w=w,
+                        e_mo=e,
                     )
                     nac_vec = {}
                     for pair_idx, (s1, s2) in enumerate(pair_list):

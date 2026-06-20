@@ -276,7 +276,7 @@ def scf_grad(
 
     # if method == "OM1":
     if method in {"OM1", "OM2", "OM3"}:
-        e1b_x_new, e2a_x_new, fko_x, omx_orthogonalization_grad = omx_fd(
+        e1b_x_new, e2a_x_new, fko_x, omx_orthogonalization_grad, _ = omx_fd(
             molecule, overlap_KAB_x, w_x_new, Xij, ni, nj, idxi, idxj, method, P0
         )
 
@@ -330,13 +330,11 @@ from .om2_hcore import (
 )
 
 
-def omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x):
-    # Save S_blocks, B_blocks, core_semi instead of rebuilding here. At least core_semi
+def _build_omx_ortho_cache(molecule):
     orb_dim = 4
     device = molecule.coordinates.device
     dtype = molecule.coordinates.dtype
     nblocks = molecule.nmol * molecule.molsize * molecule.molsize
-    method = molecule.method
 
     tables = molecule.parameters.get("_omx_tables")
     basis_data = molecule.parameters.get("_omx_basis_data")
@@ -362,25 +360,42 @@ def omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x):
 
     S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
     B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
+    return {"S5": S5, "B5": B5, "tables": tables}
 
-    if P0.dim() == 4:
+
+def _density_to_ortho_blocks(P0, molecule, unrestricted=False):
+    molsize = molecule.molsize
+    if unrestricted:
         Ptot = P0[:, 0] + P0[:, 1]
     else:
         Ptot = P0
-    molsize = molecule.molsize
-    P_blocks = (
-        Ptot.reshape(molecule.nmol, molsize, 4, molsize, 4)
-        .transpose(2, 3)
-        .reshape(molecule.nmol * molsize * molsize, 4, 4)
+    if Ptot.dim() == 3:
+        Ptot = Ptot.unsqueeze(1)
+    ndensity = Ptot.shape[1]
+    return (
+        Ptot.reshape(molecule.nmol, ndensity, molsize, 4, molsize, 4)
+        .permute(0, 2, 4, 1, 3, 5)
+        .reshape(molecule.nmol * molsize * molsize, ndensity, 4, 4)
     )
+
+
+def omx_threebody_ortho_grad(
+    molecule, P0, S_x, B_x, pair_core_semi_x, ortho_cache=None, unrestricted=False, vel_eff=None
+):
+    cache = _build_omx_ortho_cache(molecule) if ortho_cache is None else ortho_cache
+    tables = cache["tables"]
+    P_blocks = _density_to_ortho_blocks(P0, molecule, unrestricted=unrestricted)
+    method = molecule.method
     if method == "OM3":
-        omx_orthogonalization_grad = betor_grad_dense(P_blocks, S5, B5, S_x, B_x, molecule, tables["gval1"])
+        grad = betor_grad_dense(
+            P_blocks, cache["S5"], cache["B5"], S_x, B_x, molecule, tables["gval1"], vel_eff=vel_eff
+        )
     else:
         COR = molecule.om2_COR
-        omx_orthogonalization_grad = betor_grad_dense(
+        grad = betor_grad_dense(
             P_blocks,
-            S5,
-            B5,
+            cache["S5"],
+            cache["B5"],
             S_x,
             B_x,
             molecule,
@@ -388,8 +403,9 @@ def omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x):
             COR=COR,
             gval2=tables["gval2"],
             pair_core_semi_x=pair_core_semi_x,
+            vel_eff=vel_eff,
         )
-    return omx_orthogonalization_grad
+    return grad[:, 0] if grad.shape[1] == 1 else grad
 
 
 repeat_tensor = lambda x: torch.cat([x, x])
@@ -1663,6 +1679,7 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
     method_is_om2 = method == "OM2"
     B_x = overlap_KAB_x
     pair_core_semi_x = None
+    ortho_cache = _build_omx_ortho_cache(molecule) if need_threebody_grad else None
     if need_threebody_grad:
         S_x = torch.zeros_like(B_x)
         if method_is_om2:
@@ -1709,12 +1726,15 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
 
     omx_orthogonalization_grad = None
     if need_threebody_grad:
-        omx_orthogonalization_grad = omx_threebody_ortho_grad(molecule, P0, S_x, B_x, pair_core_semi_x)
+        omx_orthogonalization_grad = omx_threebody_ortho_grad(
+            molecule, P0, S_x, B_x, pair_core_semi_x, ortho_cache=ortho_cache, unrestricted=P0.dim() == 4
+        )
+        ortho_cache = {"S_x": S_x, "B_x": B_x.clone(), "pair_core_semi_x": pair_core_semi_x, **ortho_cache}
 
     # Hcore derivative needs to have upper and lower triangle contribution, multiply by 2.0, since Hcore is symmetric and will be contracted with a symmetric P0.
     overlap_KAB_x *= 2.0
 
-    return e1b_x, e2a_x, fko_x, omx_orthogonalization_grad
+    return e1b_x, e2a_x, fko_x, omx_orthogonalization_grad, ortho_cache
 
 
 def _flat(X):
@@ -1723,19 +1743,27 @@ def _flat(X):
 
 
 def _unflat(X, N):
-    M = X.shape[0]
-    return X.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
+    if X.dim() == 3:
+        M = X.shape[0]
+        return X.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
+    M, K = X.shape[:2]
+    return X.reshape(M, K, N, 4, N, 4).permute(0, 1, 2, 4, 3, 5)
 
 
 def _dense_from_pairs(M, N, mol, i, j, blocks):
-    W = blocks.new_zeros((M, 4 * N, 4 * N))
-    W5 = W.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
-    W5[mol, i, j] = blocks
-    return W
+    if blocks.dim() == 3:
+        W = blocks.new_zeros((M, 4 * N, 4 * N))
+        W5 = W.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
+        W5[mol, i, j] = blocks
+        return W
+    K = blocks.shape[1]
+    W = blocks.new_zeros((M, K, N, N, 4, 4))
+    W[mol, :, i, j] = blocks
+    return W.permute(0, 1, 2, 4, 3, 5).reshape(M, K, 4 * N, 4 * N)
 
 
 def betor_grad_dense(
-    P_blocks, S5, B5, S_x, B_x, molecule, gval1, COR=None, gval2=None, pair_core_semi_x=None
+    P_blocks, S5, B5, S_x, B_x, molecule, gval1, COR=None, gval2=None, pair_core_semi_x=None, vel_eff=None
 ):
     M, N = S5.shape[:2]
     dtype, device = S5.dtype, S5.device
@@ -1746,26 +1774,29 @@ def betor_grad_dense(
     b = mask % N
     P = mask.numel()
 
+    if P_blocks.dim() == 3:
+        P_blocks = P_blocks.unsqueeze(1)
+    K = P_blocks.shape[1]
     W = 2.0 * P_blocks[mask]
 
     S2 = _flat(S5)
     B2 = _flat(B5)
 
     ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
-    G1 = -ft1[:, None, None] * W
+    G1 = -ft1[:, None, None, None] * W
 
     W1 = _dense_from_pairs(M, N, mol, a, b, G1)
-    W1 = W1 + W1.transpose(1, 2)
+    W1 = W1 + W1.transpose(-1, -2)
 
-    adjS2 = torch.bmm(W1, B2)
-    adjB2 = torch.bmm(W1, S2)
+    adjS2 = torch.matmul(W1, B2[:, None])
+    adjB2 = torch.matmul(W1, S2[:, None])
 
     if COR is not None:
         ft2 = 0.0625 * (gval2[molecule.ni] + gval2[molecule.nj])
-        G2 = ft2[:, None, None] * W
+        G2 = ft2[:, None, None, None] * W
 
         W2 = _dense_from_pairs(M, N, mol, a, b, G2)
-        W2 = W2 + W2.transpose(1, 2)
+        W2 = W2 + W2.transpose(-1, -2)
 
         COR4 = COR.reshape(M, N, 4, N).permute(0, 1, 3, 2)  # [M,N,N,4]
         F = COR4.unsqueeze(-1) - COR4.transpose(1, 2).unsqueeze(-2)
@@ -1773,29 +1804,33 @@ def betor_grad_dense(
         D = S5 * F
         D2 = _flat(D)
 
-        adjD2 = torch.bmm(W2, S2)
-        adjS2 = adjS2 + torch.bmm(W2, D2)
+        adjD2 = torch.matmul(W2, S2[:, None])
+        adjS2 = adjS2 + torch.matmul(W2, D2[:, None])
 
         adjD = _unflat(adjD2, N)
-        adjS = _unflat(adjS2, N) + adjD * F
+        adjS = _unflat(adjS2, N) + adjD * F[:, None]
         adjB = _unflat(adjB2, N)
 
-        adjF = adjD * S5
-        adjCOR = adjF.sum(-1) - adjF.sum(-2).transpose(1, 2)
+        adjF = adjD * S5[:, None]
+        adjCOR = adjF.sum(-1) - adjF.sum(-2).transpose(-3, -2)
     else:
         adjS = _unflat(adjS2, N)
         adjB = _unflat(adjB2, N)
         adjCOR = None
 
-    grad = torch.zeros((M * N, 3), dtype=dtype, device=device)
-    fa = mol * N + a
-    fb = mol * N + b
+    S_x_t = -S_x.transpose(-1, -2)
+    B_x_t = -B_x.transpose(-1, -2)
+    adjS_ab = adjS[mol, :, a, b]
+    adjB_ab = adjB[mol, :, a, b]
+    adjS_ba = adjS[mol, :, b, a]
+    adjB_ba = adjB[mol, :, b, a]
 
-    q_ab = (adjS[mol, a, b][:, None] * S_x).sum((-1, -2)) + (adjB[mol, a, b][:, None] * B_x).sum((-1, -2))
-
-    q_ba = (adjS[mol, b, a][:, None] * (-S_x.transpose(-1, -2))).sum((-1, -2)) + (
-        adjB[mol, b, a][:, None] * (-B_x.transpose(-1, -2))
-    ).sum((-1, -2))
+    q_ab = (adjS_ab[:, :, None] * S_x[:, None]).sum((-1, -2)) + (adjB_ab[:, :, None] * B_x[:, None]).sum(
+        (-1, -2)
+    )
+    q_ba = (adjS_ba[:, :, None] * S_x_t[:, None]).sum((-1, -2)) + (adjB_ba[:, :, None] * B_x_t[:, None]).sum(
+        (-1, -2)
+    )
 
     if COR is not None:
         Cx0 = torch.zeros((P, 3, 4), dtype=dtype, device=device)
@@ -1813,8 +1848,23 @@ def betor_grad_dense(
         Cx0[:, :, 1:] = Cx0p[:, :, None] * ha[:, :, None]
         Cx1[:, :, 1:] = Cx1p[:, :, None] * hb[:, :, None]
 
-        q_ab = q_ab + (adjCOR[mol, a, b][:, None, :] * Cx0).sum(-1)
-        q_ba = q_ba + (adjCOR[mol, b, a][:, None, :] * (-Cx1)).sum(-1)
+        adjCOR_ab = adjCOR[mol, :, a, b]
+        adjCOR_ba = adjCOR[mol, :, b, a]
+        q_ab = q_ab + (adjCOR_ab[:, :, None, :] * Cx0[:, None, :, :]).sum(-1)
+        q_ba = q_ba + (adjCOR_ba[:, :, None, :] * (-Cx1[:, None, :, :])).sum(-1)
+
+    if vel_eff is not None:
+        # Fast path for TD-NAC: the caller only needs grad · vel, so skip the
+        # dense [M, K, N, 3] gradient materialization and contract per-pair.
+        v_ab = vel_eff[mol, a] - vel_eff[mol, b]
+        pair_val = ((q_ab - q_ba) * v_ab[:, None, :]).sum(dim=-1)
+        grad = torch.zeros((M, K), dtype=dtype, device=device)
+        grad.index_add_(0, mol, pair_val)
+        return grad
+
+    grad = torch.zeros((M * N, K, 3), dtype=dtype, device=device)
+    fa = mol * N + a
+    fb = mol * N + b
 
     grad.index_add_(0, fa, q_ab)
     grad.index_add_(0, fb, -q_ab)
@@ -1822,4 +1872,4 @@ def betor_grad_dense(
     grad.index_add_(0, fb, q_ba)
     grad.index_add_(0, fa, -q_ba)
 
-    return grad.reshape(M, N, 3)
+    return grad.reshape(M, N, K, 3).permute(0, 2, 1, 3)

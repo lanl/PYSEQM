@@ -76,7 +76,7 @@ coordinates = torch.tensor(
     device=device,
 )
 # species, coordinates = read_xyz(["/Users/vishikh/onedrive/calculations/CNT_10.xyz"])
-species, coordinates = read_xyz(['./examples/methane.xyz'])
+# species, coordinates = read_xyz(['./examples/methane.xyz'])
 # species, coordinates = read_xyz(['./234ppe.xyz'])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
@@ -93,10 +93,14 @@ seqm_parameters = {
     # [1], adaptive mixing
     # [2], adaptive mixing, then pulay
     # 'uhf' : True,
-    # "excited_states": {"n_states": 4, "method": "cis"},
-    # "active_state": 1,
+    "excited_states": {"n_states": 4, "method": "cis"},
+    "active_state": 1,
     # 'scf_backward': 1,
     "analytical_gradient": [True],
+    "nonadiabatic": {
+        "compute_nac": True,  # enable NAC vectors for hopping
+        "pairs": ((1,2),),
+        }
 }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -112,5 +116,7 @@ print(' Total Energy (eV):\n', molecules.Etot)
 print('\n Electronic Energy (eV): ', molecules.Eelec)
 print('\n Nuclear Energy (eV):\n', molecules.Enuc)
 print('\n Heat of Formation (ev):\n', molecules.Hf)
+print('\n force:\n', molecules.force)
 print("Timing is \n",const.timing)
+print("NAC\n",molecules.nac[(0,1)])
 # print('\n Orbital energies (eV):\n', molecules.e_mo)

@@ -9,7 +9,7 @@ from seqm.seqm_functions.rcis_batch import packone_batch
 from .dynamics.nac_utils import resolve_nac_config
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
 from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
-from .seqm_functions.hcore import orthogonalized_overlap_between_geometries
+from .seqm_functions.hcore import orthogonalized_overlap_from_matrices, overlap_between_geometries
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 
@@ -94,6 +94,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         if nac_settings.pairs:
             na_cfg["nac_states"] = nac_settings.pairs
         params["nonadiabatic"] = na_cfg
+        method = str(params["method"]).upper()
+        tdc_method = str(na_cfg.get("tdc_method", "hamiltonian_fd")).strip().lower()
+        if method == "PM6" and tdc_method in ("overlap", "hamiltonian_fd"):
+            raise NotImplementedError(f"nonadiabatic.tdc_method='{tdc_method}' is not implemented for PM6.")
         super().__init__(
             damp=damp,
             seqm_parameters=params,
@@ -104,13 +108,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             *args,
             **kwargs,
         )
-        self.compute_nac = nac_settings.enabled
-        self._tdc_method = str(na_cfg.get("tdc_method", "hamiltonian_fd")).strip().lower()
+        self._tdc_method = tdc_method
         if self._tdc_method not in ("overlap", "hamiltonian_fd"):
             raise ValueError(
                 f"Invalid nonadiabatic.tdc_method '{self._tdc_method}'. "
                 "Supported methods: 'overlap', 'hamiltonian_fd'."
             )
+        self.compute_nac = nac_settings.enabled
         self._dtnact = 5e-5  # small dt for finite-diff, NEXMD uses 0.002 au
         self.initial_state = initial_state
         self._electronic_substeps: Optional[int] = None
@@ -134,6 +138,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._perm_cost_buffers: Dict[tuple, torch.Tensor] = {}
         self._coords_prev: Optional[torch.Tensor] = None
         self._mos_prev: Optional[torch.Tensor] = None
+        self._packed_overlap_prev: Optional[torch.Tensor] = None
+        self._overlap_pack_spec: Optional[tuple] = None
         self._resume_state = None
 
     def _normalize_initial_state(self, nmol: int, device) -> torch.Tensor:
@@ -344,8 +350,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         perms = [self._hungarian_perm(cost_cpu[m]) for m in range(nmol)]
         return torch.stack(perms, dim=0)
 
-    @staticmethod
     def _time_derivative_coupling(
+        self,
         molecule,
         coords_prev,
         mos_prev,
@@ -365,19 +371,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         Returns:
           nac_dt: (nmol, nstates, nstates)
         """
-        if coords_prev is None or mos_prev is None:
-            raise RuntimeError("Overlap TDC requires previous coordinates and molecular orbitals.")
-        if cis_prev is None or cis_curr is None:
-            raise RuntimeError("Overlap TDC requires previous and current CIS amplitudes.")
-
-        if molecule.nocc.dim() != 1:  # restricted closed-shell
-            raise RuntimeError("Overlap TDC currently supports restricted closed-shell only.")
-
-        # TODO: orbital_window logic to limit nocc/nvirt
         nocc = int(molecule.nocc[0].item())
-        norb = int(molecule.norb[0].item())
-        nvirt = norb - nocc
-
+        nvirt = int(molecule.norb[0].item()) - nocc
         nmol = int(molecule.nmol)
         nov = nocc * nvirt
 
@@ -403,14 +398,17 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         curr = parse_amp(cis_curr)
 
         with torch.no_grad():
-            # AO overlap between current geometry (rows) and previous geometry (cols)
-            # FIXME: this will fail for d-orbitals, will have to use packd
-            def pack_ao(S):
-                return packone_batch(S, 4 * molecule.nHeavy[0], molecule.nHydro[0], norb)
+            coords_curr = molecule.coordinates.detach()
 
-            S_ao = orthogonalized_overlap_between_geometries(
-                molecule, molecule.coordinates.detach(), coords_prev.detach(), pack_fn=pack_ao
+            S_curr = packone_batch(
+                overlap_between_geometries(molecule, coords_curr, coords_curr), *self._overlap_pack_spec
             )
+            S_cross = packone_batch(
+                overlap_between_geometries(molecule, coords_curr, coords_prev), *self._overlap_pack_spec
+            )
+            S_prev = self._packed_overlap_prev
+
+            S_ao = orthogonalized_overlap_from_matrices(S_curr, S_cross, S_prev)
 
             # MO overlap: S_mo = C(t)^T S_ao(t,t-dt) C(t-dt)
             Cc = molecule.molecular_orbitals  # (nmol, nao, norb)
@@ -442,7 +440,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 return torch.bmm(Cf, Cdf.transpose(1, 2))
 
             if curr[0] == "cis":
-                _, flat_p, view_p = prev
+                _, flat_p, _ = prev
                 _, flat_c, view_c = curr
 
                 # CI-derivative term: <p|c> - <c|p>
@@ -454,7 +452,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 coup = coup + mo_term_virtual(view_c) + mo_term_occ(view_c)
 
             else:
-                _, (Xp_f, Yp_f), (Xp_v, Yp_v) = prev
+                _, (Xp_f, Yp_f), _ = prev
                 _, (Xc_f, Yc_f), (Xc_v, Yc_v) = curr
 
                 # CI-derivative term in Fortran style:
@@ -482,6 +480,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 coup = coup - torch.diag_embed(torch.diagonal(coup, dim1=1, dim2=2))
 
             nac_dt = coup / (2.0 * dt)
+            self._packed_overlap_prev = S_curr
 
         return nac_dt
 
@@ -825,6 +824,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
     ):
         if learned_parameters is None:
             learned_parameters = {}
+        self._coords_prev = None
+        self._mos_prev = None
+        self._packed_overlap_prev = None
+        self._overlap_pack_spec = None
         self._setup_states(molecule)
         self._init_coeffs(molecule)
         molecule.active_state = (
@@ -854,6 +857,29 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         need_current_cis_amp = self._cache_prev_cis_amp or not torch.is_tensor(init_nac_dot)
         if need_current_cis_amp:
             current_cis_amp = self._current_cis_amplitudes(molecule)
+        if not torch.is_tensor(init_nac_dot):
+            if self._tdc_method == "overlap":
+                if molecule.nocc.dim() != 1:
+                    raise NotImplementedError("Overlap TDC currently supports restricted closed-shell only.")
+                norb = int(molecule.norb[0].item())
+                self._overlap_pack_spec = (
+                    4 * int(molecule.nHeavy[0].item()),
+                    int(molecule.nHydro[0].item()),
+                    norb,
+                )
+                self._coords_prev = torch.empty_like(molecule.coordinates)
+                self._mos_prev = torch.empty_like(molecule.molecular_orbitals)
+                coords = molecule.coordinates.detach()
+                self._packed_overlap_prev = packone_batch(
+                    overlap_between_geometries(molecule, coords, coords), *self._overlap_pack_spec
+                )
+            elif self._tdc_method == "hamiltonian_fd":
+                if molecule.nocc.dim() != 1:
+                    raise NotImplementedError(
+                        "hamiltonian_fd TD-NAC currently supports restricted closed-shell only."
+                    )
+                if not torch.is_tensor(current_cis_amp) or current_cis_amp.dim() != 3:
+                    raise NotImplementedError("hamiltonian_fd TD-NAC currently supports CIS amplitudes only.")
         if self._cache_prev_cis_amp:
             self._copy_cache_entry(cache_old, "cis_amp", current_cis_amp)
         else:
@@ -869,7 +895,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             init_cache = {"energies": self._cache_old.get("energies"), "cis_amp": current_cis_amp}
             vel_old = molecule.velocities.detach().clone()
             acc_old = molecule.acc.detach().clone()
-            nd = compute_tdc_hamiltonian_fd(self, molecule, init_cache, learned_parameters, vel_old, acc_old)
+            nd = compute_tdc_hamiltonian_fd(
+                self, molecule, init_cache, learned_parameters, vel_old, acc_old, validate=False
+            )
             self._copy_cache_entry(self._cache_old, "nac_dot", nd)
 
         nmol = molecule.species.shape[0]
@@ -1000,17 +1028,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             acc_old = molecule.acc.detach().clone()
         elif self._tdc_method == "overlap":
             coords_prev = self._coords_prev
-            if coords_prev is None:
-                coords_prev = torch.empty_like(molecule.coordinates)
-                self._coords_prev = coords_prev
             coords_prev.copy_(molecule.coordinates.detach())
 
-            mos_curr = getattr(molecule, "molecular_orbitals", None)
-            if torch.is_tensor(mos_curr):
-                if self._mos_prev is None:
-                    self._mos_prev = torch.empty_like(mos_curr)
-                self._mos_prev.copy_(mos_curr.detach())
-                mos_prev = self._mos_prev
+            self._mos_prev.copy_(molecule.molecular_orbitals.detach())
+            mos_prev = self._mos_prev
 
         if self.damp is not None:
             self._apply_langevin_thermostat(molecule)
@@ -1040,7 +1061,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             nac_dt = cache_new.get("nac_dot")
         elif self._tdc_method == "hamiltonian_fd":
             nac_dt = compute_tdc_hamiltonian_fd(
-                self, molecule, cache_new, learned_parameters, vel_old, acc_old
+                self, molecule, cache_new, learned_parameters, vel_old, acc_old, validate=False
             )
             if not self._cache_prev_cis_amp:
                 cache_new.pop("cis_amp", None)

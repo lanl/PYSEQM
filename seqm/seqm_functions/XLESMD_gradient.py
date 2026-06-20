@@ -96,18 +96,13 @@ def xlesmd_rcis_grad_batch(
     # ) + 2.0 * (R * Rbar_pi).sum(dim=(1, 2))
     # print(f"DEBUG: XLESMD Gradient: energy is {debugE.item():.15f}")
 
-    # Ad_inv_b = RHS/ea_ei
-    # x1 = make_A_times_zvector(mol,Ad_inv_b,w,e_mo)
+    ea_flat = ea_ei.view(nmol, nocc * nvirt)
+    rhs0 = RHS / ea_flat
 
-    def setup_applyA(mol, w, ea_ei, Cocc, Cvirt):
-        def applyA(z):
-            Az = make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt)
-            return Az
+    def applyA(z):
+        return make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt)
 
-        return applyA
-
-    A = setup_applyA(mol, w, ea_ei, Cocc, Cvirt)
-    zvec = conjugate_gradient_batch(A, RHS, ea_ei.view(nmol, nocc * nvirt), tol=zvec_tolerance)
+    zvec = conjugate_gradient_batch(A=applyA, b=RHS, M_diag=ea_flat, tol=zvec_tolerance, x0=rhs0)
 
     z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
     cis_densities["relaxed_difference_density"] = (

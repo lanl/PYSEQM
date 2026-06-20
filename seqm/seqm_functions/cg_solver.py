@@ -9,6 +9,7 @@ def conjugate_gradient_batch(
     M_diag: Optional[torch.Tensor] = None,
     max_iter: int = 100,
     tol: float = 1e-6,
+    x0: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Fully‐batched (Preconditioned) Conjugate Gradient over arbitrary residual dimensions.
@@ -22,6 +23,7 @@ def conjugate_gradient_batch(
         M_diag (Optional[Tensor]): diag of preconditioner, same shape as b.
         max_iter (int): max CG iterations.
         tol (float): stop tolerance on residual norm.
+        x0 (Optional[Tensor]): optional initial guess, same shape as b.
 
     Returns:
         x (Tensor): solution, same shape as b.
@@ -31,9 +33,16 @@ def conjugate_gradient_batch(
     sum_dims = tuple(range(1, b.dim()))
     expand_shape = (batch_size,) + (1,) * (b.dim() - 1)
 
+    if x0 is not None and x0.shape != b.shape:
+        raise ValueError("x0 must have the same shape as b.")
+
     # 1) init
-    x = torch.zeros_like(b)
-    r = b.clone()  # residual
+    if x0 is None:
+        x = torch.zeros_like(b)
+        r = b.clone()  # residual
+    else:
+        x = x0.clone()
+        r = b - A(x)
     if M_diag is not None:
         M_inv = 1.0 / M_diag
         z = r * M_inv  # preconditioned residual

@@ -1,7 +1,19 @@
 import torch
 
-from seqm.seqm_functions.anal_grad import omx_fd, overlap_der_finiteDiff, w_der, w_derivative_numerical
-from seqm.seqm_functions.rcis_batch import unpackone_batch
+from seqm.seqm_functions.anal_grad import (
+    omx_fd,
+    omx_threebody_ortho_grad,
+    overlap_der_finiteDiff,
+    w_der,
+    w_derivative_numerical,
+)
+from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
+from seqm.seqm_functions.rcis_batch import (
+    get_occ_virt,
+    make_A_times_zvector_batched,
+    makeA_pi_batched,
+    unpackone_batch,
+)
 
 from .constants import a0
 from .omx_utils import OMX_METHODS, get_orbital_zetas
@@ -20,16 +32,18 @@ def _state_pair_tensors(state_pairs, device):
     return pair_tensor[:, 0] - 1, pair_tensor[:, 1] - 1
 
 
-def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device):
+def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device, return_w_x=False):
     npairs = mol.rij.shape[0]
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
     zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
     zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
     w_x = torch.zeros(npairs, 3, 10, 10, dtype=dtype, device=device)
+    p0_ortho_grad = None
+    ortho_cache = None
     if mol.method in OMX_METHODS:
-        e1b_x, e2a_x, _, _ = omx_fd(
-            mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, mol.method, None
+        e1b_x, e2a_x, _, p0_ortho_grad, ortho_cache = omx_fd(
+            mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, mol.method, P0
         )
     else:
         overlap_der_finiteDiff(
@@ -111,10 +125,14 @@ def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device):
     )
     e1b_x *= scale_emat
     e2a_x *= scale_emat
-    return overlap_KAB_x, e1b_x, e2a_x
+    if return_w_x:
+        return overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache, w_x
+    return overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache
 
 
-def _contract_nac_density_batch(mol, B, overlap_KAB_x, e1b_x, e2a_x, nmol, molsize):
+def _contract_nac_density_batch(
+    mol, B, B0, overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache, nmol, molsize
+):
     pair_grad = torch.einsum("pbxy,pcxy->pbc", B[mol.mask], overlap_KAB_x)
     pair_grad.add_(
         torch.einsum("pbxy,pcxy->pbc", B[mol.maskd[mol.idxj]], e2a_x)
@@ -124,10 +142,139 @@ def _contract_nac_density_batch(mol, B, overlap_KAB_x, e1b_x, e2a_x, nmol, molsi
     nac_cis = torch.zeros(nmol * molsize, pair_grad.shape[1], 3, dtype=B.dtype, device=B.device)
     nac_cis.index_add_(0, mol.idxi, pair_grad)
     nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
-    return nac_cis.view(nmol, molsize, pair_grad.shape[1], 3).permute(0, 2, 1, 3)
+    nac_cis = nac_cis.view(nmol, molsize, pair_grad.shape[1], 3).permute(0, 2, 1, 3)
+    if ortho_cache is not None:
+        nac_cis += omx_threebody_ortho_grad(
+            mol,
+            B0,
+            ortho_cache["S_x"],
+            ortho_cache["B_x"],
+            ortho_cache["pair_core_semi_x"],
+            ortho_cache=ortho_cache,
+            unrestricted=False,
+        )
+        if p0_ortho_grad is not None:
+            nac_cis += p0_ortho_grad.unsqueeze(1)
+    return nac_cis
 
 
-def calc_nac(mol, amp, e_exc, P0, ri, riXH, state_pairs, rpa=False, pair_batch_size=4):
+def _build_pair_response_density_batch(
+    mol, w, e_mo, Cocc, Cvirt, amp_i, amp_j, Bij_symm, zvec_tolerance, pair_response_cache=None
+):
+    nmol, nbatch, nocc, nvirt = amp_i.shape
+    if pair_response_cache is None:
+        RI = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, amp_i, Cvirt)
+        RJ = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, amp_j, Cvirt)
+        Bv_i = torch.einsum("Nma,Nbia->Nbmi", Cvirt, amp_i)
+        Bv_j = torch.einsum("Nma,Nbia->Nbmi", Cvirt, amp_j)
+        Bo_i = torch.einsum("Nmi,Nbia->Nbma", Cocc, amp_i)
+        Bo_j = torch.einsum("Nmi,Nbia->Nbma", Cocc, amp_j)
+    else:
+        RI, RJ, Bv_i, Bv_j, Bo_i, Bo_j = pair_response_cache
+    pair_pi = makeA_pi_batched(mol, torch.cat((Bij_symm, RI, RJ), dim=1), w)
+    BIJ_pi = pair_pi[:, :nbatch] * 2.0
+    RI_pi = pair_pi[:, nbatch : 2 * nbatch]
+    RJ_pi = pair_pi[:, 2 * nbatch :]
+
+    rhs = -torch.einsum("Nni,Nbmn,Nma->Nbia", Cocc, BIJ_pi, Cvirt)
+    rhs -= torch.einsum("Nbni,Nbmn,Nma->Nbia", Bv_i, RJ_pi, Cvirt)
+    rhs -= torch.einsum("Nbni,Nbmn,Nma->Nbia", Bv_j, RI_pi, Cvirt)
+    rhs += torch.einsum("Nni,Nbmn,Nbma->Nbia", Cocc, RI_pi, Bo_j)
+    rhs += torch.einsum("Nni,Nbmn,Nbma->Nbia", Cocc, RJ_pi, Bo_i)
+    ea_ei = e_mo[:, nocc : nocc + nvirt].unsqueeze(1) - e_mo[:, :nocc].unsqueeze(2)
+    rhs_flat = rhs.reshape(nmol * nbatch, nocc * nvirt)
+    ea_flat = ea_ei.repeat_interleave(nbatch, dim=0).reshape(nmol * nbatch, nocc * nvirt)
+    z0_flat = rhs_flat / ea_flat
+
+    def applyA(z):
+        return make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt)
+
+    zvec = conjugate_gradient_batch(applyA, rhs_flat, ea_flat, tol=zvec_tolerance, x0=z0_flat)
+    z_ao = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, zvec.view(nmol, nbatch, nocc, nvirt), Cvirt)
+    Dij = Bij_symm + z_ao + z_ao.transpose(-1, -2)
+    return Dij, RI, RJ
+
+
+def _contract_mixed_transition_terms(mol, RI0, RJ0, w_x, dtype, device):
+    nmol, nbatch, _, _ = RI0.shape
+    molsize = int(mol.molsize)
+    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
+    weight = torch.tensor(
+        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
+    ).reshape(1, 1, 10)
+    scale_emat = torch.tensor(
+        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
+        dtype=dtype,
+        device=device,
+    )
+    ind = torch.tensor(
+        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
+    )
+
+    def ao4(T):
+        return (
+            T.reshape(nmol, nbatch, molsize, 4, molsize, 4)
+            .permute(0, 2, 4, 1, 3, 5)
+            .reshape(nmol * molsize * molsize, nbatch, 4, 4)
+        )
+
+    def add_component(left0, right0, include_coulomb):
+        Rl = ao4(left0)
+        Rr = ao4(right0)
+        pair_grad = torch.zeros(mol.rij.shape[0], nbatch, 3, dtype=dtype, device=device)
+        if include_coulomb:
+            Rr_diag = Rr[mol.maskd]
+            PA = (Rr_diag[mol.idxi][..., indices[0], indices[1]] * weight).unsqueeze(-1)
+            PB = (Rr_diag[mol.idxj][..., indices[0], indices[1]] * weight).unsqueeze(-2)
+
+            J_x_2a = torch.zeros((mol.rij.shape[0], nbatch, 3, 4, 4), dtype=dtype, device=device)
+            J_x_1b = torch.zeros_like(J_x_2a)
+            J_x_2a[..., indices[0], indices[1]] = torch.sum(PA.unsqueeze(2) * w_x.unsqueeze(1), dim=3)
+            J_x_1b[..., indices[0], indices[1]] = torch.sum(PB.unsqueeze(2) * w_x.unsqueeze(1), dim=4)
+            J_x_2a *= scale_emat.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            J_x_1b *= scale_emat.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            pair_grad.add_(
+                (Rl[mol.maskd[mol.idxj]].unsqueeze(2) * J_x_2a).sum(dim=(3, 4))
+                + (Rl[mol.maskd[mol.idxi]].unsqueeze(2) * J_x_1b).sum(dim=(3, 4))
+            )
+
+        overlap_rx = torch.zeros((mol.rij.shape[0], nbatch, 3, 4, 4), dtype=dtype, device=device)
+        Pp = Rr[mol.mask].unsqueeze(2)
+        for i in range(4):
+            w_x_i = w_x[..., ind[i], :].unsqueeze(1)
+            for j in range(4):
+                overlap_rx[..., i, j] = -0.5 * torch.sum(Pp * w_x_i[..., :, ind[j]], dim=(3, 4))
+        pair_grad.add_((2.0 * Rl[mol.mask].unsqueeze(2) * overlap_rx).sum(dim=(3, 4)))
+        return pair_grad
+
+    RI_symm = 0.5 * (RI0 + RI0.transpose(-1, -2))
+    RJ_symm = 0.5 * (RJ0 + RJ0.transpose(-1, -2))
+    RI_antisymm = 0.5 * (RI0 - RI0.transpose(-1, -2))
+    RJ_antisymm = 0.5 * (RJ0 - RJ0.transpose(-1, -2))
+    pair_grad = 2.0 * add_component(RI_symm, RJ_symm, include_coulomb=True)
+    pair_grad += 2.0 * add_component(RI_antisymm, RJ_antisymm, include_coulomb=False)
+
+    nac_cis = torch.zeros(nmol * molsize, nbatch, 3, dtype=dtype, device=device)
+    nac_cis.index_add_(0, mol.idxi, pair_grad)
+    nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
+    return nac_cis.view(nmol, molsize, nbatch, 3).permute(0, 2, 1, 3)
+
+
+def calc_nac(
+    mol,
+    amp,
+    e_exc,
+    P0,
+    ri,
+    riXH,
+    state_pairs,
+    rpa=False,
+    pair_batch_size=4,
+    full_nac=False,
+    w=None,
+    e_mo=None,
+    zvec_tolerance=1e-6,
+):
     """
     amp: tensor of CIS amplitudes of shape [nmol, nroots, nov].
     state_pairs: iterable of 1-based (state1, state2) pairs.
@@ -138,26 +285,39 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state_pairs, rpa=False, pair_batch_s
         raise NotImplementedError(
             "Nonadiabatic coupling vecotrs not yet implemented for RPA. Use CIS instead."
         )
+    if full_nac and (w is None or e_mo is None):
+        raise ValueError("full_nac=True requires w and e_mo.")
     device = amp.device
     dtype = amp.dtype
-    norb = int(mol.norb[0].item())
-    nocc = int(mol.nocc[0].item())
-    nvirt = norb - nocc
     nmol = int(mol.nmol)
     molsize = int(mol.molsize)
     state_i, state_j = _state_pair_tensors(state_pairs, device)
+    pair_sign = torch.where(state_i <= state_j, 1.0, -1.0).to(dtype)
+    state_i, state_j = torch.minimum(state_i, state_j), torch.maximum(state_i, state_j)
     n_state_pairs = int(state_i.numel())
     if n_state_pairs == 0:
         return torch.empty((nmol, 0, molsize, 3), dtype=dtype, device=device)
 
     # CIS unrelaxed density:
     # B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j
-    C = mol.molecular_orbitals
-    Cocc = C[:, :, :nocc]
-    Cvirt = C[:, :, nocc:norb]
+    if full_nac:
+        nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
+    else:
+        nocc = int(mol.nocc[0].item())
+        nvirt = int(mol.norb[0].item()) - nocc
+        Cocc = mol.molecular_orbitals[:, :, :nocc]
+        Cvirt = mol.molecular_orbitals[:, :, nocc : nocc + nvirt]
     nroots = amp.shape[1]
     amp_ia = amp.view(nmol, nroots, nocc, nvirt)
-    overlap_KAB_x, e1b_x, e2a_x = _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device)
+    if full_nac:
+        overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache, w_x = _build_nac_derivative_operators(
+            mol, P0, ri, riXH, dtype, device, return_w_x=True
+        )
+    else:
+        overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache = _build_nac_derivative_operators(
+            mol, P0, ri, riXH, dtype, device
+        )
+        w_x = None
 
     nHeavy = int(mol.nHeavy[0].item())
     nHydro = int(mol.nHydro[0].item())
@@ -180,8 +340,26 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state_pairs, rpa=False, pair_batch_s
         Bij_chunk = torch.matmul(v_i, v_j.transpose(-1, -2)) - torch.matmul(o_i, o_j.transpose(-1, -2))
         Bij_chunk = 0.5 * (Bij_chunk + Bij_chunk.transpose(-1, -2))
 
+        density0 = Bij_chunk
+        RI0 = RJ0 = None
+        if full_nac:
+            RI = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, amp_i, Cvirt)
+            RJ = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, amp_j, Cvirt)
+            density0, RI0, RJ0 = _build_pair_response_density_batch(
+                mol,
+                w,
+                e_mo,
+                Cocc,
+                Cvirt,
+                amp_i,
+                amp_j,
+                Bij_chunk,
+                zvec_tolerance,
+                pair_response_cache=(RI, RJ, v_i, v_j, o_i, o_j),
+            )
+
         B0 = unpackone_batch(
-            Bij_chunk.reshape(nmol * nbatch, Bij_chunk.shape[2], Bij_chunk.shape[3]),
+            density0.reshape(nmol * nbatch, density0.shape[2], density0.shape[3]),
             4 * nHeavy,
             nHydro,
             size_full,
@@ -192,9 +370,33 @@ def calc_nac(mol, amp, e_exc, P0, ri, riXH, state_pairs, rpa=False, pair_batch_s
             .reshape(nmol * molsize * molsize, nbatch, 4, 4)
         )
         nac_cis[:, start:stop] = _contract_nac_density_batch(
-            mol, B, overlap_KAB_x, e1b_x, e2a_x, nmol, molsize
+            mol,
+            B,
+            B0.view(nmol, nbatch, size_full, size_full),
+            overlap_KAB_x,
+            e1b_x,
+            e2a_x,
+            p0_ortho_grad,
+            ortho_cache,
+            nmol,
+            molsize,
         )
+        if full_nac:
+            nac_cis[:, start:stop] += _contract_mixed_transition_terms(
+                mol,
+                unpackone_batch(
+                    RI0.reshape(nmol * nbatch, RI0.shape[2], RI0.shape[3]), 4 * nHeavy, nHydro, size_full
+                ).view(nmol, nbatch, size_full, size_full),
+                unpackone_batch(
+                    RJ0.reshape(nmol * nbatch, RJ0.shape[2], RJ0.shape[3]), 4 * nHeavy, nHydro, size_full
+                ).view(nmol, nbatch, size_full, size_full),
+                w_x,
+                dtype,
+                device,
+            )
 
     denom = e_exc[:, state_j] - e_exc[:, state_i]
     nac_cis = nac_cis / denom[:, :, None, None]
+    # Preserve the sign correction for callers that pass reversed state pairs.
+    nac_cis = nac_cis * pair_sign.view(1, n_state_pairs, 1, 1)
     return nac_cis
