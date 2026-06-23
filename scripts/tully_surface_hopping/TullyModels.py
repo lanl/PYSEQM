@@ -328,7 +328,6 @@ def run_tully(
 ):
     if method != "fssh":
         raise ValueError("Only FSSH Tully runs are supported.")
-    torch.manual_seed(seed)
     if isinstance(model, str):
         name = model.lower()
         if name in ("1", "single", "sac", "single_avoided_crossing", "model1"):
@@ -345,4 +344,4 @@ def run_tully(
     dyn._setup_states(mol)
     dyn._init_coeffs(mol)
     mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
-    return dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
+    return dyn.run(mol, steps=steps, reuse_P=True, remove_com=None, seed=seed)

@@ -72,7 +72,6 @@ def _run_single_worker(
     collect_density: bool,
 ) -> tuple[bool, torch.Tensor, Optional[np.ndarray]]:
     """Worker-safe single trajectory run."""
-    torch.manual_seed(seed)
     model = get_model(model_name)
     dyn = TullyFSSH(model, timestep=timestep, electronic_substeps=elec_substeps)
     mol = TullyMolecule(x0=x0, v0=v0, mass=mass, dtype=torch.double)
@@ -82,7 +81,7 @@ def _run_single_worker(
         dyn._reset_density_history()
     mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
     with torch.no_grad():
-        dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
+        dyn.run(mol, steps=steps, reuse_P=True, remove_com=None, seed=seed)
     x_final = float(mol.coordinates[0, 0, 0])
     is_trans = _classify_exit(x_final, x0)
     active_state = None
@@ -131,7 +130,6 @@ def run_ensemble(
         raise ValueError("Tully model must be named.")
 
     def _one(seed, v0):
-        torch.manual_seed(seed)
         local_model = (
             get_model(model_name) if isinstance(model_name, str) and model_name != "custom" else model
         )
@@ -143,7 +141,7 @@ def run_ensemble(
             dyn._reset_density_history()
         mol.dm = torch.zeros(1, 1, 1, device=mol.coordinates.device)
         with torch.no_grad():
-            dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
+            dyn.run(mol, steps=steps, reuse_P=True, remove_com=None, seed=seed)
             x_final = float(mol.coordinates[0, 0, 0])
             is_trans = _classify_exit(x_final, x0)
             active_state = None

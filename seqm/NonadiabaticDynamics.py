@@ -1126,7 +1126,9 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         # Cumulative draw per molecule
         cumsum = torch.cumsum(g_rows, dim=1)
         r = torch.rand(nmol, device=device)
-        cmp = cumsum >= r.unsqueeze(1)
+        # Use a strict comparison so a zero-valued draw does not select a
+        # zero-probability first bin and turn into a self-hop.
+        cmp = cumsum > r.unsqueeze(1)
         has_hop = cmp.any(dim=1)
 
         if has_hop.any():

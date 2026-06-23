@@ -99,7 +99,6 @@ def _run_velocity(
     collect_density: bool,
     seed: int,
 ) -> Dict:
-    torch.manual_seed(seed)
     dyn = TullyFSSH(model, timestep=timestep, electronic_substeps=elec_substeps)
     mol = BatchedTullyMolecule(x0=x0, v0=[v0] * ntraj, mass=mass, dtype=torch.double)
     dyn._setup_states(mol)
@@ -107,7 +106,7 @@ def _run_velocity(
     if collect_density and hasattr(dyn, "_reset_density_history"):
         dyn._reset_density_history()
     with torch.no_grad():
-        dyn.run(mol, steps=steps, reuse_P=True, remove_com=None)
+        dyn.run(mol, steps=steps, reuse_P=True, remove_com=None, seed=seed)
 
     final_x = mol.coordinates[:, 0, 0]
     # Active state per trajectory; fallback to argmax(pop) if not set.
@@ -214,7 +213,6 @@ def run_ensemble(
 
     if workers == 1:
         for v_seed, v in v_seed_list:
-            torch.manual_seed(v_seed)
             local_model = get_model(model_key) if isinstance(model_key, str) else model
             stats.append(
                 _run_velocity(
