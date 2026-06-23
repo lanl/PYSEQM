@@ -13,7 +13,7 @@ BOMD
 **Born–Oppenheimer Molecular Dynamics (BOMD)** simulates nuclear motion on the
 electronic ground‐state potential energy surface. At **every time step**, the
 electronic structure is recomputed and the forces are taken from a converged
-SCF calculation. 
+SCF calculation.
 
 Engines available
 -----------------

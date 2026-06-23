@@ -5,10 +5,10 @@ from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
-from ..reference_data import assert_allclose, load_or_update_reference, reference_path
+from ..reference_data import ALL_METHODS, assert_allclose, load_or_update_reference, reference_path_for_method
 
 
-@pytest.mark.parametrize("method", ["MNDO", "AM1", "PM3", "PM6", "PM6_SP"])
+@pytest.mark.parametrize("method", ALL_METHODS)
 def test_single_point_runs_for_all_methods(method, device, methane_molecule_data):
     species, coordinates = methane_molecule_data
     const = Constants().to(device)
@@ -32,7 +32,8 @@ def test_single_point_runs_for_all_methods(method, device, methane_molecule_data
         "Enuc": float(molecule.Enuc.item()),
         "force": molecule.force.detach().cpu().tolist(),
     }
-    ref_path = reference_path(f"smoke_single_point_{method}")
+
+    ref_path = reference_path_for_method("smoke_single_point", method, am1_name="smoke_single_point_AM1")
     ref = load_or_update_reference(ref_path, data)
 
     assert_allclose(data["Etot"], ref["Etot"], rtol=1e-5, atol=1e-5)

@@ -1,10 +1,11 @@
+import pytest
 import torch
 
 from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
-from ..reference_data import assert_allclose
+from ..reference_data import OMX_METHODS, assert_allclose
 
 
 def _rotation_matrix_z(theta):
@@ -23,11 +24,12 @@ def _rotate(coords, R):
     return torch.einsum("...i,ij->...j", coords, R)
 
 
-def test_rotation_invariance_ground_state(device, methane_molecule_data):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_rotation_invariance_ground_state(device, methane_molecule_data, method):
     species, coordinates = methane_molecule_data
     const = Constants().to(device)
 
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
+    seqm_parameters = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1]}
 
     molecule = Molecule(const, seqm_parameters, coordinates.clone(), species).to(device)
     esdriver = Electronic_Structure(seqm_parameters).to(device)
@@ -51,12 +53,13 @@ def test_rotation_invariance_ground_state(device, methane_molecule_data):
     assert_allclose(F0_rot, F1, rtol=1e-4, atol=1e-4)
 
 
-def test_rotation_invariance_excited_state(device, methane_molecule_data):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_rotation_invariance_excited_state(device, methane_molecule_data, method):
     species, coordinates = methane_molecule_data
     const = Constants().to(device)
 
     seqm_parameters = {
-        "method": "AM1",
+        "method": method,
         "scf_eps": 1.0e-7,
         "scf_converger": [1],
         "excited_states": {"n_states": 4, "method": "cis"},

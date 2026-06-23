@@ -8,10 +8,21 @@ import torch
 UPDATE_REFERENCES = os.environ.get("PYSEQM_UPDATE_REFERENCES") == "1"
 REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 
+LEGACY_METHODS = ("MNDO", "AM1", "PM3", "PM6", "PM6_SP")
+AM1_AND_OM2_METHODS = ("AM1", "OM2")
+OMX_METHODS = ("AM1", "OM1", "OM2", "OM3")
+ALL_METHODS = LEGACY_METHODS + ("OM1", "OM2", "OM3")
+
 
 def reference_path(name):
     filename = f"{name}.json"
     return REFERENCE_DIR / filename
+
+
+def reference_path_for_method(stem, method, am1_name=None):
+    if method == "AM1" and am1_name is not None:
+        return reference_path(am1_name)
+    return reference_path(f"{stem}_{method.lower()}")
 
 
 def load_or_update_reference(path, data):

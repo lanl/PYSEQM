@@ -450,7 +450,7 @@ def scf_forward1(
     F0SD,
     G2SD,
     sp2=[False],
-    scf_converger=[1, 0.0, 0.0, 1],
+    scf_converger=[1],
     unrestricted=False,
     backward=False,
     verbose=True,

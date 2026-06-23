@@ -376,7 +376,10 @@ class EnergyXL(torch.nn.Module):
 
         # nuclear energy
         alpha = molecule.parameters["alpha"]
-        if self.method == "MNDO":
+        parnuc = None
+        if self.method in {"OM1", "OM2", "OM3"}:
+            gam = rho0xi
+        elif self.method == "MNDO":
             parnuc = (alpha,)
         elif self.method == "AM1" or self.method == "PM6" or self.method == "PM6_SP":
             K = torch.stack(
@@ -419,12 +422,12 @@ class EnergyXL(torch.nn.Module):
             #
             parnuc = (alpha, K, L, M)
 
-        if "g_ss_nuc" in molecule.parameters:
+        if self.method not in {"OM1", "OM2", "OM3"} and "g_ss_nuc" in molecule.parameters:
             g = molecule.parameters["g_ss_nuc"]
             rho0a = 0.5 * ev / g[molecule.idxi]
             rho0b = 0.5 * ev / g[molecule.idxj]
             gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b) ** 2)
-        else:
+        elif self.method not in {"OM1", "OM2", "OM3"}:
             gam = w[..., 0, 0]
 
         EnucAB = pair_nuclear_energy(

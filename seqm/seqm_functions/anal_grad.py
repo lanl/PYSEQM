@@ -382,6 +382,7 @@ def _density_to_ortho_blocks(P0, molecule, unrestricted=False):
 def omx_threebody_ortho_grad(
     molecule, P0, S_x, B_x, pair_core_semi_x, ortho_cache=None, unrestricted=False, vel_eff=None
 ):
+    """Return the OMx orthogonalization correction without squeezing batch axes."""
     cache = _build_omx_ortho_cache(molecule) if ortho_cache is None else ortho_cache
     tables = cache["tables"]
     P_blocks = _density_to_ortho_blocks(P0, molecule, unrestricted=unrestricted)
@@ -405,7 +406,7 @@ def omx_threebody_ortho_grad(
             pair_core_semi_x=pair_core_semi_x,
             vel_eff=vel_eff,
         )
-    return grad[:, 0] if grad.shape[1] == 1 else grad
+    return grad
 
 
 repeat_tensor = lambda x: torch.cat([x, x])
@@ -1729,6 +1730,8 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
         omx_orthogonalization_grad = omx_threebody_ortho_grad(
             molecule, P0, S_x, B_x, pair_core_semi_x, ortho_cache=ortho_cache, unrestricted=P0.dim() == 4
         )
+        # Legacy callers expect a single density-gradient slice here.
+        omx_orthogonalization_grad = omx_orthogonalization_grad[:, 0]
         ortho_cache = {"S_x": S_x, "B_x": B_x.clone(), "pair_core_semi_x": pair_core_semi_x, **ortho_cache}
 
     # Hcore derivative needs to have upper and lower triangle contribution, multiply by 2.0, since Hcore is symmetric and will be contracted with a symmetric P0.

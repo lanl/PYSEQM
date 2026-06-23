@@ -8,7 +8,12 @@ from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 from seqm.seqm_functions.read_xyz import read_xyz
 
-from ..reference_data import assert_allclose, load_or_update_reference, reference_path
+from ..reference_data import (
+    AM1_AND_OM2_METHODS,
+    assert_allclose,
+    load_or_update_reference,
+    reference_path_for_method,
+)
 
 
 def _read_xyz_coords(path, device):
@@ -18,7 +23,8 @@ def _read_xyz_coords(path, device):
     return species, coordinates
 
 
-def test_geometry_optimization_matches_reference(device, repo_root, monkeypatch, tmp_path):
+@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
+def test_geometry_optimization_matches_reference(device, repo_root, monkeypatch, tmp_path, method):
     if os.environ.get("PYSEQM_RUN_GEOMOPT") != "1":
         pytest.skip("Set PYSEQM_RUN_GEOMOPT=1 to run geomeTRIC optimization test.")
     # if os.environ.get("KMP_DUPLICATE_LIB_OK") != "TRUE":
@@ -34,7 +40,7 @@ def test_geometry_optimization_matches_reference(device, repo_root, monkeypatch,
 
     const = Constants().to(device)
     seqm_parameters = {
-        "method": "AM1",
+        "method": method,
         "scf_eps": 1.0e-8,
         "scf_converger": [0, 0.1],
         "analytical_gradient": [True],
@@ -51,7 +57,7 @@ def test_geometry_optimization_matches_reference(device, repo_root, monkeypatch,
 
     _, optimized_coords = _read_xyz_coords(optimized_path, device)
     data = {"optimized_coords": optimized_coords.detach().cpu().tolist()}
-    ref_path = reference_path("geom_opt_methane_am1")
+    ref_path = reference_path_for_method("geom_opt_methane", method, am1_name="geom_opt_methane_am1")
     ref = load_or_update_reference(ref_path, data)
 
     assert_allclose(data["optimized_coords"], ref["optimized_coords"], rtol=1e-5, atol=1e-5)

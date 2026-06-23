@@ -218,7 +218,10 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
 **method**  (`str`)
     Specifies the semiempirical model to use.
 
-    :accepted values: ``'MNDO'``, ``'AM1'``, ``'PM3'``, ``'PM6'``
+    :accepted values: ``'MNDO'``, ``'AM1'``, ``'PM3'``, ``'PM6'``, ``'OM1'``, ``'OM2'``, ``'OM3'``
+
+    OM1, OM2, and OM3 are the orthogonalization-corrected methods in PYSEQM.
+    See the OMx subsection below for workflow-specific notes and limitations.
 
 **scf_eps** (`float`) 
     Convergence threshold for the SCF (Self-Consistent Field) loop.
@@ -238,26 +241,13 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
       ``P_new = alpha * P_old + (1 - alpha) * P_candidate``  
       where ``alpha`` is the mixing coefficient between ``0.0`` and ``1.0``.
 
-    - ``[1]``  
+    - ``[1]`` (default) 
       
       Adaptive mixing, where instead of fixing the mixing coefficient `alpha`, you let the code estimate a nearly optimal `alpha` at each step, based on changes in the density matrix elements. This gives fast convergence when things are well-behaved, with automatic damping when needed. 
 
-    - ``[1, K, L, M]``  
-      
-      where ``K`` and ``L`` are of mixing coefficients between 0.0 and 1.0, and ``M`` is an `int` greater than ``6``. 
-
-      Advanced adaptive mixing:  
-        * Use linear mixing for the first ``M`` steps.  
-        * Start with mixing coefficient ``K`` for the first 5 steps.  
-        * Linearly transition the mixing coefficient from ``K`` to ``L`` between step 6 and step ``M-5``.
-        * From step ``M-5`` to step ``M`` keep the mixing coefficient ``L``
-        * After step ``M``, switch to adaptive mixing.
-      
-      For example, ``[1, 0.5, 0.1, 20]`` would mean a linear mixing starting with the mixing coefficient of 0.5 for the first 5 steps, then from step 5 to step 20 the mixing coefficient transitions from 0.5 to 0.1, and adaptive mixing thereafter.
-
     - ``[2]``  
       
-      Use adaptive mixing initially, then switch to Pulay DIIS algorithm.
+      Pulay DIIS algorithm.
 
 **sp2**  (`list`)
     This is an alternative algorithm to update the density matrix at every step of the SCF procedure where density matrix expansion happens with second-order spectral projection polynomials (SP2).
@@ -273,3 +263,15 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
 
     - If ``True`` (default), the Fock matrix is diagonalized to obtain molecular orbitals.  
     - If ``False``, only the converged density matrix is computed.
+
+Orthogonalization-Corrected OMx Methods
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+OM1, OM2, and OM3 are the orthogonalization-corrected methods in PYSEQM.
+They use the same ``seqm_parameters`` structure as the other SEQM methods.
+
+- Supported elements: H, C, N, O, F.
+- OMx forces currently use finite-difference gradients only.
+
+See :doc:`single_point_scf`, :doc:`bomd`, :doc:`geometry_optimization`, and
+:doc:`nonadiabatic_dynamics` for workflow-specific notes.

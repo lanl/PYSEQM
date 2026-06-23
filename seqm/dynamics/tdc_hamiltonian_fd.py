@@ -292,8 +292,6 @@ def _project_omx_orthogonalization_velocity(molecule, density, vel_eff, ortho_ca
         vel_eff=vel_eff[:, : molecule.molsize],
     )
     cache = {**cache, "S_x": S_x, "B_x": B_x, "pair_core_semi_x": pair_core_semi_x}
-    if p0_ortho.dim() == 1:
-        p0_ortho = p0_ortho.unsqueeze(1)
     return p0_ortho, cache
 
 

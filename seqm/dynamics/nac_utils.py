@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 class NACConfig:
     enabled: bool
     pairs: List[Tuple[int, int]]
+    include_response_terms: bool = True
 
 
 def _dedup_pairs(pairs: Sequence[Tuple[int, int]], nroots: Optional[int]) -> List[Tuple[int, int]]:
@@ -32,6 +33,7 @@ def resolve_nac_config(
     """
     Unified NAC configuration:
       - seqm_parameters['nonadiabatic']['compute_nac']: on/off
+      - seqm_parameters['nonadiabatic']['include_response_terms']: full NAC response terms on/off
       - seqm_parameters['nonadiabatic']['states']: list of states; all unique pairs are used
       - seqm_parameters['nonadiabatic']['pairs']: explicit list of (i, j) pairs
 
@@ -39,6 +41,7 @@ def resolve_nac_config(
     """
     na_cfg = dict(seqm_parameters.get("nonadiabatic", {}))
     enabled = bool(na_cfg.get("compute_nac", default_enabled))
+    include_response_terms = bool(na_cfg.get("include_response_terms", True))
     pairs: List[Tuple[int, int]] = []
 
     state_list = na_cfg.get("states")
@@ -60,4 +63,4 @@ def resolve_nac_config(
         pairs = [(i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)]
 
     pairs = _dedup_pairs(pairs, nroots)
-    return NACConfig(enabled=enabled, pairs=pairs)
+    return NACConfig(enabled=enabled, pairs=pairs, include_response_terms=include_response_terms)

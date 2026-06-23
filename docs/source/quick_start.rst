@@ -39,7 +39,7 @@ Create a file called `run_quickstart.py` with the following contents:
 
    # 3. Set up SCF parameters
    seqm_parameters = {
-       'method':        'AM1',
+       'method':        'AM1',  # MNDO, PM3, PM6, OM1, OM2, OM3
        'scf_eps':       1e-8,
        'scf_converger': [0, 0.1],
    }

@@ -270,10 +270,11 @@ def calc_nac(
     state_pairs,
     rpa=False,
     pair_batch_size=4,
-    full_nac=False,
+    include_response_terms=True,
     w=None,
     e_mo=None,
     zvec_tolerance=1e-6,
+    **kwargs,
 ):
     """
     amp: tensor of CIS amplitudes of shape [nmol, nroots, nov].
@@ -281,12 +282,16 @@ def calc_nac(
 
     Returns a tensor with shape [nmol, len(state_pairs), molsize, 3], ordered like state_pairs.
     """
+    if "full_nac" in kwargs:
+        include_response_terms = kwargs.pop("full_nac")
+    if kwargs:
+        raise TypeError(f"Unexpected keyword arguments: {', '.join(kwargs)}")
     if rpa:
         raise NotImplementedError(
             "Nonadiabatic coupling vecotrs not yet implemented for RPA. Use CIS instead."
         )
-    if full_nac and (w is None or e_mo is None):
-        raise ValueError("full_nac=True requires w and e_mo.")
+    if include_response_terms and (w is None or e_mo is None):
+        raise ValueError("include_response_terms=True requires w and e_mo.")
     device = amp.device
     dtype = amp.dtype
     nmol = int(mol.nmol)
@@ -300,7 +305,7 @@ def calc_nac(
 
     # CIS unrelaxed density:
     # B = \sum_iab C_\mu a * t_ai * t_bi * C_\nu b - \sum_ija C_\mu i * t_ai * t_aj * C_\nu j
-    if full_nac:
+    if include_response_terms:
         nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
     else:
         nocc = int(mol.nocc[0].item())
@@ -309,7 +314,7 @@ def calc_nac(
         Cvirt = mol.molecular_orbitals[:, :, nocc : nocc + nvirt]
     nroots = amp.shape[1]
     amp_ia = amp.view(nmol, nroots, nocc, nvirt)
-    if full_nac:
+    if include_response_terms:
         overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache, w_x = _build_nac_derivative_operators(
             mol, P0, ri, riXH, dtype, device, return_w_x=True
         )
@@ -342,7 +347,7 @@ def calc_nac(
 
         density0 = Bij_chunk
         RI0 = RJ0 = None
-        if full_nac:
+        if include_response_terms:
             RI = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, amp_i, Cvirt)
             RJ = torch.einsum("Nmi,Nbia,Nna->Nbmn", Cocc, amp_j, Cvirt)
             density0, RI0, RJ0 = _build_pair_response_density_batch(
@@ -381,7 +386,7 @@ def calc_nac(
             nmol,
             molsize,
         )
-        if full_nac:
+        if include_response_terms:
             nac_cis[:, start:stop] += _contract_mixed_transition_terms(
                 mol,
                 unpackone_batch(

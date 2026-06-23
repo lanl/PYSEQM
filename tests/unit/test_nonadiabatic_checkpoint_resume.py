@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import h5py
+import pytest
 import torch
 
 from seqm.MolecularDynamics import Molecular_Dynamics_Langevin
@@ -29,6 +30,16 @@ def _output_config(prefix, molid, checkpoint_every):
 def _build_molecule(device, species, coordinates, seqm_parameters):
     const = Constants().to(device)
     return Molecule(const, seqm_parameters, coordinates, species).to(device)
+
+
+def _seqm_parameters(method, excited=False):
+    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1]}
+    if excited:
+        params.update({"excited_states": {"n_states": 2, "method": "cis"}})
+    return params
+
+
+NONADIABATIC_METHODS = [pytest.param("AM1"), pytest.param("OM2")]
 
 
 def _read_last_frame(prefix, molid):
@@ -124,14 +135,10 @@ def _compare_runs(continuous, resumed, steps):
         assert_allclose(amps_a, amps_b, rtol=1e-5, atol=1e-5)
 
 
-def test_nonadiabatic_checkpoint_resume_surface_hopping(methanal_batch_data, device, tmp_path):
+@pytest.mark.parametrize("method", NONADIABATIC_METHODS)
+def test_nonadiabatic_checkpoint_resume_surface_hopping(methanal_batch_data, device, tmp_path, method):
     species, coordinates = methanal_batch_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-        "excited_states": {"n_states": 2, "method": "cis"},
-    }
+    seqm_parameters = _seqm_parameters(method, excited=True)
 
     steps = 4
     split = 2
@@ -159,14 +166,10 @@ def test_nonadiabatic_checkpoint_resume_surface_hopping(methanal_batch_data, dev
     _compare_runs(continuous, resumed, steps)
 
 
-def test_nonadiabatic_checkpoint_restores_internal_state(methanal_batch_data, device, tmp_path):
+@pytest.mark.parametrize("method", NONADIABATIC_METHODS)
+def test_nonadiabatic_checkpoint_restores_internal_state(methanal_batch_data, device, tmp_path, method):
     species, coordinates = methanal_batch_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-        "excited_states": {"n_states": 2, "method": "cis"},
-    }
+    seqm_parameters = _seqm_parameters(method, excited=True)
 
     molecule = _build_molecule(device, species.clone(), coordinates.clone(), seqm_parameters)
     dyn = SurfaceHoppingDynamics(

@@ -53,7 +53,7 @@ Minimal Input File Template
 
    # 4a. SEQM parameters
    seqm_parameters = {
-       'method': 'AM1',            # MNDO, PM3, PM6, etc.
+       'method': 'AM1',            # MNDO, PM3, PM6, OM1, OM2, OM3
        'scf_eps': 1e-8,            # SCF convergence threshold (eV)
        'scf_converger': [0, 0.1],  # SCF algorithm
    }

@@ -207,12 +207,12 @@ what excited-state properties are computed:
 - If ``output['h5']['transition_density_matrices'] > 0``, transition density
   matrices are computed and written under
   ``/data/excitation/transition_density_matrices``.
-   Use ``output['h5']['transition_density_matrices_mode']`` to select storage:
-   ``'full'`` (default, shape ``(T, R, Norb, Norb)``) or ``'diag'`` (shape
-   ``(T, R, Norb)``), where ``diag`` stores only the diagonal TDM elements.
-   If ``'diag'`` is used together with
-   ``output['h5']['transition_properties'] = False``, only diagonal TDM elements
-   are computed (no full TDM build), which is cheaper for large systems.
+  Use ``output['h5']['transition_density_matrices_mode']`` to select storage:
+  ``'full'`` (default, shape ``(T, R, Norb, Norb)``) or ``'diag'`` (shape
+  ``(T, R, Norb)``), where ``diag`` stores only the diagonal TDM elements.
+  If ``'diag'`` is used together with
+  ``output['h5']['transition_properties'] = False``, only diagonal TDM elements
+  are computed (no full TDM build), which is cheaper for large systems.
 
 Configuration constraints:
 

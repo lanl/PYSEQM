@@ -184,6 +184,7 @@ class _TullyDynamicsMixin:
         super().__init__(params, timestep=timestep, output=_TULLY_OUTPUT)
         if electronic_substeps is not None:
             self._electronic_substeps = int(electronic_substeps)
+        self.compute_nac = bool(params["nonadiabatic"].get("compute_nac", True))
         self.model = model
         self.initial_state = 1
         self._nstates = _TULLY_NSTATES

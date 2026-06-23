@@ -607,7 +607,7 @@ class Hamiltonian(torch.nn.Module):
         # be used to restart jobs
         self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters["scf_eps"]), requires_grad=False)
         self.sp2 = seqm_parameters.get("sp2", [False])
-        self.scf_converger = seqm_parameters["scf_converger"]
+        self.scf_converger = seqm_parameters.setdefault("scf_converger", 1)
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
         self.eig = seqm_parameters.get("eig", True)
         self.scf_backward = seqm_parameters.get("scf_backward", 0)
@@ -1190,6 +1190,7 @@ class Energy(torch.nn.Module):
                         riXH,
                         pair_list,
                         rpa=method == "rpa",
+                        include_response_terms=nac_settings.include_response_terms,
                         w=w,
                         e_mo=e,
                     )

@@ -8,8 +8,10 @@ from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
+from ..reference_data import OMX_METHODS
 
-@pytest.mark.parametrize("method", ["AM1", "OM1", "OM2", "OM3"])
+
+@pytest.mark.parametrize("method", OMX_METHODS)
 def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_molecule_data, method):
     species_1, coordinates_1 = methane_molecule_data
     const = Constants().to(device)
@@ -26,7 +28,7 @@ def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_
         "scf_eps": 1.0e-7,
         "scf_converger": [1],
         "excited_states": {"n_states": n_states, "method": "cis", "tolerance": 1.0e-6},
-        "nonadiabatic": {"compute_nac": True, "states": [1, 2, 3, 4]},
+        "nonadiabatic": {"compute_nac": True, "states": [1, 2, 3, 4], "include_response_terms": False},
         "active_state": 1,
     }
 

@@ -1,10 +1,11 @@
 import h5py
+import pytest
 
 from seqm.MolecularDynamics import KSA_XL_BOMD, XL_BOMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
-from ..reference_data import assert_allclose
+from ..reference_data import OMX_METHODS, assert_allclose
 
 
 class _SimulatedCrash(RuntimeError):
@@ -25,6 +26,13 @@ def _output_config(prefix, molid, checkpoint_every):
 def _build_molecule(device, species, coordinates, seqm_parameters):
     const = Constants().to(device)
     return Molecule(const, seqm_parameters, coordinates, species).to(device)
+
+
+def _seqm_parameters(method, excited=False):
+    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1]}
+    if excited:
+        params.update({"excited_states": {"n_states": 4, "method": "cis"}, "active_state": 1})
+    return params
 
 
 def _read_last_frame(prefix, molid):
@@ -89,9 +97,10 @@ def _compare_runs(continuous, resumed, steps):
         assert_allclose(vels_a, vels_b, rtol=1e-5, atol=1e-5)
 
 
-def test_md_checkpoint_resume_basic(batch_molecule_data, device, tmp_path):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_basic(batch_molecule_data, device, tmp_path, method):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
+    seqm_parameters = _seqm_parameters(method)
 
     steps = 6
     split = 3
@@ -121,9 +130,10 @@ def test_md_checkpoint_resume_basic(batch_molecule_data, device, tmp_path):
     _compare_runs(continuous, resumed, steps)
 
 
-def test_md_checkpoint_resume_langevin(batch_molecule_data, device, tmp_path):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_langevin(batch_molecule_data, device, tmp_path, method):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
+    seqm_parameters = _seqm_parameters(method)
 
     steps = 6
     split = 3
@@ -155,9 +165,10 @@ def test_md_checkpoint_resume_langevin(batch_molecule_data, device, tmp_path):
     _compare_runs(continuous, resumed, steps)
 
 
-def test_md_checkpoint_resume_xl_bomd(batch_molecule_data, device, tmp_path):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_xl_bomd(batch_molecule_data, device, tmp_path, method):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
+    seqm_parameters = _seqm_parameters(method)
 
     steps = 6
     split = 3
@@ -191,9 +202,10 @@ def test_md_checkpoint_resume_xl_bomd(batch_molecule_data, device, tmp_path):
     _compare_runs(continuous, resumed, steps)
 
 
-def test_md_checkpoint_resume_ksa_xl_bomd(batch_molecule_data, device, tmp_path):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_ksa_xl_bomd(batch_molecule_data, device, tmp_path, method):
     species, coordinates = batch_molecule_data
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-7, "scf_converger": [1]}
+    seqm_parameters = _seqm_parameters(method)
 
     steps = 6
     split = 3
@@ -229,15 +241,10 @@ def test_md_checkpoint_resume_ksa_xl_bomd(batch_molecule_data, device, tmp_path)
     _compare_runs(continuous, resumed, steps)
 
 
-def test_md_checkpoint_resume_excited_basic(methanal_batch_data, device, tmp_path):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_excited_basic(methanal_batch_data, device, tmp_path, method):
     species, coordinates = methanal_batch_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-        "excited_states": {"n_states": 4, "method": "cis"},
-        "active_state": 1,
-    }
+    seqm_parameters = _seqm_parameters(method, excited=True)
 
     steps = 6
     split = 3
@@ -267,15 +274,10 @@ def test_md_checkpoint_resume_excited_basic(methanal_batch_data, device, tmp_pat
     _compare_runs(continuous, resumed, steps)
 
 
-def test_md_checkpoint_resume_excited_xl_bomd(methanal_batch_data, device, tmp_path):
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_excited_xl_bomd(methanal_batch_data, device, tmp_path, method):
     species, coordinates = methanal_batch_data
-    seqm_parameters = {
-        "method": "AM1",
-        "scf_eps": 1.0e-7,
-        "scf_converger": [1],
-        "excited_states": {"n_states": 4, "method": "cis"},
-        "active_state": 1,
-    }
+    seqm_parameters = _seqm_parameters(method, excited=True)
 
     steps = 6
     split = 3

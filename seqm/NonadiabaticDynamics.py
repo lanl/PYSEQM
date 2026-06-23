@@ -6,7 +6,6 @@ from scipy.optimize import linear_sum_assignment
 
 from seqm.seqm_functions.rcis_batch import packone_batch
 
-from .dynamics.nac_utils import resolve_nac_config
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
 from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
 from .seqm_functions.hcore import orthogonalized_overlap_from_matrices, overlap_between_geometries
@@ -77,23 +76,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         if compute_nac is not None:
             na_cfg["compute_nac"] = bool(compute_nac)
         params["nonadiabatic"] = na_cfg
-
-        exc_cfg = params.get("excited_states") or {}
-        nroots_cfg = exc_cfg.get("n_states")
-        target_states = na_cfg.get("states") or []
-        n_validate = None
-        if target_states:
-            try:
-                n_validate = max(int(s) for s in target_states)
-            except Exception:
-                n_validate = None
-        if n_validate is None and nroots_cfg is not None:
-            n_validate = int(nroots_cfg)
-        nac_settings = resolve_nac_config(params, nroots=n_validate, default_enabled=False)
-        na_cfg["compute_nac"] = nac_settings.enabled
-        if nac_settings.pairs:
-            na_cfg["nac_states"] = nac_settings.pairs
-        params["nonadiabatic"] = na_cfg
         method = str(params["method"]).upper()
         tdc_method = str(na_cfg.get("tdc_method", "hamiltonian_fd")).strip().lower()
         if method == "PM6" and tdc_method in ("overlap", "hamiltonian_fd"):
@@ -114,7 +96,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 f"Invalid nonadiabatic.tdc_method '{self._tdc_method}'. "
                 "Supported methods: 'overlap', 'hamiltonian_fd'."
             )
-        self.compute_nac = nac_settings.enabled
         self._dtnact = 5e-5  # small dt for finite-diff, NEXMD uses 0.002 au
         self.initial_state = initial_state
         self._electronic_substeps: Optional[int] = None
@@ -1221,6 +1202,9 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
             None,
             pair_list,
             rpa=cf.excited_states["method"] == "rpa",
+            include_response_terms=cf.nac_config.include_response_terms,
+            w=molecule.w,
+            e_mo=molecule.e_mo,
         )
         nac_vec = {}
         for pair_idx, (s1, s2) in enumerate(pair_list):

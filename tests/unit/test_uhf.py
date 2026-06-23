@@ -5,7 +5,13 @@ from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
-from ..reference_data import assert_allclose, load_or_update_reference, reference_path
+from ..reference_data import (
+    AM1_AND_OM2_METHODS,
+    assert_allclose,
+    load_or_update_reference,
+    reference_path,
+    reference_path_for_method,
+)
 
 
 def _ch3_data(device):
@@ -18,11 +24,12 @@ def _ch3_data(device):
     return species, coordinates
 
 
-def test_rhf_rejects_odd_electron_counts(device):
+@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
+def test_rhf_rejects_odd_electron_counts(device, method):
     species, coordinates = _ch3_data(device)
     const = Constants().to(device)
 
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-6, "scf_converger": [1]}
+    seqm_parameters = {"method": method, "scf_eps": 1.0e-6, "scf_converger": [1]}
 
     with pytest.raises(ValueError) as excinfo:
         Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -33,11 +40,12 @@ def test_rhf_rejects_odd_electron_counts(device):
     assert message == ref["message"]
 
 
-def test_uhf_allows_odd_electron_counts(device):
+@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
+def test_uhf_allows_odd_electron_counts(device, method):
     species, coordinates = _ch3_data(device)
     const = Constants().to(device)
 
-    seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-6, "scf_converger": [1], "UHF": True}
+    seqm_parameters = {"method": method, "scf_eps": 1.0e-6, "scf_converger": [1], "UHF": True}
 
     charges = torch.tensor([0], dtype=torch.int64, device=device)
     mult = torch.tensor([2], dtype=torch.int64, device=device)
@@ -47,7 +55,7 @@ def test_uhf_allows_odd_electron_counts(device):
     esdriver(molecule)
 
     data = {"Etot": float(molecule.Etot.item()), "dm_shape": list(molecule.dm.shape)}
-    ref_path = reference_path("uhf_ch3_am1")
+    ref_path = reference_path_for_method("uhf_ch3", method, am1_name="uhf_ch3_am1")
     ref = load_or_update_reference(ref_path, data)
 
     assert molecule.dm is not None
