@@ -8,7 +8,11 @@ from seqm.seqm_functions.rcis_batch import packone_batch
 
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
 from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
-from .seqm_functions.hcore import orthogonalized_overlap_from_matrices, overlap_between_geometries
+from .seqm_functions.hcore import (
+    orthogonalized_overlap_from_matrices,
+    overlap_between_geometries,
+    overlap_matrix_current_geometry,
+)
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 
@@ -381,9 +385,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         with torch.no_grad():
             coords_curr = molecule.coordinates.detach()
 
-            S_curr = packone_batch(
-                overlap_between_geometries(molecule, coords_curr, coords_curr), *self._overlap_pack_spec
-            )
+            S_curr = packone_batch(overlap_matrix_current_geometry(molecule), *self._overlap_pack_spec)
             S_cross = packone_batch(
                 overlap_between_geometries(molecule, coords_curr, coords_prev), *self._overlap_pack_spec
             )
@@ -850,9 +852,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 )
                 self._coords_prev = torch.empty_like(molecule.coordinates)
                 self._mos_prev = torch.empty_like(molecule.molecular_orbitals)
-                coords = molecule.coordinates.detach()
                 self._packed_overlap_prev = packone_batch(
-                    overlap_between_geometries(molecule, coords, coords), *self._overlap_pack_spec
+                    overlap_matrix_current_geometry(molecule), *self._overlap_pack_spec
                 )
             elif self._tdc_method == "hamiltonian_fd":
                 if molecule.nocc.dim() != 1:
@@ -1070,7 +1071,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._after_electronic_update(
             molecule, excitation_energies=cache_new["energies"], step=i + self.step_offset
         )
-        molecule.w = None
+        # molecule.w = None
 
         if self._h5_writer:
             na_stride = self._h5_writer._write_nonadiabatic

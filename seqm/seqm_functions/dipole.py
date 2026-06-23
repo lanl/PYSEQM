@@ -2,40 +2,19 @@ import torch
 
 from .cal_par import dd_qq
 from .constants import a0, debye_to_AU, to_debye
-from .omx_utils import get_orbital_zetas
+from .hcore import orthogonalize_operator_from_overlap, overlap_matrix_current_geometry
+from .om1_overlap import _XQQ_CUTOFF
+from .omx_basis import select_om1_basis_payload
+from .omx_utils import OMX_METHODS, get_orbital_zetas
 
 
-def calc_dipole_matrix(mol, return_diag_dipole=False):
-    """
-    Build the block-diagonal dipole tensor for atoms.
-
-    Each atom has 4 orbitals (sp), so the full dipole matrix is represented by a tensor
-    of shape (natom*natom, 4, 4, 3) where the last dimension corresponds to the x, y, and z components.
-    but here we build only the diagonal blocks of the full dipole matrix
-
-    For non-hydrogen atoms
-      - All diagonal entries (positions (i,i) for i=0,...,3) are set to -coord.
-      - Additionally, for each Cartesian direction i (i = 0 for x, 1 for y, 2 for z),
-        the off-diagonal element (0, i+1) is set to multip_2c_elec_params.
-
-    For hydrogen atoms
-      - Only the (0,0) element is set to -coord, with the other diagonal elements remaining zero.
-
-    Parameters:
-      mol: contains all the info on the molecules
-
-    Returns:
-      diagonal_dipole: Tensor of shape (natom, 4, 4, 3) with the dipole blocks.
-    """
-
+def calc_dipole_matrix_nddo(mol, return_diag_dipole=False):
+    """Build the AO coordinate-operator matrix r for NDDO-like methods."""
     dtype = mol.rij.dtype
     device = mol.rij.device
-    # for non-zero atoms
     zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
-    qn = mol.const.qn
-    # Z is a flattened tensor of the atomic numbers of non-zero atoms across molecular batches
     Z = mol.Z
-    qn0 = qn[Z]
+    qn0 = mol.const.qn[Z]
     isX = Z > 2  # Heavy atom
     isH = Z == 1
     dd, _ = dd_qq(qn0[isX], zetas[isX], zetap[isX])
@@ -46,73 +25,87 @@ def calc_dipole_matrix(mol, return_diag_dipole=False):
     coord = mol.coordinates.reshape(mol.nmol * mol.molsize, 3)[valid_atom]
     diagonal_dipole = torch.zeros((3, n_valid_atoms, 4, 4), dtype=dtype, device=device)
 
-    I_4 = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).unsqueeze(0)  # shape (1,1,4,4)
-    # Get -coord for non-H atoms and rearrange from (n_nonH, 3) to (3, n_nonH, 1, 1).
-    nonH_coord = -coord[isX].T.unsqueeze(-1).unsqueeze(-1)  # shape (3, n_nonH, 1, 1)
-    # Multiply by the identity so that only the diagonal entries are nonzero.
-    diag_block_nonH = nonH_coord * I_4  # shape (3, n_nonH, 4, 4)
-    diagonal_dipole[:, isX, :, :] = diag_block_nonH
+    diagonal_dipole[:, isX] = coord[isX].T.unsqueeze(-1).unsqueeze(-1) * torch.eye(
+        4, device=device, dtype=dtype
+    )
 
-    # Set the off-diagonal s-p interaction elements:
-    # For each Cartesian direction i (0: x, 1: y, 2: z), set
-    for i in range(3):
-        diagonal_dipole[i, isX, 0, i + 1] = -dd
-        diagonal_dipole[i, isX, i + 1, 0] = -dd
-    # cart_idx = torch.arange(3, device=device)
-    # diagonal_dipole[cart_idx, isX, 0, cart_idx + 1] = -dd
-    # diagonal_dipole[cart_idx, isX, cart_idx + 1, 0] = -dd
+    cart_idx = torch.arange(3, device=device)[:, None]
+    heavy_idx = isX.nonzero(as_tuple=False).squeeze(1)[None, :]
+    diagonal_dipole[cart_idx, heavy_idx, 0, cart_idx + 1] = dd.unsqueeze(0)
+    diagonal_dipole[cart_idx, heavy_idx, cart_idx + 1, 0] = dd.unsqueeze(0)
 
-    # --- Process hydrogen atoms ---
-    # For hydrogen atoms, only the (0,0) element is set.
-    diagonal_dipole[:, isH, 0, 0] = -coord[isH].T
+    diagonal_dipole[:, isH, 0, 0] = coord[isH].T
 
     if return_diag_dipole:
         diag = torch.zeros(3, mol.nmol * mol.molsize, 4, 4, dtype=dtype, device=device)
         diag[:, valid_atom] = diagonal_dipole
         return diag.reshape(3, mol.nmol, mol.molsize, 4, 4)
 
-    dipole_mat = torch.zeros(3, mol.nmol * mol.molsize * mol.molsize, 4, 4, dtype=dtype, device=device)
-    dipole_mat[:, mol.maskd] = diagonal_dipole
-    dipole_mat = (
-        dipole_mat.reshape(3, mol.nmol, mol.molsize, mol.molsize, 4, 4)
-        .permute(1, 0, 2, 4, 3, 5)
-        .reshape(mol.nmol, 3, 4 * mol.molsize, 4 * mol.molsize)
-    )
-
-    return dipole_mat
+    return _assemble_full_dipole_matrix(mol, diagonal_dipole.permute(1, 2, 3, 0))
 
 
 def calc_ground_dipole(molecule, P):
     with torch.no_grad():
-        b, n = molecule.coordinates.shape[:2]
-        dipole_diag_blocks = calc_dipole_matrix(molecule, return_diag_dipole=True)  # (3, b, n, 4, 4)
-
-        # Extract 4x4 block diagonals
-        if len(P.size()) == 4:  # open-shell
-            P_blocks = P[:, 0].view(b, n, 4, n, 4).diagonal(0, 1, 3) + P[:, 1].view(b, n, 4, n, 4).diagonal(
-                0, 1, 3
+        if molecule.method in OMX_METHODS:
+            # Ground-state OMx dipoles are temporarily disabled. Keep a tensor
+            # placeholder so downstream output paths do not fail on None.
+            molecule.dipole = torch.zeros(
+                (molecule.nmol, 3), dtype=molecule.coordinates.dtype, device=molecule.coordinates.device
             )
-        else:
-            P_blocks = P.view(b, n, 4, n, 4).diagonal(0, 1, 3)  # (b, 4, 4, n)
+            return
 
-        # Electronic dipole
-        electronic_dipole = torch.einsum("bxyn,dbnxy->bd", P_blocks, dipole_diag_blocks)  # (b, 3)
+        dipole_mat = calc_dipole_matrix(molecule)
+        electronic_position = torch.einsum("bnm,bknm->bk", P.sum(dim=1) if P.ndim == 4 else P, dipole_mat)
 
         # Nuclear dipole
         nuclear_dipole = (molecule.const.tore[molecule.species].unsqueeze(-1) * molecule.coordinates).sum(
             dim=1
         )  # (b, 3)
 
-        molecule.dipole = (electronic_dipole + nuclear_dipole) * to_debye * debye_to_AU
+        molecule.dipole = (nuclear_dipole - electronic_position) * to_debye * debye_to_AU
         return
 
 
-from .om1_overlap import _XQQ_CUTOFF
+def _assemble_full_dipole_matrix(molecule, diagonal_blocks, pair_blocks=None):
+    nblocks = molecule.nmol * molecule.molsize * molecule.molsize
+    dipole_blocks = torch.zeros(
+        (nblocks, 4, 4, 3), dtype=molecule.coordinates.dtype, device=molecule.coordinates.device
+    )
+    dipole_blocks[molecule.maskd] = diagonal_blocks
+    if pair_blocks is not None:
+        dipole_blocks[molecule.mask] = pair_blocks
+        dipole_blocks[molecule.mask_l] = pair_blocks.transpose(1, 2)
+    return (
+        dipole_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4, 3)
+        .permute(0, 5, 1, 3, 2, 4)
+        .reshape(molecule.nmol, 3, 4 * molecule.molsize, 4 * molecule.molsize)
+    )
+
+
+def _omx_dipole_blocks(molecule):
+    basis_data = molecule.parameters.get("_omx_basis_data")
+    if basis_data is None:
+        raise RuntimeError("OMx basis tables have not been cached on the molecule")
+
+    real_atom_mask = (molecule.species > 0).reshape(-1)
+    coords_real = molecule.coordinates.reshape(-1, 3)[real_atom_mask]
+    zero_rij = torch.zeros(coords_real.shape[0], dtype=coords_real.dtype, device=coords_real.device)
+    unit_x = torch.zeros_like(coords_real)
+    unit_x[:, 0] = 1.0
+
+    diag_dipole = omx_pair_dipole_matrix_sp(zero_rij, unit_x, coords_real, basis_data, basis_data)
+
+    pair_i = select_om1_basis_payload(basis_data, molecule.idxi)
+    pair_j = select_om1_basis_payload(basis_data, molecule.idxj)
+    pair_dipole = omx_pair_dipole_matrix_sp(
+        molecule.rij, molecule.xij, coords_real[molecule.idxi], pair_i, pair_j
+    )
+    return diag_dipole, pair_dipole
 
 
 def omx_pair_dipole_matrix_sp(rij, direction, coord_i, basis_i, basis_j):
     """
-    Batched <AO_i | r | AO_j> dipole blocks for an sp ECP-3G/OM1 basis.
+    Batched <AO_i | r | AO_j> coordinate-operator blocks for an sp ECP-3G/OM1 basis.
     AO order: [s, px, py, pz]
 
     Inputs
@@ -161,7 +154,11 @@ def omx_pair_dipole_matrix_sp(rij, direction, coord_i, basis_i, basis_j):
 
     # Gaussian product center:
     # P = Ri + b/(a+b) * (Rj - Ri)
-    Ri = coord_i[:, None, None, :]
+    # `rij` and the Gaussian exponents are in bohr-based units, while molecular
+    # coordinates are stored in Angstrom. Build the operator in bohr and convert
+    # back to Angstrom at the end so it stays consistent with the rest of the
+    # dipole-matrix code path.
+    Ri = (coord_i / a0)[:, None, None, :]
     P = Ri + (b * inv_g).unsqueeze(-1) * Rij
 
     # u = P - Ri
@@ -216,48 +213,26 @@ def omx_pair_dipole_matrix_sp(rij, direction, coord_i, basis_i, basis_j):
     block[:, 1:, 0, :] = R_ps
     block[:, 1:, 1:, :] = R_pp
 
-    return -block
+    return block * a0
 
 
-from .om2_hcore import select_om1_basis_payload
-from .two_elec_two_center_int import rotate_with_quaternion
-
-
-def calc_dipole_matrix_omx_ecp3g_sp(molecule, return_pair_blocks=False):
+def calc_dipole_matrix(molecule, orthogonalize=None):
     """
-    Full batched dipole matrix using the same pair utilities as overlap.
+    Return the AO coordinate-operator matrix r.
 
-    Returns:
-        [nmol, 3, 4*molsize, 4*molsize]
+    For OMx methods, Löwdin orthogonalization should be applied before
+    contracting any property in the orthogonalized AO basis, so the default is
+    to return the orthogonalized operator.
     """
-    orb_dim = 4
-    nmol = molecule.nmol
-    molsize = molecule.molsize
-    nblocks = nmol * molsize * molsize
+    if orthogonalize is None:
+        orthogonalize = molecule.method in OMX_METHODS
 
-    basis_data = molecule.parameters.get("_omx_basis_data")
+    if molecule.method not in OMX_METHODS:
+        return calc_dipole_matrix_nddo(molecule)
 
-    basis_i = select_om1_basis_payload(basis_data, molecule.idxi)
-    basis_j = select_om1_basis_payload(basis_data, molecule.idxj)
-
-    rot = rotate_with_quaternion(molecule.xij)
-    rot_t = rot.transpose(1, 2)
-    direction = rot_t[:, :, 0]
-
-    # Pair-ordered atom-i coordinates: [mol, i, j, xyz] -> [nblocks, xyz]
-    coord_i = molecule.coordinates[:, :, None, :].expand(nmol, molsize, molsize, 3).reshape(nblocks, 3)
-
-    pair_dipole = omx_pair_dipole_matrix_sp(
-        molecule.rij, direction, coord_i, basis_i, basis_j
-    )  # [nblocks, 4, 4, 3]
-
-    if return_pair_blocks:
-        return pair_dipole
-
-    dipole_mat = (
-        pair_dipole.reshape(nmol, molsize, molsize, orb_dim, orb_dim, 3)
-        .permute(0, 5, 1, 3, 2, 4)
-        .reshape(nmol, 3, orb_dim * molsize, orb_dim * molsize)
-    )
-
+    diag_dipole, pair_dipole = _omx_dipole_blocks(molecule)
+    dipole_mat = _assemble_full_dipole_matrix(molecule, diag_dipole, pair_dipole)
+    if orthogonalize:
+        overlap = overlap_matrix_current_geometry(molecule)
+        dipole_mat = orthogonalize_operator_from_overlap(overlap, dipole_mat)
     return dipole_mat

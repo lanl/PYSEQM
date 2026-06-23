@@ -324,23 +324,19 @@ def rcis_grad_batch(
 
 
 from .constants import debye_to_AU, to_debye
-from .rcis_batch import calc_dipole_matrix, packone_batch
+from .dipole import calc_dipole_matrix
+from .rcis_batch import pack_dipole_matrix
 
 
 def make_cis_state_dipole(mol, difference_density, relaxed_difference_density, P0):
     dipole_mat = calc_dipole_matrix(mol)
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
-    dipole_mat_packed = packone_batch(
-        dipole_mat.view(3 * mol.nmol, 4 * mol.molsize, 4 * mol.molsize), 4 * nHeavy, nHydro, norb
-    ).view(mol.nmol, 3, norb, norb)
+    dipole_mat_packed = pack_dipole_matrix(mol, dipole_mat)
 
     mol.cis_state_unrelaxed_dipole = (
-        torch.einsum("Nnm,Ndnm->Nd", difference_density, dipole_mat_packed) * to_debye * debye_to_AU
+        -torch.einsum("Nnm,Ndnm->Nd", difference_density, dipole_mat_packed) * to_debye * debye_to_AU
         + mol.dipole
     )
     mol.cis_state_relaxed_dipole = (
-        torch.einsum("Nnm,Ndnm->Nd", relaxed_difference_density, dipole_mat_packed) * to_debye * debye_to_AU
+        -torch.einsum("Nnm,Ndnm->Nd", relaxed_difference_density, dipole_mat_packed) * to_debye * debye_to_AU
         + mol.dipole
     )

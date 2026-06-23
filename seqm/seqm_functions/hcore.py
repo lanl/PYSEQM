@@ -193,40 +193,22 @@ def overlap_between_geometries(molecule, coords1, coords2):
     if coords1.shape != coords2.shape:
         raise ValueError("coords1 and coords2 must have the same shape")
 
-    is_pm6 = molecule.method == "PM6"
-    is_omx = molecule.method in {"OM1", "OM2", "OM3"}
-    orb_dim = 9 if is_pm6 else 4
-    if is_pm6:
-        overlap_fn = diatom_overlap_matrixD
-        overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
-    elif is_omx:
-        basis = molecule.parameters.get("_omx_basis")
-        basis_data = molecule.parameters.get("_omx_basis_data")
-        if basis is None or basis_data is None:
-            raise RuntimeError("OMx basis tables have not been cached on the molecule")
-        overlap_fn = diatom_overlap_matrix_OM1
-        overlap_args = ()
-    else:
-        overlap_fn = diatom_overlap_matrix_PM6_SP
-        overlap_args = (molecule.const.qn_int,)
+    overlap_fn, overlap_args, orb_dim, is_pm6, is_omx, basis_data = _overlap_kernel_data(molecule)
 
-    # Parameters are stored only for real atoms; rebuild a padded view for indexing
-    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
+    # Parameters are stored only for real atoms; rebuild a padded view for indexing.
+    zeta = None if is_omx else get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
     nmol, molsize = molecule.species.shape
     species = molecule.species
     device = coords1.device
     dtype = coords1.dtype
 
-    atom_index = torch.arange(nmol * molsize, device=device, dtype=torch.int64)
-    real_atoms = atom_index[(species.reshape(-1) > 0)]
-    if zeta.dim() == 1:
-        zeta_full = torch.zeros((nmol * molsize,), dtype=zeta.dtype, device=zeta.device)
-        zeta_full[real_atoms] = zeta
-        zeta_full = zeta_full.view(nmol, molsize)
-    else:
-        zeta_full = torch.zeros((nmol * molsize, zeta.shape[1]), dtype=zeta.dtype, device=zeta.device)
-        zeta_full[real_atoms] = zeta
-        zeta_full = zeta_full.view(nmol, molsize, -1)
+    flat_atom_index = torch.arange(nmol * molsize, device=device, dtype=torch.int64)
+    real_atoms = flat_atom_index[(species.reshape(-1) > 0)]
+    real_atom_lookup = torch.full((nmol * molsize,), -1, dtype=torch.int64, device=device)
+    real_atom_lookup[real_atoms] = torch.arange(real_atoms.numel(), device=device, dtype=torch.int64)
+    if not is_omx:
+        zeta_flat = torch.zeros((nmol * molsize, *zeta.shape[1:]), dtype=zeta.dtype, device=zeta.device)
+        zeta_flat[real_atoms] = zeta
 
     # Pair geometry between coords1 (row atoms) and coords2 (column atoms)
     diff = coords2.unsqueeze(1) - coords1.unsqueeze(2)  # (nmol, molsize, molsize, 3)
@@ -235,7 +217,7 @@ def overlap_between_geometries(molecule, coords1, coords2):
     xij = torch.zeros_like(diff)
     nonzero_dist = dist > 0
     xij[nonzero_dist] = diff[nonzero_dist] / dist[nonzero_dist].unsqueeze(-1)
-    xij[~nonzero_dist] = torch.tensor([1.0, 0.0, 0.0], device=device, dtype=dtype)
+    xij[..., 0] = torch.where(nonzero_dist, xij[..., 0], torch.ones_like(xij[..., 0]))
 
     atom_mask = (species.unsqueeze(2) > 0) & (species.unsqueeze(1) > 0)
     close_pairs = atom_mask & (rij <= overlap_cutoff)
@@ -247,17 +229,17 @@ def overlap_between_geometries(molecule, coords1, coords2):
     valid_pairs = close_pairs & (~diag_zero)
 
     if valid_pairs.any():
-        atom_index = torch.arange(nmol * molsize, device=device, dtype=torch.int64).view(nmol, molsize)
-        ni = species.unsqueeze(2).expand(-1, -1, molsize)[valid_pairs]
-        nj = species.unsqueeze(1).expand(-1, molsize, -1)[valid_pairs]
-        x_flat = xij[valid_pairs]
-        r_flat = rij[valid_pairs]
-        if zeta.dim() == 1:
-            zeta_i = zeta_full.unsqueeze(2).expand(-1, -1, molsize)[valid_pairs]
-            zeta_j = zeta_full.unsqueeze(1).expand(-1, molsize, -1)[valid_pairs]
-        else:
-            zeta_i = zeta_full.unsqueeze(2).expand(-1, -1, molsize, -1)[valid_pairs]
-            zeta_j = zeta_full.unsqueeze(1).expand(-1, molsize, -1, -1)[valid_pairs]
+        pair_idx = valid_pairs.nonzero(as_tuple=False)
+        batch_idx = pair_idx[:, 0]
+        row_idx = pair_idx[:, 1]
+        col_idx = pair_idx[:, 2]
+        flat_row = batch_idx * molsize + row_idx
+        flat_col = batch_idx * molsize + col_idx
+
+        ni = species[batch_idx, row_idx]
+        nj = species[batch_idx, col_idx]
+        x_flat = xij[batch_idx, row_idx, col_idx]
+        r_flat = rij[batch_idx, row_idx, col_idx]
 
         swap = ni < nj  # enforce ni >= nj as expected by overlap kernels
         x_use = torch.where(swap.unsqueeze(-1), -x_flat, x_flat)
@@ -265,23 +247,28 @@ def overlap_between_geometries(molecule, coords1, coords2):
             from .two_elec_two_center_int import rotate_with_quaternion
 
             direction = rotate_with_quaternion(x_use).transpose(1, 2)[:, :, 0]
-            row_idx = atom_index.unsqueeze(2).expand(-1, -1, molsize)[valid_pairs]
-            col_idx = atom_index.unsqueeze(1).expand(-1, molsize, -1)[valid_pairs]
-            row_idx_use = torch.where(swap, col_idx, row_idx)
-            col_idx_use = torch.where(swap, row_idx, col_idx)
-            basis_i = select_om1_basis_payload(basis_data, row_idx_use)
-            basis_j = select_om1_basis_payload(basis_data, col_idx_use)
+            basis_i = select_om1_basis_payload(
+                basis_data, real_atom_lookup[torch.where(swap, flat_col, flat_row)]
+            )
+            basis_j = select_om1_basis_payload(
+                basis_data, real_atom_lookup[torch.where(swap, flat_row, flat_col)]
+            )
             di_tmp = overlap_fn(x_use, r_flat, direction, basis_i, basis_j)
-            di_tmp[swap] = di_tmp[swap].transpose(1, 2)
-            di_blocks[valid_pairs] = di_tmp
         else:
             ni_use = torch.where(swap, nj, ni)
             nj_use = torch.where(swap, ni, nj)
-            zeta_i_use = torch.where(swap.unsqueeze(-1), zeta_j, zeta_i)
-            zeta_j_use = torch.where(swap.unsqueeze(-1), zeta_i, zeta_j)
+            zeta_i = zeta_flat[flat_row]
+            zeta_j = zeta_flat[flat_col]
+            if zeta.dim() == 1:
+                zeta_i_use = torch.where(swap, zeta_j, zeta_i)
+                zeta_j_use = torch.where(swap, zeta_i, zeta_j)
+            else:
+                zeta_i_use = torch.where(swap.unsqueeze(-1), zeta_j, zeta_i)
+                zeta_j_use = torch.where(swap.unsqueeze(-1), zeta_i, zeta_j)
             di_tmp = overlap_fn(ni_use, nj_use, x_use, r_flat, zeta_i_use, zeta_j_use, *overlap_args)
-            di_tmp[swap] = di_tmp[swap].transpose(1, 2)
-            di_blocks[valid_pairs] = di_tmp
+
+        di_tmp[swap] = di_tmp[swap].transpose(1, 2)
+        di_blocks[batch_idx, row_idx, col_idx] = di_tmp
 
     # When coords1 and coords2 coincide for the same atom, the overlap is identity
     if diag_zero.any():
@@ -289,6 +276,82 @@ def overlap_between_geometries(molecule, coords1, coords2):
 
     overlap_matrix = di_blocks.transpose(2, 3).reshape(nmol, orb_dim * molsize, orb_dim * molsize)
     return overlap_matrix
+
+
+def overlap_matrix_current_geometry(molecule):
+    """Build the AO overlap matrix for the molecule's current geometry."""
+    overlap_fn, overlap_args, orb_dim, is_pm6, is_omx, basis_data = _overlap_kernel_data(molecule)
+    nmol, molsize = molecule.species.shape
+    dtype = molecule.coordinates.dtype
+    device = molecule.coordinates.device
+    nblocks = nmol * molsize * molsize
+
+    blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
+
+    if is_omx:
+        pair_i = select_om1_basis_payload(basis_data, molecule.idxi)
+        pair_j = select_om1_basis_payload(basis_data, molecule.idxj)
+        from .two_elec_two_center_int import rotate_with_quaternion
+
+        direction = rotate_with_quaternion(molecule.xij).transpose(1, 2)[:, :, 0]
+        pair_blocks = overlap_fn(molecule.xij, molecule.rij, direction, pair_i, pair_j)
+    else:
+        zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
+        pair_blocks = overlap_fn(
+            molecule.ni,
+            molecule.nj,
+            molecule.xij,
+            molecule.rij,
+            zeta[molecule.idxi],
+            zeta[molecule.idxj],
+            *overlap_args,
+        )
+
+    blocks[molecule.mask] = pair_blocks
+    blocks[molecule.mask_l] = pair_blocks.transpose(-1, -2)
+
+    if is_pm6:
+        eye = torch.eye(orb_dim, dtype=dtype, device=device)
+        h_self = torch.zeros_like(eye)
+        h_self[0, 0] = 1.0
+        blocks[molecule.maskd[molecule.Z == 1]] = h_self
+        blocks[molecule.maskd[molecule.Z > 1]] = eye
+    else:
+        blocks[molecule.maskd] = torch.eye(orb_dim, dtype=dtype, device=device)
+
+    return (
+        blocks.reshape(nmol, molsize, molsize, orb_dim, orb_dim)
+        .transpose(2, 3)
+        .reshape(nmol, orb_dim * molsize, orb_dim * molsize)
+    )
+
+
+def _overlap_kernel_data(molecule):
+    is_pm6 = molecule.method == "PM6"
+    is_omx = molecule.method in {"OM1", "OM2", "OM3"}
+    orb_dim = 9 if is_pm6 else 4
+
+    if is_pm6:
+        return (
+            diatom_overlap_matrixD,
+            (molecule.const.qn_int, molecule.const.qnD_int),
+            orb_dim,
+            is_pm6,
+            is_omx,
+            None,
+        )
+    if is_omx:
+        basis_data = molecule.parameters.get("_omx_basis_data")
+        if basis_data is None:
+            raise RuntimeError("OMx basis tables have not been cached on the molecule")
+        return diatom_overlap_matrix_OM1, (), orb_dim, is_pm6, is_omx, basis_data
+    return diatom_overlap_matrix_PM6_SP, (molecule.const.qn_int,), orb_dim, is_pm6, is_omx, None
+
+
+def _overlap_matrix_for_geometry(molecule, coords):
+    if coords.shape == molecule.coordinates.shape and coords.data_ptr() == molecule.coordinates.data_ptr():
+        return overlap_matrix_current_geometry(molecule)
+    return overlap_between_geometries(molecule, coords, coords)
 
 
 def _symmetric_inverse_square_root_eigh(S, eigval_tol=None):
@@ -306,18 +369,32 @@ def _symmetric_inverse_square_root_eigh(S, eigval_tol=None):
     return eigvals, eigvecs, inv_sqrt_eigvals
 
 
-def _orthogonalized_overlap(S1, S12, S2, eigval_tol=None):
+def orthogonalized_overlap_from_matrices(S1, S12, S2, eigval_tol=None):
+    """Orthogonalize a precomputed overlap triple without rebuilding AO overlaps."""
     _, eigvecs1, inv_sqrt1 = _symmetric_inverse_square_root_eigh(S1, eigval_tol)
-    _, eigvecs2, inv_sqrt2 = _symmetric_inverse_square_root_eigh(S2, eigval_tol)
+    if S1.data_ptr() == S2.data_ptr():
+        eigvecs2, inv_sqrt2 = eigvecs1, inv_sqrt1
+    else:
+        _, eigvecs2, inv_sqrt2 = _symmetric_inverse_square_root_eigh(S2, eigval_tol)
 
     S12_orth = eigvecs1.transpose(-1, -2) @ S12 @ eigvecs2
     S12_orth = S12_orth * inv_sqrt1.unsqueeze(-1) * inv_sqrt2.unsqueeze(-2)
     return eigvecs1 @ S12_orth @ eigvecs2.transpose(-1, -2)
 
 
-def orthogonalized_overlap_from_matrices(S1, S12, S2, eigval_tol=None):
-    """Orthogonalize a precomputed overlap triple without rebuilding AO overlaps."""
-    return _orthogonalized_overlap(S1, S12, S2, eigval_tol)
+def orthogonalize_operator_from_overlap(S, operator, eigval_tol=None):
+    """
+    Orthogonalize an AO-basis operator with the same overlap on both sides:
+
+        O_orth = S^(-1/2) O S^(-1/2)
+
+    `operator` may have shape `(nmol, nao, nao)` or `(nmol, ncomp, nao, nao)`.
+    """
+    _, eigvecs, inv_sqrt = _symmetric_inverse_square_root_eigh(S, eigval_tol)
+    xform = (eigvecs * inv_sqrt.unsqueeze(-2)) @ eigvecs.transpose(-1, -2)
+    if operator.dim() == 3:
+        return xform @ operator @ xform
+    return xform.unsqueeze(1) @ operator @ xform.unsqueeze(1)
 
 
 def orthogonalized_overlap_between_geometries(molecule, coords1, coords2, eigval_tol=None, pack_fn=None):
@@ -333,13 +410,13 @@ def orthogonalized_overlap_between_geometries(molecule, coords1, coords2, eigval
     pack_fn: optional callable applied to S(R1), S(R1,R2), and S(R2)
     returns: (nmol, nao, nao), where nao is the packed size if pack_fn is used
     """
-    S1 = overlap_between_geometries(molecule, coords1, coords1)
+    S1 = _overlap_matrix_for_geometry(molecule, coords1)
     S12 = overlap_between_geometries(molecule, coords1, coords2)
-    S2 = overlap_between_geometries(molecule, coords2, coords2)
+    S2 = _overlap_matrix_for_geometry(molecule, coords2)
 
     if pack_fn is not None:
         S1 = pack_fn(S1)
         S12 = pack_fn(S12)
         S2 = pack_fn(S2)
 
-    return _orthogonalized_overlap(S1, S12, S2, eigval_tol)
+    return orthogonalized_overlap_from_matrices(S1, S12, S2, eigval_tol)

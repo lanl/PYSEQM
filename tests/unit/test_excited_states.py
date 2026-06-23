@@ -172,3 +172,69 @@ def test_rpa_batch_same_molecule_different_coords(device, methanal_batch_data, m
     assert_allclose(data["cis_energies"], ref["cis_energies"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["oscillator_strength"], ref["oscillator_strength"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+
+
+def test_om2_transition_dipoles_match_mndo_ethene_twist(device):
+    prev_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    species = torch.tensor([[6, 6, 1, 1, 1, 1]], dtype=torch.int64, device=device)
+    try:
+        coordinates = torch.tensor(
+            [
+                [
+                    [0.00000, 0.66819, 0.00000],
+                    [0.00000, -0.66819, 0.00000],
+                    [0.66414, 1.23830, -0.64135],
+                    [0.66414, -1.23830, 0.64135],
+                    [-0.66414, 1.23830, 0.64135],
+                    [-0.66414, -1.23830, -0.64135],
+                ]
+            ],
+            dtype=torch.float64,
+            device=device,
+        )
+        const = Constants().to(device)
+        seqm_parameters = {
+            "method": "OM2",
+            "scf_eps": 1.0e-8,
+            "scf_converger": [2],
+            "excited_states": {"n_states": 4, "method": "cis"},
+            "active_state": 1,
+        }
+
+        molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
+        esdriver = Electronic_Structure(seqm_parameters).to(device)
+        esdriver(molecule)
+
+        expected_transition_dipole = torch.tensor(
+            [
+                [
+                    [0.0, -0.5779362869470863, 0.0],
+                    [-0.6165675141371499, 0.0, 0.0],
+                    [0.0, 0.0, 0.7826884559272248],
+                    [-0.4087342822437641, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float64,
+            device=device,
+        )
+        expected_oscillator_strength = torch.tensor(
+            [[0.008034, 0.038884, 0.074313, 0.022889]], dtype=torch.float64, device=device
+        )
+
+        assert molecule.transition_dipole is not None
+        assert molecule.oscillator_strength is not None
+        assert_allclose(
+            molecule.transition_dipole.detach().cpu().tolist(),
+            expected_transition_dipole.detach().cpu().tolist(),
+            rtol=1e-5,
+            atol=1e-5,
+        )
+        assert_allclose(
+            molecule.oscillator_strength.detach().cpu().tolist(),
+            expected_oscillator_strength.detach().cpu().tolist(),
+            rtol=1e-4,
+            atol=1e-5,
+        )
+    finally:
+        torch.set_default_dtype(prev_dtype)

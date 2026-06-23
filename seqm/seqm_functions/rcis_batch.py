@@ -733,6 +733,15 @@ def _store_tdm_by_mode(mol, R, tdm_mode):
     mol.transition_density_matrices = R.clone()
 
 
+def pack_dipole_matrix(mol, dipole_mat):
+    nHeavy = mol.nHeavy[0]
+    nHydro = mol.nHydro[0]
+    norb = mol.norb[0]
+    return packone_batch(
+        dipole_mat.view(3 * mol.nmol, 4 * mol.molsize, 4 * mol.molsize), 4 * nHeavy, nHydro, norb
+    ).view(mol.nmol, 3, norb, norb)
+
+
 def _resolve_tdm_mode(mol):
     exc_cfg = mol.seqm_parameters["excited_states"]
     tdm_mode = str(exc_cfg.get("transition_density_matrices_mode", "full")).strip().lower()
@@ -804,10 +813,6 @@ def calc_transition_dipoles(
     else:
         amp_ia_X = amplitudes.view(mol.nmol, nroots, nocc, nvirt)
 
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
-
     # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a
     R = torch.einsum("bmi,bria,bna->brmn", Cocc, amp_ia_X, Cvirt)
     if rpa:
@@ -819,9 +824,7 @@ def calc_transition_dipoles(
     if not do_transition_props:
         return None, None
 
-    dipole_mat_packed = packone_batch(
-        dipole_mat.view(3 * mol.nmol, 4 * mol.molsize, 4 * mol.molsize), 4 * nHeavy, nHydro, norb
-    ).view(mol.nmol, 3, norb, norb)
+    dipole_mat_packed = pack_dipole_matrix(mol, dipole_mat)
     # Transition dipole in AU as calculated in NEXMD
     transition_dipole = torch.einsum("brmn,bdmn->brd", R, dipole_mat_packed) * math.sqrt(2.0) / a0
     hartree = 27.2113962  # value used in NEXMD
