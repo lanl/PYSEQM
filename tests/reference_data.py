@@ -10,6 +10,7 @@ REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 
 LEGACY_METHODS = ("MNDO", "AM1", "PM3", "PM6", "PM6_SP")
 AM1_AND_OM2_METHODS = ("AM1", "OM2")
+LANGEVIN_METHODS = ("AM1",)
 OMX_METHODS = ("AM1", "OM1", "OM2", "OM3")
 ALL_METHODS = LEGACY_METHODS + ("OM1", "OM2", "OM3")
 

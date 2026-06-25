@@ -6,6 +6,7 @@ from .constants import a0, ev
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .dispersion_am1_fs1 import dEdisp_dr
 from .energy import pair_nuclear_energy
+from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 from .om2_hcore import build_omx_pair_context
 from .two_elec_two_center_int import rotate_with_quaternion
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
@@ -128,9 +129,7 @@ def contract_ao_derivatives_with_density(
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     #   0,     1         2       3       4         5       6      7         8        9
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
+    ind = _cached_index(K_ind_4, device)
     # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
     # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
     if unrestricted:
@@ -163,14 +162,13 @@ def contract_ao_derivatives_with_density(
     # weight for them are
     #  1       2       1        2        2        1        2       2        2       1
 
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape((-1, 10))
-    weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
+    # Multiply the weight by 0.5 because the contribution of coulomb integrals to energy is 0.5*P_mu_nu*F_mu_nv.
+    weight = (_cached_tensor(WEIGHT_10, device, dtype) * 0.5).reshape((-1, 10))
 
-    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P[maskd[idxi]][..., indices[0], indices[1]] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
-    PB = (P[maskd[idxj]][..., indices[0], indices[1]] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    PA = (P[maskd[idxi]][..., idx0, idx1] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
+    PB = (P[maskd[idxj]][..., idx0, idx1] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
 
@@ -181,26 +179,17 @@ def contract_ao_derivatives_with_density(
     # In the future, if this code is to be edited, be careful here
     sumA = overlap_KAB_x
     sumA.zero_()
-    sumA[..., indices[0], indices[1]] = suma
+    sumA[..., idx0, idx1] = suma
     e2a_x.add_(sumA)
 
     sumB = overlap_KAB_x
     sumB.zero_()
     sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-    sumB[..., indices[0], indices[1]] = sumb
+    sumB[..., idx0, idx1] = sumb
     e1b_x.add_(sumB)
 
     # Core-elecron interaction
-    # fmt: off
-    scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0],
-         [0.0, 1.0, 2.0, 2.0],
-         [0.0, 0.0, 1.0, 2.0],
-         [0.0, 0.0, 0.0, 1.0]],
-        dtype=dtype,
-        device=device,
-    )
-    # fmt: on
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     e1b_x *= scale_emat
     e2a_x *= scale_emat
     # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
@@ -254,11 +243,6 @@ def scf_grad(
     The gradient is calculated in a pseudo-numerical fashion. The derivatives of the overlap, the core-core repulsions and the two-electron integrals in
     the atomic orbital basis are calculated using finite-differnce.
     """
-    # if method == "OM1":
-    #     return scf_grad_om1(P0, molecule, molsize, mask, maskd)
-    # if method in {"OM2", "OM3"}:
-    #     raise NotImplementedError("Fast finite-difference gradients are implemented for OM1 only")
-
     # torch.set_printoptions(precision=6)
     # torch.set_printoptions(linewidth=110)
 
@@ -274,7 +258,6 @@ def scf_grad(
     overlap_KAB_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
     w_x_new = torch.zeros(rij.shape[0], 3, 10, 10, device=device, dtype=dtype)
 
-    # if method == "OM1":
     if method in {"OM1", "OM2", "OM3"}:
         e1b_x_new, e2a_x_new, fko_x, omx_orthogonalization_grad, _ = omx_fd(
             molecule, overlap_KAB_x, w_x_new, Xij, ni, nj, idxi, idxj, method, P0
@@ -1666,7 +1649,50 @@ def der_TETCILF(
     w_x_final[XX, ...] = w_x.reshape(ri.shape[0], 3, 10, 10)
 
 
-def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=None):
+def _build_omx_ortho_fd_cache(molecule, Xij, ni, nj, idxi, idxj, method, dtype, device):
+    if method not in {"OM2", "OM3"}:
+        return None
+
+    npairs = Xij.shape[0]
+    ni_ = repeat_tensor(ni)
+    nj_ = repeat_tensor(nj)
+    idxi_ = repeat_tensor(idxi)
+    idxj_ = repeat_tensor(idxj)
+    one_over_twodelta = 1.0 / (2.0 * delta)
+    S_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
+    B_x = torch.zeros_like(S_x)
+    pair_core_semi_x = torch.zeros(npairs, 3, 4, 2, device=device, dtype=dtype) if method == "OM2" else None
+    ortho_cache = _build_omx_ortho_cache(molecule)
+
+    for coord in range(3):
+        Xij[:, coord] -= delta
+        rij_plus = torch.norm(Xij, dim=1)
+        xij_plus = Xij / rij_plus.unsqueeze(1)
+        rij_plus = rij_plus / a0
+
+        Xij[:, coord] += 2.0 * delta
+        rij_minus = torch.norm(Xij, dim=1)
+        xij_minus = Xij / rij_minus.unsqueeze(1)
+        rij_minus = rij_minus / a0
+
+        rij_ = torch.cat([rij_plus, rij_minus])
+        xij_ = torch.cat([xij_plus, xij_minus])
+        ctx = build_omx_pair_context(
+            molecule, method=method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
+        )
+        Xij[:, coord] -= delta
+
+        B_x[:, coord] = (ctx["pair_resonance"][:npairs] - ctx["pair_resonance"][npairs:]) * one_over_twodelta
+        S_x[:, coord] = (ctx["pair_overlap"][:npairs] - ctx["pair_overlap"][npairs:]) * one_over_twodelta
+        if pair_core_semi_x is not None:
+            pair_core_semi_x[:, coord] = (
+                ctx["pair"]["core_semi"][:npairs] - ctx["pair"]["core_semi"][npairs:]
+            ) * one_over_twodelta
+
+    return {"S_x": S_x, "B_x": B_x, "pair_core_semi_x": pair_core_semi_x, **ortho_cache}
+
+
+def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=None, return_ortho_cache=False):
     npairs = Xij.shape[0]
     ni_ = repeat_tensor(ni)
     nj_ = repeat_tensor(nj)
@@ -1676,15 +1702,16 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
     e2a_x = torch.zeros((npairs, 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
     fko_x = torch.zeros((npairs, 3), dtype=w_x.dtype, device=w_x.device)
     one_over_twodelta = 1.0 / (2.0 * delta)
+    need_ortho_terms = method in {"OM2", "OM3"} and (torch.is_tensor(P0) or return_ortho_cache)
     need_threebody_grad = method in {"OM2", "OM3"} and torch.is_tensor(P0)
-    method_is_om2 = method == "OM2"
     B_x = overlap_KAB_x
-    pair_core_semi_x = None
-    ortho_cache = _build_omx_ortho_cache(molecule) if need_threebody_grad else None
-    if need_threebody_grad:
-        S_x = torch.zeros_like(B_x)
-        if method_is_om2:
-            pair_core_semi_x = torch.zeros(npairs, 3, 4, 2, device=w_x.device, dtype=w_x.dtype)
+    ortho_cache = _build_omx_ortho_cache(molecule) if need_ortho_terms else None
+    S_x = torch.zeros_like(B_x) if need_ortho_terms else None
+    pair_core_semi_x = (
+        torch.zeros(npairs, 3, 4, 2, device=w_x.device, dtype=w_x.dtype)
+        if method == "OM2" and need_ortho_terms
+        else None
+    )
 
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
@@ -1715,12 +1742,10 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
         e1b_x[:, coord, :, :] = (pair["e1b"][:npairs] - pair["e1b"][npairs:]) * one_over_twodelta
         e2a_x[:, coord, :, :] = (pair["e2a"][:npairs] - pair["e2a"][npairs:]) * one_over_twodelta
         fko_x[:, coord] = (pair["fko"][:npairs] - pair["fko"][npairs:]) * one_over_twodelta
-
-        if need_threebody_grad:
+        if need_ortho_terms:
             S_ = ctx["pair_overlap"]
             S_x[:, coord] = (S_[:npairs] - S_[npairs:]) * one_over_twodelta
-
-            if method == "OM2":
+            if pair_core_semi_x is not None:
                 pair_core_semi_x[:, coord] = (
                     pair["core_semi"][:npairs] - pair["core_semi"][npairs:]
                 ) * one_over_twodelta
@@ -1732,6 +1757,7 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
         )
         # Legacy callers expect a single density-gradient slice here.
         omx_orthogonalization_grad = omx_orthogonalization_grad[:, 0]
+    if need_ortho_terms:
         ortho_cache = {"S_x": S_x, "B_x": B_x.clone(), "pair_core_semi_x": pair_core_semi_x, **ortho_cache}
 
     # Hcore derivative needs to have upper and lower triangle contribution, multiply by 2.0, since Hcore is symmetric and will be contracted with a symmetric P0.

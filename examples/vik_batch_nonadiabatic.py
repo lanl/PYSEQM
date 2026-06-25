@@ -28,7 +28,7 @@ def build_molecule(xyz_path: str, ntraj: int, device):
         "excited_states": {"n_states": 5, "method": "cis", "tolerance": 1e-6, "make_best_guess": True},
         "active_state": 3,
         "analytical_gradient": [True],
-        "nonadiabatic": {"compute_nac": True},
+        "nonadiabatic": {"tdc_method": "nac_dot_v"},
     }
     mol = Molecule(const, seqm_parameters, coords, species).to(device)
     return mol

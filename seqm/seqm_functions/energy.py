@@ -1,5 +1,3 @@
-import math
-
 import torch
 
 from .constants import a0, ev
@@ -108,8 +106,8 @@ def pair_nuclear_energy(
     atomic_num = const.atomic_num
     tore = const.tore
 
-    if method == "OM1" or method == "OM2" or method == "OM3":
-        # For OMx, rho0xi stores fko
+    if method in {"OM1", "OM2", "OM3"}:
+        # For OMx, gam stores fko (Klopman-Ohno)
         EnucAB = gam * tore[ni] * tore[nj] * ev / rij
         return EnucAB
 
@@ -126,7 +124,7 @@ def pair_nuclear_energy(
         # in mopac, rij is in unit of angstrom
         # EnucAB = torch.abs(t1*(1.0+t2+t3))
         EnucAB = t1 * (1.0 + t2 + t3)
-    elif method == "PM3" or method == "AM1":
+    elif method in {"PM3", "AM1"}:
         # two gaussian terms for PM3
         # 3~4 terms for AM1
         _, K, L, M = parameters
@@ -138,7 +136,7 @@ def pair_nuclear_energy(
         t6 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija.reshape((-1, 1)) - M[idxj]) ** 2), dim=1)
 
         EnucAB = t1 * (1.0 + t2 + t3) + t4 * (t5 + t6)
-    elif method == "PM6" or method == "PM6_SP" or method == "PM6_SP_STAR":
+    elif method in {"PM6", "PM6_SP", "PM6_SP_STAR"}:
         _, K, L, M = parameters
         # K, L , M shape (natoms,2 or 4)
 
@@ -150,28 +148,28 @@ def pair_nuclear_energy(
         XH = ((ni == 6) | (ni == 7) | (ni == 8)) & (nj == 1)
         XCC = (ni == 6) & (nj == 6)
         XSiO = (ni == 14) & (nj == 8)
-        ten_to_minus8 = 10 ** (-8)
+        ten_to_minus8 = 1.0e-8
         unpolcore = ten_to_minus8 * torch.pow(
             (torch.pow(atomic_num[ni], 1 / 3) + torch.pow(atomic_num[nj], 1 / 3)) / rija, 12
         )
 
         expo2 = unpolcore + tore[ni] * tore[nj] * ev / torch.sqrt(rij * rij + (rho0xi + rho0xj) ** 2) * (
-            1.0 + 2.0 * chi[ni, nj] * torch.pow(math.e, -alp[ni, nj] * (rija + 0.0003 * torch.pow(rija, 6)))
+            1.0 + 2.0 * chi[ni, nj] * torch.exp(-alp[ni, nj] * (rija + 0.0003 * torch.pow(rija, 6)))
         )
 
         # EXCEPTIONS FOR C-H,O-H,N-H
         expo2[XH] = unpolcore[XH] + tore[ni][XH] * tore[nj][XH] * (
-            1.0 + 2.0 * chi[ni, nj][XH] * torch.pow(math.e, -alp[ni, nj][XH] * (torch.pow(rija[XH], 2)))
+            1.0 + 2.0 * chi[ni, nj][XH] * torch.exp(-alp[ni, nj][XH] * (torch.pow(rija[XH], 2)))
         ) * ev / torch.sqrt(rij[XH] * rij[XH] + (rho0xi[XH] + rho0xj[XH]) ** 2)
 
         # EXCEPTIONS FOR C-C
         expo2[XCC] = expo2[XCC] + tore[ni][XCC] * tore[nj][XCC] * (
-            9.28 * torch.pow(math.e, -rija[XCC] * 5.98)
+            9.28 * torch.exp(-rija[XCC] * 5.98)
         ) * ev / torch.sqrt(rij[XCC] * rij[XCC] + (rho0xi[XCC] + rho0xj[XCC]) ** 2)
 
         # EXCEPTIONS FOR Si-O
         expo2[XSiO] = expo2[XSiO] - tore[ni][XSiO] * tore[nj][XSiO] * (
-            0.0007 * torch.pow(math.e, -torch.pow(rij[XSiO] - 2.9, 2))
+            0.0007 * torch.exp(-torch.pow(rij[XSiO] - 2.9, 2))
         ) * ev / torch.sqrt(rij[XSiO] * rij[XSiO] + (rho0xi[XSiO] + rho0xj[XSiO]) ** 2)
 
         EnucAB = expo2 + t4 * (t5 + t6)
@@ -194,8 +192,7 @@ def total_energy(nmol, pair_molid, EnucAB, Eelec):
     """
     Enuc = torch.zeros((nmol,), dtype=EnucAB.dtype, device=EnucAB.device)
     Enuc.index_add_(0, pair_molid, EnucAB)
-    Etot = Eelec + Enuc
-    return Etot, Enuc
+    return Eelec + Enuc, Enuc
 
 
 def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
@@ -211,11 +208,11 @@ def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
     """
     # electronic energy for isolated atom, sum for each molecule
     Eiso_sum = torch.zeros_like(Etot)
-    Eiso_sum.index_add_(0, atom_molid, Eiso)
+    Eiso_sum.index_add_(0, atom_molid, Eiso.to(dtype=Etot.dtype, device=Etot.device))
     if flag:
         # experimental heat of formation for each atom, sum for each molecule
         eheat_sum = torch.zeros_like(Etot)
-        eheat_sum.index_add_(0, atom_molid, const.eheat[Z])
+        eheat_sum.index_add_(0, atom_molid, const.eheat[Z].to(dtype=Etot.dtype, device=Etot.device))
         # Hf = Etot - Eiso_sum + eheat_sum
         return Etot - Eiso_sum + eheat_sum, Eiso_sum
     else:

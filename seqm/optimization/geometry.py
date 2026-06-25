@@ -1,6 +1,5 @@
 import os
 import tempfile
-import uuid
 
 import torch
 
@@ -9,12 +8,12 @@ from ..ElectronicStructure import Electronic_Structure as esdriver
 
 def _write_trajectory(path, step, molecule):
     """Write a multi‐frame .xyz"""
+    species = molecule.species[0]
+    coordinates = molecule.coordinates[0]
     with open(path, "a") as out:
-        out.write(f"{molecule.species.shape[1]}\nStep {step}, E = {molecule.Etot[0]:.8f} eV\n")
-        for atom in range(molecule.coordinates.shape[1]):
-            out.write(
-                f"{molecule.const.label[molecule.species[0, atom].item()]} {molecule.coordinates[0, atom, 0]:15.5f} {molecule.coordinates[0, atom, 1]:15.5f} {molecule.coordinates[0, atom, 2]:15.5f}\n"
-            )
+        out.write(f"{species.shape[0]}\nStep {step}, E = {molecule.Etot[0]:.8f} eV\n")
+        for atom, xyz in zip(species, coordinates):
+            out.write(f"{molecule.const.label[atom.item()]} {xyz[0]:15.5f} {xyz[1]:15.5f} {xyz[2]:15.5f}\n")
 
 
 # ─── User API ────────────────────────────────────────────────────────────────
@@ -46,7 +45,7 @@ def geomeTRIC_optimization(molecule, traj_file: str = "geom_opt_traj.xyz", **run
         geomeTRIC Engine that calls PYSEQM’s Electronic_Structure
         """
 
-        def __init__(self, molecule, traj_file, learned_parameters=dict()):
+        def __init__(self, molecule, traj_file, learned_parameters=None):
             self.molecule = molecule
 
             geomol = GeomMolecule()
@@ -54,18 +53,22 @@ def geomeTRIC_optimization(molecule, traj_file: str = "geom_opt_traj.xyz", **run
             geomol.xyzs = [self.molecule.coordinates.clone().detach().cpu().numpy()[0]]
             super().__init__(geomol)
 
-            self.learned_parameters = learned_parameters
+            self.learned_parameters = {} if learned_parameters is None else learned_parameters
             self.esdriver = esdriver(self.molecule.seqm_parameters).to(self.molecule.coordinates.device)
             self.step = 0
             self.traj_file = traj_file
 
         def calc_new(self, coords, dirname=None):
             # 1) Bohr → Å tensor
-            xyz_ang = torch.tensor(
-                coords.reshape(-1, 3) * bohr2ang,
-                device=self.molecule.coordinates.device,
-                dtype=self.molecule.coordinates.dtype,
-            ).unsqueeze(0)
+            xyz_ang = (
+                torch.as_tensor(
+                    coords.reshape(-1, 3),
+                    device=self.molecule.coordinates.device,
+                    dtype=self.molecule.coordinates.dtype,
+                )
+                .mul(bohr2ang)
+                .unsqueeze(0)
+            )
 
             with torch.no_grad():
                 self.molecule.coordinates = torch.nn.Parameter(xyz_ang)
@@ -95,7 +98,7 @@ def geomeTRIC_optimization(molecule, traj_file: str = "geom_opt_traj.xyz", **run
     engine = pyseqm_engine(molecule, traj_file)
     # Making a temp directory and a temp file because geomeTRIC uses this for logging but I dont want these files saved
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmpf = os.path.join(tmpdir, str(uuid.uuid4()))
+        tmpf = os.path.join(tmpdir, "geometric.in")
 
         result = run_optimizer(
             customengine=engine, input=tmpf, qccnv=True, **run_kwargs

@@ -6,7 +6,7 @@ import torch
 
 from seqm.basics import *  # noqa: F403
 from .basics import Pack_Parameters, Parser
-from .seqm_functions.omx_utils import prepare_parameters
+from .seqm_functions.omx_utils import build_beta_tensor, prepare_parameters
 
 
 class Molecule(torch.nn.Module):
@@ -18,7 +18,7 @@ class Molecule(torch.nn.Module):
         species,
         charges=0,
         mult=1,
-        learned_parameters=dict(),
+        learned_parameters=None,
         do_large_tensors=True,
         *args,
         **kwargs,
@@ -80,29 +80,22 @@ class Molecule(torch.nn.Module):
             self, self.method, return_mask_l=True, do_large_tensors=do_large_tensors, *args, **kwargs
         )
 
-        if callable(learned_parameters):
-            adict = learned_parameters(self.species, self.coordinates)
-            self.parameters, self.alp, self.chi = copy.deepcopy(self.packpar(self.Z, learned_params=adict))
-        else:
-            self.parameters, self.alp, self.chi = copy.deepcopy(
-                self.packpar(self.Z, learned_params=learned_parameters)
-            )
+        if learned_parameters is None:
+            learned_parameters = {}
+
+        learned_params = (
+            learned_parameters(self.species, self.coordinates)
+            if callable(learned_parameters)
+            else learned_parameters
+        )
+        self.parameters, self.alp, self.chi = copy.deepcopy(
+            self.packpar(self.Z, learned_params=learned_params)
+        )
 
         self.norb = self.nHydro + 4 * self.nHeavy  # number of orbitals
 
-        if self.method == "PM6":  # PM6 not implemented yet. Only PM6_SP
-            self.parameters["beta"] = torch.cat(
-                (
-                    self.parameters["beta_s"].unsqueeze(1),
-                    self.parameters["beta_p"].unsqueeze(1),
-                    self.parameters["beta_d"].unsqueeze(1),
-                ),
-                dim=1,
-            )
-        else:
-            self.parameters["beta"] = torch.cat(
-                (self.parameters["beta_s"].unsqueeze(1), self.parameters["beta_p"].unsqueeze(1)), dim=1
-            )
+        self.parameters["beta"] = build_beta_tensor(self.parameters, self.method)
+        if self.method != "PM6":
             prepare_parameters(
                 self.parameters,
                 self.packpar,
@@ -177,12 +170,6 @@ class Molecule(torch.nn.Module):
         self.cis_state_relaxed_dipole: Optional[torch.Tensor] = None
         self.nac: Optional[torch.Tensor] = None
         self.nac_dot: Optional[torch.Tensor] = None
-
-        def get_coordinates(self):
-            return self.coordinates
-
-        def get_species(self):
-            return self.species
 
 
 def check_input(species):

@@ -75,6 +75,8 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
+    mol_idx = torch.arange(nmol, device=device)
+    subspace_idx = torch.arange(maxSubspacesize, device=device)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -84,19 +86,28 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         # Determine current subspace dimensions per molecule
         delta = vend - vstart
         max_v = int(delta.max().item())
-        rel_idx = torch.arange(max_v, device=device).unsqueeze(0)  # (1, max_v)
-        abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-        mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(-1, max_v)
+        rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
 
         # Gather current subspace vectors into V_batched
-        V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-        V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
+        if torch.all(delta == max_v):
+            dense_idx = vstart[:, None] + rel_idx
+            V_batched = V[mol_idx[:, None], dense_idx, :]
+            mask = None
+        else:
+            abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
+            mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
+            batch_idx = mol_idx.unsqueeze(1).expand(-1, max_v)
+            V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
+            V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
         AV_batch, BV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt, makeB=True)
-        AV[batch_idx[mask], abs_idx[mask], :] = AV_batch[mask]
-        BV[batch_idx[mask], abs_idx[mask], :] = BV_batch[mask]
+        if mask is None:
+            AV[mol_idx[:, None], dense_idx, :] = AV_batch
+            BV[mol_idx[:, None], dense_idx, :] = BV_batch
+        else:
+            AV[batch_idx[mask], abs_idx[mask], :] = AV_batch[mask]
+            BV[batch_idx[mask], abs_idx[mask], :] = BV_batch[mask]
 
         # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())

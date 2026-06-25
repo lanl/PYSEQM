@@ -1,6 +1,13 @@
 import torch
 
-from .diag import DEGEN_EIGENSOLVER, construct_P, degen_symeig, pytorch_symeig
+from .diag import (
+    DEGEN_EIGENSOLVER,
+    _apply_padding_eigen_shifts,
+    _zero_padding_eigenvalues,
+    construct_P,
+    degen_symeig,
+    pytorch_symeig,
+)
 from .packd import packd, unpackd
 
 # THIS IS AN OLD PROTOTYPE. IDEALLY, SHOULD BE CODED THE SAME WAY AS diag.py
@@ -46,27 +53,13 @@ def sym_eig_truncd(x, nSuperHeavy, nheavyatom, nH, nocc, eig_only=False):
         nSuperHeavy = nSuperHeavy.repeat_interleave(2)
         nH = nH.repeat_interleave(2)
         nocc = nocc.flatten()
-        # Gershgorin circle theorem estimate upper bounds of eigenvalues
         x_orig_shape = x.size()
 
         x0 = packd(x, nSuperHeavy, nheavyatom, nH)
-        nmol, size, _ = x0.shape
 
-        aii = x0.diagonal(dim1=1, dim2=2)
-        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
-        hN = torch.max(aii + ri, dim=1)[0]
-        dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
-
+        size = x0.shape[1]
         norb = nheavyatom * 4 + nH + nSuperHeavy * 9
-        pnorb = size - norb
-        nn = torch.max(pnorb).item()
-        dx = 0.005
-        mutipler = torch.arange(1.0 + dx, 1.0 + nn * dx + dx, dx, dtype=dtype, device=device)[:nn]
-        ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb > 0
-        for i in range(nmol):
-            if cond[i]:
-                x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
+        has_padding = _apply_padding_eigen_shifts(x0, norb)
         try:
             e0, v = sym_eigh(x0)
         except:
@@ -74,33 +67,17 @@ def sym_eig_truncd(x, nSuperHeavy, nheavyatom, nH, nocc, eig_only=False):
                 print(x0)
             print("Diagonalization failed")
             raise
+        nmol = x0.shape[0]
         e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
         e[..., :size] = e0
-        for i in range(nmol):
-            if cond[i]:
-                e[i, norb[i] : size] = 0.0
+        e = _zero_padding_eigenvalues(e, norb, has_padding)
 
     else:  # need to add large diagonal values to replace 0 padding
-        # Gershgorin circle theorem estimate upper bounds of eigenvalues
-
         x0 = packd(x, nSuperHeavy, nheavyatom, nH)
-        nmol, size, _ = x0.shape
 
-        aii = x0.diagonal(dim1=1, dim2=2)
-        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
-        hN = torch.max(aii + ri, dim=1)[0]
-        dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
-
+        size = x0.shape[1]
         norb = nheavyatom * 4 + nH + nSuperHeavy * 9
-        pnorb = size - norb
-        nn = torch.max(pnorb).item()
-        dx = 0.005
-        mutipler = torch.arange(1.0 + dx, 1.0 + nn * dx + dx, dx, dtype=dtype, device=device)[:nn]
-        ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb > 0
-        for i in range(nmol):
-            if cond[i]:
-                x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
+        has_padding = _apply_padding_eigen_shifts(x0, norb)
         try:
             e0, v = sym_eigh(x0)
         except:
@@ -108,11 +85,10 @@ def sym_eig_truncd(x, nSuperHeavy, nheavyatom, nH, nocc, eig_only=False):
                 print("NaN problem\n", x0)
             e0, v = sym_eigh(x0)
 
+        nmol = x0.shape[0]
         e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
         e[..., :size] = e0
-        for i in range(nmol):
-            if cond[i]:
-                e[i, norb[i] : size] = 0.0
+        e = _zero_padding_eigenvalues(e, norb, has_padding)
 
     if eig_only:
         if x.dim() == 4:

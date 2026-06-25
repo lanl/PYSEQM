@@ -11,7 +11,7 @@ def Spherical_Pot_Force(molecule, radius, k=1.0, center=[0.0, 0.0, 0.0]):
     k - Hooke's constant in E = 0.5*k*x^2
     """
 
-    center = torch.tensor(center, device=molecule.coordinates.device)
+    center = torch.as_tensor(center, dtype=molecule.coordinates.dtype, device=molecule.coordinates.device)
 
     r_from_center = torch.norm(molecule.coordinates - center, dim=2).unsqueeze(-1)
     force_mask = r_from_center > radius  # find atoms beyond radius

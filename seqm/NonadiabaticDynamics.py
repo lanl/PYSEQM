@@ -62,7 +62,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         Temp: float = 0.0,
         step_offset: int = 0,
         output: Optional[Dict] = None,
-        compute_nac: Optional[bool] = None,
         initial_state: Union[int, torch.Tensor] = 1,
         damp: Optional[float] = None,
         *args,
@@ -77,11 +76,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # Analytical gradients are required for active-surface FSSH forces.
         params.setdefault("analytical_gradient", [True])
         na_cfg = dict(params.get("nonadiabatic", {}))
-        if compute_nac is not None:
-            na_cfg["compute_nac"] = bool(compute_nac)
-        params["nonadiabatic"] = na_cfg
         method = str(params["method"]).upper()
         tdc_method = str(na_cfg.get("tdc_method", "hamiltonian_fd")).strip().lower()
+        na_cfg["compute_nac"] = tdc_method == "nac_dot_v"
+        params["nonadiabatic"] = na_cfg
         if method == "PM6" and tdc_method in ("overlap", "hamiltonian_fd"):
             raise NotImplementedError(f"nonadiabatic.tdc_method='{tdc_method}' is not implemented for PM6.")
         super().__init__(
@@ -95,11 +93,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             **kwargs,
         )
         self._tdc_method = tdc_method
-        if self._tdc_method not in ("overlap", "hamiltonian_fd"):
+        if self._tdc_method not in ("overlap", "hamiltonian_fd", "nac_dot_v"):
             raise ValueError(
                 f"Invalid nonadiabatic.tdc_method '{self._tdc_method}'. "
-                "Supported methods: 'overlap', 'hamiltonian_fd'."
+                "Supported methods: 'overlap', 'hamiltonian_fd', 'nac_dot_v'."
             )
+        self._direct_nac_tdc = self._tdc_method == "nac_dot_v"
         self._dtnact = 5e-5  # small dt for finite-diff, NEXMD uses 0.002 au
         self.initial_state = initial_state
         self._electronic_substeps: Optional[int] = None
@@ -126,6 +125,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._packed_overlap_prev: Optional[torch.Tensor] = None
         self._overlap_pack_spec: Optional[tuple] = None
         self._resume_state = None
+        self._full_nac_pairs_1based = None
+        self._full_nac_pair_keys = None
+        self._full_nac_state_i = None
+        self._full_nac_state_j = None
 
     def _normalize_initial_state(self, nmol: int, device) -> torch.Tensor:
         init = self.initial_state
@@ -162,6 +165,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._nstates = int(base_nstates)
         exc_cfg["_nad_nstates"] = self._nstates
         exc_cfg["n_states"] = self._nstates + 2
+        self._full_nac_pair_keys = [(i, j) for i in range(self._nstates) for j in range(i + 1, self._nstates)]
+        self._full_nac_pairs_1based = [(i + 1, j + 1) for i, j in self._full_nac_pair_keys]
+        if self._full_nac_pair_keys:
+            self._full_nac_state_i, self._full_nac_state_j = zip(*self._full_nac_pair_keys)
+        else:
+            self._full_nac_state_i = ()
+            self._full_nac_state_j = ()
         nmol = molecule.species.shape[0]
         device = molecule.coordinates.device
         self._ensure_active_states(nmol, device)
@@ -204,7 +214,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
     def _get_arange(self, n: int, device, dtype=torch.long):
         key = (n, device, dtype)
         arr = self._arange_cache.get(key)
-        if arr is None or arr.numel() != n or arr.dtype != dtype:
+        if arr is None:
             arr = torch.arange(n, device=device, dtype=dtype)
             self._arange_cache[key] = arr
         return arr
@@ -220,7 +230,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             t = torch.empty(shape, device=device, dtype=dtype)
             cache[key] = t
         if fill_value is not None:
-            if fill_value == 0 or fill_value == 0.0:
+            if fill_value == 0:
                 t.zero_()
             else:
                 t.fill_(fill_value)
@@ -258,10 +268,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             raise RuntimeError("molecule.cis_amplitudes is required for nonadiabatic dynamics.")
         if cis_amp.dim() == 3:
             return cis_amp[:, : self._nstates]
-        elif cis_amp.dim() == 4 and cis_amp.shape[0] == 2:
+        if cis_amp.dim() == 4 and cis_amp.shape[0] == 2:
             return cis_amp[:, :, : self._nstates]
-        else:
-            raise RuntimeError(f"Unsupported cis_amplitudes shape {tuple(cis_amp.shape)}.")
+        raise RuntimeError(f"Unsupported cis_amplitudes shape {tuple(cis_amp.shape)}.")
 
     def _compute_electronic_structure(self, molecule, learned_parameters, **kwargs):
         # For FSSH we request gradients on the active excited state.
@@ -284,8 +293,44 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         energies = self._build_state_energies(molecule)
         # Keep step-local references; previous-step snapshots are kept in _cache_old.
         cache_new = {"energies": energies, "cis_amp": self._current_cis_amplitudes(molecule)}
+        if self._direct_nac_tdc:
+            cache_new["nac_dot"] = self._nac_dot_from_vectors(molecule, molecule.nac)
         self._cache_new = cache_new
         return energies
+
+    def _nac_pairs(self):
+        return self._full_nac_pairs_1based
+
+    def _select_nac_pairs(self, nac_vec, pair_list):
+        if nac_vec is None:
+            return None
+        selected = {}
+        for s1, s2 in pair_list:
+            key = (s1 - 1, s2 - 1)
+            pair = nac_vec.get(key)
+            if pair is None:
+                return None
+            selected[key] = pair
+        return selected
+
+    def _nac_dot_from_vectors(self, molecule, nac_vec):
+        if nac_vec is None:
+            raise RuntimeError("molecule.nac is required for nonadiabatic.tdc_method='nac_dot_v'.")
+        vel = molecule.velocities
+        nmol = int(vel.shape[0])
+        nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=vel.dtype, device=vel.device)
+        if not self._full_nac_pair_keys:
+            return nac_dot
+        try:
+            pair_stack = torch.stack([nac_vec[key] for key in self._full_nac_pair_keys], dim=1)
+        except KeyError as exc:
+            raise RuntimeError(
+                "Full excited-state NAC vectors are required for nonadiabatic.tdc_method='nac_dot_v'."
+            ) from exc
+        proj = torch.sum(pair_stack * vel.unsqueeze(1), dim=(2, 3))
+        nac_dot[:, self._full_nac_state_i, self._full_nac_state_j] = proj
+        nac_dot[:, self._full_nac_state_j, self._full_nac_state_i] = -proj
+        return nac_dot
 
     @staticmethod
     def _hungarian_perm(cost) -> torch.Tensor:
@@ -334,6 +379,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # Run Hungarian per molecule (each cost matrix already on CPU)
         perms = [self._hungarian_perm(cost_cpu[m]) for m in range(nmol)]
         return torch.stack(perms, dim=0)
+
+    @staticmethod
+    def _diagonal_amplitude_overlap(cis_prev, cis_curr):
+        if cis_prev.dim() == 4 and cis_prev.shape[0] == 2:
+            cis_prev = cis_prev[0]
+            cis_curr = cis_curr[0]
+        return torch.sum(cis_prev * cis_curr, dim=-1)
 
     def _time_derivative_coupling(
         self,
@@ -862,6 +914,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     )
                 if not torch.is_tensor(current_cis_amp) or current_cis_amp.dim() != 3:
                     raise NotImplementedError("hamiltonian_fd TD-NAC currently supports CIS amplitudes only.")
+            elif self._direct_nac_tdc:
+                init_nac_dot = self._nac_dot_from_vectors(molecule, molecule.nac)
         if self._cache_prev_cis_amp:
             self._copy_cache_entry(cache_old, "cis_amp", current_cis_amp)
         else:
@@ -875,6 +929,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         if "nac_dot" not in self._cache_old:
             init_cache = {"energies": self._cache_old.get("energies"), "cis_amp": current_cis_amp}
+            if self._direct_nac_tdc:
+                raise RuntimeError("nac_dot_v TD-NAC should have precomputed nac_dot in cache_old.")
             vel_old = molecule.velocities.detach().clone()
             acc_old = molecule.acc.detach().clone()
             nd = compute_tdc_hamiltonian_fd(
@@ -1005,10 +1061,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         coords_prev = None
         mos_prev = None
-        if self._tdc_method == "hamiltonian_fd":
+        if self._tdc_method in ("hamiltonian_fd", "overlap"):
             vel_old = molecule.velocities.detach().clone()
             acc_old = molecule.acc.detach().clone()
-        elif self._tdc_method == "overlap":
+        if self._tdc_method == "overlap":
             coords_prev = self._coords_prev
             coords_prev.copy_(molecule.coordinates.detach())
 
@@ -1048,9 +1104,29 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             if not self._cache_prev_cis_amp:
                 cache_new.pop("cis_amp", None)
         elif self._tdc_method == "overlap":
-            nac_dt = self._time_derivative_coupling(
-                molecule, coords_prev, mos_prev, cache_old.get("cis_amp"), cache_new.get("cis_amp"), dt
-            )
+            cis_prev = cache_old.get("cis_amp")
+            cis_curr = cache_new.get("cis_amp")
+            diag_overlap = self._diagonal_amplitude_overlap(cis_prev, cis_curr)
+            # overlap based nact is valid only if excited states havent changed greatly from previous to current step
+            if torch.all(diag_overlap >= 0.99):
+                nac_dt = self._time_derivative_coupling(
+                    molecule, coords_prev, mos_prev, cis_prev, cis_curr, dt
+                )
+            else:
+                nac_dt = compute_tdc_hamiltonian_fd(
+                    self,
+                    molecule,
+                    cache_new,
+                    learned_parameters,
+                    vel_old,
+                    acc_old,
+                    include_response_terms=True,
+                    validate=True,
+                )
+                with torch.no_grad():
+                    self._packed_overlap_prev = packone_batch(
+                        overlap_matrix_current_geometry(molecule), *self._overlap_pack_spec
+                    )
         else:
             raise RuntimeError(f"Unsupported TDC method '{self._tdc_method}'.")
 
@@ -1192,6 +1268,10 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
     def _compute_NACR_for_hop(self, molecule, nac_pairs):
         cf = self.esdriver.conservative_force.energy
         pair_list = nac_pairs
+        if self._direct_nac_tdc:
+            cached_nac = self._select_nac_pairs(molecule.nac, pair_list)
+            if cached_nac is not None:
+                return cached_nac
 
         P = molecule.dm
         exc_amps = molecule.cis_amplitudes

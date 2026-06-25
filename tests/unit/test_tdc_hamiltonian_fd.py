@@ -12,7 +12,10 @@ from ..reference_data import OMX_METHODS
 
 
 @pytest.mark.parametrize("method", OMX_METHODS)
-def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_molecule_data, method):
+@pytest.mark.parametrize("include_response_terms", [False, True])
+def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(
+    device, methane_molecule_data, method, include_response_terms
+):
     species_1, coordinates_1 = methane_molecule_data
     const = Constants().to(device)
 
@@ -28,7 +31,11 @@ def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_
         "scf_eps": 1.0e-7,
         "scf_converger": [1],
         "excited_states": {"n_states": n_states, "method": "cis", "tolerance": 1.0e-6},
-        "nonadiabatic": {"compute_nac": True, "states": [1, 2, 3, 4], "include_response_terms": False},
+        "nonadiabatic": {
+            "compute_nac": True,
+            "states": [1, 2, 3, 4],
+            "include_response_terms": include_response_terms,
+        },
         "active_state": 1,
     }
 
@@ -56,7 +63,13 @@ def test_tdc_hamiltonian_fd_matches_nac_component_methane_batch(device, methane_
         vel_old[:, atom, :] = row
 
     nac_dt = compute_tdc_hamiltonian_fd(
-        nad, molecule, cache_new, learned_parameters={}, vel_old=vel_old, acc_old=acc_old
+        nad,
+        molecule,
+        cache_new,
+        learned_parameters={},
+        vel_old=vel_old,
+        acc_old=acc_old,
+        include_response_terms=include_response_terms,
     )
 
     tdc_upper = nac_dt[:, :n_states, :n_states][:, idx_i, idx_j]

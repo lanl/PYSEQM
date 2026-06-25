@@ -9,6 +9,8 @@ PM6_NBF = 9  # s,p,d basis
 # Precompute lower-triangle indices for packing (including diagonal)
 TRIL_IDX_4 = torch.tril_indices(DEFAULT_NBF, DEFAULT_NBF, offset=0)
 TRIL_IDX_9 = torch.tril_indices(PM6_NBF, PM6_NBF, offset=0)
+UPPER_IDX0_4 = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], dtype=torch.long)
+UPPER_IDX1_4 = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], dtype=torch.long)
 # Weight tensor to scale the lower-triangle elements by 2
 WEIGHT_10 = torch.tensor([1.0,
                           2.0, 1.0,
@@ -99,6 +101,12 @@ K_ind_4 = torch.tensor([
     [3,4,5,8],
     [6,7,8,9]
 ], dtype=torch.long)
+EMAT_SCALE_4 = torch.tensor([
+    [1.0, 2.0, 2.0, 2.0],
+    [0.0, 1.0, 2.0, 2.0],
+    [0.0, 0.0, 1.0, 2.0],
+    [0.0, 0.0, 0.0, 1.0],
+])
 # fmt: on
 P_INDEX_3 = torch.tensor([1, 2, 3], dtype=torch.long)
 P_OFF_I = torch.tensor([1, 1, 2], dtype=torch.long)
@@ -326,21 +334,16 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
     w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)  # last dim = nP, which is the packed index that packs nbf*nbf
 
     if themethod == "PM6":
-        # With d-orbitals, the w tensor seems to align with the
-        # upper triangle blocks of P, but Pp=P[mask] gets the
-        # blocks of the lower triangle of P. So we transpose it here
+        # PM6's d-orbital integral layout aligns with upper-triangle P blocks.
         Pp = Pp.transpose(1, 2)
-        for j in range(9):
-            q_idx = ind[j]  # (nbf,)
-            # gather w2[b, i, ν, σ] = w1[b, i, ν, q_idx[σ]]
-            # i.e. pick out the “λσ” slot for each σ
-            w2 = w1[..., q_idx]
-            Ksum[:, j, :] = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
-    else:
-        for j in range(4):
-            q_idx = ind[j]  # (nbf,)
-            w2 = w1[..., q_idx]
-            Ksum[:, :, j] = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
+
+    for j in range(nbf):
+        w2 = w1[..., ind[j]]
+        k_block = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
+        if themethod == "PM6":
+            Ksum[:, j, :] = k_block
+        else:
+            Ksum[:, :, j] = k_block
 
     F.index_add_(0, mask, Ksum)
 

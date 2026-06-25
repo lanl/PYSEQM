@@ -248,7 +248,9 @@ def build_omx_hcore(molecule):
     pair_data = context["pair"]
 
     for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
-        H_blocks[molecule.maskd, orb, orb] = molecule.parameters[key]
+        H_blocks[molecule.maskd, orb, orb] = molecule.parameters[key].to(
+            dtype=H_blocks.dtype, device=H_blocks.device
+        )
     H_blocks.index_add_(0, molecule.maskd[molecule.idxi], pair_data["e1b"])
     H_blocks.index_add_(0, molecule.maskd[molecule.idxj], pair_data["e2a"])
 

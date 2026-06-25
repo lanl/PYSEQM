@@ -62,11 +62,12 @@ def hcore(molecule, doTETCI=True):
     # h1elec(idxi, idxj, ni, nj, xij, rij, zeta_a, zeta_b, beta, ispair=False) =>  beta_mu_nu
 
     # t0 = time.time()
-    is_pm6 = molecule.method == "PM6"
     is_omx = molecule.method in {"OM1", "OM2", "OM3"}
-    orb_dim = 9 if is_pm6 else 4
     if is_omx:
         return build_omx_hcore(molecule)
+
+    is_pm6 = molecule.method == "PM6"
+    orb_dim = 9 if is_pm6 else 4
     if is_pm6:
         overlap_fn = diatom_overlap_matrixD
         overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
@@ -83,7 +84,7 @@ def hcore(molecule, doTETCI=True):
     npairs = xij.size(0)
     mask_ov = rij <= overlap_cutoff
 
-    # 3) Compute diatomic overlaps only where rij ≤ cutoff
+    # Compute diatomic overlaps only where rij ≤ cutoff
     di = torch.zeros((npairs, orb_dim, orb_dim), dtype=xij.dtype, device=xij.device)
     di[mask_ov] = overlap_fn(
         ni[mask_ov],
@@ -136,7 +137,7 @@ def hcore(molecule, doTETCI=True):
     if is_pm6:
         U_keys += ["U_dd"] * 5
     for orb, key in enumerate(U_keys):
-        M[molecule.maskd, orb, orb] = molecule.parameters[key]
+        M[molecule.maskd, orb, orb] = molecule.parameters[key].to(dtype=M.dtype, device=M.device)
 
     # Scatter in core-electron TETCI terms which go into the diagonal blocks
     # V_{mu,nv,B} = -ZB*(mu^A nv^A, s^B s^B), stored in e1b, e2a
@@ -157,11 +158,8 @@ def hcore(molecule, doTETCI=True):
 
     # First, build per-orbital beta from per-atom beta
     b_atom = molecule.parameters["beta"]  # shape (n_atoms, 3) or (n_atoms, 2)
-    beta_atoms = torch.empty((b_atom.shape[0], orb_dim), dtype=b_atom.dtype, device=b_atom.device)
-    beta_atoms[:, 0] = b_atom[:, 0]  # s
-    beta_atoms[:, 1:4] = b_atom[:, 1].unsqueeze(-1)  # p
-    if is_pm6:
-        beta_atoms[:, 4:9] = b_atom[:, 2].unsqueeze(-1)  # d
+    beta_layout = [0, 1, 1, 1, 2, 2, 2, 2, 2] if is_pm6 else [0, 1, 1, 1]
+    beta_atoms = b_atom[:, beta_layout]
 
     # Then, make the two-center one-elecron matrix terms
     bi = beta_atoms[idxi]  # (npairs, orb_dim)

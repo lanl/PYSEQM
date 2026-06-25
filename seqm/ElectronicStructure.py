@@ -34,14 +34,14 @@ class Electronic_Structure(torch.nn.Module):
         """
         n_molecule = P.shape[0]
         n_atom = P.shape[1] // n_orbital
-        q = P.diagonal(dim1=1, dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(axis=2)
+        q = P.diagonal(dim1=1, dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(dim=2)
         return q
 
     def forward(
         self,
         molecule,
-        learned_parameters=dict(),
-        xl_bomd_params=dict(),
+        learned_parameters=None,
+        xl_bomd_params=None,
         P0=None,
         err_threshold=None,
         max_rank=None,
@@ -54,6 +54,9 @@ class Electronic_Structure(torch.nn.Module):
         return force in unit of eV/Angstrom
         return force, density matrix, total energy of this batch
         """
+        learned_parameters = {} if learned_parameters is None else learned_parameters
+        xl_bomd_params = {} if xl_bomd_params is None else xl_bomd_params
+
         if dm_prop == "SCF":
             (
                 molecule.force,
@@ -102,29 +105,14 @@ class Electronic_Structure(torch.nn.Module):
             )
 
         with torch.no_grad():
-            # $$$
-            if molecule.dm.dim() == 4:  # open shell
-                if molecule.method == "PM6":
-                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(
-                        molecule.dm[:, 0], n_orbital=9
-                    )
-                    molecule.q -= self.atomic_charges(
-                        molecule.dm[:, 1], n_orbital=9
-                    )  # unit +e, i.e. electron: -1.0
-                else:
-                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(
-                        molecule.dm[:, 0]
-                    )
-                    molecule.q -= self.atomic_charges(molecule.dm[:, 1])  # unit +e, i.e. electron: -1.0
-            else:  # closed shell
-                if molecule.method == "PM6":
-                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(
-                        molecule.dm, n_orbital=9
-                    )  # unit +e, i.e. electron: -1.0
-                else:
-                    molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(
-                        molecule.dm
-                    )  # unit +e, i.e. electron: -1.0
+            n_orbital = 9 if molecule.method == "PM6" else 4
+            if molecule.dm.dim() == 4:
+                electron_charge = self.atomic_charges(molecule.dm[:, 0], n_orbital) + self.atomic_charges(
+                    molecule.dm[:, 1], n_orbital
+                )
+            else:
+                electron_charge = self.atomic_charges(molecule.dm, n_orbital)
+            molecule.q = molecule.const.tore[molecule.species] - electron_charge
         # return F, P, L
 
     def get_force(self):

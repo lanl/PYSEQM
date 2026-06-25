@@ -196,23 +196,19 @@ def packd(x, nSuperHeavy, nHeavy, nHydro):
     nho = 4 * nHeavy
     nhoho = 9 * nSuperHeavy
     if x.dim() == 2:
-        x0 = packoned(x, nSuperHeavy * 9, nHeavy * 4, nHydro, nhoho + nho + nHydro)
-    elif x.dim() == 4:
-        norb = torch.max(nho + nHydro + nhoho)
-        x = x.flatten(start_dim=0, end_dim=1)
-        x0 = torch.stack(list(map(lambda a, b, c, d: packoned(a, b, c, d, norb), x, nhoho, nho, nHydro)))
-    else:
-        norb = torch.max(nho + nHydro + nhoho)
-        x0 = torch.stack(list(map(lambda a, b, c, d: packoned(a, b, c, d, norb), x, nhoho, nho, nHydro)))
+        return packoned(x, nhoho, nho, nHydro, nhoho + nho + nHydro)
 
-    return x0
+    if x.dim() == 4:
+        x = x.flatten(start_dim=0, end_dim=1)
+
+    norb = int(torch.max(nho + nHydro + nhoho).item())
+    return torch.stack(list(map(lambda a, b, c, d: packoned(a, b, c, d, norb), x, nhoho, nho, nHydro)))
 
 
 def unpackd(x0, nSuperHeavy, nHeavy, nHydro, size):
     if x0.dim() == 2:
-        x = unpackoned(x0, nSuperHeavy * 9, nHeavy * 4, nHydro, size)
-    else:
-        nho = 4 * nHeavy
-        nhoho = 9 * nSuperHeavy
-        x = torch.stack(list(map(lambda a, b, c, d: unpackoned(a, b, c, d, size), x0, nhoho, nho, nHydro)))
-    return x
+        return unpackoned(x0, nSuperHeavy * 9, nHeavy * 4, nHydro, size)
+
+    nho = 4 * nHeavy
+    nhoho = 9 * nSuperHeavy
+    return torch.stack(list(map(lambda a, b, c, d: unpackoned(a, b, c, d, size), x0, nhoho, nho, nHydro)))

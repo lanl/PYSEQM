@@ -620,8 +620,6 @@ def solve_for_amplitude_omega_newton(
         return (a - om.unsqueeze(-1)).abs().min(dim=-1).values
 
     val = f(omega)
-    der_eps = torch.tensor(fp_eps, device=device, dtype=dtype)
-    zero = torch.tensor(0.0, device=device, dtype=dtype)
     for _ in range(max_newton_iter):
         if torch.all(torch.abs(val) < tol):
             break
@@ -632,13 +630,13 @@ def solve_for_amplitude_omega_newton(
         sgn = torch.sign(der)
         if torch.any(sgn == 0):
             raise RuntimeError("Zero derivative encountered in Newton solve; check inputs.")
-        der_safe = sgn * torch.maximum(der.abs(), der_eps)
+        der_safe = sgn * der.abs().clamp_min(fp_eps)
 
         step = val / der_safe  # Newton step
 
         # cap step so we don't run into poles in one update
         dist = pole_dist(omega)
-        cap = (dist - pole_eps).clamp_min(zero)
+        cap = (dist - pole_eps).clamp_min(0.0)
         cap = max_step_frac_of_pole_dist * cap
         step = torch.clamp(step, min=-cap, max=cap)
 
@@ -670,7 +668,7 @@ def solve_for_amplitude_omega_newton(
     # recover xi and normalize to enforce ||xi||=1
     d = a - omega.unsqueeze(-1)
     xi = -g / d
-    xi = xi / xi.norm(dim=-1, keepdim=True).clamp_min(torch.tensor(1e-30, device=device, dtype=dtype))
+    xi = xi / xi.norm(dim=-1, keepdim=True).clamp_min(1e-30)
 
     return xi, omega
 

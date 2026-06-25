@@ -21,6 +21,13 @@ def get_orbital_zetas(parameters, method):
     return parameters["zeta_s"], parameters["zeta_p"]
 
 
+def build_beta_tensor(parameters, method):
+    fields = ["beta_s", "beta_p"]
+    if method == "PM6":
+        fields.append("beta_d")
+    return torch.stack([parameters[field] for field in fields], dim=1)
+
+
 def build_omx_parameter_tables(packpar, parameters):
     """
     Build element-indexed OMx parameter tables from the packed parameter module.

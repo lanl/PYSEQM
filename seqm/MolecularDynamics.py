@@ -49,9 +49,8 @@ class OutputConfig:
     def from_dict(cls, config: Optional[Dict] = None) -> "OutputConfig":
         """Create OutputConfig from dictionary with backward compatibility."""
         if not config:
-            return cls(
-                molid=[], print_every=0, checkpoint_every=0, xyz_every=0, h5_config={}, h5_vectors_every=None
-            )
+            return cls(molid=[], print_every=0, checkpoint_every=0, xyz_every=0)
+        config = dict(config)
 
         # Backward compatibility
         if "thermo" in config and "print_every" not in config:
@@ -72,7 +71,7 @@ class OutputConfig:
             print_every=int(config.get("print every", 1)),
             checkpoint_every=int(config.get("checkpoint every", 100)),
             xyz_every=int(config.get("xyz", 0)),
-            h5_config=config.get("h5", {}),
+            h5_config=dict(config.get("h5", {}) or {}),
             h5_vectors_every=vectors_every,
         )
 
@@ -435,10 +434,9 @@ class HDF5Writer:
 
     def append_vectors(self, step_idx: int, molecule):
         """Append vector data (coordinates, velocities, forces)."""
-        write_names = []
-        for name, stride in self._cadence.items():
-            if stride > 0 and (step_idx % stride) == 0:
-                write_names.append(name)
+        write_names = [
+            name for name, stride in self._cadence.items() if stride > 0 and (step_idx % stride) == 0
+        ]
         if not write_names:
             return
 
@@ -447,23 +445,15 @@ class HDF5Writer:
             f = self.flags[mol]
             S = f["active_slice"]
 
-            tensors = {}
-            if "coordinates" in write_names:
-                tensors["coordinates"] = molecule.coordinates[mol, S, :]
-            if "velocities" in write_names:
-                tensors["velocities"] = molecule.velocities[mol, S, :]
-            if "forces" in write_names:
-                tensors["forces"] = molecule.force[mol, S, :]
-
             did_write = False
-            for name, arr in tensors.items():
+            for name in write_names:
                 i = self.i_vec[mol][name]
                 if i >= f["Tw_vec"][name]:
                     continue
 
                 g = h5[name]
                 g["steps"][i] = int(step_idx)
-                g["values"][i] = _to_np(arr)
+                g["values"][i] = _to_np(getattr(molecule, name if name != "forces" else "force")[mol, S])
                 self.i_vec[mol][name] = i + 1
                 did_write = did_write or (self.i_vec[mol][name] % 100 == 0)
 
@@ -644,14 +634,16 @@ class Geometry_Optimization_SD(torch.nn.Module):
         self.max_evl = max_evl
         self.force = Force(seqm_parameters)
 
-    def onestep(self, molecule, learned_parameters=dict()):
+    def onestep(self, molecule, learned_parameters=None):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         self.esdriver(molecule, learned_parameters=learned_parameters, P0=molecule.dm, dm_prop="SCF")
         force = molecule.force
         with torch.no_grad():
             molecule.coordinates.add_(self.alpha * force)
         return force, molecule.Etot
 
-    def run(self, molecule, learned_parameters=dict(), log=True):
+    def run(self, molecule, learned_parameters=None, log=True):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         dtype = molecule.coordinates.dtype
         device = molecule.coordinates.device
         nmol = molecule.coordinates.shape[0]
@@ -861,8 +853,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """Potential energy for thermodynamics (override in subclasses)."""
         return molecule.Etot
 
-    def one_step(self, molecule, learned_parameters=dict(), *args, **kwargs):
+    def one_step(self, molecule, learned_parameters=None, *args, **kwargs):
         """Perform one velocity Verlet integration step."""
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         dt = self.timestep
         if molecule.const.do_timing:
             t0 = time.time()
@@ -895,15 +888,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         return self.one_step(molecule, learned_parameters=learned_parameters, **kwargs)
 
     def initialize(
-        self,
-        molecule,
-        remove_com=None,
-        learned_parameters=dict(),
-        steps: Optional[int] = None,
-        *args,
-        **kwargs,
+        self, molecule, remove_com=None, learned_parameters=None, steps: Optional[int] = None, *args, **kwargs
     ):
         """Initialize MD simulation."""
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         self._validate_h5_output_config()
         molecule.verbose = False  # Dont print SCF and CIS/RPA results
         self.esdriver.conservative_force.energy.md = True
@@ -1009,7 +997,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self,
         molecule,
         steps,
-        learned_parameters=dict(),
+        learned_parameters=None,
         reuse_P=True,
         remove_com=None,
         seed=None,
@@ -1017,6 +1005,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         **kwargs,
     ):
         """Run molecular dynamics simulation."""
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         self.start_time = datetime.now()
         print(f"MD run began at {self.start_time}", flush=True)
 
@@ -1364,8 +1353,9 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
             molecule.velocities.mul_(self.langevin_c1)
             molecule.velocities.add_(self.langevin_c2 * torch.randn_like(molecule.velocities))
 
-    def one_step(self, molecule, learned_parameters=dict(), *args, **kwargs):
+    def one_step(self, molecule, learned_parameters=None, *args, **kwargs):
         """Velocity Verlet with Langevin thermostat."""
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         dt = self.timestep
         if molecule.const.do_timing:
             t0 = time.time()
@@ -1398,14 +1388,9 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
             molecule.const.timing["MD"].append(time.time() - t0)
 
     def initialize(
-        self,
-        molecule,
-        remove_com=None,
-        learned_parameters=dict(),
-        steps: Optional[int] = None,
-        *args,
-        **kwargs,
+        self, molecule, remove_com=None, learned_parameters=None, steps: Optional[int] = None, *args, **kwargs
     ):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         if self.damp is not None:
             dt = self.timestep
             # s = -γ dt
@@ -1423,7 +1408,8 @@ class Molecular_Dynamics_Langevin(Molecular_Dynamics_Basic):
 class XL_BOMD(Molecular_Dynamics_Langevin):
     """Extended Lagrangian Born-Oppenheimer MD."""
 
-    def __init__(self, damp=None, xl_bomd_params=dict(), *args, **kwargs):
+    def __init__(self, damp=None, xl_bomd_params=None, *args, **kwargs):
+        xl_bomd_params = {} if xl_bomd_params is None else dict(xl_bomd_params)
         self.k = xl_bomd_params["k"]
         self.xl_bomd_params = xl_bomd_params
         super().__init__(damp, *args, **kwargs)
@@ -1485,9 +1471,10 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         return es_new
 
     def one_step(
-        self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=dict(), *args, **kwargs
+        self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=None, *args, **kwargs
     ):
         """XL-BOMD integration step."""
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         dt = self.timestep
         if molecule.const.do_timing:
             t0 = time.time()
@@ -1581,12 +1568,13 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
         self,
         molecule,
         remove_com=None,
-        learned_parameters=dict(),
+        learned_parameters=None,
         steps: Optional[int] = None,
         do_xl_esmd=False,
         *args,
         **kwargs,
     ):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         if torch.any(
             active_state_tensor(molecule.active_state, int(molecule.nmol), molecule.coordinates.device) > 0
         ):
@@ -1658,7 +1646,7 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 class KSA_XL_BOMD(XL_BOMD):
     """Krylov Subspace Approximation XL-BOMD."""
 
-    def __init__(self, damp=None, xl_bomd_params=dict(), *args, **kwargs):
+    def __init__(self, damp=None, xl_bomd_params=None, *args, **kwargs):
         super().__init__(damp, xl_bomd_params, *args, **kwargs)
         self.add_spherical_potential = False
 
@@ -1699,8 +1687,9 @@ class XL_ESMD(XL_BOMD):
         return es_new
 
     def one_step(
-        self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=dict(), *args, **kwargs
+        self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=None, *args, **kwargs
     ):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         dt = self.timestep
         if molecule.const.do_timing:
             t0 = time.time()
@@ -1758,14 +1747,9 @@ class XL_ESMD(XL_BOMD):
         return P, Pt, es_amp, es_amp_t
 
     def initialize(
-        self,
-        molecule,
-        remove_com=None,
-        learned_parameters=dict(),
-        steps: Optional[int] = None,
-        *args,
-        **kwargs,
+        self, molecule, remove_com=None, learned_parameters=None, steps: Optional[int] = None, *args, **kwargs
     ):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         super().initialize(
             molecule,
             remove_com=remove_com,

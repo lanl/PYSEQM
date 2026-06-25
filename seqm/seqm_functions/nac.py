@@ -8,6 +8,15 @@ from seqm.seqm_functions.anal_grad import (
     w_derivative_numerical,
 )
 from seqm.seqm_functions.cg_solver import conjugate_gradient_batch
+from seqm.seqm_functions.fock import (
+    EMAT_SCALE_4,
+    UPPER_IDX0_4,
+    UPPER_IDX1_4,
+    WEIGHT_10,
+    K_ind_4,
+    _cached_index,
+    _cached_tensor,
+)
 from seqm.seqm_functions.rcis_batch import (
     get_occ_virt,
     make_A_times_zvector_batched,
@@ -35,17 +44,16 @@ def _state_pair_tensors(state_pairs, device):
 def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device, return_w_x=False):
     npairs = mol.rij.shape[0]
     overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
-    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     Xij = mol.xij * mol.rij.unsqueeze(1) * a0
     w_x = torch.zeros(npairs, 3, 10, 10, dtype=dtype, device=device)
-    p0_ortho_grad = None
     ortho_cache = None
     if mol.method in OMX_METHODS:
-        e1b_x, e2a_x, _, p0_ortho_grad, ortho_cache = omx_fd(
-            mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, mol.method, P0
+        e1b_x, e2a_x, _, _, ortho_cache = omx_fd(
+            mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, mol.method, return_ortho_cache=True
         )
     else:
+        zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
+        zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
         overlap_der_finiteDiff(
             overlap_x,
             mol.idxi,
@@ -86,9 +94,7 @@ def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device, return_w_x
 
     # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals
     # with the density matrix has been cribbed from fock.py.
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
+    ind = _cached_index(K_ind_4, device)
     overlap_KAB_x = overlap_x
     P = (
         P0.reshape(mol.nmol, mol.molsize, 4, mol.molsize, 4)
@@ -101,37 +107,32 @@ def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device, return_w_x
         for j in range(4):
             overlap_KAB_x[..., i, j] -= torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape((-1, 10))
-    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P[mol.maskd[mol.idxi]][..., indices[0], indices[1]] * weight).unsqueeze(-1)
-    PB = (P[mol.maskd[mol.idxj]][..., indices[0], indices[1]] * weight).unsqueeze(-2)
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    PA = (P[mol.maskd[mol.idxi]][..., idx0, idx1] * weight).unsqueeze(-1)
+    PB = (P[mol.maskd[mol.idxj]][..., idx0, idx1] * weight).unsqueeze(-2)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)
     sumA = torch.zeros_like(overlap_KAB_x)
-    sumA[..., indices[0], indices[1]] = suma
+    sumA[..., idx0, idx1] = suma
     e2a_x.add_(sumA)
 
     sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)
     sumB = torch.zeros_like(overlap_KAB_x)
-    sumB[..., indices[0], indices[1]] = sumb
+    sumB[..., idx0, idx1] = sumb
     e1b_x.add_(sumB)
 
-    scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
-        dtype=dtype,
-        device=device,
-    )
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     e1b_x *= scale_emat
     e2a_x *= scale_emat
     if return_w_x:
-        return overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache, w_x
-    return overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache
+        return overlap_KAB_x, e1b_x, e2a_x, None, ortho_cache, w_x
+    return overlap_KAB_x, e1b_x, e2a_x, None, ortho_cache
 
 
 def _contract_nac_density_batch(
-    mol, B, B0, overlap_KAB_x, e1b_x, e2a_x, p0_ortho_grad, ortho_cache, nmol, molsize
+    mol, B, B0, overlap_KAB_x, e1b_x, e2a_x, _unused_p0_ortho_grad, ortho_cache, nmol, molsize
 ):
     pair_grad = torch.einsum("pbxy,pcxy->pbc", B[mol.mask], overlap_KAB_x)
     pair_grad.add_(
@@ -153,8 +154,6 @@ def _contract_nac_density_batch(
             ortho_cache=ortho_cache,
             unrestricted=False,
         )
-        if p0_ortho_grad is not None:
-            nac_cis += p0_ortho_grad.unsqueeze(1)
     return nac_cis
 
 
@@ -198,18 +197,11 @@ def _build_pair_response_density_batch(
 def _contract_mixed_transition_terms(mol, RI0, RJ0, w_x, dtype, device):
     nmol, nbatch, _, _ = RI0.shape
     molsize = int(mol.molsize)
-    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape(1, 1, 10)
-    scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
-        dtype=dtype,
-        device=device,
-    )
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape(1, 1, 10)
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
+    ind = _cached_index(K_ind_4, device)
 
     def ao4(T):
         return (
@@ -224,13 +216,13 @@ def _contract_mixed_transition_terms(mol, RI0, RJ0, w_x, dtype, device):
         pair_grad = torch.zeros(mol.rij.shape[0], nbatch, 3, dtype=dtype, device=device)
         if include_coulomb:
             Rr_diag = Rr[mol.maskd]
-            PA = (Rr_diag[mol.idxi][..., indices[0], indices[1]] * weight).unsqueeze(-1)
-            PB = (Rr_diag[mol.idxj][..., indices[0], indices[1]] * weight).unsqueeze(-2)
+            PA = (Rr_diag[mol.idxi][..., idx0, idx1] * weight).unsqueeze(-1)
+            PB = (Rr_diag[mol.idxj][..., idx0, idx1] * weight).unsqueeze(-2)
 
             J_x_2a = torch.zeros((mol.rij.shape[0], nbatch, 3, 4, 4), dtype=dtype, device=device)
             J_x_1b = torch.zeros_like(J_x_2a)
-            J_x_2a[..., indices[0], indices[1]] = torch.sum(PA.unsqueeze(2) * w_x.unsqueeze(1), dim=3)
-            J_x_1b[..., indices[0], indices[1]] = torch.sum(PB.unsqueeze(2) * w_x.unsqueeze(1), dim=4)
+            J_x_2a[..., idx0, idx1] = torch.sum(PA.unsqueeze(2) * w_x.unsqueeze(1), dim=3)
+            J_x_1b[..., idx0, idx1] = torch.sum(PB.unsqueeze(2) * w_x.unsqueeze(1), dim=4)
             J_x_2a *= scale_emat.unsqueeze(0).unsqueeze(0).unsqueeze(0)
             J_x_1b *= scale_emat.unsqueeze(0).unsqueeze(0).unsqueeze(0)
             pair_grad.add_(

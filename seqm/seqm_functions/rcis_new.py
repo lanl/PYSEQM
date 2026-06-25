@@ -3,6 +3,14 @@ import math
 import torch
 
 from seqm.dynamics.active_state import active_state_tensor
+from seqm.seqm_functions.fock import (
+    UPPER_IDX0_4,
+    UPPER_IDX1_4,
+    WEIGHT_10,
+    K_ind_4,
+    _cached_index,
+    _cached_tensor,
+)
 from seqm.seqm_functions.pack import packone, unpackone
 
 from .constants import a0
@@ -88,6 +96,8 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
+    mol_idx = torch.arange(nmol, device=device)
+    subspace_idx = torch.arange(maxSubspacesize, device=device)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -99,18 +109,26 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         # Determine current subspace dimensions per molecule
         delta = vend - vstart
         max_v = int(delta.max().item())
-        rel_idx = torch.arange(max_v, device=device).unsqueeze(0)  # (1, max_v)
-        abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-        mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-        batch_idx = torch.arange(nmol, device=device).unsqueeze(1).expand(-1, max_v)
+        rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
 
         # Gather current subspace vectors into V_batched
-        V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-        V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
+        if torch.all(delta == max_v):
+            dense_idx = vstart[:, None] + rel_idx
+            V_batched = V[mol_idx[:, None], dense_idx, :]
+            mask = None
+        else:
+            abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
+            mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
+            batch_idx = mol_idx.unsqueeze(1).expand(-1, max_v)
+            V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
+            V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
         HV_batch = matrix_vector_product_any_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
-        HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
+        if mask is None:
+            HV[mol_idx[:, None], dense_idx, :] = HV_batch
+        else:
+            HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
 
         # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
@@ -309,9 +327,7 @@ def makeA_pi_any_batched(mol, P_xi, w_, allSymmetric=False):
 
         # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
         #   0,     1         2       3       4         5       6      7         8        9
-        ind = torch.tensor(
-            [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-        )
+        ind = _cached_index(K_ind_4, device)
         # Upper-tri (A,B) blocks per density
         npairs_ut = mask.numel()
         base_stride = molsize * molsize  # blocks per density per molecule
@@ -467,9 +483,9 @@ def makeA_pi_symm_any_batch(mol, P0, w):
 
     # ========== 2) Two-center Coulomb-like sums over neighbor atoms ==========
     # Pack A and B for all densities × pairs
-    tri_i = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], device=device)
-    tri_j = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], device=device)
-    weight = torch.tensor([1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device)
+    tri_i = _cached_index(UPPER_IDX0_4, device)
+    tri_j = _cached_index(UPPER_IDX1_4, device)
+    weight = _cached_tensor(WEIGHT_10, device, dtype)
     PA = (P[md_i.reshape(-1)][..., tri_i, tri_j] * weight).view(nD, npairs_pairdiag, 10, 1)
     PB = (P[md_j.reshape(-1)][..., tri_i, tri_j] * weight).view(nD, npairs_pairdiag, 1, 10)
 
@@ -492,9 +508,7 @@ def makeA_pi_symm_any_batch(mol, P0, w):
 
     # ========== 3) Off-diagonal exchange-like AB blocks (K-type) ==========
     # sum[...,i,j] = Σ_{ν∈A} Σ_{σ∈B} [ -0.5 P_{νσ} * (μν | λσ) ]  using your 10x10 pack map
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
+    ind = _cached_index(K_ind_4, device)
 
     mask_flat = mask_exp.reshape(-1)  # (nD*npairs_ut,)
     Pp = -0.5 * P[mask_flat].view(nD, npairs_ut, 4, 4)  # (nD, npairs_ut, 4,4)

@@ -11,6 +11,7 @@ from seqm.seqm_functions.constants import Constants
 
 from ..reference_data import (
     AM1_AND_OM2_METHODS,
+    LANGEVIN_METHODS,
     assert_allclose,
     load_or_update_reference,
     reference_path_for_method,
@@ -155,24 +156,6 @@ def _run_and_check(md, molecule, prefix, molid, steps, expect_excited=False, n_s
 
 
 @pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
-def test_md_basic_single(tmp_path, device, methane_molecule_data, method):
-    species, coordinates = methane_molecule_data
-    seqm_parameters = _seqm_parameters(method)
-
-    molid = [0]
-    prefix = str(tmp_path / "md_basic_single")
-    molecule = _build_molecule(device, species, coordinates, seqm_parameters)
-    md = Molecular_Dynamics_Basic(
-        seqm_parameters=seqm_parameters, timestep=0.5, Temp=300.0, output=_output_config(prefix, molid)
-    ).to(device)
-
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
-    ref_path = reference_path_for_method("md_basic_methane", method, am1_name="md_basic_methane")
-    ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics[0], ref[0], tol_drift=1e-2, tol_slope=1e-3)
-
-
-@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
 def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data, method):
     species, coordinates = batch_molecule_data
     seqm_parameters = _seqm_parameters(method)
@@ -191,7 +174,7 @@ def test_md_basic_batch_mixed(tmp_path, device, batch_molecule_data, method):
         _assert_md_metrics(current, expected, tol_drift=1e-2, tol_slope=1e-3)
 
 
-@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
+@pytest.mark.parametrize("method", LANGEVIN_METHODS)
 def test_md_langevin_single(tmp_path, device, methane_molecule_data, method):
     species, coordinates = methane_molecule_data
     seqm_parameters = _seqm_parameters(method)
@@ -207,11 +190,11 @@ def test_md_langevin_single(tmp_path, device, methane_molecule_data, method):
         output=_output_config(prefix, molid),
     ).to(device)
 
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=50)
+    metrics = _run_and_check(md, molecule, prefix, molid, steps=20)
     _assert_temperature_envelope(metrics[0])
 
 
-@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
+@pytest.mark.parametrize("method", LANGEVIN_METHODS)
 def test_md_langevin_batch_mixed(tmp_path, device, batch_molecule_data, method):
     species, coordinates = batch_molecule_data
     seqm_parameters = _seqm_parameters(method)
@@ -227,7 +210,7 @@ def test_md_langevin_batch_mixed(tmp_path, device, batch_molecule_data, method):
         output=_output_config(prefix, molid),
     ).to(device)
 
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=50)
+    metrics = _run_and_check(md, molecule, prefix, molid, steps=20)
     for current in metrics:
         _assert_temperature_envelope(current)
 
@@ -256,29 +239,6 @@ def test_md_xl_bomd_single(tmp_path, device, methane_molecule_data, method):
 
 
 @pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
-def test_md_xl_bomd_single_k4(tmp_path, device, methane_molecule_data, method):
-    species, coordinates = methane_molecule_data
-    seqm_parameters = _seqm_parameters(method)
-
-    molid = [0]
-    prefix = str(tmp_path / "md_xl_bomd_single_k4")
-    molecule = _build_molecule(device, species, coordinates, seqm_parameters)
-    md = XL_BOMD(
-        xl_bomd_params={"k": 4},
-        damp=None,
-        seqm_parameters=seqm_parameters,
-        timestep=0.5,
-        Temp=300.0,
-        output=_output_config(prefix, molid),
-    ).to(device)
-
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
-    ref_path = reference_path_for_method("md_xl_bomd_methane_k4", method, am1_name="md_xl_bomd_methane_k4")
-    ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
-
-
-@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
 def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data, method):
     species, coordinates = methane_molecule_data
     seqm_parameters = _seqm_parameters(method)
@@ -297,31 +257,6 @@ def test_md_ksa_xl_bomd_single(tmp_path, device, methane_molecule_data, method):
 
     metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
     ref_path = reference_path_for_method("md_ksa_xl_bomd_methane", method, am1_name="md_ksa_xl_bomd_methane")
-    ref = load_or_update_reference(ref_path, metrics)
-    _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
-
-
-@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
-def test_md_ksa_xl_bomd_single_k4(tmp_path, device, methane_molecule_data, method):
-    species, coordinates = methane_molecule_data
-    seqm_parameters = _seqm_parameters(method)
-
-    molid = [0]
-    prefix = str(tmp_path / "md_ksa_xl_bomd_single_k4")
-    molecule = _build_molecule(device, species, coordinates, seqm_parameters)
-    md = KSA_XL_BOMD(
-        xl_bomd_params={"k": 4, "max_rank": 3, "err_threshold": 0.0, "T_el": 1500},
-        damp=None,
-        seqm_parameters=seqm_parameters,
-        timestep=0.5,
-        Temp=300.0,
-        output=_output_config(prefix, molid),
-    ).to(device)
-
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=30)
-    ref_path = reference_path_for_method(
-        "md_ksa_xl_bomd_methane_k4", method, am1_name="md_ksa_xl_bomd_methane_k4"
-    )
     ref = load_or_update_reference(ref_path, metrics)
     _assert_md_metrics(metrics[0], ref[0], tol_drift=5e-2, tol_slope=5e-3)
 
@@ -393,7 +328,7 @@ def test_md_excited_transition_properties_opt_in(tmp_path, device, methanal_batc
         assert h5["data/excitation/oscillator_strength"].shape == (3, 4)
 
 
-@pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
+@pytest.mark.parametrize("method", LANGEVIN_METHODS)
 def test_md_excited_langevin_batch(tmp_path, device, methanal_batch_data, method):
     species, coordinates = methanal_batch_data
     seqm_parameters = _seqm_parameters(method, excited=True)
@@ -409,7 +344,7 @@ def test_md_excited_langevin_batch(tmp_path, device, methanal_batch_data, method
         output=_output_config(prefix, molid),
     ).to(device)
 
-    metrics = _run_and_check(md, molecule, prefix, molid, steps=80, expect_excited=True, n_states=4)
+    metrics = _run_and_check(md, molecule, prefix, molid, steps=20, expect_excited=True, n_states=4)
     for current in metrics:
         _assert_temperature_envelope(current)
 

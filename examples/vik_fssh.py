@@ -38,19 +38,19 @@ coordinates = torch.tensor(
     device=device,
 )
 
-species = torch.as_tensor( [ [6, 1, 1,1,1], ], dtype=torch.long, device=device,)
-
-# fmt: off
-coordinates = torch.tensor(
-    [[
- [-2.7878725 ,   1.3475389,    0.0000000], 
- [-2.2590725 ,   1.5085389,    0.9359000],
- [-2.5827725 ,   2.1715389,   -0.6786000],
- [-2.4533725 ,   0.4161389,   -0.4496000],
- [-3.8563725 ,   1.2938389,    0.1921000]]
-    ],
-    device=device,
-)
+# species = torch.as_tensor( [ [6, 1, 1,1,1], ], dtype=torch.long, device=device,)
+#
+# # fmt: off
+# coordinates = torch.tensor(
+#     [[
+#  [-2.7878725 ,   1.3475389,    0.0000000], 
+#  [-2.2590725 ,   1.5085389,    0.9359000],
+#  [-2.5827725 ,   2.1715389,   -0.6786000],
+#  [-2.4533725 ,   0.4161389,   -0.4496000],
+#  [-3.8563725 ,   1.2938389,    0.1921000]]
+#     ],
+#     device=device,
+# )
 # species, coordinates = read_xyz(["/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/23ppe/23ppe.xyz"])
 species, coordinates = read_xyz(["./23ppe_opt.xyz"])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
@@ -59,7 +59,7 @@ coordinates = torch.as_tensor(coordinates, device=device)
 const = Constants().to(device)
 
 seqm_parameters = {
-    "method": "AM1",
+    "method": "OM2",
     "scf_eps": 1.0e-8,
     "scf_converger": [1],
     "excited_states": {
@@ -69,12 +69,12 @@ seqm_parameters = {
     },
     "analytical_gradient": [True],
     "nonadiabatic": {
-    #     "compute_nac": True,  # enable NAC vectors for hopping
+    #     "tdc_method": "nac_dot_v",  # use analytic NAC vectors contracted with velocity
     #     "force_mode": "active",  # forces on active surface only
     #     "recompute_on_hop": True,  # refresh forces after accepted hops
     #     "skip_first_step_prop": True,  # skip electronic propagation on step 0
-    "tdc_method": "hamiltonian_fd",  # use finite-difference Hamiltonian approach for TDNACs
-    # "tdc_method": "overlap",  # use finite-difference Hamiltonian approach for TDNACs
+    # "tdc_method": "hamiltonian_fd",  # use finite-difference Hamiltonian approach for TDNACs
+    "tdc_method": "overlap",  # use finite-difference Hamiltonian approach for TDNACs
     },
 }
 
@@ -120,10 +120,10 @@ dyn = SurfaceHoppingDynamics(
 steps = 10
 dyn.run(molecule, steps, reuse_P=True, remove_com=("angular", 1))
 
-if dyn.hop_log:
-    print("Hop events (step, from->to, accepted):")
-    for event in dyn.hop_log:
-        status = "accepted" if event.accepted else "frustrated"
-        print(f"  step {event.step:4d}: S{event.from_state + 1} -> S{event.to_state + 1} ({status})")
-else:
-    print("No hops recorded.")
+# if dyn.hop_log:
+#     print("Hop events (step, from->to, accepted):")
+#     for event in dyn.hop_log:
+#         status = "accepted" if event.accepted else "frustrated"
+#         print(f"  step {event.step:4d}: S{event.from_state + 1} -> S{event.to_state + 1} ({status})")
+# else:
+#     print("No hops recorded.")

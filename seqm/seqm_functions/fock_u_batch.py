@@ -252,15 +252,14 @@ def _two_center_u(F, P_tot, P_spin, w, maskd, mask, idxi, idxj, themethod):
 
     if themethod == "PM6":
         Pp = Pp.transpose(2, 3)  # align for d‐orbitals
-        for j in range(nbf):
-            q_idx = ind[j]  # (nbf,)
-            w2 = w1[..., q_idx]  # (nPairs, nbf, nbf)
-            Ksum[..., j, :] = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
-    else:
-        for j in range(nbf):
-            q_idx = ind[j]
-            w2 = w1[..., q_idx]
-            Ksum[..., :, j] = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
+
+    for j in range(nbf):
+        w2 = w1[..., ind[j]]
+        k_block = (w2 * Pp.unsqueeze(2)).sum(dim=(3, 4))
+        if themethod == "PM6":
+            Ksum[..., j, :] = k_block
+        else:
+            Ksum[..., :, j] = k_block
 
     F.index_add_(1, mask, Ksum)
 

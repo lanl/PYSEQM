@@ -161,11 +161,16 @@ Important FSSH inputs
 ``nonadiabatic['tdc_method']``
   Method for calculating the time-derivative nonadiabatic coupling
   :math:`\tau_{ij} = \dot{R}\cdot d_{ij}` used in electronic propagation.
-  ``'hamiltonian_fd'`` is the default and recommended CIS option. It computes
-  the nonadiabatic coupling from finite differences of the Hamiltonian.
-  ``'overlap'`` uses finite differences of state
-  overlaps and should be treated as a diagnostic option since the 
-  implementation is not verified.
+  Supported values are:
+
+  - ``'hamiltonian_fd'``: the default and recommended CIS option. It computes
+    the nonadiabatic coupling from finite differences of the Hamiltonian.
+  - ``'overlap'``: uses finite differences of state overlaps and should be
+    treated as a diagnostic option since the implementation is not verified.
+  - ``'nac_dot_v'``: contracts precomputed NAC vectors with the nuclear
+    velocities. This requires the full excited-state NAC set for the
+    propagated manifold; when selected, PYSEQM requests those pairs
+    automatically.
 
 ``nonadiabatic['decohere_on_hop']``
   If ``True``, collapse the electronic amplitudes after stochastic hop
@@ -277,8 +282,10 @@ Getting nonadiabatic coupling vectors
 -------------------------------------
 
 You can request CIS nonadiabatic coupling vectors in a single-point excited
-state calculation by setting ``seqm_parameters['nonadiabatic']``. State labels
-in the input are 1-based.
+state calculation by setting ``seqm_parameters['nonadiabatic']``. These are
+the same vectors consumed by ``SurfaceHoppingDynamics`` when
+``nonadiabatic['tdc_method'] = 'nac_dot_v'``. State labels in the input are
+1-based.
 
 .. code-block:: python
 

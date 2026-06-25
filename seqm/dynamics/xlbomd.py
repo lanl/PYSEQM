@@ -30,7 +30,7 @@ import time
 import torch
 
 from ..basics import Pack_Parameters, Parser
-from ..seqm_functions.omx_utils import prepare_parameters
+from ..seqm_functions.omx_utils import build_beta_tensor, prepare_parameters
 from ..seqm_functions.G_XL_LR import G
 from ..seqm_functions.SP2 import SP2
 from ..seqm_functions.XLESMD import elec_energy_excited_xl
@@ -76,8 +76,8 @@ class EnergyXL(torch.nn.Module):
         molecule,
         P,
         cis_amp,
-        learned_parameters=dict(),
-        xl_bomd_params=dict(),
+        learned_parameters=None,
+        xl_bomd_params=None,
         all_terms=False,
         *args,
         **kwargs,
@@ -87,6 +87,8 @@ class EnergyXL(torch.nn.Module):
         D: Density Matrix, F=>D  (SP2)
         P: Dynamics Field Tensor
         """
+        learned_parameters = {} if learned_parameters is None else learned_parameters
+        xl_bomd_params = {} if xl_bomd_params is None else xl_bomd_params
 
         (
             molecule.nmol,
@@ -108,28 +110,17 @@ class EnergyXL(torch.nn.Module):
             molecule.rij,
         ) = self.parser(molecule, self.method, *args, **kwargs)
 
-        if callable(learned_parameters):
-            adict = learned_parameters(molecule.species, molecule.coordinates)
-            molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params=adict)
-        else:
-            molecule.parameters, molecule.alp, molecule.chi = self.packpar(
-                molecule.Z, learned_params=learned_parameters
-            )
+        learned_params = (
+            learned_parameters(molecule.species, molecule.coordinates)
+            if callable(learned_parameters)
+            else learned_parameters
+        )
+        molecule.parameters, molecule.alp, molecule.chi = self.packpar(
+            molecule.Z, learned_params=learned_params
+        )
 
-        if molecule.method == "PM6":  # PM6 not implemented yet. Only PM6_SP
-            molecule.parameters["beta"] = torch.cat(
-                (
-                    molecule.parameters["beta_s"].unsqueeze(1),
-                    molecule.parameters["beta_p"].unsqueeze(1),
-                    molecule.parameters["beta_d"].unsqueeze(1),
-                ),
-                dim=1,
-            )
-        else:
-            molecule.parameters["beta"] = torch.cat(
-                (molecule.parameters["beta_s"].unsqueeze(1), molecule.parameters["beta_p"].unsqueeze(1)),
-                dim=1,
-            )
+        molecule.parameters["beta"] = build_beta_tensor(molecule.parameters, molecule.method)
+        if molecule.method != "PM6":
             prepare_parameters(
                 molecule.parameters,
                 molecule.packpar,
@@ -381,54 +372,25 @@ class EnergyXL(torch.nn.Module):
             gam = rho0xi
         elif self.method == "MNDO":
             parnuc = (alpha,)
-        elif self.method == "AM1" or self.method == "PM6" or self.method == "PM6_SP":
-            K = torch.stack(
-                (
-                    molecule.parameters["Gaussian1_K"],
-                    molecule.parameters["Gaussian2_K"],
-                    molecule.parameters["Gaussian3_K"],
-                    molecule.parameters["Gaussian4_K"],
-                ),
-                dim=1,
-            )
-            #
-            L = torch.stack(
-                (
-                    molecule.parameters["Gaussian1_L"],
-                    molecule.parameters["Gaussian2_L"],
-                    molecule.parameters["Gaussian3_L"],
-                    molecule.parameters["Gaussian4_L"],
-                ),
-                dim=1,
-            )
-            # molecule.
-            M = torch.stack(
-                (
-                    molecule.parameters["Gaussian1_M"],
-                    molecule.parameters["Gaussian2_M"],
-                    molecule.parameters["Gaussian3_M"],
-                    molecule.parameters["Gaussian4_M"],
-                ),
-                dim=1,
-            )
-            #
+        elif self.method in {"AM1", "PM6", "PM6_SP"}:
+            K = torch.stack([molecule.parameters[f"Gaussian{i}_K"] for i in range(1, 5)], dim=1)
+            L = torch.stack([molecule.parameters[f"Gaussian{i}_L"] for i in range(1, 5)], dim=1)
+            M = torch.stack([molecule.parameters[f"Gaussian{i}_M"] for i in range(1, 5)], dim=1)
             parnuc = (alpha, K, L, M)
         elif self.method == "PM3":
-            K = torch.stack((molecule.parameters["Gaussian1_K"], molecule.parameters["Gaussian2_K"]), dim=1)
-            #
-            L = torch.stack((molecule.parameters["Gaussian1_L"], molecule.parameters["Gaussian2_L"]), dim=1)
-            #
-            M = torch.stack((molecule.parameters["Gaussian1_M"], molecule.parameters["Gaussian2_M"]), dim=1)
-            #
+            K = torch.stack([molecule.parameters[f"Gaussian{i}_K"] for i in range(1, 3)], dim=1)
+            L = torch.stack([molecule.parameters[f"Gaussian{i}_L"] for i in range(1, 3)], dim=1)
+            M = torch.stack([molecule.parameters[f"Gaussian{i}_M"] for i in range(1, 3)], dim=1)
             parnuc = (alpha, K, L, M)
 
-        if self.method not in {"OM1", "OM2", "OM3"} and "g_ss_nuc" in molecule.parameters:
-            g = molecule.parameters["g_ss_nuc"]
-            rho0a = 0.5 * ev / g[molecule.idxi]
-            rho0b = 0.5 * ev / g[molecule.idxj]
-            gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b) ** 2)
-        elif self.method not in {"OM1", "OM2", "OM3"}:
-            gam = w[..., 0, 0]
+        if self.method not in {"OM1", "OM2", "OM3"}:
+            if "g_ss_nuc" in molecule.parameters:
+                g = molecule.parameters["g_ss_nuc"]
+                rho0a = 0.5 * ev / g[molecule.idxi]
+                rho0b = 0.5 * ev / g[molecule.idxj]
+                gam = ev / torch.sqrt(molecule.rij**2 + (rho0a + rho0b) ** 2)
+            else:
+                gam = w[..., 0, 0]
 
         EnucAB = pair_nuclear_energy(
             molecule.Z,
@@ -523,8 +485,10 @@ class ForceXL(torch.nn.Module):
         self.create_graph = seqm_parameters.get("2nd_grad", False)
 
     def forward(
-        self, molecule, P, cis_amp=None, learned_parameters=dict(), xl_bomd_params=dict(), *args, **kwargs
+        self, molecule, P, cis_amp=None, learned_parameters=None, xl_bomd_params=None, *args, **kwargs
     ):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
+        xl_bomd_params = {} if xl_bomd_params is None else xl_bomd_params
         molecule.coordinates.requires_grad_(True)
         Hf, Etot, Eelec, EEnt, Enuc, Eiso, EnucAB, D, dP2dt2, Error, e_gap, e, Fe_occ = self.energy(
             molecule,

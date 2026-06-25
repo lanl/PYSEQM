@@ -4,6 +4,7 @@ from .anal_grad import core_core_der, overlap_der_finiteDiff, w_der
 from .cg_solver import conjugate_gradient_batch
 from .constants import a0
 from .dispersion_am1_fs1 import dEdisp_dr
+from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 from .omx_utils import get_orbital_zetas
 from .rcis_batch import get_occ_virt, make_A_times_zvector_batched, makeA_pi_batched, unpackone_batch
 from .rcis_grad_batch import make_cis_state_dipole
@@ -195,9 +196,7 @@ def xlesmd_rcis_grad_batch(
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     #   0,     1         2       3       4         5       6      7         8        9
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
+    ind = _cached_index(K_ind_4, device)
     # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
     # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
     overlap_KAB_x = overlap_x
@@ -217,26 +216,17 @@ def xlesmd_rcis_grad_batch(
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     # weight for them are
     #  1       2       1        2        2        1        2       2        2       1
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape((-1, 10))
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
     # weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
 
-    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P[mol.maskd[mol.idxi]][..., indices[0], indices[1]] * weight).unsqueeze(
-        -1
-    )  # Shape: (npairs, 10, 1)
-    PB = (P[mol.maskd[mol.idxj]][..., indices[0], indices[1]] * weight).unsqueeze(
-        -2
-    )  # Shape: (npairs, 1, 10)
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    PA = (P[mol.maskd[mol.idxi]][..., idx0, idx1] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
+    PB = (P[mol.maskd[mol.idxj]][..., idx0, idx1] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
 
-    scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
-        dtype=dtype,
-        device=device,
-    )
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     if include_ground_state:
         pair_grad.add_(
             0.5 * (P[mol.maskd[mol.idxj], None, :, :] * e2a_x * scale_emat).sum(dim=(2, 3))
@@ -250,13 +240,13 @@ def xlesmd_rcis_grad_batch(
     # In the future, if this code is to be edited, be careful here
     sumA = overlap_KAB_x
     sumA.zero_()
-    sumA[..., indices[0], indices[1]] = suma
+    sumA[..., idx0, idx1] = suma
     e2a_x.add_(sumA)
 
     sumB = overlap_KAB_x
     sumB.zero_()
     sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-    sumB[..., indices[0], indices[1]] = sumb
+    sumB[..., idx0, idx1] = sumb
     del suma, sumb
     e1b_x.add_(sumB)
 
@@ -289,26 +279,20 @@ def xlesmd_rcis_grad_batch(
     del Rbar_symmetrized
 
     Rdiag_symmetrized = R_symm[mol.maskd]
-    PA = (
-        Rdiag_symmetrized[mol.idxi][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    ).unsqueeze(-1)
-    PB = (
-        Rdiag_symmetrized[mol.idxj][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    ).unsqueeze(-2)
+    PA = (Rdiag_symmetrized[mol.idxi][..., idx0, idx1] * weight).unsqueeze(-1)
+    PB = (Rdiag_symmetrized[mol.idxj][..., idx0, idx1] * weight).unsqueeze(-2)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
     sumA = overlap_KAB_x
     sumA.zero_()
-    sumA[..., indices[0], indices[1]] = suma
+    sumA[..., idx0, idx1] = suma
     J_x_2a = e2a_x
     J_x_2a[:, :, :] = sumA
 
     sumB = overlap_KAB_x
     sumB.zero_()
     sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-    sumB[..., indices[0], indices[1]] = sumb
+    sumB[..., idx0, idx1] = sumb
     J_x_1b = sumB
     del suma, sumb
 

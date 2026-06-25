@@ -39,16 +39,15 @@ def params(
     p = torch.zeros((m + 1, n))
     requested_elements = {int(x) for x in elements if int(x) > 0}
     found_elements = set()
-    f = open(fn)
-    header = f.readline().strip().replace(" ", "").split(",")
-    idx = [header.index(item) for item in parameters]
-    for l in f:
-        t = l.strip().replace(" ", "").split(",")
-        id = int(t[0])
-        if id in requested_elements:
-            found_elements.add(id)
-            p[id, :] = torch.tensor([float(t[x]) for x in idx])
-    f.close()
+    with open(fn) as f:
+        header = f.readline().strip().replace(" ", "").split(",")
+        idx = [header.index(item) for item in parameters]
+        for line in f:
+            t = line.strip().replace(" ", "").split(",")
+            element_id = int(t[0])
+            if element_id in requested_elements:
+                found_elements.add(element_id)
+                p[element_id, :] = torch.tensor([float(t[x]) for x in idx])
     if method in {"OM1", "OM2", "OM3"}:
         missing = sorted(requested_elements - found_elements)
         if missing:
@@ -86,15 +85,15 @@ def PWCCT(
     q = torch.zeros((m + 1, m + 1))
     p = torch.zeros((m + 1, m + 1))
 
-    if method == "PM6" or method == "PM6_SP":
+    if method in {"PM6", "PM6_SP"}:
         fo = root_dir + "PWCCT_" + method + "_MOPAC.csv"
-        f = open(fo)
-        for l in f:
-            t = l.strip().replace(" ", "").split(",")
-            id = int(t[0])
-            id2 = int(t[1])
-            if id in elements and id2 in elements:
-                q[id, id2] = float(t[2])
-                p[id, id2] = float(t[3])
-        f.close()
+        requested_elements = set(elements)
+        with open(fo) as f:
+            for line in f:
+                t = line.strip().replace(" ", "").split(",")
+                element_i = int(t[0])
+                element_j = int(t[1])
+                if element_i in requested_elements and element_j in requested_elements:
+                    q[element_i, element_j] = float(t[2])
+                    p[element_i, element_j] = float(t[3])
     return torch.nn.Parameter(q, requires_grad=False), torch.nn.Parameter(p, requires_grad=False)

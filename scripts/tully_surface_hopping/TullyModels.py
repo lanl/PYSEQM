@@ -165,7 +165,7 @@ def _tully_seqm_params() -> Dict:
         "scf_eps": 1.0e-8,
         "scf_converger": [1],
         "excited_states": {"n_states": _TULLY_NSTATES},
-        "nonadiabatic": {"compute_nac": True, "detect_crossings": False},
+        "nonadiabatic": {"tdc_method": "nac_dot_v", "detect_crossings": False},
     }
 
 
@@ -184,7 +184,6 @@ class _TullyDynamicsMixin:
         super().__init__(params, timestep=timestep, output=_TULLY_OUTPUT)
         if electronic_substeps is not None:
             self._electronic_substeps = int(electronic_substeps)
-        self.compute_nac = bool(params["nonadiabatic"].get("compute_nac", True))
         self.model = model
         self.initial_state = 1
         self._nstates = _TULLY_NSTATES
@@ -198,9 +197,7 @@ class _TullyDynamicsMixin:
         self._setup_states(molecule)
         self._init_coeffs(molecule)
         molecule.active_state = self._active_states + 1
-        self._compute_electronic_structure(
-            molecule, learned_parameters=learned_parameters, compute_nac=self.compute_nac, **kwargs
-        )
+        self._compute_electronic_structure(molecule, learned_parameters=learned_parameters, **kwargs)
         return super().initialize(
             molecule, remove_com=remove_com, learned_parameters=learned_parameters, *args, **kwargs
         )
@@ -253,15 +250,10 @@ class _TullyDynamicsMixin:
         self._active_state = exc_idx
         molecule.active_state = self._active_states + 1
         molecule.force = molecule.all_forces[:, exc_idx + 1]
-        if not self.compute_nac:
-            raise RuntimeError("Tully dynamics requires NAC computation.")
         nac_vec = {(0, 1): torch.zeros((nmol, molsize, 3), dtype=dtype, device=device)}
         nac_vec[(0, 1)][:, 0, 0] = nac
-        nac_dot = torch.zeros((nmol, self._nstates, self._nstates), dtype=dtype, device=device)
-        vel = molecule.velocities[:, 0, 0]
-        nac_dot[:, 0, 1] = nac * vel
-        nac_dot[:, 1, 0] = -nac * vel
         molecule.nac = nac_vec
+        nac_dot = self._nac_dot_from_vectors(molecule, nac_vec)
         molecule.nac_dot = nac_dot
         ground_energy = torch.zeros((nmol,), dtype=dtype, device=device)
         self._cache_new = {

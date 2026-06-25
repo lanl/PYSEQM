@@ -6,6 +6,8 @@ from seqm.basics import Pack_Parameters
 from .build_two_elec_one_center_int_D import calc_integral  # , calc_integral_os
 from .diag import (
     DEGEN_EIGENSOLVER,
+    _apply_padding_eigen_shifts,
+    _zero_padding_eigenvalues,
     construct_P,
     degen_symeig,
     pytorch_symeig,
@@ -17,6 +19,28 @@ from .pack import pack, unpack
 from .packd import packd, unpackd
 
 CHECK_DEGENERACY = False
+
+
+def _initial_density_guess(molecule, tore, nmol):
+    orb_dim = 9 if molecule.method == "PM6" else 4
+    P0 = torch.zeros(
+        molecule.nmol * molecule.molsize * molecule.molsize,
+        orb_dim,
+        orb_dim,
+        dtype=molecule.coordinates.dtype,
+        device=molecule.coordinates.device,
+    )
+    heavy = molecule.Z > 1
+    P0[molecule.maskd[heavy], 0, 0] = tore[molecule.Z[heavy]] / 4.0
+    P0[molecule.maskd, 1, 1] = P0[molecule.maskd, 0, 0]
+    P0[molecule.maskd, 2, 2] = P0[molecule.maskd, 0, 0]
+    P0[molecule.maskd, 3, 3] = P0[molecule.maskd, 0, 0]
+    P0[molecule.maskd[molecule.Z == 1], 0, 0] = 1.0
+    return (
+        P0.reshape(nmol, molecule.molsize, molecule.molsize, orb_dim, orb_dim)
+        .transpose(2, 3)
+        .reshape(nmol, orb_dim * molecule.molsize, orb_dim * molecule.molsize)
+    )
 
 
 def make_dm_guess(
@@ -68,45 +92,9 @@ def make_dm_guess(
     nmol = molecule.nHeavy.shape[0]
     tore = molecule.const.tore
 
-    if not torch.is_tensor(molecule.dm) or overwrite_existing_dm == True:
+    if not torch.is_tensor(molecule.dm) or overwrite_existing_dm:
         # print('Reinitializing DM')
-        if molecule.method == "PM6":
-            P0 = torch.zeros(
-                molecule.nmol * molecule.molsize * molecule.molsize,
-                9,
-                9,
-                dtype=molecule.coordinates.dtype,
-                device=molecule.coordinates.device,
-            )  # density matrix
-            P0[molecule.maskd[molecule.Z > 1], 0, 0] = tore[molecule.Z[molecule.Z > 1]] / 4.0
-            P0[molecule.maskd, 1, 1] = P0[molecule.maskd, 0, 0]
-            P0[molecule.maskd, 2, 2] = P0[molecule.maskd, 0, 0]
-            P0[molecule.maskd, 3, 3] = P0[molecule.maskd, 0, 0]
-            P0[molecule.maskd[molecule.Z == 1], 0, 0] = 1.0
-            P = (
-                P0.reshape(nmol, molecule.molsize, molecule.molsize, 9, 9)
-                .transpose(2, 3)
-                .reshape(nmol, 9 * molecule.molsize, 9 * molecule.molsize)
-            )
-
-        else:
-            P0 = torch.zeros(
-                molecule.nmol * molecule.molsize * molecule.molsize,
-                4,
-                4,
-                dtype=molecule.coordinates.dtype,
-                device=molecule.coordinates.device,
-            )  # density matrix
-            P0[molecule.maskd[molecule.Z > 1], 0, 0] = tore[molecule.Z[molecule.Z > 1]] / 4.0
-            P0[molecule.maskd, 1, 1] = P0[molecule.maskd, 0, 0]
-            P0[molecule.maskd, 2, 2] = P0[molecule.maskd, 0, 0]
-            P0[molecule.maskd, 3, 3] = P0[molecule.maskd, 0, 0]
-            P0[molecule.maskd[molecule.Z == 1], 0, 0] = 1.0
-            P = (
-                P0.reshape(nmol, molecule.molsize, molecule.molsize, 4, 4)
-                .transpose(2, 3)
-                .reshape(nmol, 4 * molecule.molsize, 4 * molecule.molsize)
-            )
+        P = _initial_density_guess(molecule, tore, nmol)
 
         if molecule.nocc.dim() == 2:
             P = torch.stack((0.5 * P, 0.5 * P), dim=1)
@@ -172,36 +160,22 @@ def make_dm_guess(
                 nheavyatom = molecule.nHeavy.repeat_interleave(2)
                 nH = molecule.nHydro.repeat_interleave(2)
                 nocc = molecule.nocc.flatten()
-                # Gershgorin circle theorem estimate upper bounds of eigenvalues
                 x_orig_shape = x.size()
                 x0 = packd(x, nSuperHeavy, nheavyatom, nH)
-                nmol, size, _ = x0.shape
 
-                aii = x0.diagonal(dim1=1, dim2=2)
-                ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
-                hN = torch.max(aii + ri, dim=1)[0]
-                dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
+                size = x0.shape[1]
                 norb = nheavyatom * 4 + nH + nSuperHeavy * 9
-                pnorb = size - norb
-                nn = torch.max(pnorb).item()
-                dx = 0.005
-                mutipler = torch.arange(1.0 + dx, 1.0 + nn * dx + dx, dx, dtype=dtype, device=device)[:nn]
-                ind = torch.arange(size, dtype=torch.int64, device=device)
-                cond = pnorb > 0
-                for i in range(nmol):
-                    if cond[i]:
-                        x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
+                has_padding = _apply_padding_eigen_shifts(x0, norb)
                 try:
                     e0, v = sym_eigh(x0)
                 except:
                     if torch.isnan(x0).any():
                         print("isnan(x0) #1 in DM guess", x0)
                     e0, v = sym_eigh(x0)
+                nmol = x0.shape[0]
                 e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
                 e[..., :size] = e0
-                for i in range(nmol):
-                    if cond[i]:
-                        e[i, norb[i] : size] = 0.0
+                e = _zero_padding_eigenvalues(e, norb, has_padding)
 
                 # $$$ the code below can and SHOULD be optimized. Too many reshapes
 
@@ -278,40 +252,25 @@ def make_dm_guess(
                 dtype = x.dtype
                 device = x.device
 
-                nSuperHeavy = molecule.nSuperHeavy.repeat_interleave(2)
                 nheavyatom = molecule.nHeavy.repeat_interleave(2)
                 nH = molecule.nHydro.repeat_interleave(2)
                 nocc = molecule.nocc.flatten()
-                # Gershgorin circle theorem estimate upper bounds of eigenvalues
                 x_orig_shape = x.size()
                 x0 = pack(x, nheavyatom, nH)
-                nmol, size, _ = x0.shape
 
-                aii = x0.diagonal(dim1=1, dim2=2)
-                ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
-                hN = torch.max(aii + ri, dim=1)[0]
-                dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
+                size = x0.shape[1]
                 norb = nheavyatom * 4 + nH
-                pnorb = size - norb
-                nn = torch.max(pnorb).item()
-                dx = 0.005
-                mutipler = torch.arange(1.0 + dx, 1.0 + nn * dx + dx, dx, dtype=dtype, device=device)[:nn]
-                ind = torch.arange(size, dtype=torch.int64, device=device)
-                cond = pnorb > 0
-                for i in range(nmol):
-                    if cond[i]:
-                        x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
+                has_padding = _apply_padding_eigen_shifts(x0, norb)
                 try:
                     e0, v = sym_eigh(x0)
                 except:
                     if torch.isnan(x0).any():
                         print("isnan(x0) #2 in DM guess", x0)
                     e0, v = sym_eigh(x0)
+                nmol = x0.shape[0]
                 e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
                 e[..., :size] = e0
-                for i in range(nmol):
-                    if cond[i]:
-                        e[i, norb[i] : size] = 0.0
+                e = _zero_padding_eigenvalues(e, norb, has_padding)
 
                 # $$$ the code below can and SHOULD be optimized. Too many reshapes
 

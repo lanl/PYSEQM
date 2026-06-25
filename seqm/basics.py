@@ -19,7 +19,7 @@ from .seqm_functions.energy import (
 )
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.normal_modes import normal_modes
-from .seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas, prepare_parameters
+from .seqm_functions.omx_utils import OMX_METHODS, build_beta_tensor, get_orbital_zetas, prepare_parameters
 from .seqm_functions.parameters import PWCCT, params
 from .seqm_functions.rcis_batch import calc_cis_energy, rcis_batch
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
@@ -537,13 +537,10 @@ class Pack_Parameters(torch.nn.Module):
         self.learned_list = seqm_parameters.get("learned", [])
         self.method = seqm_parameters["method"]
         if self.method in OMX_METHODS:
-            normalized_learned = []
-            for name in self.learned_list:
-                if name in {"zeta_s", "zeta_p"}:
-                    name = "zeta"
-                if name not in normalized_learned:
-                    normalized_learned.append(name)
-            self.learned_list = normalized_learned
+            if {"zeta_s", "zeta_p"}.intersection(self.learned_list):
+                raise ValueError(
+                    "Learned list has zeta_s or zeta_p but OMx methods use same zeta for s,p orbitals"
+                )
         self.filedir = (
             seqm_parameters["parameter_file_dir"]
             if "parameter_file_dir" in seqm_parameters
@@ -563,10 +560,11 @@ class Pack_Parameters(torch.nn.Module):
             method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.required_list
         )
 
-    def forward(self, Z, learned_params=dict()):
+    def forward(self, Z, learned_params=None):
         """
         combine the learned_parames with other required parameters
         """
+        learned_params = {} if learned_params is None else learned_params
         for i in range(self.nrp):
             learned_params[self.required_list[i]] = self.p[Z, i]  # .contiguous()
         return learned_params, self.alpha, self.chi
@@ -673,21 +671,39 @@ class Energy(torch.nn.Module):
         self.eig = seqm_parameters.get("eig", True)
         self.excited_states = seqm_parameters.get("excited_states")
         if self.excited_states is not None:
-            self.excited_states.setdefault("make_best_guess", True)
-            self.excited_states.setdefault("save_tdm", False)
-            self.excited_states.setdefault("save_tdm_xlbomd", False)
-            self.excited_states.setdefault("save_tdm_output", False)
-            self.excited_states.setdefault("compute_transition_properties", False)
+            for key, value in {
+                "make_best_guess": True,
+                "save_tdm": False,
+                "save_tdm_xlbomd": False,
+                "save_tdm_output": False,
+                "compute_transition_properties": False,
+            }.items():
+                self.excited_states.setdefault(key, value)
         # Resolve NAC configuration once at construction
         nroots = None
         if self.excited_states and "n_states" in self.excited_states:
             nroots = int(self.excited_states["n_states"])
         self.nac_config = resolve_nac_config(seqm_parameters, nroots=nroots, default_enabled=False)
+        na_cfg = dict(seqm_parameters.get("nonadiabatic", {}))
+        self._direct_nac_tdc = str(na_cfg.get("tdc_method", "hamiltonian_fd")).strip().lower() == "nac_dot_v"
+        self._all_nac_pair_cache = {}
         self.xlesmd = False
         self.md = False
         self.namd = False
         if self.uhf and self.excited_states is not None:
             raise NotImplementedError("Unrestricted excited state methods (CIS and RPA) not available")
+
+    def _nac_pair_list(self):
+        if self.namd and self._direct_nac_tdc:
+            nroots = int(self.excited_states.get("_nad_nstates", self.excited_states["n_states"]))
+            pair_list = self._all_nac_pair_cache.get(nroots)
+            if pair_list is None:
+                pair_list = [(i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)]
+                self._all_nac_pair_cache[nroots] = pair_list
+            return pair_list
+        nac_settings = self.nac_config
+        nroots = self.excited_states["n_states"]
+        return nac_settings.pairs or [(i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)]
 
     @staticmethod
     def _phase_align_cis(new_amp, ref_amp, rpa=False):
@@ -906,24 +922,18 @@ class Energy(torch.nn.Module):
             molecule.rij,
         ) = self.parser(molecule, self.method, *args, **kwargs)
 
-        if callable(learned_parameters):
-            adict = learned_parameters(molecule.species, molecule.coordinates)
-            molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(
-                self.packpar(molecule.Z, learned_params=adict)
-            )
-        else:
-            molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(
-                self.packpar(molecule.Z, learned_params=learned_parameters)
-            )
+        learned_params = (
+            learned_parameters(molecule.species, molecule.coordinates)
+            if callable(learned_parameters)
+            else learned_parameters
+        )
+        molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(
+            self.packpar(molecule.Z, learned_params=learned_params)
+        )
 
         params = molecule.parameters
-        if molecule.method == "PM6":
-            params["beta"] = torch.cat(
-                (params["beta_s"].unsqueeze(1), params["beta_p"].unsqueeze(1), params["beta_d"].unsqueeze(1)),
-                dim=1,
-            )
-        else:
-            params["beta"] = torch.cat((params["beta_s"].unsqueeze(1), params["beta_p"].unsqueeze(1)), dim=1)
+        params["beta"] = build_beta_tensor(params, molecule.method)
+        if molecule.method != "PM6":
             prepare_parameters(
                 params,
                 molecule.packpar,
@@ -936,11 +946,12 @@ class Energy(torch.nn.Module):
         params["Kbeta"] = params.get("Kbeta", None)
 
     def forward(
-        self, molecule, learned_parameters=dict(), all_terms=False, P0=None, cis_amp=None, *args, **kwargs
+        self, molecule, learned_parameters=None, all_terms=False, P0=None, cis_amp=None, *args, **kwargs
     ):
         """
         get the energy terms
         """
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         self._prepare_molecule_inputs(molecule, learned_parameters, *args, **kwargs)
         params = molecule.parameters
 
@@ -956,7 +967,7 @@ class Energy(torch.nn.Module):
                     print(
                         "Zero occupied alpha or beta orbitals found (e.g. triplet H2). HOMO-LUMO gaps are not available."
                     )
-                    e_gap = torch.tensor([])
+                    e_gap = e.new_empty(0)
                 else:
                     lumo_a, lumo_b = molecule.nocc[:, 0].unsqueeze(0).T, molecule.nocc[:, 1].unsqueeze(0).T
                     e_gap_a = e[:, 0].gather(1, lumo_a) - e[:, 0].gather(1, lumo_a - 1)
@@ -1108,6 +1119,7 @@ class Energy(torch.nn.Module):
         if self.excited_states:
             cis_tol = self.excited_states["tolerance"]
             method = self.excited_states["method"].lower()
+            is_rpa = method == "rpa"
             orbital_window = self.excited_states.get("orbital_window", None)
             best_guess_from_prev = self.excited_states["make_best_guess"]
             need_tdm = any(
@@ -1119,7 +1131,7 @@ class Energy(torch.nn.Module):
                 if all_same_mols:
                     if molecule.const.do_timing:
                         t0 = time.time()
-                    if method == "cis" or method == "tda":
+                    if method in {"cis", "tda"}:
                         excitation_energies, exc_amps = rcis_batch(
                             molecule,
                             w,
@@ -1134,7 +1146,7 @@ class Energy(torch.nn.Module):
                                 "compute_transition_properties"
                             ],
                         )
-                    elif method == "rpa":
+                    elif is_rpa:
                         excitation_energies, exc_amps = rpa(
                             molecule,
                             w,
@@ -1159,7 +1171,7 @@ class Energy(torch.nn.Module):
                         )
                     else:
                         raise NotImplementedError("RPA for non-uniform batch not yet available")
-                exc_amps = self._phase_align_cis(exc_amps, prev_cis_amp, rpa=method == "rpa")
+                exc_amps = self._phase_align_cis(exc_amps, prev_cis_amp, rpa=is_rpa)
                 molecule.cis_amplitudes = exc_amps
                 molecule.cis_energies = excitation_energies
 
@@ -1177,10 +1189,7 @@ class Energy(torch.nn.Module):
                 nac_settings = self.nac_config
 
                 if nac_settings.enabled:
-                    nroots = self.excited_states["n_states"]
-                    pair_list = nac_settings.pairs or [
-                        (i, j) for i in range(1, nroots + 1) for j in range(i + 1, nroots + 1)
-                    ]
+                    pair_list = self._nac_pair_list()
                     pair_nac = calc_nac(
                         molecule,
                         exc_amps,
@@ -1189,7 +1198,7 @@ class Energy(torch.nn.Module):
                         ri,
                         riXH,
                         pair_list,
-                        rpa=method == "rpa",
+                        rpa=is_rpa,
                         include_response_terms=nac_settings.include_response_terms,
                         w=w,
                         e_mo=e,
@@ -1206,7 +1215,7 @@ class Energy(torch.nn.Module):
                 active_idx = torch.clamp(active_states - 1, min=0)
 
                 def _gather_active_amplitude(amplitudes):
-                    if method == "rpa":
+                    if is_rpa:
                         idx = active_idx.view(1, -1, 1, 1).expand(2, -1, 1, amplitudes.shape[-1])
                         gathered = amplitudes.gather(2, idx).squeeze(2)
                         mask_expand = excited_mask.view(1, -1, 1)
@@ -1240,7 +1249,7 @@ class Energy(torch.nn.Module):
                             gam,
                             self.method,
                             parnuc,
-                            rpa=method == "rpa",
+                            rpa=is_rpa,
                             include_ground_state=True,
                             orbital_window=orbital_window,
                             calculate_dipole=False,
@@ -1260,10 +1269,10 @@ class Energy(torch.nn.Module):
                     amp_sel = _gather_active_amplitude(exc_amps)
                     if all_same_mols:
                         cis_energy = calc_cis_energy(
-                            molecule, w, e, amp_sel, F, P, rpa=method == "rpa", orbital_window=orbital_window
+                            molecule, w, e, amp_sel, F, P, rpa=is_rpa, orbital_window=orbital_window
                         )
                     else:
-                        cis_energy = calc_cis_energy_any_batch(molecule, w, e, amp_sel, rpa=method == "rpa")
+                        cis_energy = calc_cis_energy_any_batch(molecule, w, e, amp_sel, rpa=is_rpa)
                     Eexcited[excited_mask] = cis_energy[excited_mask]
 
             if self.seqm_parameters.get("do_all_forces", False):
@@ -1294,7 +1303,7 @@ class Energy(torch.nn.Module):
                         gam,
                         self.method,
                         parnuc,
-                        rpa=method == "rpa",
+                        rpa=is_rpa,
                         include_ground_state=True,
                         calculate_dipole=True,
                     )
@@ -1403,9 +1412,10 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
     def forward(
-        self, molecule, learned_parameters=dict(), P0=None, cis_amp=None, do_force=True, *args, **kwargs
+        self, molecule, learned_parameters=None, P0=None, cis_amp=None, do_force=True, *args, **kwargs
     ):
         # We have two options to calculate force: 1. Analytical gradients (including semi-numerical gradients) and 2. From back-propogagation
+        learned_parameters = {} if learned_parameters is None else learned_parameters
         do_analytical_gradient = self.seqm_parameters.get("analytical_gradient", [False])
         active_states = active_state_tensor(
             molecule.active_state, int(molecule.nmol), molecule.coordinates.device

@@ -2067,7 +2067,9 @@ def scf_loop(
         P
     ):  # $$$ I'm not sure if it is okay to use DM initialized from make_dm_guess which corresponds to 1 SCF iteration + HOMO-LUMO mix.
         P0 = torch.zeros_like(M)  # density matrix
-        P0[molecule.maskd[molecule.Z > 1], 0, 0] = tore[molecule.Z[molecule.Z > 1]] / 4.0
+        tore_z = tore[molecule.Z].to(dtype=P0.dtype, device=P0.device)
+        heavy = molecule.Z > 1
+        P0[molecule.maskd[heavy], 0, 0] = tore_z[heavy] / 4.0
         P0[molecule.maskd, 1, 1] = P0[molecule.maskd, 0, 0]
         P0[molecule.maskd, 2, 2] = P0[molecule.maskd, 0, 0]
         P0[molecule.maskd, 3, 3] = P0[molecule.maskd, 0, 0]

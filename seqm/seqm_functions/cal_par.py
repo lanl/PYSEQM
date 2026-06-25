@@ -17,12 +17,7 @@ def dd_qq(qn, zs, zp):
       dd: dipole charge separation
       qq: qutrupole charge separation
     """
-    dd = (
-        (2.0 * qn + 1.0)
-        * (4.0 * zs * zp) ** (qn + 0.5)
-        / (zs + zp) ** (2.0 * qn + 2.0)
-        / torch.sqrt(torch.tensor(3.0, dtype=zs.dtype, device=zs.device))
-    )
+    dd = (2.0 * qn + 1.0) * (4.0 * zs * zp) ** (qn + 0.5) / (zs + zp) ** (2.0 * qn + 2.0) / math.sqrt(3.0)
     qq = torch.sqrt((4.0 * qn**2 + 6.0 * qn + 2.0) / 20.0) / zp
 
     return dd, qq

@@ -1,3 +1,5 @@
+import math
+
 import torch as th
 
 from .two_elec_two_center_int import rotate_with_quaternion
@@ -116,7 +118,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + A111[jcall3, 2] * B111[jcall3, 1]
                 - B111[jcall3, 2] * A111[jcall3, 1]
             )
-            / (th.sqrt(th.tensor(3.0)) * 8.0)
+            / (math.sqrt(3.0) * 8.0)
         )
         S211[jcall3] = (
             th.pow(zeta_b[jcall3, 0], 1.5)
@@ -152,7 +154,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + B211[jcall4, 3] * (A211[jcall4, 0] - A211[jcall4, 2])
                 - B211[jcall4, 1] * (A211[jcall4, 2] - A211[jcall4, 4])
             )
-            / (16.0 * th.sqrt(th.tensor(3.0)))
+            / (16.0 * math.sqrt(3.0))
         )
         S121[jcall4] = (
             th.pow(zeta_b[jcall4, 1] * zeta_a[jcall4, 0], 2.5)
@@ -163,7 +165,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 - B121[jcall4, 3] * (A121[jcall4, 0] - A121[jcall4, 2])
                 + B121[jcall4, 1] * (A121[jcall4, 2] - A121[jcall4, 4])
             )
-            / (16.0 * th.sqrt(th.tensor(3.0)))
+            / (16.0 * math.sqrt(3.0))
         )
         w = th.pow(zeta_b[jcall4, 1] * zeta_a[jcall4, 1], 2.5) * rij[jcall4] ** 5 / 16.0
         S221[jcall4] = -w * (
@@ -193,7 +195,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 - 2.0 * A111[jcall431, 1] * B111[jcall431, 3]
                 - B111[jcall431, 4] * A111[jcall431, 0]
             )
-            / (th.sqrt(th.tensor(10.0)) * 24.0)
+            / (math.sqrt(10.0) * 24.0)
         )
         S211[jcall431] = (
             th.pow(zeta_b[jcall431, 0], 1.5)
@@ -205,7 +207,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + B211[jcall431, 1] * (A211[jcall431, 2] + A211[jcall431, 4])
                 - B211[jcall431, 3] * (A211[jcall431, 2] + A211[jcall431, 0])
             )
-            / (8.0 * th.sqrt(th.tensor(30.0)))
+            / (8.0 * math.sqrt(30.0))
         )
 
     jcall5 = jcall == 5  # ii=4
@@ -222,7 +224,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + B111[jcall5, 4] * A111[jcall5, 1]
                 + B111[jcall5, 5] * A111[jcall5, 0]
             )
-            / (th.sqrt(th.tensor(30.0)) * 48.0)
+            / (math.sqrt(30.0) * 48.0)
         )
         S211[jcall5] = (
             th.pow(zeta_b[jcall5, 0], 2.5)
@@ -236,7 +238,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + A211[jcall5, 1] * B211[jcall5, 5]
                 + A211[jcall5, 0] * B211[jcall5, 4]
             )
-            / (48.0 * th.sqrt(th.tensor(10.0)))
+            / (48.0 * math.sqrt(10.0))
         )
         S121[jcall5] = (
             th.pow(zeta_b[jcall5, 1], 2.5)
@@ -248,7 +250,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 - 2.0 * (A121[jcall5, 1] * B121[jcall5, 3] - A121[jcall5, 2] * B121[jcall5, 4])
                 - (A121[jcall5, 0] * B121[jcall5, 4] - A121[jcall5, 1] * B121[jcall5, 5])
             )
-            / (48.0 * th.sqrt(th.tensor(10.0)))
+            / (48.0 * math.sqrt(10.0))
         )
         S221[jcall5] = (
             th.pow(zeta_b[jcall5, 1], 2.5)
@@ -260,7 +262,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 - (A22[jcall5, 1] * B22[jcall5, 2] - A22[jcall5, 3] * B22[jcall5, 4])
                 - (A22[jcall5, 0] * B22[jcall5, 3] - A22[jcall5, 2] * B22[jcall5, 5])
             )
-            / (16.0 * th.sqrt(th.tensor(30.0)))
+            / (16.0 * math.sqrt(30.0))
         )
         S222[jcall5] = (
             th.pow(zeta_b[jcall5, 1], 2.5)
@@ -272,7 +274,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 - (A22[jcall5, 3] - A22[jcall5, 1]) * (B22[jcall5, 2] - B22[jcall5, 4])
                 - (A22[jcall5, 2] - A22[jcall5, 0]) * (B22[jcall5, 3] - B22[jcall5, 5])
             )
-            / (32.0 * th.sqrt(th.tensor(30.0)))
+            / (32.0 * math.sqrt(30.0))
         )
 
     jcall6 = jcall == 6
@@ -299,7 +301,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + (A211[jcall6, 1] * B211[jcall6, 4] + A211[jcall6, 2] * B211[jcall6, 5])
                 + (-A211[jcall6, 0] * B211[jcall6, 5] - A211[jcall6, 1] * B211[jcall6, 6])
             )
-            / (480.0 * th.sqrt(th.tensor(3.0)))
+            / (480.0 * math.sqrt(3.0))
         )
         S121[jcall6] = (
             th.pow(zeta_b[jcall6, 1] * zeta_a[jcall6, 0], 3.5)
@@ -312,7 +314,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
                 + (A121[jcall6, 1] * B121[jcall6, 4] - A121[jcall6, 2] * B121[jcall6, 5])
                 + (A121[jcall6, 0] * B121[jcall6, 5] - A121[jcall6, 1] * B121[jcall6, 6])
             )
-            / (480.0 * th.sqrt(th.tensor(3.0)))
+            / (480.0 * math.sqrt(3.0))
         )
         S221[jcall6] = (
             th.pow(zeta_b[jcall6, 1], 3.5)

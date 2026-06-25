@@ -29,15 +29,7 @@ def GenerateRotationMatrix(xij):
 
     # ``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
 
-    tmp = torch.where(
-        xij[..., 2] < 0.0,
-        torch.tensor(-1.0, dtype=dtype, device=device),
-        torch.where(
-            xij[..., 2] > 0.0,
-            torch.tensor(1.0, dtype=dtype, device=device),
-            torch.tensor(0.0, dtype=dtype, device=device),
-        ),
-    )
+    tmp = torch.sign(xij[..., 2])
 
     # ca = th.where(xy>=1.0e-10, xij[...,0]/xy, tmp)
     cond_xy = xy >= 1.0e-10
@@ -48,14 +40,14 @@ def GenerateRotationMatrix(xij):
     SA = torch.zeros_like(xy)
 
     SA[cond_xy] = xij[cond_xy, 1] / xy[cond_xy]
-    SB = torch.where(xy >= 1.0e-10, xy, torch.tensor(0.0, dtype=dtype, device=device))
+    SB = torch.where(cond_xy, xy, torch.zeros_like(xy))
 
     C2A = 2.000 * CA * CA - 1.000
     C2B = 2.000 * CB * CB - 1.000
     S2A = 2.000 * SA * CA
     S2B = 2.000 * SB * CB
 
-    P = torch.zeros(xij.shape[0], 3, 3)
+    P = torch.zeros(xij.shape[0], 3, 3, dtype=dtype, device=device)
     P[..., 1 - 1, 1 - 1] = CA * SB
     P[..., 2 - 1, 1 - 1] = CA * CB
     P[..., 3 - 1, 1 - 1] = -SA
@@ -65,7 +57,7 @@ def GenerateRotationMatrix(xij):
     P[..., 1 - 1, 3 - 1] = CB
     P[..., 2 - 1, 3 - 1] = -SB
 
-    D = torch.zeros(xij.shape[0], 5, 5)
+    D = torch.zeros(xij.shape[0], 5, 5, dtype=dtype, device=device)
     D[..., 1 - 1, 1 - 1] = PT5SQ3 * C2A * SB * SB
     D[..., 2 - 1, 1 - 1] = PT5 * C2A * S2B
     D[..., 3 - 1, 1 - 1] = -S2A * SB
@@ -90,7 +82,7 @@ def GenerateRotationMatrix(xij):
     D[..., 4 - 1, 5 - 1] = S2A * (CB * CB + PT5 * SB * SB)
     D[..., 5 - 1, 5 - 1] = C2A * CB
     K = 0
-    matrix = torch.zeros(xij.shape[0], 15, 45, device=device)
+    matrix = torch.zeros(xij.shape[0], 15, 45, dtype=dtype, device=device)
 
     ### S-S ###
     matrix[..., 0, 0] = 1.00000

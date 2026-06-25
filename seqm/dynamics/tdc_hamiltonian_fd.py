@@ -1,9 +1,18 @@
 import torch
 
-from seqm.seqm_functions.anal_grad import _build_omx_ortho_cache, omx_threebody_ortho_grad
-from seqm.seqm_functions.anal_grad import delta as omx_fd_delta
+from seqm.seqm_functions.anal_grad import _build_omx_ortho_fd_cache, omx_threebody_ortho_grad
 from seqm.seqm_functions.constants import a0, overlap_cutoff
 from seqm.seqm_functions.diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
+from seqm.seqm_functions.fock import (
+    EMAT_SCALE_4,
+    UPPER_IDX0_4,
+    UPPER_IDX1_4,
+    WEIGHT_10,
+    K_ind_4,
+    _cached_index,
+    _cached_tensor,
+)
+from seqm.seqm_functions.nac import _build_pair_response_density_batch
 from seqm.seqm_functions.om2_hcore import build_omx_pair_context
 from seqm.seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas
 from seqm.seqm_functions.rcis_batch import unpackone_batch
@@ -11,7 +20,7 @@ from seqm.seqm_functions.two_elec_two_center_int import two_elec_two_center_int 
 
 
 def build_fd_displaced_geometries(
-    molecule, vel_old, acc_old, dtnact, dtmd, damp=None, langevin_c1=None, langevin_c2=None
+    molecule, vel_old, acc_old, dtnact, damp=None, langevin_c1=None, langevin_c2=None
 ):
     R = molecule.coordinates.detach()
     vel_eff = vel_old.clone()
@@ -171,19 +180,11 @@ def _directional_tetci_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minus,
 def _prepare_pair_operators_for_directional_nac(mol, P, overlap_t, w_t, e1b_t, e2a_t):
     device = P.device
     dtype = P.dtype
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).view(1, 10)
-    idx0 = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], dtype=torch.int64, device=device)
-    idx1 = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], dtype=torch.int64, device=device)
-    scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
-        dtype=dtype,
-        device=device,
-    )
+    ind = _cached_index(K_ind_4, device)
+    weight = _cached_tensor(WEIGHT_10, device, dtype).view(1, 10)
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
 
     overlap_eff = overlap_t
     P_offdiag = P[mol.mask]
@@ -223,79 +224,73 @@ def _contract_pair_density_directional_batch(mol, B, overlap_eff, e1b_eff, e2a_e
     return out
 
 
-def _project_omx_orthogonalization_velocity(molecule, density, vel_eff, ortho_cache):
-    if molecule.method not in {"OM2", "OM3"}:
-        return None
-    if ortho_cache is None:
-        raise RuntimeError("OMx orthogonalization projection requires a prebuilt ortho_cache.")
+def _contract_mixed_transition_terms_directional_batch(mol, RI0, RJ0, w_t, dtype, device):
+    nmol, nbatch, _, _ = RI0.shape
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape(1, 1, 10)
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
+    ind = _cached_index(K_ind_4, device)
 
-    cache = ortho_cache
-    npairs = molecule.rij.shape[0]
-    dtype = density.dtype
-    device = density.device
-    rep = lambda x: torch.cat((x, x), dim=0)
-    idxi_ = rep(molecule.idxi)
-    idxj_ = rep(molecule.idxj)
-    ni_ = rep(molecule.ni)
-    nj_ = rep(molecule.nj)
-
-    Xij = molecule.xij * molecule.rij.unsqueeze(1) * a0
-    S_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    B_x = torch.zeros_like(S_x)
-    pair_core_semi_x = None
-    if molecule.method == "OM2":
-        pair_core_semi_x = torch.zeros((npairs, 3, 4, 2), dtype=dtype, device=device)
-
-    # These are Cartesian x/y/z derivatives. The directionally projected
-    # pair_overlap_t / pair_core_semi_t from _directional_omx_derivatives
-    # are not interchangeable here.
-    for coord in range(3):
-        Xij[:, coord] -= omx_fd_delta
-        rij_plus = torch.linalg.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * omx_fd_delta
-        rij_minus = torch.linalg.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        xij_ = torch.cat((xij_plus, xij_minus), dim=0)
-        rij_ = torch.cat((rij_plus, rij_minus), dim=0)
-        ctx = build_omx_pair_context(
-            molecule, method=molecule.method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
+    def ao4(T):
+        molsize = int(mol.molsize)
+        return (
+            T.reshape(nmol, nbatch, molsize, 4, molsize, 4)
+            .permute(0, 2, 4, 1, 3, 5)
+            .reshape(nmol * molsize * molsize, nbatch, 4, 4)
         )
-        pair_resonance_t = (ctx["pair_resonance"][:npairs] - ctx["pair_resonance"][npairs:]) / (
-            2.0 * omx_fd_delta
-        )
-        pair_overlap_t = (ctx["pair_overlap"][:npairs] - ctx["pair_overlap"][npairs:]) / (2.0 * omx_fd_delta)
-        pair_core_semi_t = None
-        if pair_core_semi_x is not None:
-            pair_core_semi_t = (ctx["pair"]["core_semi"][:npairs] - ctx["pair"]["core_semi"][npairs:]) / (
-                2.0 * omx_fd_delta
+
+    def add_component(left0, right0, include_coulomb):
+        Rl = ao4(left0)
+        Rr = ao4(right0)
+        pair_val = torch.zeros((mol.rij.shape[0], nbatch), dtype=dtype, device=device)
+        if include_coulomb:
+            Rr_diag = Rr[mol.maskd]
+            PA = (Rr_diag[mol.idxi][..., idx0, idx1] * weight).unsqueeze(-1)
+            PB = (Rr_diag[mol.idxj][..., idx0, idx1] * weight).unsqueeze(-2)
+
+            J_t_2a = torch.zeros((mol.rij.shape[0], nbatch, 4, 4), dtype=dtype, device=device)
+            J_t_1b = torch.zeros_like(J_t_2a)
+            J_t_2a[..., idx0, idx1] = torch.sum(PA * w_t.unsqueeze(1), dim=2)
+            J_t_1b[..., idx0, idx1] = torch.sum(PB * w_t.unsqueeze(1), dim=3)
+            J_t_2a *= scale_emat.unsqueeze(0).unsqueeze(0)
+            J_t_1b *= scale_emat.unsqueeze(0).unsqueeze(0)
+            pair_val.add_(
+                (Rl[mol.maskd[mol.idxj]] * J_t_2a).sum(dim=(2, 3))
+                + (Rl[mol.maskd[mol.idxi]] * J_t_1b).sum(dim=(2, 3))
             )
-        Xij[:, coord] -= omx_fd_delta
 
-        B_x[:, coord] = pair_resonance_t
-        S_x[:, coord] = pair_overlap_t
-        if pair_core_semi_x is not None:
-            pair_core_semi_x[:, coord] = pair_core_semi_t
+        overlap_rt = torch.zeros((mol.rij.shape[0], nbatch, 4, 4), dtype=dtype, device=device)
+        Pp = Rr[mol.mask]
+        for i in range(4):
+            w_i = w_t[..., ind[i], :]
+            for j in range(4):
+                overlap_rt[..., i, j] = -0.5 * torch.sum(Pp * w_i[:, None, :, ind[j]], dim=(2, 3))
+        pair_val.add_((2.0 * Rl[mol.mask] * overlap_rt).sum(dim=(2, 3)))
+        return pair_val
 
-    p0_ortho = omx_threebody_ortho_grad(
-        molecule,
-        density,
-        S_x,
-        B_x,
-        pair_core_semi_x,
-        ortho_cache=cache,
-        unrestricted=False,
-        vel_eff=vel_eff[:, : molecule.molsize],
-    )
-    cache = {**cache, "S_x": S_x, "B_x": B_x, "pair_core_semi_x": pair_core_semi_x}
-    return p0_ortho, cache
+    RI_symm = 0.5 * (RI0 + RI0.transpose(-1, -2))
+    RJ_symm = 0.5 * (RJ0 + RJ0.transpose(-1, -2))
+    RI_antisymm = 0.5 * (RI0 - RI0.transpose(-1, -2))
+    RJ_antisymm = 0.5 * (RJ0 - RJ0.transpose(-1, -2))
+    pair_val = 2.0 * add_component(RI_symm, RJ_symm, include_coulomb=True)
+    pair_val += 2.0 * add_component(RI_antisymm, RJ_antisymm, include_coulomb=False)
+
+    out = torch.zeros((nmol, nbatch), dtype=dtype, device=device)
+    out.index_add_(0, mol.pair_molid, pair_val)
+    return out
 
 
-def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel_old, acc_old, validate=True):
+def compute_tdc_hamiltonian_fd(
+    nad,
+    molecule,
+    cache_new,
+    learned_parameters,
+    vel_old,
+    acc_old,
+    include_response_terms=False,
+    validate=True,
+):
     ref_amp = cache_new["cis_amp"]
     ref_energies = cache_new["energies"]
     if validate:
@@ -306,13 +301,17 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
                 "hamiltonian_fd TD-NAC currently supports restricted closed-shell only."
             )
         if ref_amp.dim() != 3:
-            raise NotImplementedError("hamiltonian_fd TD-NAC currently supports CIS amplitudes only.")
+            raise NotImplementedError(
+                "hamiltonian_fd TD-NAC currently supports CIS amplitudes only, not RPA."
+            )
+    if include_response_terms and (
+        getattr(molecule, "w", None) is None or getattr(molecule, "e_mo", None) is None
+    ):
+        raise ValueError("include_response_terms=True requires molecule.w and molecule.e_mo.")
 
     dtnact = nad._dtnact
 
-    dm_ref = molecule.dm
     mos_ref = molecule.molecular_orbitals
-    p0_ortho = None
     ortho_cache = None
 
     R_plus, R_minus = build_fd_displaced_geometries(
@@ -320,7 +319,6 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
         vel_old,
         acc_old,
         dtnact,
-        nad.timestep,
         damp=nad.damp,
         langevin_c1=getattr(nad, "langevin_c1", None),
         langevin_c2=getattr(nad, "langevin_c2", None),
@@ -334,11 +332,19 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
         )
         overlap_t = 2.0 * pair_resonance_t
         if molecule.method in {"OM2", "OM3"}:
-            ortho_cache = _build_omx_ortho_cache(molecule)
-            vel_eff = (R_plus - R_minus) / (2.0 * dtnact)
-            p0_ortho, ortho_cache = _project_omx_orthogonalization_velocity(
-                molecule, dm_ref, vel_eff, ortho_cache=ortho_cache
+            Xij = molecule.xij * molecule.rij.unsqueeze(1) * a0
+            ortho_cache = _build_omx_ortho_fd_cache(
+                molecule,
+                Xij,
+                molecule.ni,
+                molecule.nj,
+                molecule.idxi,
+                molecule.idxj,
+                molecule.method,
+                mos_ref.dtype,
+                mos_ref.device,
             )
+            vel_eff = (R_plus - R_minus) / (2.0 * dtnact)
 
     else:
         overlap_t = _directional_overlap_derivative(
@@ -361,7 +367,11 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
     if int(molecule.norb[0].item()) < (nocc + nvirt):
         raise ValueError("Not enough orbitals to match CIS amplitude dimensions.")
 
-    P = dm_ref.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+    P = (
+        molecule.dm.reshape(nmol, molsize, 4, molsize, 4)
+        .transpose(2, 3)
+        .reshape(nmol * molsize * molsize, 4, 4)
+    )
     overlap_eff, e1b_eff, e2a_eff = _prepare_pair_operators_for_directional_nac(
         molecule, P, overlap_t, w_t, e1b_t, e2a_t
     )
@@ -387,15 +397,34 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
         j_chunk = state_j[start:stop]
         nbatch = int(i_chunk.numel())
 
+        amp_i = amp.index_select(1, i_chunk)
+        amp_j = amp.index_select(1, j_chunk)
         v_i = Bvirt.index_select(1, i_chunk)
         v_j = Bvirt.index_select(1, j_chunk)
         o_i = Bocc.index_select(1, i_chunk)
         o_j = Bocc.index_select(1, j_chunk)
         Bij_chunk = torch.matmul(v_i, v_j.transpose(-1, -2)) - torch.matmul(o_i, o_j.transpose(-1, -2))
         Bij_chunk = 0.5 * (Bij_chunk + Bij_chunk.transpose(-1, -2))
+        density0 = Bij_chunk
+        RI0 = RJ0 = None
+        if include_response_terms:
+            RI = torch.einsum("bmi,bria,bna->brmn", Cocc, amp_i, Cvirt)
+            RJ = torch.einsum("bmi,bria,bna->brmn", Cocc, amp_j, Cvirt)
+            density0, RI0, RJ0 = _build_pair_response_density_batch(
+                molecule,
+                molecule.w,
+                molecule.e_mo,
+                Cocc,
+                Cvirt,
+                amp_i,
+                amp_j,
+                Bij_chunk,
+                molecule.seqm_parameters["excited_states"]["tolerance"],
+                pair_response_cache=(RI, RJ, v_i, v_j, o_i, o_j),
+            )
 
         B0 = unpackone_batch(
-            Bij_chunk.reshape(nmol * nbatch, Bij_chunk.shape[2], Bij_chunk.shape[3]),
+            density0.reshape(nmol * nbatch, density0.shape[2], density0.shape[3]),
             4 * nHeavy,
             nHydro,
             size_full,
@@ -410,7 +439,6 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
             molecule, B, overlap_eff, e1b_eff, e2a_eff, nmol
         )
         if ortho_cache is not None:
-            dot_h_upper[:, start:stop].add_(p0_ortho)
             dot_h_upper[:, start:stop].add_(
                 omx_threebody_ortho_grad(
                     molecule,
@@ -421,6 +449,21 @@ def compute_tdc_hamiltonian_fd(nad, molecule, cache_new, learned_parameters, vel
                     ortho_cache=ortho_cache,
                     unrestricted=False,
                     vel_eff=vel_eff[:, :molsize],
+                )
+            )
+        if include_response_terms:
+            dot_h_upper[:, start:stop].add_(
+                _contract_mixed_transition_terms_directional_batch(
+                    molecule,
+                    unpackone_batch(
+                        RI0.reshape(nmol * nbatch, RI0.shape[2], RI0.shape[3]), 4 * nHeavy, nHydro, size_full
+                    ).view(nmol, nbatch, size_full, size_full),
+                    unpackone_batch(
+                        RJ0.reshape(nmol * nbatch, RJ0.shape[2], RJ0.shape[3]), 4 * nHeavy, nHydro, size_full
+                    ).view(nmol, nbatch, size_full, size_full),
+                    w_t,
+                    ref_amp.dtype,
+                    ref_amp.device,
                 )
             )
 

@@ -1,15 +1,13 @@
+import math
+
 import torch
+
+from .RotationMatrixD import GenerateRotationMatrix, Rotate2Center2Electron
+from .cal_par import AIJL, POIJ, additive_term_rho1, additive_term_rho2, dd_qq
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
 from .two_elec_two_center_int_local_frame_d_orbitals import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
-from .cal_par import *
 from .constants import ev
-import sys
-import numpy
 
-# import scipy.special
-from .parameters import  PWCCT
-from .RotationMatrixD import *
-import time
 
 _PM6_D_PARAM_CACHE = {}
 
@@ -101,9 +99,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     two electron two center integrals in molecule frame
     """
     
-    t0 = time.time()
-
-    #t = time.time()
     dtype = xij.dtype
     device = xij.device
     #two electron two center integrals
@@ -121,9 +116,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     hppd = 0.5 * (gpp - gp2)
     hpp = hpp.clamp_min(0.1)
     qn0=qn[Z]
-    qnd0=qn[Z]
     #Z==0 is for padding zero
-    isH = Z==1  # Hydrogen
     isX = Z>2   # Heavy atom
     #### populations elements with d-oribitals
     ###Need extra rho to hold additive terms
@@ -205,10 +198,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
             AIJ63[idxs_t] = aij63
             
 
-    #print("PRE-ROTATE:", time.time() - t0)
-
-    t1 =     time.time()
-
     dp= AIJ52/math.sqrt(5)
     isY = qnd[Z] > 0
     D = torch.sqrt(AIJ43*math.sqrt(1.0000/15.0000))*math.sqrt(2.0000)
@@ -244,12 +233,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
     ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
 
-    #print("PRE-ROTATE2:", time.time() - t1)
-
-    
-    
-
-    t1 = time.time()
     w, e1b, e2a, riXH, ri = \
         rotate(ni, nj, xij, rij, \
                tore, dd[idxi],dd[idxj], \
@@ -269,9 +252,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
                DD[idxi]*isY[idxi],DD[idxj]*isY[idxj], \
                alpha, themethod,rho_2d[idxi],rho_2d[idxj],rho_core[idxi],rho_core[idxj])
 
-    #print("ROTATE:",     time.time() - t1)
-
-
     rho0aTMP = rho_0[idxi].clone()
     rho0bTMP = rho_0[idxj].clone()
     A = (rho_core[idxi] != 0.000)
@@ -288,8 +268,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     rotate the two elecron two center integrals from local frame to molecule frame
     """
     
-    t1 = time.time()
-
     dtype =  xij.dtype
     device = xij.device
 #    t0 =    time.time() 

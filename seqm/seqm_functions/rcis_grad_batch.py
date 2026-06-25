@@ -7,6 +7,15 @@ from seqm.seqm_functions.anal_grad import (
     w_der,
     w_derivative_numerical,
 )
+from seqm.seqm_functions.fock import (
+    EMAT_SCALE_4,
+    UPPER_IDX0_4,
+    UPPER_IDX1_4,
+    WEIGHT_10,
+    K_ind_4,
+    _cached_index,
+    _cached_tensor,
+)
 from seqm.seqm_functions.rcis_batch import make_cis_densities, unpackone_batch
 
 from .constants import a0, ev
@@ -141,9 +150,9 @@ def rcis_grad_batch(
     P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     if include_ground_state:
         B += 0.5 * P
-        # To include the total excited-state gradient, add the ground-state gradient to the excited-state correction.
+        # To do the total excited-state gradient, add the ground-state gradient to the excited-state correction.
         # The Fock-like derivative matrices below contain one-electron terms plus density-contracted two-electron terms.
-        # Ground-state energy has coefficient 1 for the one-electron derivative but 1/2 for the two-electron derivative.
+        # Ground-state energy has factor of 1 for the one-electron derivative but 1/2 for the two-electron derivative.
         # Therefore add only 0.5*P to B, and add the missing 0.5*P one-electron overlap/core terms explicitly.
         pair_grad += 0.5 * (P[mol.mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3))
     else:
@@ -157,9 +166,7 @@ def rcis_grad_batch(
     # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     #   0,     1         2       3       4         5       6      7         8        9
-    ind = torch.tensor(
-        [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.int64, device=device
-    )
+    ind = _cached_index(K_ind_4, device)
     # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
     # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
     overlap_KAB_x = overlap_x
@@ -179,26 +186,17 @@ def rcis_grad_batch(
     # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
     # weight for them are
     #  1       2       1        2        2        1        2       2        2       1
-    weight = torch.tensor(
-        [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-    ).reshape((-1, 10))
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
     # weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
 
-    indices = (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)
-    PA = (P[mol.maskd[mol.idxi]][..., indices[0], indices[1]] * weight).unsqueeze(
-        -1
-    )  # Shape: (npairs, 10, 1)
-    PB = (P[mol.maskd[mol.idxj]][..., indices[0], indices[1]] * weight).unsqueeze(
-        -2
-    )  # Shape: (npairs, 1, 10)
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    PA = (P[mol.maskd[mol.idxi]][..., idx0, idx1] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
+    PB = (P[mol.maskd[mol.idxj]][..., idx0, idx1] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
 
-    scale_emat = torch.tensor(
-        [[1.0, 2.0, 2.0, 2.0], [0.0, 1.0, 2.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0]],
-        dtype=dtype,
-        device=device,
-    )
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     if include_ground_state:
         pair_grad.add_(
             0.5 * (P[mol.maskd[mol.idxj], None, :, :] * e2a_x * scale_emat).sum(dim=(2, 3))
@@ -212,13 +210,13 @@ def rcis_grad_batch(
     # In the future, if this code is to be edited, be careful here
     sumA = overlap_KAB_x
     sumA.zero_()
-    sumA[..., indices[0], indices[1]] = suma
+    sumA[..., idx0, idx1] = suma
     e2a_x.add_(sumA)
 
     sumB = overlap_KAB_x
     sumB.zero_()
     sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-    sumB[..., indices[0], indices[1]] = sumb
+    sumB[..., idx0, idx1] = sumb
     del suma, sumb
     e1b_x.add_(sumB)
 
@@ -243,26 +241,20 @@ def rcis_grad_batch(
     del R_symmetrized
 
     Rdiag_symmetrized = R_symm[mol.maskd]
-    PA = (
-        Rdiag_symmetrized[mol.idxi][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    ).unsqueeze(-1)
-    PB = (
-        Rdiag_symmetrized[mol.idxj][..., (0, 0, 1, 0, 1, 2, 0, 1, 2, 3), (0, 1, 1, 2, 2, 2, 3, 3, 3, 3)]
-        * weight
-    ).unsqueeze(-2)
+    PA = (Rdiag_symmetrized[mol.idxi][..., idx0, idx1] * weight).unsqueeze(-1)
+    PB = (Rdiag_symmetrized[mol.idxj][..., idx0, idx1] * weight).unsqueeze(-2)
 
     suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
     sumA = overlap_KAB_x
     sumA.zero_()
-    sumA[..., indices[0], indices[1]] = suma
+    sumA[..., idx0, idx1] = suma
     J_x_2a = e2a_x
     J_x_2a[:, :, :] = sumA
 
     sumB = overlap_KAB_x
     sumB.zero_()
     sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-    sumB[..., indices[0], indices[1]] = sumb
+    sumB[..., idx0, idx1] = sumb
     J_x_1b = sumB
     del suma, sumb
 

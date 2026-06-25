@@ -85,7 +85,7 @@ const = Constants(do_timing=True).to(device)
 active_state = 1
 
 seqm_parameters = {
-    "method": "OM2",  # AM1, MNDO, PM#
+    "method": "OM3",  # AM1, MNDO, PM#
     # "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [2],  # converger used for scf loop
@@ -97,10 +97,11 @@ seqm_parameters = {
     "active_state": 1,
     # 'scf_backward': 1,
     # "analytical_gradient": [True],
-    # "nonadiabatic": {
-    #     "compute_nac": True,  # enable NAC vectors for hopping
-    #     "pairs": ((1,2),),
-    #     }
+    # "analytical_gradient": [False],
+    "nonadiabatic": {
+        "compute_nac": True,
+        "pairs": ((1,2),),
+        }
 }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -108,7 +109,7 @@ molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
 ### Create electronic structure driver:
 esdriver = Electronic_Structure(seqm_parameters).to(device)
 
-esdriver(molecules,do_force=False)
+esdriver(molecules,do_force=True)
 
 print(' Total Energy (eV):\n', molecules.Etot)
 # print(f"Dipoles\n{molecules.dipole}")
@@ -118,5 +119,5 @@ print('\n Nuclear Energy (eV):\n', molecules.Enuc)
 print('\n Heat of Formation (ev):\n', molecules.Hf)
 # print('\n force:\n', molecules.force)
 print("Timing is \n",const.timing)
-# print("NAC\n",molecules.nac[(0,1)])
+print("NAC\n",molecules.nac[(0,1)])
 # print('\n Orbital energies (eV):\n', molecules.e_mo)

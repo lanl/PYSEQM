@@ -22,6 +22,49 @@ PADDING_EIGENSHIFT_START_FACTOR = 1.0
 PADDING_EIGENSHIFT_INCREMENT = 0.005  # dx increment for eigenvalue shifts
 
 
+def _apply_padding_eigen_shifts(x0, norb):
+    """Move padded orbitals above the physical spectrum before diagonalization."""
+    nmol, size, _ = x0.shape
+    aii = x0.diagonal(dim1=1, dim2=2)
+    ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
+    hN = torch.max(aii + ri, dim=1)[0]
+    dE = hN - torch.min(aii - ri, dim=1)[0]
+
+    pnorb = size - norb
+    max_padding = int(torch.max(pnorb).item())
+    has_padding = pnorb > 0
+    if not has_padding.any():
+        return has_padding
+
+    shifts = torch.arange(
+        PADDING_EIGENSHIFT_START_FACTOR + PADDING_EIGENSHIFT_INCREMENT,
+        PADDING_EIGENSHIFT_START_FACTOR + (max_padding + 1) * PADDING_EIGENSHIFT_INCREMENT,
+        PADDING_EIGENSHIFT_INCREMENT,
+        dtype=x0.dtype,
+        device=x0.device,
+    )[:max_padding]
+    ind = torch.arange(size, dtype=torch.int64, device=x0.device)
+    for i in torch.nonzero(has_padding, as_tuple=False).flatten():
+        x0[i, ind[norb[i] :], ind[norb[i] :]] = shifts[: pnorb[i]] * dE[i] + hN[i]
+    return has_padding
+
+
+def _zero_padding_eigenvalues(e, norb, has_padding):
+    if has_padding.any():
+        size = e.shape[-1]
+        for i in torch.nonzero(has_padding, as_tuple=False).flatten():
+            e[i, norb[i] : size] = 0.0
+    return e
+
+
+def _occupied_density(e, v, nocc):
+    if CHECK_DEGENERACY:
+        return torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
+    return 2.0 * torch.stack(
+        list(map(lambda a, n: torch.matmul(a[:, :n], a[:, :n].transpose(0, 1)), v, nocc))
+    )
+
+
 def pseudo_diag(x, C, E, nheavyatom, nH, nocc):
     # x single Fock matrix
     # here x has padding 0, but is symmetric, i.e. lower and upper trianlge parts are filled
@@ -123,32 +166,12 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         nheavyatom = nheavyatom.repeat_interleave(2)
         nH = nH.repeat_interleave(2)
         nocc = nocc.flatten()
-        # Gershgorin circle theorem estimate upper bounds of eigenvalues
         x_orig_shape = x.size()
         x0 = pack(x, nheavyatom, nH)
-        nmol, size, _ = x0.shape
 
-        aii = x0.diagonal(dim1=1, dim2=2)
-        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
-        hN = torch.max(aii + ri, dim=1)[0]
-        dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
-
+        size = x0.shape[1]
         norb = nheavyatom * 4 + nH
-        pnorb = size - norb
-        nn = torch.max(pnorb).item()
-        dx = PADDING_EIGENSHIFT_INCREMENT
-        mutipler = torch.arange(
-            PADDING_EIGENSHIFT_START_FACTOR + dx,
-            PADDING_EIGENSHIFT_START_FACTOR + nn * dx + dx,
-            dx,
-            dtype=dtype,
-            device=device,
-        )[:nn]
-        ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb > 0
-        for i in range(nmol):
-            if cond[i]:
-                x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
+        has_padding = _apply_padding_eigen_shifts(x0, norb)
         try:
             e0, v = sym_eigh(x0)
         except RuntimeError as e:
@@ -156,40 +179,19 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
                 raise RuntimeError("sym_eigh failed with NaN in input matrix") from e
             else:
                 raise RuntimeError(f"sym_eigh failed: {e}") from e
+        nmol = x0.shape[0]
         e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
         e[..., :size] = e0
-        for i in range(nmol):
-            if cond[i]:
-                e[i, norb[i] : size] = 0.0
+        e = _zero_padding_eigenvalues(e, norb, has_padding)
     else:  # Batched, restricted: (B, N, N), similar to above but without spin channels
         # Add large diagonal shifts to padded orbital blocks to prevent them
         # from interfering with physical eigenvalues during eigendecomposition.
 
-        # Gershgorin circle theorem estimate upper bounds of eigenvalues
         x0 = pack(x, nheavyatom, nH)
-        nmol, size, _ = x0.shape
 
-        aii = x0.diagonal(dim1=1, dim2=2)
-        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
-        hN = torch.max(aii + ri, dim=1)[0]
-        dE = hN - torch.min(aii - ri, dim=1)[0]  # (maximal - minimal) get range
-
+        size = x0.shape[1]
         norb = nheavyatom * 4 + nH
-        pnorb = size - norb
-        nn = torch.max(pnorb).item()
-        dx = PADDING_EIGENSHIFT_INCREMENT
-        mutipler = torch.arange(
-            PADDING_EIGENSHIFT_START_FACTOR + dx,
-            PADDING_EIGENSHIFT_START_FACTOR + nn * dx + dx,
-            dx,
-            dtype=dtype,
-            device=device,
-        )[:nn]
-        ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb > 0
-        for i in range(nmol):
-            if cond[i]:
-                x0[i, ind[norb[i] :], ind[norb[i] :]] = mutipler[: pnorb[i]] * dE[i] + hN[i]
+        has_padding = _apply_padding_eigen_shifts(x0, norb)
         try:
             e0, v = sym_eigh(x0)
         except RuntimeError as e:
@@ -197,11 +199,10 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
                 raise RuntimeError(f"sym_eigh failed with NaN in input: {e}") from e
             else:
                 raise RuntimeError(f"sym_eigh failed: {e}") from e
+        nmol = x0.shape[0]
         e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
         e[..., :size] = e0
-        for i in range(nmol):
-            if cond[i]:
-                e[i, norb[i] : size] = 0.0
+        e = _zero_padding_eigenvalues(e, norb, has_padding)
 
     if eig_only:
         if x.dim() == 4:
@@ -224,12 +225,7 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
 
         t*=2.0
         """
-        if CHECK_DEGENERACY:
-            t = torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
-        else:
-            t = 2.0 * torch.stack(
-                list(map(lambda a, n: torch.matmul(a[:, :n], a[:, :n].transpose(0, 1)), v, nocc))
-            )
+        t = _occupied_density(e, v, nocc)
 
     P = unpack(t, nheavyatom, nH, x.shape[-1])
 

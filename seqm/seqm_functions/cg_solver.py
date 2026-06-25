@@ -100,6 +100,7 @@ def conjugate_gradient_batch(
 
     if torch.any(active):
         raise RuntimeError(f"Conjugate gradient did not converge in {max_iter} steps (resid={r_norm})")
+    return x
 
 
 # Example Usage

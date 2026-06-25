@@ -6,6 +6,7 @@ from seqm.dynamics.active_state import active_state_tensor
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
+from .fock import UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 
 # from seqm.seqm_functions.pack import packone, unpackone
 
@@ -309,21 +310,12 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     return A
 
 
-def _rcis_constant_tensors(mol, dtype, device):
-    cache = getattr(mol, "_rcis_batch_constant_tensors", {})
-    key = (device.type, device.index, dtype)
-    if key not in cache:
-        tri_i = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], dtype=torch.long, device=device)
-        tri_j = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], dtype=torch.long, device=device)
-        weight = torch.tensor(
-            [1.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 1.0], dtype=dtype, device=device
-        ).reshape((-1, 10))
-        ind = torch.tensor(
-            [[0, 1, 3, 6], [1, 2, 4, 7], [3, 4, 5, 8], [6, 7, 8, 9]], dtype=torch.long, device=device
-        )
-        cache[key] = tri_i, tri_j, weight, ind
-        mol._rcis_batch_constant_tensors = cache
-    return cache[key]
+def _rcis_constant_tensors(dtype, device):
+    tri_i = _cached_index(UPPER_IDX0_4, device)
+    tri_j = _cached_index(UPPER_IDX1_4, device)
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
+    ind = _cached_index(K_ind_4, device)
+    return tri_i, tri_j, weight, ind
 
 
 def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
@@ -365,7 +357,7 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
         P_anti = P_anti.reshape(nmol, nnewRoots, molsize * molsize, 4, 4)
         del P0_blocks, P0
 
-        _, _, _, ind = _rcis_constant_tensors(mol, dtype, device)
+        _, _, _, ind = _rcis_constant_tensors(dtype, device)
         sumK = torch.empty(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
         Pp = P_anti[:, :, mask]
         for i in range(4):
@@ -435,7 +427,7 @@ def makeA_pi_symm_batch(mol, P0, w):
     # print_memory_usage("After P_symm, and Fock_symm")
 
     # Calculate Coulomb contribution J
-    tri_i, tri_j, weight, ind = _rcis_constant_tensors(mol, dtype, device)
+    tri_i, tri_j, weight, ind = _rcis_constant_tensors(dtype, device)
 
     grad_enabled = torch.is_grad_enabled()
 

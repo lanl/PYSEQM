@@ -61,36 +61,31 @@ def _unpack_batch_same(x0_flat, nho: int, nHy: int, size: int):
     return x
 
 
+def _same_counts(*counts):
+    return all(count.unique().numel() == 1 for count in counts)
+
+
 def pack(x, nHeavy, nHydro):
     nho = 4 * nHeavy
-    # single matrix
     if x.dim() == 2:
-        x0 = packone(x, nHeavy * 4, nHydro, nho + nHydro)
-    # batch
-    else:
-        if x.dim() == 4:
-            x = x.flatten(start_dim=0, end_dim=1)
+        return packone(x, nho, nHydro, nho + nHydro)
 
-        same = (nho.unique().numel() == 1) and (nHydro.unique().numel() == 1)
-        if same:
-            h, hy = nho[0].item(), nHydro[0].item()
-            x0 = _pack_batch_same(x, h, hy)
-        else:
-            norb = int((nho + nHydro).max().item())
-            x0 = torch.stack(list(map(lambda a, b, c: packone(a, b, c, norb), x, nho, nHydro)))
+    if x.dim() == 4:
+        x = x.flatten(start_dim=0, end_dim=1)
 
-    return x0
+    if _same_counts(nho, nHydro):
+        return _pack_batch_same(x, nho[0].item(), nHydro[0].item())
+
+    norb = int((nho + nHydro).max().item())
+    return torch.stack(list(map(lambda a, b, c: packone(a, b, c, norb), x, nho, nHydro)))
 
 
 def unpack(x0, nHeavy, nHydro, size):
     nho = 4 * nHeavy
-    if x0.dim() == 2:  # single matrix
-        x = unpackone(x0, nho, nHydro, size)
-    else:  # batch
-        same = (nho.unique().numel() == 1) and (nHydro.unique().numel() == 1)
-        if same:
-            h, hy = nho[0].item(), nHydro[0].item()
-            x = _unpack_batch_same(x0, h, hy, size)
-        else:
-            x = torch.stack(list(map(lambda a, b, c: unpackone(a, b, c, size), x0, nho, nHydro)))
-    return x
+    if x0.dim() == 2:
+        return unpackone(x0, nho, nHydro, size)
+
+    if _same_counts(nho, nHydro):
+        return _unpack_batch_same(x0, nho[0].item(), nHydro[0].item(), size)
+
+    return torch.stack(list(map(lambda a, b, c: unpackone(a, b, c, size), x0, nho, nHydro)))

@@ -18,7 +18,7 @@ def calc_dipole_matrix_nddo(mol, return_diag_dipole=False):
     isX = Z > 2  # Heavy atom
     isH = Z == 1
     dd, _ = dd_qq(qn0[isX], zetas[isX], zetap[isX])
-    dd *= a0
+    dd = dd.to(dtype=dtype, device=device) * a0
 
     valid_atom = (mol.species > 0).reshape(-1)
     n_valid_atoms = mol.maskd.numel()
@@ -47,8 +47,8 @@ def calc_dipole_matrix_nddo(mol, return_diag_dipole=False):
 def calc_ground_dipole(molecule, P):
     with torch.no_grad():
         if molecule.method in OMX_METHODS:
-            # Ground-state OMx dipoles are temporarily disabled. Keep a tensor
-            # placeholder so downstream output paths do not fail on None.
+            # Ground-state OMx dipoles are temporarily disabled since we might need to recalculate AO dipole matrix for transition dipoles.
+            # Keep a tensor placeholder so downstream output paths do not fail on None.
             molecule.dipole = torch.zeros(
                 (molecule.nmol, 3), dtype=molecule.coordinates.dtype, device=molecule.coordinates.device
             )
