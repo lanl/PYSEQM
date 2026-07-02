@@ -36,7 +36,8 @@ coordinates = torch.tensor(
 )
 
 # species, coordinates = read_xyz(["../../Downloads/23ppe-min.xyz"])
-species, coordinates = read_xyz(["/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/23ppe/234ppe.xyz"])
+# species, coordinates = read_xyz(["/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/23ppe/234ppe.xyz"])
+species, coordinates = read_xyz(["/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/34ppe/34ppe.xyz"])
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
 

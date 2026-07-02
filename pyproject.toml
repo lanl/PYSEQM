@@ -36,6 +36,7 @@ dependencies = [
 geomopt = ["geometric"]
 hipnn = ["hippynn"]
 test = ["pytest"]
+opt-einsum = ["opt-einsum"]
 docs = [
   "sphinx",
   "pydata-sphinx-theme",

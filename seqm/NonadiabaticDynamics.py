@@ -380,13 +380,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         perms = [self._hungarian_perm(cost_cpu[m]) for m in range(nmol)]
         return torch.stack(perms, dim=0)
 
-    @staticmethod
-    def _diagonal_amplitude_overlap(cis_prev, cis_curr):
-        if cis_prev.dim() == 4 and cis_prev.shape[0] == 2:
-            cis_prev = cis_prev[0]
-            cis_curr = cis_curr[0]
-        return torch.sum(cis_prev * cis_curr, dim=-1)
-
     def _time_derivative_coupling(
         self,
         molecule,
@@ -395,7 +388,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         cis_prev,  # CIS: (nmol,nstates,nov) or RPA: (2,nmol,nstates,nov)
         cis_curr,
         dt,
-        enforce_antisym=True,
     ):
         """
         Excited–excited time-derivative NAC using finite diff of state overlaps.
@@ -431,6 +423,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
             raise RuntimeError(f"Unsupported CIS amplitude shape {tuple(amp.shape)}.")
 
+        def bad_diag_overlap(S, qmin):
+            q = torch.diagonal(S.abs(), dim1=1, dim2=2).min(dim=1).values
+            return q < qmin
+
         prev = parse_amp(cis_prev)
         curr = parse_amp(cis_curr)
 
@@ -444,6 +440,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             S_prev = self._packed_overlap_prev
 
             S_ao = orthogonalized_overlap_from_matrices(S_curr, S_cross, S_prev)
+            # S_ao = S_cross
+
+            self._packed_overlap_prev = S_curr  # Save for next step
 
             # MO overlap: S_mo = C(t)^T S_ao(t,t-dt) C(t-dt)
             Cc = molecule.molecular_orbitals  # (nmol, nao, norb)
@@ -452,6 +451,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
             Soo = S_mo[:, :nocc, :nocc]  # (nmol, nocc, nocc)
             Svv = S_mo[:, nocc:, nocc:]  # (nmol, nvirt, nvirt)
+
+            if bad_diag_overlap(Soo, 0.85).any() or bad_diag_overlap(Svv, 0.85).any():
+                return None
 
             dSoo = Soo.transpose(1, 2) - Soo
             dSvv = Svv.transpose(1, 2) - Svv
@@ -480,7 +482,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
                 # CI-derivative term: <p|c> - <c|p>
                 ov_pc = torch.bmm(flat_p, flat_c.transpose(1, 2))
-                ov_cp = torch.bmm(flat_c, flat_p.transpose(1, 2))
+                # ov_cp = torch.bmm(flat_c, flat_p.transpose(1, 2))
+                ov_cp = ov_pc.transpose(-2, -1)
                 coup = ov_pc - ov_cp
 
                 # MO-derivative terms
@@ -510,12 +513,14 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     + mo_term_occ(Yc_v)
                 )
 
-            if enforce_antisym:
-                coup = 0.5 * (coup - coup.transpose(1, 2))
-                coup = coup - torch.diag_embed(torch.diagonal(coup, dim1=1, dim2=2))
+            if bad_diag_overlap(ov_pc, 0.85).any():
+                print("Bad amp overlap, ", ov_pc)
+                return None
 
+            asym = coup - coup.transpose(1, 2)
+
+            coup = 0.5 * asym
             nac_dt = coup / (2.0 * dt)
-            self._packed_overlap_prev = S_curr
 
         return nac_dt
 
@@ -1104,15 +1109,11 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             if not self._cache_prev_cis_amp:
                 cache_new.pop("cis_amp", None)
         elif self._tdc_method == "overlap":
-            cis_prev = cache_old.get("cis_amp")
-            cis_curr = cache_new.get("cis_amp")
-            diag_overlap = self._diagonal_amplitude_overlap(cis_prev, cis_curr)
-            # overlap based nact is valid only if excited states havent changed greatly from previous to current step
-            if torch.all(diag_overlap >= 0.99):
-                nac_dt = self._time_derivative_coupling(
-                    molecule, coords_prev, mos_prev, cis_prev, cis_curr, dt
-                )
-            else:
+            nac_dt = self._time_derivative_coupling(
+                molecule, coords_prev, mos_prev, cache_old.get("cis_amp"), cache_new.get("cis_amp"), dt
+            )
+            if nac_dt is None:
+                # print("Bad previous overlap")
                 nac_dt = compute_tdc_hamiltonian_fd(
                     self,
                     molecule,
