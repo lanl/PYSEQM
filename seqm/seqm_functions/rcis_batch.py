@@ -3,12 +3,58 @@ import math
 import torch
 
 from seqm.dynamics.active_state import active_state_tensor
+from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
 from .fock import UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 
 # from seqm.seqm_functions.pack import packone, unpackone
+
+_makeA_pi_batched_dispatch = None
+_makeA_pi_symm_batch_dispatch = None
+_ao_transition_density_dispatch = None
+_mo_fock_action_dispatch = None
+_cis_density_dispatch = None
+_relaxed_rhs_dispatch = None
+_relaxed_finish_dispatch = None
+
+
+def enable_rcis_compile(mode=None, **options):
+    """Compile CIS/RPA tensor contractions used inside Davidson iterations."""
+    global _makeA_pi_batched_dispatch
+    global _makeA_pi_symm_batch_dispatch
+    global _ao_transition_density_dispatch
+    global _mo_fock_action_dispatch
+    global _cis_density_dispatch
+    global _relaxed_rhs_dispatch
+    global _relaxed_finish_dispatch
+
+    compile_options = dict(options)
+    if mode is not None:
+        compile_options["mode"] = mode
+
+    _makeA_pi_batched_dispatch = optional_compile_function(
+        _makeA_pi_batched_kernel, compile_options=compile_options, label="rcis.makeA_pi_batched"
+    )
+    _makeA_pi_symm_batch_dispatch = optional_compile_function(
+        _makeA_pi_symm_batch_kernel, compile_options=compile_options, label="rcis.makeA_pi_symm_batch"
+    )
+    _ao_transition_density_dispatch = optional_compile_function(
+        _ao_transition_density_kernel, compile_options=compile_options, label="rcis.ao_transition_density"
+    )
+    _mo_fock_action_dispatch = optional_compile_function(
+        _mo_fock_action_kernel, compile_options=compile_options, label="rcis.mo_fock_action"
+    )
+    _cis_density_dispatch = optional_compile_function(
+        _cis_density_kernel, compile_options=compile_options, label="rcis.cis_density"
+    )
+    _relaxed_rhs_dispatch = optional_compile_function(
+        _relaxed_rhs_kernel, compile_options=compile_options, label="rcis.relaxed_rhs"
+    )
+    _relaxed_finish_dispatch = optional_compile_function(
+        _relaxed_finish_kernel, compile_options=compile_options, label="rcis.relaxed_finish"
+    )
 
 
 def rcis_batch(
@@ -274,33 +320,32 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # at once. To avoid this, we first estimate the peak memory usage and then chunk over nNewRoots.
     # TODO: Also chunk over the nmol dimension
     need_to_chunk, chunk_size = getMemUse(V.dtype, V.device, mol, nNewRoots)
+    make_density = _ao_transition_density_dispatch or _ao_transition_density_kernel
+    make_post = _mo_fock_action_dispatch or _mo_fock_action_kernel
 
     if not need_to_chunk:
-        P_xi = torch.einsum("bmi,bria,bna->brmn", Cocc, Via, Cvirt)
+        P_xi = make_density(Cocc, Via, Cvirt)
         F0 = makeA_pi_batched(mol, P_xi, w)
-        # why am I multiplying by A 2?
-        A = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
+        result = make_post(Via, F0, ea_ei, Cocc, Cvirt, bool(makeB), torch.is_grad_enabled())
         if makeB:
-            B = torch.einsum("bmi,brnm,bna->bria", Cocc, F0, Cvirt) * 2.0
+            A, B = result
+        else:
+            A = result
     else:
-        # F0 = torch.empty(nmol,nNewRoots,norb,norb,device=V.device,dtype=V.dtype)
         A = torch.empty(nmol, nNewRoots, nocc, nvirt, device=V.device, dtype=V.dtype)
         if makeB:
             B = torch.empty_like(A)
         for start in range(0, nNewRoots, chunk_size):
             end = min(start + chunk_size, nNewRoots)
-            P_xi = torch.einsum("bmi,bria,bna->brmn", Cocc, Via[:, start:end], Cvirt)
-            # F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
-            P_xi = makeA_pi_batched(mol, P_xi, w)
-            F0 = P_xi
-            A[:, start:end, :] = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
+            Via_chunk = Via[:, start:end]
+            P_xi = make_density(Cocc, Via_chunk, Cvirt)
+            F0 = makeA_pi_batched(mol, P_xi, w)
             if makeB:
-                B[:, start:end, :] = torch.einsum("bmi,brnm,bna->bria", Cocc, F0, Cvirt) * 2.0
-
-    if torch.is_grad_enabled():
-        A += Via * ea_ei.unsqueeze(1)
-    else:
-        A.addcmul_(Via, ea_ei.unsqueeze(1))
+                A[:, start:end], B[:, start:end] = make_post(
+                    Via_chunk, F0, ea_ei, Cocc, Cvirt, True, torch.is_grad_enabled()
+                )
+            else:
+                A[:, start:end] = make_post(Via_chunk, F0, ea_ei, Cocc, Cvirt, False, torch.is_grad_enabled())
     A = A.reshape(nmol, nNewRoots, -1)
 
     if makeB:
@@ -308,6 +353,25 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
         return A, B
 
     return A
+
+
+def _ao_transition_density_kernel(Cocc, Via, Cvirt, symmetrize: bool = False):
+    density = torch.einsum("bmi,bria,bna->brmn", Cocc, Via, Cvirt)
+    if symmetrize:
+        density = density + density.transpose(-1, -2)
+    return density
+
+
+def _mo_fock_action_kernel(Via, F0, ea_ei, Cocc, Cvirt, makeB: bool, grad_enabled: bool):
+    A = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
+    if grad_enabled:
+        A = A + Via * ea_ei.unsqueeze(1)
+    else:
+        A.addcmul_(Via, ea_ei.unsqueeze(1))
+    if not makeB:
+        return A
+    B = torch.einsum("bmi,brnm,bna->bria", Cocc, F0, Cvirt) * 2.0
+    return A, B
 
 
 def _rcis_constant_tensors(dtype, device):
@@ -320,36 +384,64 @@ def _rcis_constant_tensors(dtype, device):
 
 def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
     r"""
-    Given the amplitudes in the AO basis (i.e. the transition densities)
-    calculates the contraction with two-electron integrals
-    In other words, for an amplitude X_jb, this function calculates \sum_jb (\mu\nu||jb)X_jb
+    Given amplitudes in the AO basis, calculate \sum_jb (\mu\nu||jb)X_jb.
     """
-    device = P_xi.device
-    dtype = P_xi.dtype
+    npairs_per_mol = (int(mol.molsize) * (int(mol.molsize) - 1)) // 2
+    nmol = int(mol.nmol)
+    molsize = int(mol.molsize)
+    nHeavy = int(mol.nHeavy[0].item())
+    nHydro = int(mol.nHydro[0].item())
+    norb = int(mol.norb[0].item())
 
-    npairs_per_mol = (mol.molsize * (mol.molsize - 1)) // 2
-    nmol = mol.nmol
-    mask = mol.mask[:npairs_per_mol]
-    maskd = mol.maskd[: mol.molsize]
-    mask_l = mol.mask_l[:npairs_per_mol]
-    molsize = mol.molsize
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
-
+    dispatch = _makeA_pi_batched_dispatch or _makeA_pi_batched_kernel
     nnewRoots = P_xi.shape[1]
-    # P0 = torch.stack([
-    #     unpackone(P_xi[i,j], 4*nHeavy, nHydro, molsize * 4)
-    #     for i in range(nmol) for j in range(nnewRoots)
-    # ]).view(nmol,nnewRoots, molsize * 4, molsize * 4)
     P0 = unpackone_batch(P_xi.reshape(nmol * nnewRoots, norb, norb), 4 * nHeavy, nHydro, molsize * 4).view(
         nmol, nnewRoots, 4 * molsize, 4 * molsize
     )
-    del P_xi
+    F0 = dispatch(
+        P0,
+        w_.view(nmol, npairs_per_mol, 10, 10),
+        mol.mask[:npairs_per_mol],
+        mol.maskd[:molsize],
+        mol.mask_l[:npairs_per_mol],
+        mol.idxi[:npairs_per_mol],
+        mol.idxj[:npairs_per_mol],
+        mol.parameters["g_ss"].view(nmol, -1),
+        mol.parameters["g_sp"].view(nmol, -1),
+        mol.parameters["g_pp"].view(nmol, -1),
+        mol.parameters["g_p2"].view(nmol, -1),
+        mol.parameters["h_sp"].view(nmol, -1),
+        molsize,
+        nmol,
+        bool(allSymmetric),
+    )
+    F0 = packone_batch(F0, 4 * nHeavy, nHydro, norb).view(nmol, nnewRoots, norb, norb)
+    return F0.view(nmol, nnewRoots, norb, norb)
 
-    w = w_.view(nmol, npairs_per_mol, 10, 10)
-    # Compute the (ai||jb)X_jb
-    F = makeA_pi_symm_batch(mol, P0, w)
+
+def _makeA_pi_batched_kernel(
+    P0,
+    w,
+    mask,
+    maskd,
+    mask_l,
+    idxi,
+    idxj,
+    gss,
+    gsp,
+    gpp,
+    gp2,
+    hsp,
+    molsize: int,
+    nmol: int,
+    allSymmetric: bool = False,
+):
+    device = P0.device
+    dtype = P0.dtype
+    nnewRoots = P0.shape[1]
+    F = _makeA_pi_symm_batch_kernel(
+        P0, w, mask, maskd, mask_l, idxi, idxj, gss, gsp, gpp, gp2, hsp, molsize, nmol
+    )
 
     if not allSymmetric:
         P0_blocks = P0.reshape(nmol, nnewRoots, molsize, 4, molsize, 4).transpose(3, 4)
@@ -362,7 +454,6 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
         Pp = P_anti[:, :, mask]
         for i in range(4):
             for j in range(4):
-                # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
                 sumK[..., i, j] = -0.5 * torch.sum(
                     Pp * w[..., ind[i], :][..., :, ind[j]].unsqueeze(1), dim=(3, 4)
                 )
@@ -371,16 +462,9 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
         del Pp
         del sumK
 
-        gsp = mol.parameters["g_sp"].view(nmol, -1)
-        gpp = mol.parameters["g_pp"].view(nmol, -1)
-        gp2 = mol.parameters["g_p2"].view(nmol, -1)
-        hsp = mol.parameters["h_sp"].view(nmol, -1)
-
         F2e1c = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, device=device, dtype=dtype)
         for i in range(1, 4):
-            # (s,p) = (p,s) upper triangle
             F2e1c[..., 0, i] = P_anti[..., maskd, 0, i] * (0.5 * hsp - 0.5 * gsp).unsqueeze(1)
-        # (p,p*)
         for i, j in [(1, 2), (1, 3), (2, 3)]:
             F2e1c[..., i, j] = P_anti[..., maskd, i, j] * (0.25 * gpp - 0.75 * gp2).unsqueeze(1)
 
@@ -395,29 +479,39 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
         .reshape(nmol * nnewRoots, 4 * molsize, 4 * molsize)
     )
     del F
-
-    # F0 = torch.stack([
-    #     packone(F0[i,j], 4*nHeavy, nHydro, norb)
-    #     for i in range(nmol) for j in range(nnewRoots)
-    # ])
-    F0 = packone_batch(F0, 4 * nHeavy, nHydro, norb).view(nmol, nnewRoots, norb, norb)
-
-    return F0.view(nmol, nnewRoots, norb, norb)
+    return F0
 
 
 def makeA_pi_symm_batch(mol, P0, w):
-    molsize = mol.molsize
+    molsize = int(mol.molsize)
+    nmol = int(mol.nmol)
+    npairs_per_mol = (molsize * (molsize - 1)) // 2
+
+    dispatch = _makeA_pi_symm_batch_dispatch or _makeA_pi_symm_batch_kernel
+    return dispatch(
+        P0,
+        w,
+        mol.mask[:npairs_per_mol],
+        mol.maskd[:molsize],
+        mol.mask_l[:npairs_per_mol],
+        mol.idxi[:npairs_per_mol],
+        mol.idxj[:npairs_per_mol],
+        mol.parameters["g_ss"].view(nmol, -1),
+        mol.parameters["g_sp"].view(nmol, -1),
+        mol.parameters["g_pp"].view(nmol, -1),
+        mol.parameters["g_p2"].view(nmol, -1),
+        mol.parameters["h_sp"].view(nmol, -1),
+        molsize,
+        nmol,
+    )
+
+
+def _makeA_pi_symm_batch_kernel(
+    P0, w, mask, maskd, mask_l, idxi, idxj, gss, gsp, gpp, gp2, hsp, molsize: int, nmol: int
+):
     nnewRoots = P0.shape[1]
     dtype = P0.dtype
     device = P0.device
-
-    npairs_per_mol = (mol.molsize * (mol.molsize - 1)) // 2
-    mask = mol.mask[:npairs_per_mol]
-    maskd = mol.maskd[: mol.molsize]
-    mask_l = mol.mask_l[:npairs_per_mol]
-    idxi = mol.idxi[:npairs_per_mol]
-    idxj = mol.idxj[:npairs_per_mol]
-    nmol = mol.nmol
 
     P0_blocks = P0.reshape(nmol, nnewRoots, molsize, 4, molsize, 4).transpose(3, 4)
     P = 0.5 * (P0_blocks + P0_blocks.transpose(2, 3).transpose(4, 5))
@@ -469,13 +563,6 @@ def makeA_pi_symm_batch(mol, P0, w):
     Pdiag = P[:, :, maskd]
     Pptot_diag = Pdiag[..., 1, 1] + Pdiag[..., 2, 2] + Pdiag[..., 3, 3]
 
-    # One center-two electron integrals
-    gss = mol.parameters["g_ss"].view(nmol, -1)
-    gsp = mol.parameters["g_sp"].view(nmol, -1)
-    gpp = mol.parameters["g_pp"].view(nmol, -1)
-    gp2 = mol.parameters["g_p2"].view(nmol, -1)
-    hsp = mol.parameters["h_sp"].view(nmol, -1)
-
     del sumK
 
     Fdiag[..., 0, 0] += 0.5 * Pdiag[..., 0, 0] * gss.unsqueeze(1) + Pptot_diag * (gsp - 0.5 * hsp).unsqueeze(
@@ -501,35 +588,6 @@ def makeA_pi_symm_batch(mol, P0, w):
     # F[:,:,maskd] += F[:,:,maskd].triu(1).transpose(3,4)
 
     return F
-
-
-# def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
-#     """Orthogonalizes the vectors in the newsubspace against the original subspace
-#        with Gram-Schmidt orthogonalization. We cannot use Modified-Gram-Schmidt because
-#        we want leave the original subspace vectors untouched
-#
-#     :V: Original subspace vectors (with pre-allocated memory for new vectors)
-#     :newsubspace: vectors that have to be orthonormalized
-#     :vend: original subspace size
-#     :tol: the tolerance for the norm of new vectors below which the vector will be discarded
-#     :returns: vend: size of the subspace after adding in the new vectors
-#
-#     """
-#     # reorthogonalization will dramatically improve the loss of orthogonality from numerical errors.
-#     # See: https://doi.org/10.1016/j.camwa.2005.08.009
-#     # Giraud, Luc, Julien Langou, and Miroslav Rozloznik. "The loss of orthogonality in the Gram-Schmidt orthogonalization process." Computers & Mathematics with Applications 50.7 (2005): 1069-1075.
-#     n = newsubspace.shape[0]
-#     for i in range(n):
-#         vec = newsubspace[i]
-#         vec -= (vec @ V[:vend].T) @ V[:vend]
-#         vec -= (vec @ V[:vend].T) @ V[:vend]
-#         vecnorm = torch.norm(vec)
-#
-#         if vecnorm > tol:
-#             V[vend] = vec / vecnorm
-#             vend = vend + 1
-#
-#     return vend
 
 
 def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
@@ -570,7 +628,7 @@ def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
     # Optional but useful: clean up against old V again in finite precision.
     overlap = Q_new @ V_old.T
     max_leak = overlap.abs().max()
-    orth_atol = 1e-13 if Q_new.dtype == torch.float64 else 1e-5
+    orth_atol = 1e-13 if Q_new.dtype == torch.float64 else 1e-6
 
     if max_leak > orth_atol:
         Q_new -= (Q_new @ V[:vend].T) @ V[:vend]
@@ -1074,22 +1132,14 @@ def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
     nocc = int(mol.nocc[0])
     nvirt = norb - nocc
 
-    # if z.dim() != 2:
-    #     raise ValueError("z must have shape [batch, nocc * nvirt].")
-    # if z.shape[1] != nocc * nvirt:
-    #     raise ValueError("z has incompatible orbital dimension.")
-    # if z.shape[0] % nmol != 0:
-    #     raise ValueError("z batch size must be a multiple of mol.nmol.")
-
     nroots = z.shape[0] // nmol
     Via = z.reshape(nmol, nroots, nocc, nvirt)
-    P_xi = torch.einsum("Nmi,Nria,Nna->Nrmn", Cocc, Via, Cvirt)
-    P_xi = P_xi + P_xi.transpose(-1, -2)
+    make_density = _ao_transition_density_dispatch or _ao_transition_density_kernel
+    make_post = _mo_fock_action_dispatch or _mo_fock_action_kernel
+    P_xi = make_density(Cocc, Via, Cvirt, True)
 
     F0 = makeA_pi_batched(mol, P_xi, w, allSymmetric=True)
-    A = torch.einsum("Nmi,Nrmn,Nna->Nria", Cocc, F0, Cvirt) * 2.0
-
-    A += Via * ea_ei[:, None]
+    A = make_post(Via, F0, ea_ei, Cocc, Cvirt, False, torch.is_grad_enabled())
 
     return A.reshape(nmol * nroots, nocc * nvirt)
 
@@ -1129,7 +1179,14 @@ def make_cis_densities(
         amp_ia_X = amp.view(mol.nmol, nocc, nvirt)
 
     cis_densities = {}
-    if do_transition_denisty or do_relaxed_density:
+    if not rpa and (do_difference_density or do_relaxed_density):
+        make_density = _cis_density_dispatch or _cis_density_kernel
+        R, B, B_virt, B_occ = make_density(Cocc, Cvirt, amp_ia_X)
+        if do_transition_denisty or do_relaxed_density:
+            cis_densities["transition_density"] = R
+        if do_difference_density:
+            cis_densities["difference_density"] = B
+    elif do_transition_denisty or do_relaxed_density:
         # CIS transition density R = \sum_ia C_\mu i * t_ia * C_\nu a
         R = torch.einsum("bmi,bia,bna->bmn", Cocc, amp_ia_X, Cvirt)
         if rpa:
@@ -1137,28 +1194,24 @@ def make_cis_densities(
         cis_densities["transition_density"] = R
 
     if do_difference_density:
-        B_virt = torch.einsum("Nma,Nia->Nmi", Cvirt, amp_ia_X)
-        B_occ = torch.einsum("Nmi,Nia->Nma", Cocc, amp_ia_X)
-
-        B = torch.einsum("Nmi,Nni->Nmn", B_virt, B_virt) - torch.einsum("Nmi,Nni->Nmn", B_occ, B_occ)
-
         if rpa:
+            B_virt = torch.einsum("Nma,Nia->Nmi", Cvirt, amp_ia_X)
+            B_occ = torch.einsum("Nmi,Nia->Nma", Cocc, amp_ia_X)
+            B = torch.einsum("Nmi,Nni->Nmn", B_virt, B_virt) - torch.einsum("Nmi,Nni->Nmn", B_occ, B_occ)
             B_virt_Y = torch.einsum("Nma,Nia->Nmi", Cvirt, amp_ia_Y)
             B_occ_Y = torch.einsum("Nmi,Nia->Nma", Cocc, amp_ia_Y)
             B += torch.einsum("Nmi,Nni->Nmn", B_virt_Y, B_virt_Y) - torch.einsum(
                 "Nmi,Nni->Nmn", B_occ_Y, B_occ_Y
             )
-
-        cis_densities["difference_density"] = B
+            cis_densities["difference_density"] = B
 
         if do_relaxed_density:
             # Calculate z-vector
             # make RHS of the CPSCF equation:
             B_pi = makeA_pi_batched(mol, B.unsqueeze(1), w, allSymmetric=True).squeeze(1) * 2.0
             R_pi = makeA_pi_batched(mol, R.unsqueeze(1), w).squeeze(1) * 2.0
-            RHS = -torch.einsum("Nni,Nmn,Nma->Nia", Cocc, B_pi, Cvirt)
-            RHS -= torch.einsum("Nni,Nmn,Nma->Nia", B_virt, R_pi, Cvirt)
-            RHS += torch.einsum("Nni,Nmn,Nma->Nia", Cocc, R_pi, B_occ)
+            make_rhs = _relaxed_rhs_dispatch or _relaxed_rhs_kernel
+            RHS = make_rhs(Cocc, Cvirt, B_pi, R_pi, B_virt, B_occ)
 
             if rpa:
                 RHS -= torch.einsum("Nni,Nnm,Nma->Nia", B_virt_Y, R_pi, Cvirt)
@@ -1175,11 +1228,32 @@ def make_cis_densities(
 
             zvec = conjugate_gradient_batch(applyA, RHS, ea_flat, tol=zvec_tolerance, x0=rhs0)
 
-            z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
-            D = B + z_ao + z_ao.transpose(1, 2)  # Now this contains the relaxed density
-            cis_densities["relaxed_difference_density"] = D
+            make_relaxed = _relaxed_finish_dispatch or _relaxed_finish_kernel
+            cis_densities["relaxed_difference_density"] = make_relaxed(
+                Cocc, Cvirt, zvec, B, nmol, nocc, nvirt
+            )
 
     return cis_densities
+
+
+def _cis_density_kernel(Cocc, Cvirt, amp_ia):
+    R = torch.einsum("bmi,bia,bna->bmn", Cocc, amp_ia, Cvirt)
+    B_virt = torch.einsum("Nma,Nia->Nmi", Cvirt, amp_ia)
+    B_occ = torch.einsum("Nmi,Nia->Nma", Cocc, amp_ia)
+    B = torch.einsum("Nmi,Nni->Nmn", B_virt, B_virt) - torch.einsum("Nmi,Nni->Nmn", B_occ, B_occ)
+    return R, B, B_virt, B_occ
+
+
+def _relaxed_rhs_kernel(Cocc, Cvirt, B_pi, R_pi, B_virt, B_occ):
+    RHS = -torch.einsum("Nni,Nmn,Nma->Nia", Cocc, B_pi, Cvirt)
+    RHS -= torch.einsum("Nni,Nmn,Nma->Nia", B_virt, R_pi, Cvirt)
+    RHS += torch.einsum("Nni,Nmn,Nma->Nia", Cocc, R_pi, B_occ)
+    return RHS
+
+
+def _relaxed_finish_kernel(Cocc, Cvirt, zvec, B, nmol: int, nocc: int, nvirt: int):
+    z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
+    return B + z_ao + z_ao.transpose(1, 2)
 
 
 # Function to verify the linearization of energy (w.r.t. density, transition density) for XL-BOMD

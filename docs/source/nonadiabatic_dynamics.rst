@@ -178,6 +178,12 @@ Important FSSH inputs
   collapse back to the current active state. The default is ``False``. This is
   a simple collapse rule, not a continuous decoherence-time correction.
 
+``torch_compile``
+  The NAMD drivers inherit the BOMD ``torch_compile`` option. When enabled for
+  repeated dynamics, it compiles the same SCF/CIS kernels as excited-state BOMD
+  and also registers tensor contractions used by CIS NAC vectors. Set
+  ``compile_nac=False`` to leave NAC contractions eager.
+
 ``nonadiabatic['detect_crossings']``
   Enables trivial crossing detection. The default is ``True``.
 

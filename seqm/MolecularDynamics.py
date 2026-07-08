@@ -14,7 +14,13 @@ import torch
 from seqm.basics import Force
 from seqm.dynamics.active_state import active_state_tensor
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
+from seqm.seqm_functions.fock import enable_fock_compile
+from seqm.seqm_functions.nac import enable_nac_compile
+from seqm.seqm_functions.om1_pair_backend import enable_omx_compile
+from seqm.seqm_functions.omx_utils import OMX_METHODS
+from seqm.seqm_functions.rcis_batch import enable_rcis_compile
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
+from seqm.utils.torch_compile import normalize_torch_compile_config
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -689,9 +695,21 @@ class Geometry_Optimization_SD(torch.nn.Module):
 class Molecular_Dynamics_Basic(torch.nn.Module):
     """Base class for molecular dynamics simulations."""
 
-    def __init__(self, seqm_parameters, timestep=1.0, Temp=0.0, step_offset=0, output=None, *args, **kwargs):
+    def __init__(
+        self,
+        seqm_parameters,
+        timestep=1.0,
+        Temp=0.0,
+        step_offset=0,
+        output=None,
+        torch_compile=None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.seqm_parameters = seqm_parameters
+        self._torch_compile_config = normalize_torch_compile_config(seqm_parameters, torch_compile)
+        self._torch_compile_applied = False
         self.timestep = timestep
         self.output_config = OutputConfig.from_dict(output)
         self._sync_excited_state_output_flags()
@@ -849,6 +867,33 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         """Set degrees of freedom."""
         self.n_dof = 3.0 * molecule.num_atoms - constraints
 
+    def _enable_torch_compile_if_requested(self, molecule):
+        """Enable optional compilation for repeated dynamics force evaluations."""
+        cfg = self._torch_compile_config
+        if self._torch_compile_applied or not cfg["enabled"]:
+            return
+        self._torch_compile_applied = True
+
+        # XL-BOMD has a separate density propagation path; leave it eager for now.
+        if getattr(self, "k", None) is not None:
+            return
+
+        method = str(self.seqm_parameters.get("method", "")).upper()
+        options = dict(cfg["options"])
+        if "mode" not in options and molecule.coordinates.is_cuda:
+            options["mode"] = "reduce-overhead"
+        kernel_options = dict(options)
+        kernel_mode = kernel_options.pop("mode", None)
+
+        if cfg["compile_omx"] and method in OMX_METHODS:
+            enable_omx_compile(mode=kernel_mode)
+        if cfg["compile_fock"]:
+            enable_fock_compile(mode=kernel_mode, **kernel_options)
+        if cfg["compile_cis"] and self.seqm_parameters.get("excited_states"):
+            enable_rcis_compile(mode=kernel_mode, **kernel_options)
+        if cfg["compile_nac"] and self.seqm_parameters.get("nonadiabatic"):
+            enable_nac_compile(mode=kernel_mode, **kernel_options)
+
     def _thermo_potential(self, molecule):
         """Potential energy for thermodynamics (override in subclasses)."""
         return molecule.Etot
@@ -937,6 +982,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
+        self._enable_torch_compile_if_requested(molecule)
 
         # Setup output
         has_molid = len(self.output_config.molid) > 0

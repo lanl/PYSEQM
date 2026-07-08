@@ -890,11 +890,16 @@ class Energy(torch.nn.Module):
         molecule.rij = pairdist * molecule.const.length_conversion_factor
 
     def _prepare_molecule_inputs(self, molecule, learned_parameters, *args, **kwargs):
+        parser_kwargs = kwargs
+        if not self.xlesmd and kwargs:
+            parser_kwargs = dict(kwargs)
+            parser_kwargs.pop("xl_bomd_params", None)
+
         md_static = (
             self.md
             and not callable(learned_parameters)
             and not args
-            and not kwargs
+            and not parser_kwargs
             and torch.is_tensor(getattr(molecule, "idxi", None))
             and isinstance(getattr(molecule, "parameters", None), dict)
         )
@@ -920,7 +925,7 @@ class Energy(torch.nn.Module):
             molecule.idxj,
             molecule.xij,
             molecule.rij,
-        ) = self.parser(molecule, self.method, *args, **kwargs)
+        ) = self.parser(molecule, self.method, *args, **parser_kwargs)
 
         learned_params = (
             learned_parameters(molecule.species, molecule.coordinates)

@@ -1,5 +1,7 @@
 import torch
 
+from seqm.utils.torch_compile import optional_compile_function
+
 # ——— Constants —————————————————————————————————————————————————————————
 # fmt: off
 # Basis function counts
@@ -114,6 +116,20 @@ P_OFF_J = torch.tensor([2, 3, 3], dtype=torch.long)
 
 _WEIGHT_CACHE = {}
 _INDEX_CACHE = {}
+_fock_sp_dispatch = None
+
+
+def enable_fock_compile(mode=None, **options):
+    """Compile the restricted s,p Fock kernel used repeatedly in SCF."""
+    global _fock_sp_dispatch
+
+    compile_options = dict(options)
+    if mode is not None:
+        compile_options["mode"] = mode
+
+    _fock_sp_dispatch = optional_compile_function(
+        _fock_sp_kernel, compile_options=compile_options, label="fock.restricted_sp"
+    )
 
 
 def _cached_tensor(base, device, dtype=None):
@@ -164,6 +180,9 @@ def fock(
     """
     Construct the Fock matrix for either the default (4-basis) or PM6 (9-basis) method.
     """
+    if themethod != "PM6" and _fock_sp_dispatch is not None:
+        return _fock_sp_dispatch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+
     # 1) reshape density into blocks of shape (nbf,nbf)
     nbf = PM6_NBF if themethod == "PM6" else DEFAULT_NBF
     P = P0.view(nmol, molsize, nbf, molsize, nbf).transpose(2, 3).reshape(-1, nbf, nbf)
@@ -185,6 +204,18 @@ def fock(
     nrs = nbf * molsize
     F_full = F.view(nmol, molsize, molsize, nbf, nbf).transpose(2, 3).reshape(nmol, nrs, nrs)
     # symmetrize lower triangle since only the upper triangle of F has been built so far
+    F_full += F_full.triu(1).transpose(1, 2)
+    return F_full
+
+
+def _fock_sp_kernel(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp):
+    nbf = DEFAULT_NBF
+    P = P0.view(nmol, molsize, nbf, molsize, nbf).transpose(2, 3).reshape(-1, nbf, nbf)
+    F = M.clone()
+    F = _one_center(F, P, maskd, gss, gpp, gsp, gp2, hsp)
+    F = _two_center_sp(F, P, w, maskd, mask, idxi, idxj)
+    nrs = nbf * molsize
+    F_full = F.view(nmol, molsize, molsize, nbf, nbf).transpose(2, 3).reshape(nmol, nrs, nrs)
     F_full += F_full.triu(1).transpose(1, 2)
     return F_full
 
@@ -264,25 +295,56 @@ def _d_contrib_one_center(F, P, W, maskd):
 # ——— Helper: two-center (J & K) —————————————————————————————————————
 
 
+def _two_center_sp(F, P, w, maskd, mask, idxi, idxj):
+    nbf = DEFAULT_NBF
+    tril_idx = _cached_index(TRIL_IDX_4, P.device)
+    weight_tc = _cached_tensor(WEIGHT_10, P.device, P.dtype)
+    i0, i1 = tril_idx
+
+    PA = (P[maskd[idxi]][:, i1, i0] * weight_tc).unsqueeze(-1)
+    PB = (P[maskd[idxj]][:, i1, i0] * weight_tc).unsqueeze(-2)
+
+    J_A = (PA * w).sum(dim=1)
+    J_B = (PB * w).sum(dim=2)
+
+    B = w.shape[0]
+    sumA = torch.zeros(B, nbf, nbf, device=P.device, dtype=P.dtype)
+    sumB = torch.zeros_like(sumA)
+    sumA[:, i1, i0] = J_A
+    sumB[:, i1, i0] = J_B
+
+    F.index_add_(0, maskd[idxi], sumB)
+    F.index_add_(0, maskd[idxj], sumA)
+
+    Pp = -0.5 * P[mask]
+    Ksum = torch.zeros_like(sumA)
+    ind = _cached_index(K_ind_4, P.device)
+
+    p_idx = ind.view(-1)
+    w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)
+    for j in range(nbf):
+        w2 = w1[..., ind[j]]
+        k_block = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
+        Ksum[:, :, j] = k_block
+
+    F.index_add_(0, mask, Ksum)
+    return F
+
+
 def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
     """
     Adds two-center (neighbor-atom) J and K contributions.
     """
-    # Two-electron two-center weight factors
+    if themethod != "PM6":
+        return _two_center_sp(F, P, w, maskd, mask, idxi, idxj)
 
-    if themethod == "PM6":
-        nbf = PM6_NBF
-        tril_idx = _cached_index(TRIL_IDX_9, P.device)
-        weight_tc = _cached_tensor(WEIGHT_45, P.device, P.dtype)
-    else:
-        nbf = DEFAULT_NBF
-        tril_idx = _cached_index(TRIL_IDX_4, P.device)
-        weight_tc = _cached_tensor(WEIGHT_10, P.device, P.dtype)
-
+    nbf = PM6_NBF
+    tril_idx = _cached_index(TRIL_IDX_9, P.device)
+    weight_tc = _cached_tensor(WEIGHT_45, P.device, P.dtype)
     i0, i1 = tril_idx
 
     # Pack intra-atomic blocks for neighbors A and B by multiplying the lower triangle blocks by 2
-    idxA, idxB = (idxj, idxi) if themethod == "PM6" else (idxi, idxj)
+    idxA, idxB = idxj, idxi
     PA = (P[maskd[idxA]][:, i1, i0] * weight_tc).unsqueeze(-1)  # (...,nP,1)
     PB = (P[maskd[idxB]][:, i1, i0] * weight_tc).unsqueeze(-2)  # (...,1,nP)
 
@@ -306,44 +368,18 @@ def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
 
     Ksum = torch.zeros_like(sumA)
 
-    # The commented-out code below is lower-memory version but has two python nested for-loops
-
-    # # Contract Pp[b,ν,σ] with w[b, ind[j,i,νσ] ] over ν,σ
-    # if themethod=='PM6':
-    #     Pp = Pp.transpose(1,2)
-    #     # ind is mapping from (i,j) → integral indices in w
-    #     ind = K_ind_9.to(device=P.device)
-    #     for i in range(9):
-    #         for j in range(9):
-    #             # extract the 9×9 (or 4×4) block of w for this (i,j)
-    #             # and sum ν,σ
-    #             wblk = w[..., ind[j], :][..., :, ind[i]]  # shape (nPairs,nbf,nbf)
-    #             Ksum[..., i, j] = (Pp * wblk).sum(dim=(1,2))
-    # else:
-    #     ind = K_ind_4.to(device=P.device)
-    #     for i in range(4):
-    #         for j in range(4):
-    #             # and sum ν,σ
-    #             wblk = w[..., ind[i], :][..., :, ind[j]]  # shape (nPairs,nbf,nbf)
-    #             Ksum[..., i, j] = (Pp * wblk).sum(dim=(1,2))
-
-    # This eliminates one of the for-loops but uses more memory
-    ind = _cached_index(K_ind_9 if themethod == "PM6" else K_ind_4, P.device)
+    ind = _cached_index(K_ind_9, P.device)
 
     p_idx = ind.view(-1)  # (i*ν,)
     w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)  # last dim = nP, which is the packed index that packs nbf*nbf
 
-    if themethod == "PM6":
-        # PM6's d-orbital integral layout aligns with upper-triangle P blocks.
-        Pp = Pp.transpose(1, 2)
+    # PM6's d-orbital integral layout aligns with upper-triangle P blocks.
+    Pp = Pp.transpose(1, 2)
 
     for j in range(nbf):
         w2 = w1[..., ind[j]]
         k_block = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
-        if themethod == "PM6":
-            Ksum[:, j, :] = k_block
-        else:
-            Ksum[:, :, j] = k_block
+        Ksum[:, j, :] = k_block
 
     F.index_add_(0, mask, Ksum)
 

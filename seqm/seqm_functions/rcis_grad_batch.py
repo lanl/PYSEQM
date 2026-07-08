@@ -73,18 +73,16 @@ def rcis_grad_batch(
     ###############################
     # Calculate the gradient of CIS energies
 
-    # TODO: instead of repeating the calculation of gradient of the overlap matrix and the 2-e integral matrix w_x, store it and reuse it, while calculating ground state
-    # gradients. Alternately, combine ground and excited state gradients
     npairs = mol.rij.shape[0]
     dtype = B0.dtype
     device = B0.device
     nmol = mol.nmol
-    overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    Xij = mol.xij * mol.rij.unsqueeze(1) * a0
-    w_x = torch.zeros(mol.rij.shape[0], 3, 10, 10, dtype=dtype, device=device)
     omx_orthogonalization_grad = None
 
     if method in {"OM1", "OM2", "OM3"}:
+        overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
+        Xij = mol.xij * mol.rij.unsqueeze(1) * a0
+        w_x = torch.zeros(mol.rij.shape[0], 3, 10, 10, dtype=dtype, device=device)
         ortho_density = B0 if not include_ground_state else B0 + P0
         e1b_x, e2a_x, fko_x, omx_orthogonalization_grad, _ = omx_fd(
             mol, overlap_x, w_x, Xij, mol.ni, mol.nj, mol.idxi, mol.idxj, method, ortho_density
@@ -103,6 +101,9 @@ def rcis_grad_batch(
                 )
             )
     else:
+        overlap_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
+        Xij = mol.xij * mol.rij.unsqueeze(1) * a0
+        w_x = torch.zeros(npairs, 3, 10, 10, dtype=dtype, device=device)
         zetas, zetap = get_orbital_zetas(mol.parameters, mol.method)
         zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
         overlap_der_finiteDiff(
