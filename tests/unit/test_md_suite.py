@@ -36,7 +36,7 @@ def _build_molecule(device, species, coordinates, seqm_parameters):
 
 
 def _seqm_parameters(method, excited=False):
-    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1]}
+    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1], "torch_compile": False}
     if excited:
         params.update({"excited_states": {"n_states": 4, "method": "cis"}, "active_state": 1})
     return params
@@ -198,12 +198,39 @@ def test_md_langevin_single(tmp_path, device, methane_molecule_data, method):
 def test_torch_compile_config_rejects_targets():
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
+    assert normalize_torch_compile_config({})["enabled"]
+    assert not normalize_torch_compile_config({"torch_compile": False})["enabled"]
+    assert not normalize_torch_compile_config({"torch_compile": {"enabled": False}})["enabled"]
+    assert not normalize_torch_compile_config({}, False)["enabled"]
+
     cfg = normalize_torch_compile_config({}, {"enabled": True, "mode": "reduce-overhead"})
     assert cfg["enabled"]
     assert cfg["options"] == {"mode": "reduce-overhead"}
 
     with pytest.raises(ValueError, match="target"):
         normalize_torch_compile_config({}, {"enabled": True, "target": "force"})
+
+
+def test_md_torch_compile_enabled_by_default(monkeypatch):
+    import seqm.MolecularDynamics as md_module
+    from seqm.utils.torch_compile import normalize_torch_compile_config
+
+    calls = []
+    monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
+
+    seqm_parameters = {"method": "AM1"}
+
+    class DummyMolecule:
+        coordinates = torch.zeros(1)
+
+    md = type("DummyMD", (), {})()
+    md._torch_compile_config = normalize_torch_compile_config(seqm_parameters)
+    md._torch_compile_applied = False
+    md.seqm_parameters = seqm_parameters
+    md_module.Molecular_Dynamics_Basic._enable_torch_compile_if_requested(md, DummyMolecule())
+
+    assert calls == ["fock"]
+    assert md._torch_compile_applied
 
 
 def test_md_torch_compile_family_toggles(monkeypatch):
@@ -214,7 +241,9 @@ def test_md_torch_compile_family_toggles(monkeypatch):
     monkeypatch.setattr(md_module, "enable_omx_compile", lambda **kwargs: calls.append("omx"))
     monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
     monkeypatch.setattr(md_module, "enable_rcis_compile", lambda **kwargs: calls.append("cis"))
+    monkeypatch.setattr(md_module, "enable_rcis_grad_compile", lambda **kwargs: calls.append("cis_grad"))
     monkeypatch.setattr(md_module, "enable_nac_compile", lambda **kwargs: calls.append("nac"))
+    monkeypatch.setattr(md_module, "enable_tdc_hamiltonian_fd_compile", lambda **kwargs: calls.append("tdc"))
 
     seqm_parameters = _seqm_parameters("OM1", excited=True)
     seqm_parameters["nonadiabatic"] = {"compute_nac": False}
@@ -243,7 +272,8 @@ def test_md_torch_compile_family_toggles(monkeypatch):
 
 
 def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, device, methane_molecule_data):
-    from seqm.seqm_functions import fock, nac, rcis_batch
+    from seqm.dynamics import tdc_hamiltonian_fd
+    from seqm.seqm_functions import fock, nac, rcis_batch, rcis_grad_batch
 
     calls = []
 
@@ -260,12 +290,17 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
     monkeypatch.setattr(rcis_batch, "_cis_density_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_relaxed_rhs_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_relaxed_finish_dispatch", None)
+    monkeypatch.setattr(rcis_grad_batch, "_rcis_grad_contract_dispatch", None)
     monkeypatch.setattr(nac, "_contract_nac_density_dispatch", None)
     monkeypatch.setattr(nac, "_contract_mixed_transition_terms_dispatch", None)
     monkeypatch.setattr(nac, "_pair_response_rhs_dispatch", None)
+    monkeypatch.setattr(tdc_hamiltonian_fd, "_prepare_directional_pair_ops_dispatch", None)
+    monkeypatch.setattr(tdc_hamiltonian_fd, "_contract_pair_density_directional_dispatch", None)
+    monkeypatch.setattr(tdc_hamiltonian_fd, "_contract_mixed_transition_directional_dispatch", None)
 
     species, coordinates = methane_molecule_data
     seqm_parameters = _seqm_parameters("AM1", excited=True)
+    seqm_parameters.pop("torch_compile", None)
     seqm_parameters["nonadiabatic"] = {"compute_nac": False}
 
     molid = [0]
@@ -286,12 +321,23 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
     assert "_makeA_pi_batched_kernel" in compiled_names
     assert "_ao_transition_density_kernel" in compiled_names
     assert "_mo_fock_action_kernel" in compiled_names
+    assert "_rcis_grad_contract_kernel" in compiled_names
     assert all(kwargs["mode"] == "reduce-overhead" for _, kwargs in calls)
     assert getattr(fock._fock_sp_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(rcis_batch._makeA_pi_symm_batch_dispatch, "is_torch_compile_wrapper", False)
+    assert getattr(rcis_grad_batch._rcis_grad_contract_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(nac._contract_nac_density_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(nac._contract_mixed_transition_terms_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(nac._pair_response_rhs_dispatch, "is_torch_compile_wrapper", False)
+    assert getattr(
+        tdc_hamiltonian_fd._prepare_directional_pair_ops_dispatch, "is_torch_compile_wrapper", False
+    )
+    assert getattr(
+        tdc_hamiltonian_fd._contract_pair_density_directional_dispatch, "is_torch_compile_wrapper", False
+    )
+    assert getattr(
+        tdc_hamiltonian_fd._contract_mixed_transition_directional_dispatch, "is_torch_compile_wrapper", False
+    )
 
 
 @pytest.mark.parametrize("method", LANGEVIN_METHODS)

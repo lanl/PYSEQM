@@ -29,7 +29,7 @@ def _build_molecule(device, species, coordinates, seqm_parameters):
 
 
 def _seqm_parameters(method, excited=False):
-    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1]}
+    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1], "torch_compile": False}
     if excited:
         params.update({"excited_states": {"n_states": 4, "method": "cis"}, "active_state": 1})
     return params

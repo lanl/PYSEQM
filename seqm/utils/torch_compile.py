@@ -18,14 +18,15 @@ def _compile_config(enabled):
 
 def normalize_torch_compile_config(seqm_parameters, override=None):
     """
-    Normalize the opt-in torch.compile configuration used by dynamics drivers.
+    Normalize the torch.compile configuration used by dynamics drivers.
 
     Accepted forms:
+      torch_compile=False
       torch_compile=True
       torch_compile={"enabled": True, "mode": "reduce-overhead"}
       torch_compile={"enabled": True, "options": {"mode": "reduce-overhead"}}
     """
-    raw = seqm_parameters.get("torch_compile", False) if override is None else override
+    raw = seqm_parameters.get("torch_compile", True) if override is None else override
     if raw is None or raw is False:
         return _compile_config(False)
     if raw is True:

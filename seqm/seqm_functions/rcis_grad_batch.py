@@ -17,10 +17,26 @@ from seqm.seqm_functions.fock import (
     _cached_tensor,
 )
 from seqm.seqm_functions.rcis_batch import make_cis_densities, unpackone_batch
+from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0, ev
 from .dispersion_am1_fs1 import dEdisp_dr
 from .omx_utils import get_orbital_zetas
+
+_rcis_grad_contract_dispatch = None
+
+
+def enable_rcis_grad_compile(mode=None, **options):
+    """Compile tensor contractions used after CIS derivative integrals are built."""
+    global _rcis_grad_contract_dispatch
+
+    compile_options = dict(options)
+    if mode is not None:
+        compile_options["mode"] = mode
+
+    _rcis_grad_contract_dispatch = optional_compile_function(
+        _rcis_grad_contract_kernel, compile_options=compile_options, label="rcis_grad.contract"
+    )
 
 
 def rcis_grad_batch(
@@ -147,91 +163,107 @@ def rcis_grad_batch(
             pair_grad = core_core_der(mol, gam, w_x, method, parnuc)
             if mol.seqm_parameters.get("dispersion", False) and method == "AM1":
                 pair_grad += dEdisp_dr(mol)
+    if not include_ground_state:
+        pair_grad = torch.zeros_like(Xij)
+
+    ind = _cached_index(K_ind_4, device)
+    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
+    idx0 = _cached_index(UPPER_IDX0_4, device)
+    idx1 = _cached_index(UPPER_IDX1_4, device)
+    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
+
+    contract = _rcis_grad_contract_dispatch or _rcis_grad_contract_kernel
+    grad_cis = contract(
+        B0,
+        R0,
+        P0,
+        overlap_x,
+        w_x,
+        e1b_x,
+        e2a_x,
+        pair_grad,
+        mol.mask,
+        mol.maskd,
+        mol.idxi,
+        mol.idxj,
+        ind,
+        idx0,
+        idx1,
+        weight,
+        scale_emat,
+        int(nmol),
+        int(molsize),
+        bool(include_ground_state),
+    )
+
+    if omx_orthogonalization_grad is not None:
+        grad_cis += omx_orthogonalization_grad
+
+    return grad_cis
+
+
+def _rcis_grad_contract_kernel(
+    B0,
+    R0,
+    P0,
+    overlap_x,
+    w_x,
+    e1b_x,
+    e2a_x,
+    pair_grad,
+    mask,
+    maskd,
+    idxi,
+    idxj,
+    ind,
+    idx0,
+    idx1,
+    weight,
+    scale_emat,
+    nmol: int,
+    molsize: int,
+    include_ground_state: bool,
+):
     B = B0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
     if include_ground_state:
-        B += 0.5 * P
-        # To do the total excited-state gradient, add the ground-state gradient to the excited-state correction.
-        # The Fock-like derivative matrices below contain one-electron terms plus density-contracted two-electron terms.
-        # Ground-state energy has factor of 1 for the one-electron derivative but 1/2 for the two-electron derivative.
-        # Therefore add only 0.5*P to B, and add the missing 0.5*P one-electron overlap/core terms explicitly.
-        pair_grad += 0.5 * (P[mol.mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3))
-    else:
-        pair_grad = torch.zeros_like(Xij)
+        B = B + 0.5 * P
+        pair_grad = pair_grad + 0.5 * (P[mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3))
 
-    # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
-
-    # Exchange integrals
-    # mu, nu in A
-    # lambda, sigma in B
-    # F_mu_lambda = Hcore - 0.5* \sum_{nu \in A} \sum_{sigma in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    #   0,     1         2       3       4         5       6      7         8        9
-    ind = _cached_index(K_ind_4, device)
-    # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
-    # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
-    overlap_KAB_x = overlap_x
-    Pp = P[mol.mask].unsqueeze(1)
-    # half_multiply = 1.0 # 0.5
+    overlap_KAB_x = overlap_x.clone()
+    Pp = P[mask].unsqueeze(1)
     for i in range(4):
         w_x_i = w_x[..., ind[i], :]
         for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
             overlap_KAB_x[..., i, j] -= torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
-    pair_grad += (B[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
+    pair_grad = pair_grad + (B[mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
 
-    # Coulomb integrals -- only on the diagonal
-    # F_mu_nv = Hcore + \sum^B \sum_{lambda, sigma} P^B_{lambda, sigma} * (mu nu, lambda sigma)
-    # as only upper triangle part is done, and put in order
-    # (ss ), (px s), (px px), (py s), (py px), (py py), (pz s), (pz px), (pz py), (pz pz)
-    # weight for them are
-    #  1       2       1        2        2        1        2       2        2       1
-    weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
-    # weight *= 0.5  # Multiply the weight by 0.5 because the contribution of coulomb integrals to engergy is calculated as 0.5*P_mu_nu*F_mu_nv
+    PA = (P[maskd[idxi]][..., idx0, idx1] * weight).unsqueeze(-1)
+    PB = (P[maskd[idxj]][..., idx0, idx1] * weight).unsqueeze(-2)
 
-    idx0 = _cached_index(UPPER_IDX0_4, device)
-    idx1 = _cached_index(UPPER_IDX1_4, device)
-    PA = (P[mol.maskd[mol.idxi]][..., idx0, idx1] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
-    PB = (P[mol.maskd[mol.idxj]][..., idx0, idx1] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
-
-    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
-
-    scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
+    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)
     if include_ground_state:
-        pair_grad.add_(
-            0.5 * (P[mol.maskd[mol.idxj], None, :, :] * e2a_x * scale_emat).sum(dim=(2, 3))
-            + 0.5 * (P[mol.maskd[mol.idxi], None, :, :] * e1b_x * scale_emat).sum(dim=(2, 3))
+        pair_grad = pair_grad + (
+            0.5 * (P[maskd[idxj], None, :, :] * e2a_x * scale_emat).sum(dim=(2, 3))
+            + 0.5 * (P[maskd[idxi], None, :, :] * e1b_x * scale_emat).sum(dim=(2, 3))
         )
 
-    # Collect in sumA and sumB tensors
-    # reususe overlap_KAB_x here instead of creating new arrays
-    # I am going to be alliasing overlap_KAB_x to sumA and then further aliasing it to sumB
-    # This seems like bad practice because I'm not allocating new memory but using the same tensor for all operations.
-    # In the future, if this code is to be edited, be careful here
-    sumA = overlap_KAB_x
-    sumA.zero_()
+    sumA = torch.zeros_like(overlap_x)
     sumA[..., idx0, idx1] = suma
-    e2a_x.add_(sumA)
+    e2a_eff = e2a_x + sumA
 
-    sumB = overlap_KAB_x
-    sumB.zero_()
-    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
+    sumB = torch.zeros_like(overlap_x)
+    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)
     sumB[..., idx0, idx1] = sumb
-    del suma, sumb
-    e1b_x.add_(sumB)
+    e1b_eff = e1b_x + sumB
 
-    e1b_x *= scale_emat
-    e2a_x *= scale_emat
-    # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    # e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
-    pair_grad.add_(
-        (B[mol.maskd[mol.idxj], None, :, :] * e2a_x).sum(dim=(2, 3))
-        + (B[mol.maskd[mol.idxi], None, :, :] * e1b_x).sum(dim=(2, 3))
+    e1b_eff = e1b_eff * scale_emat
+    e2a_eff = e2a_eff * scale_emat
+    pair_grad = pair_grad + (
+        (B[maskd[idxj], None, :, :] * e2a_eff).sum(dim=(2, 3))
+        + (B[maskd[idxi], None, :, :] * e1b_eff).sum(dim=(2, 3))
     )
-    del e1b_x
-
-    ###########################################################
 
     R_symmetrized = 0.5 * (R0 + R0.transpose(1, 2))
     R_symm = (
@@ -239,47 +271,34 @@ def rcis_grad_batch(
         .transpose(2, 3)
         .reshape(nmol * molsize * molsize, 4, 4)
     )
-    del R_symmetrized
 
-    Rdiag_symmetrized = R_symm[mol.maskd]
-    PA = (Rdiag_symmetrized[mol.idxi][..., idx0, idx1] * weight).unsqueeze(-1)
-    PB = (Rdiag_symmetrized[mol.idxj][..., idx0, idx1] * weight).unsqueeze(-2)
+    Rdiag_symmetrized = R_symm[maskd]
+    PA = (Rdiag_symmetrized[idxi][..., idx0, idx1] * weight).unsqueeze(-1)
+    PB = (Rdiag_symmetrized[idxj][..., idx0, idx1] * weight).unsqueeze(-2)
 
-    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
-    sumA = overlap_KAB_x
-    sumA.zero_()
+    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)
+    sumA = torch.zeros_like(overlap_x)
     sumA[..., idx0, idx1] = suma
-    J_x_2a = e2a_x
-    J_x_2a[:, :, :] = sumA
+    J_x_2a = sumA * scale_emat
 
-    sumB = overlap_KAB_x
-    sumB.zero_()
-    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
+    sumB = torch.zeros_like(overlap_x)
+    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)
     sumB[..., idx0, idx1] = sumb
-    J_x_1b = sumB
-    del suma, sumb
+    J_x_1b = sumB * scale_emat
 
-    # Core-elecron interaction
-    # J_x_1b.add_(J_x_1b.triu(1).transpose(2, 3))
-    # J_x_2a.add_(J_x_2a.triu(1).transpose(2, 3))
-    J_x_1b *= scale_emat
-    J_x_2a *= scale_emat
-    pair_grad.add_(
-        (2.0 * R_symm[mol.maskd[mol.idxj], None, :, :] * J_x_2a).sum(dim=(2, 3))
-        + (2.0 * R_symm[mol.maskd[mol.idxi], None, :, :] * J_x_1b).sum(dim=(2, 3))
-    )  # I can use R_symm instead of R here
-    del J_x_2a
-    del Rdiag_symmetrized
+    pair_grad = pair_grad + (
+        (2.0 * R_symm[maskd[idxj], None, :, :] * J_x_2a).sum(dim=(2, 3))
+        + (2.0 * R_symm[maskd[idxi], None, :, :] * J_x_1b).sum(dim=(2, 3))
+    )
 
-    Pp = R_symm[mol.mask].unsqueeze(1)
+    overlap_KAB_x = torch.zeros_like(overlap_x)
+    Pp = R_symm[mask].unsqueeze(1)
     for i in range(4):
         w_x_i = w_x[..., ind[i], :]
         for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
             overlap_KAB_x[..., i, j] = -0.5 * torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
-    pair_grad.add_((4.0 * R_symm[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
-    del R_symm
+    pair_grad = pair_grad + (4.0 * R_symm[mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
 
     R_antisymmetrized = 0.5 * (R0 - R0.transpose(1, 2))
     R_antisymm = (
@@ -287,32 +306,19 @@ def rcis_grad_batch(
         .transpose(2, 3)
         .reshape(nmol * molsize * molsize, 4, 4)
     )
-    del R_antisymmetrized
-    Pp = R_antisymm[mol.mask].unsqueeze(1)
+    Pp = R_antisymm[mask].unsqueeze(1)
     for i in range(4):
         w_x_i = w_x[..., ind[i], :]
         for j in range(4):
-            # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
             overlap_KAB_x[..., i, j] = -0.5 * torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
 
-    pair_grad.add_((4.0 * R_antisymm[mol.mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
+    pair_grad = pair_grad + (4.0 * R_antisymm[mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3))
 
-    # Define the gradient tensor
-    grad_cis = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
-
-    # idxi/idxj are assumed to already index the full (nmol*molsize) layout; if padding is present,
-    # map packed real-atom indices back to full indices as in anal_grad.contract_ao_derivatives_with_density.
-    grad_cis.index_add_(0, mol.idxi, pair_grad)
-    grad_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
+    grad_cis = torch.zeros(nmol * molsize, 3, dtype=B0.dtype, device=B0.device)
+    grad_cis.index_add_(0, idxi, pair_grad)
+    grad_cis.index_add_(0, idxj, pair_grad, alpha=-1.0)
 
     grad_cis = grad_cis.view(nmol, molsize, 3)
-
-    if omx_orthogonalization_grad is not None:
-        grad_cis += omx_orthogonalization_grad
-
-    # torch.set_printoptions(precision=15)
-    # print(f'Analytical CIS gradient is (eV/Angstrom):\n{grad_cis}')
-
     return grad_cis
 
 

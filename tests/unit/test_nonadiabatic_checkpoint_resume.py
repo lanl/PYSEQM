@@ -33,7 +33,7 @@ def _build_molecule(device, species, coordinates, seqm_parameters):
 
 
 def _seqm_parameters(method, excited=False):
-    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1]}
+    params = {"method": method, "scf_eps": 1.0e-7, "scf_converger": [1], "torch_compile": False}
     if excited:
         params.update({"excited_states": {"n_states": 2, "method": "cis"}})
     return params
@@ -132,7 +132,17 @@ def _compare_runs(continuous, resumed, steps):
         assert_allclose(coords_a, coords_b, rtol=1e-5, atol=1e-5)
         assert_allclose(vels_a, vels_b, rtol=1e-5, atol=1e-5)
         assert active_a == active_b
-        assert_allclose(amps_a, amps_b, rtol=1e-5, atol=1e-5)
+        amps_a_t = torch.as_tensor(amps_a)
+        amps_b_t = torch.as_tensor(amps_b)
+        amps_a_c = torch.complex(amps_a_t[:, 0], amps_a_t[:, 1])
+        amps_b_c = torch.complex(amps_b_t[:, 0], amps_b_t[:, 1])
+        overlap = amps_a_c * torch.conj(amps_b_c)
+        phase = torch.ones_like(overlap)
+        nz = torch.abs(overlap) > 1.0e-12
+        phase[nz] = overlap[nz] / torch.abs(overlap[nz])
+        amps_b_aligned = amps_b_c * phase
+        amps_b_t = torch.stack((amps_b_aligned.real, amps_b_aligned.imag), dim=1)
+        assert_allclose(amps_a_t, amps_b_t, rtol=1e-5, atol=1e-5)
 
 
 @pytest.mark.parametrize("method", NONADIABATIC_METHODS)

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import torch
 
+import seqm.NonadiabaticDynamics as namd_module
 from seqm.MolecularDynamics import CONSTANTS
 from seqm.NonadiabaticDynamics import NonadiabaticDynamicsBase, SurfaceHoppingDynamics
 
@@ -108,6 +109,71 @@ def test_hop_integral_accumulates_coupling():
     assert torch.abs(nad._hop_integral[0, 0, 1]) > 0
     assert torch.abs(nad._hop_integral[0, 1, 0]) > 0
     assert torch.allclose(nad._hop_integral[0, 0, 1], -nad._hop_integral[0, 1, 0], atol=1.0e-12)
+
+
+def test_nonadiabatic_compile_hook_registers_kernels(monkeypatch):
+    calls = []
+
+    def fake_super(self, molecule):
+        self._torch_compile_applied = True
+
+    monkeypatch.setattr(
+        namd_module.Molecular_Dynamics_Langevin, "_enable_torch_compile_if_requested", fake_super
+    )
+    monkeypatch.setattr(namd_module, "enable_nonadiabatic_compile", lambda **kwargs: calls.append(kwargs))
+
+    nad = DummyNAD()
+    nad._torch_compile_applied = False
+    nad._torch_compile_config = {"enabled": True, "compile_nac": True, "options": {"mode": "reduce-overhead"}}
+    molecule = SimpleNamespace(coordinates=torch.zeros((1, 1, 3)))
+    nad._enable_torch_compile_if_requested(molecule)
+
+    assert calls == [{"mode": "reduce-overhead"}]
+
+
+def test_nonadiabatic_compile_wrappers_execute(monkeypatch):
+    compiled = []
+
+    def fake_compile(fn, **kwargs):
+        compiled.append(getattr(fn, "__name__", ""))
+        return fn
+
+    monkeypatch.setattr(torch, "compile", fake_compile)
+    for name in (
+        "_tdc_mo_overlap_dispatch",
+        "_tdc_cis_coupling_dispatch",
+        "_tdc_rpa_coupling_dispatch",
+        "_electronic_propagation_dispatch",
+    ):
+        monkeypatch.setattr(namd_module, name, None)
+
+    namd_module.enable_nonadiabatic_compile(mode="reduce-overhead")
+
+    C = torch.eye(3, dtype=torch.float64).unsqueeze(0)
+    namd_module._tdc_mo_overlap_dispatch(C, C, C, 1)
+
+    flat = torch.eye(2, dtype=torch.float64).unsqueeze(0)
+    view = flat.view(1, 2, 1, 2)
+    dSoo = torch.zeros((1, 1, 1), dtype=torch.float64)
+    dSvv = torch.zeros((1, 2, 2), dtype=torch.float64)
+    namd_module._tdc_cis_coupling_dispatch(flat, flat, view, dSoo, dSvv, 1.0, 1, 2)
+    namd_module._tdc_rpa_coupling_dispatch(
+        flat, flat * 0.0, flat, flat * 0.0, view, view * 0.0, dSoo, dSvv, 1.0, 1, 2
+    )
+
+    nad = make_dummy(substeps=2)
+    cache = {
+        "energies": torch.zeros((1, 2), dtype=torch.float64),
+        "nac_dot": torch.zeros((1, 2, 2), dtype=torch.float64),
+    }
+    nad._propagate_electronic(cache, cache, substeps=2)
+
+    assert {
+        "_tdc_mo_overlap_blocks_kernel",
+        "_tdc_cis_coupling_kernel",
+        "_tdc_rpa_coupling_kernel",
+        "_electronic_propagation_kernel",
+    }.issubset(set(compiled))
 
 
 def test_crossing_detection_triggers():

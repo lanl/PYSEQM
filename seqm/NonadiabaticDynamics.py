@@ -5,6 +5,7 @@ import torch
 from scipy.optimize import linear_sum_assignment
 
 from seqm.seqm_functions.rcis_batch import packone_batch
+from seqm.utils.torch_compile import optional_compile_function
 
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
 from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
@@ -17,6 +18,154 @@ from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 
 HBAR_EV_FS = 0.6582119514  # Planck's constant (reduced) in eV·fs
+_tdc_mo_overlap_dispatch = None
+_tdc_cis_coupling_dispatch = None
+_tdc_rpa_coupling_dispatch = None
+_electronic_propagation_dispatch = None
+
+
+def enable_nonadiabatic_compile(mode=None, **options):
+    """Compile tensor kernels used by overlap TD-NAC and electronic propagation."""
+    global _tdc_mo_overlap_dispatch
+    global _tdc_cis_coupling_dispatch
+    global _tdc_rpa_coupling_dispatch
+    global _electronic_propagation_dispatch
+
+    compile_options = dict(options)
+    if mode is not None:
+        compile_options["mode"] = mode
+
+    _tdc_mo_overlap_dispatch = optional_compile_function(
+        _tdc_mo_overlap_blocks_kernel, compile_options=compile_options, label="namd.tdc_mo_overlap"
+    )
+    _tdc_cis_coupling_dispatch = optional_compile_function(
+        _tdc_cis_coupling_kernel, compile_options=compile_options, label="namd.tdc_cis_coupling"
+    )
+    _tdc_rpa_coupling_dispatch = optional_compile_function(
+        _tdc_rpa_coupling_kernel, compile_options=compile_options, label="namd.tdc_rpa_coupling"
+    )
+    _electronic_propagation_dispatch = optional_compile_function(
+        _electronic_propagation_kernel, compile_options=compile_options, label="namd.electronic_propagation"
+    )
+
+
+def _tdc_mo_overlap_blocks_kernel(Cc, S_ao, Cp, nocc: int):
+    S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)
+    return S_mo[:, :nocc, :nocc], S_mo[:, nocc:, nocc:]
+
+
+def _mo_term_virtual_kernel(C_view, dSvv, nmol: int, nov: int):
+    Cd = torch.matmul(C_view, dSvv.transpose(1, 2).unsqueeze(1))
+    Cf = C_view.reshape(nmol, C_view.shape[1], nov)
+    Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
+    return torch.bmm(Cf, Cdf.transpose(1, 2))
+
+
+def _mo_term_occ_kernel(C_view, dSoo, nmol: int, nov: int):
+    Ct = C_view.permute(0, 1, 3, 2)
+    Ctd = torch.matmul(Ct, dSoo.transpose(1, 2).unsqueeze(1))
+    Cd = Ctd.permute(0, 1, 3, 2)
+    Cf = C_view.reshape(nmol, C_view.shape[1], nov)
+    Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
+    return torch.bmm(Cf, Cdf.transpose(1, 2))
+
+
+def _tdc_cis_coupling_kernel(flat_p, flat_c, view_c, dSoo, dSvv, dt: float, nmol: int, nov: int):
+    ov_pc = torch.bmm(flat_p, flat_c.transpose(1, 2))
+    coup = ov_pc - ov_pc.transpose(-2, -1)
+    coup = coup + _mo_term_virtual_kernel(view_c, dSvv, nmol, nov)
+    coup = coup + _mo_term_occ_kernel(view_c, dSoo, nmol, nov)
+    asym = coup - coup.transpose(1, 2)
+    return 0.25 * asym / dt, ov_pc
+
+
+def _tdc_rpa_coupling_kernel(Xp_f, Yp_f, Xc_f, Yc_f, Xc_v, Yc_v, dSoo, dSvv, dt: float, nmol: int, nov: int):
+    ov_pc = torch.bmm(Xp_f, Xc_f.transpose(1, 2)) + torch.bmm(Yp_f, Yc_f.transpose(1, 2))
+    ov_cp = torch.bmm(Xc_f, Xp_f.transpose(1, 2)) + torch.bmm(Yc_f, Yp_f.transpose(1, 2))
+    coup = ov_pc - ov_cp
+    coup = coup + _mo_term_virtual_kernel(Xc_v, dSvv, nmol, nov)
+    coup = coup + _mo_term_occ_kernel(Xc_v, dSoo, nmol, nov)
+    coup = coup + _mo_term_virtual_kernel(Yc_v, dSvv, nmol, nov)
+    coup = coup + _mo_term_occ_kernel(Yc_v, dSoo, nmol, nov)
+    asym = coup - coup.transpose(1, 2)
+    return 0.25 * asym / dt, ov_pc
+
+
+def _electronic_rhs_kernel(xr, yi, theta, nac_proj):
+    ct = torch.cos(theta)
+    st = torch.sin(theta)
+
+    u_re = xr * ct - yi * st
+    u_im = xr * st + yi * ct
+
+    r_re = torch.bmm(nac_proj, u_re.unsqueeze(-1)).squeeze(-1)
+    r_im = torch.bmm(nac_proj, u_im.unsqueeze(-1)).squeeze(-1)
+
+    dx = -(ct * r_re + st * r_im)
+    dy = st * r_re - ct * r_im
+    return dx, dy
+
+
+def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: float, nsub: int):
+    de = e1 - e0
+    dnd = nd_new - nd_old
+
+    inv_nsub = 1.0 / float(nsub)
+    dt_sub = dt_total * inv_nsub
+    half_dt_sub = 0.5 * dt_sub
+    dt_over_hbar = dt_sub / HBAR_EV_FS
+    half_dt_over_hbar = 0.5 * dt_over_hbar
+    one_sixth_dt = dt_sub / 6.0
+
+    x = amp[..., 0]
+    y = amp[..., 1]
+    th = amp[..., 2]
+
+    for s in range(nsub):
+        tau = s * inv_nsub
+        tau_half = tau + 0.5 * inv_nsub
+        tau_full = tau + inv_nsub
+
+        e1s = e0 + tau * de
+        e2s = e0 + tau_half * de
+
+        nd1 = nd_old + tau * dnd
+        nd2 = nd_old + tau_half * dnd
+        nd4 = nd_old + tau_full * dnd
+
+        dx1, dy1 = _electronic_rhs_kernel(x, y, th, nd1)
+
+        x2 = x + half_dt_sub * dx1
+        y2 = y + half_dt_sub * dy1
+        th2 = th - half_dt_over_hbar * e1s
+        dx2, dy2 = _electronic_rhs_kernel(x2, y2, th2, nd2)
+
+        x3 = x + half_dt_sub * dx2
+        y3 = y + half_dt_sub * dy2
+        th3 = th - half_dt_over_hbar * e2s
+        dx3, dy3 = _electronic_rhs_kernel(x3, y3, th3, nd2)
+
+        x4 = x + dt_sub * dx3
+        y4 = y + dt_sub * dy3
+        th4 = th - dt_over_hbar * e2s
+        dx4, dy4 = _electronic_rhs_kernel(x4, y4, th4, nd4)
+
+        x = x + one_sixth_dt * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4)
+        y = y + one_sixth_dt * (dy1 + 2.0 * dy2 + 2.0 * dy3 + dy4)
+        th = th - e2s * dt_over_hbar
+
+    th = torch.remainder(th + torch.pi, 2.0 * torch.pi) - torch.pi
+
+    ct = torch.cos(th)
+    st = torch.sin(th)
+    u_re = x * ct - y * st
+    u_im = x * st + y * ct
+    hop_int = u_re.unsqueeze(2) * u_re.unsqueeze(1) + u_im.unsqueeze(2) * u_im.unsqueeze(1)
+    hop_int = hop_int * nd_new * (2.0 * dt_total)
+    hop_int = hop_int * (1.0 - eye)
+
+    return torch.stack((x, y, th), dim=-1), hop_int
+
 
 # =============================================================================
 # Nonadiabatic (mixed quantum–classical) dynamics in the adiabatic electronic basis
@@ -129,6 +278,21 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._full_nac_pair_keys = None
         self._full_nac_state_i = None
         self._full_nac_state_j = None
+
+    def _enable_torch_compile_if_requested(self, molecule):
+        was_applied = self._torch_compile_applied
+        super()._enable_torch_compile_if_requested(molecule)
+        cfg = self._torch_compile_config
+        if was_applied or not cfg["enabled"] or getattr(self, "k", None) is not None:
+            return
+        if not cfg["compile_nac"]:
+            return
+
+        options = dict(cfg["options"])
+        if "mode" not in options and molecule.coordinates.is_cuda:
+            options["mode"] = "reduce-overhead"
+        kernel_mode = options.pop("mode", None)
+        enable_nonadiabatic_compile(mode=kernel_mode, **options)
 
     def _normalize_initial_state(self, nmol: int, device) -> torch.Tensor:
         init = self.initial_state
@@ -447,10 +611,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             # MO overlap: S_mo = C(t)^T S_ao(t,t-dt) C(t-dt)
             Cc = molecule.molecular_orbitals  # (nmol, nao, norb)
             Cp = mos_prev  # (nmol, nao, norb)
-            S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)  # (nmol, norb, norb)
-
-            Soo = S_mo[:, :nocc, :nocc]  # (nmol, nocc, nocc)
-            Svv = S_mo[:, nocc:, nocc:]  # (nmol, nvirt, nvirt)
+            make_overlap = _tdc_mo_overlap_dispatch or _tdc_mo_overlap_blocks_kernel
+            Soo, Svv = make_overlap(Cc, S_ao, Cp, nocc)
 
             if bad_diag_overlap(Soo, 0.85).any() or bad_diag_overlap(Svv, 0.85).any():
                 return None
@@ -458,69 +620,24 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             dSoo = Soo.transpose(1, 2) - Soo
             dSvv = Svv.transpose(1, 2) - Svv
 
-            # helper: MO-derivative term on virtual block
-            def mo_term_virtual(C_view):
-                # C_view: (nmol, nstates, nocc, nvirt)
-                Cd = torch.matmul(C_view, dSvv.transpose(1, 2).unsqueeze(1))  # (nmol, nstates, nocc, nvirt)
-                Cf = C_view.reshape(nmol, C_view.shape[1], nov)  # (nmol, nstates, nov)
-                Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
-                return torch.bmm(Cf, Cdf.transpose(1, 2))  # (nmol, nstates, nstates)
-
-            # helper: MO-derivative term on occupied block
-            def mo_term_occ(C_view):
-                # apply dSoo^T on the occ index
-                Ct = C_view.permute(0, 1, 3, 2)  # (nmol, nstates, nvirt, nocc)
-                Ctd = torch.matmul(Ct, dSoo.transpose(1, 2).unsqueeze(1))  # (nmol, nstates, nvirt, nocc)
-                Cd = Ctd.permute(0, 1, 3, 2)  # (nmol, nstates, nocc, nvirt)
-                Cf = C_view.reshape(nmol, C_view.shape[1], nov)
-                Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
-                return torch.bmm(Cf, Cdf.transpose(1, 2))
-
             if curr[0] == "cis":
                 _, flat_p, _ = prev
                 _, flat_c, view_c = curr
-
-                # CI-derivative term: <p|c> - <c|p>
-                ov_pc = torch.bmm(flat_p, flat_c.transpose(1, 2))
-                # ov_cp = torch.bmm(flat_c, flat_p.transpose(1, 2))
-                ov_cp = ov_pc.transpose(-2, -1)
-                coup = ov_pc - ov_cp
-
-                # MO-derivative terms
-                coup = coup + mo_term_virtual(view_c) + mo_term_occ(view_c)
+                make_coup = _tdc_cis_coupling_dispatch or _tdc_cis_coupling_kernel
+                nac_dt, ov_pc = make_coup(flat_p, flat_c, view_c, dSoo, dSvv, float(dt), nmol, nov)
 
             else:
                 _, (Xp_f, Yp_f), _ = prev
                 _, (Xc_f, Yc_f), (Xc_v, Yc_v) = curr
 
-                # CI-derivative term in Fortran style:
-                # (X+Y)^T(X+Y) + (X-Y)^T(X-Y)  antisymmetrized between steps
-                # Ap_p = Xp_f + Yp_f
-                # Ap_c = Xc_f + Yc_f
-                # Am_p = Xp_f - Yp_f
-                # Am_c = Xc_f - Yc_f
-
-                ov_pc = torch.bmm(Xp_f, Xc_f.transpose(1, 2)) + torch.bmm(Yp_f, Yc_f.transpose(1, 2))
-                ov_cp = torch.bmm(Xc_f, Xp_f.transpose(1, 2)) + torch.bmm(Yc_f, Yp_f.transpose(1, 2))
-                coup = ov_pc - ov_cp
-
-                # MO-derivative terms: +X part +Y part (note the + sign)
-                coup = (
-                    coup
-                    + mo_term_virtual(Xc_v)
-                    + mo_term_occ(Xc_v)
-                    + mo_term_virtual(Yc_v)
-                    + mo_term_occ(Yc_v)
+                make_coup = _tdc_rpa_coupling_dispatch or _tdc_rpa_coupling_kernel
+                nac_dt, ov_pc = make_coup(
+                    Xp_f, Yp_f, Xc_f, Yc_f, Xc_v, Yc_v, dSoo, dSvv, float(dt), nmol, nov
                 )
 
             if bad_diag_overlap(ov_pc, 0.85).any():
                 print("Bad amp overlap, ", ov_pc)
                 return None
-
-            asym = coup - coup.transpose(1, 2)
-
-            coup = 0.5 * asym
-            nac_dt = coup / (2.0 * dt)
 
         return nac_dt
 
@@ -693,7 +810,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # excitation energies
         e0 = energies_old
         e1 = energies_new
-        de = e1 - e0
 
         dnd = nd_new - nd_old
 
@@ -722,109 +838,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         else:
             nsub = int(substeps)
 
-        inv_nsub = 1.0 / float(nsub)
-        dt_sub = dt_total * inv_nsub
-        half_dt_sub = 0.5 * dt_sub
-        dt_over_hbar = dt_sub / HBAR_EV_FS
-        half_dt_over_hbar = 0.5 * dt_over_hbar
-        one_sixth_dt = dt_sub / 6.0
-
-        x = amp[..., 0]
-        y = amp[..., 1]
-        th = amp[..., 2]
-
-        def rhs_amp(xr, yi, theta, nac_proj):
-            """
-            Interaction-picture RHS, using real arithmetic.
-
-            a_i = x_i + i y_i
-            u_i = a_i exp(i theta_i)
-
-            da_i/dt = - exp(-i theta_i) sum_j D_ij u_j
-            """
-
-            ct = torch.cos(theta)
-            st = torch.sin(theta)
-
-            # u = (x + i y) exp(i theta)
-            u_re = xr * ct - yi * st
-            u_im = xr * st + yi * ct
-
-            # r = D @ u, D is real.
-            r_re = torch.bmm(nac_proj, u_re.unsqueeze(-1)).squeeze(-1)
-            r_im = torch.bmm(nac_proj, u_im.unsqueeze(-1)).squeeze(-1)
-
-            # -exp(-i theta) r
-            dx = -(ct * r_re + st * r_im)
-            dy = st * r_re - ct * r_im
-
-            return dx, dy
-
-        # ------------------------------------------------------------------
-        # RK4 loop
-        # ------------------------------------------------------------------
-        for s in range(nsub):
-            tau = s * inv_nsub
-            tau_half = tau + 0.5 * inv_nsub
-            tau_full = tau + inv_nsub
-
-            e1s = e0 + tau * de
-            e2s = e0 + tau_half * de
-
-            nd1 = nd_old + tau * dnd
-            nd2 = nd_old + tau_half * dnd
-            nd4 = nd_old + tau_full * dnd
-
-            # k1
-            dx1, dy1 = rhs_amp(x, y, th, nd1)
-
-            # k2
-            x2 = x + half_dt_sub * dx1
-            y2 = y + half_dt_sub * dy1
-            th2 = th - half_dt_over_hbar * e1s
-            dx2, dy2 = rhs_amp(x2, y2, th2, nd2)
-
-            # k3
-            x3 = x + half_dt_sub * dx2
-            y3 = y + half_dt_sub * dy2
-            th3 = th - half_dt_over_hbar * e2s
-            dx3, dy3 = rhs_amp(x3, y3, th3, nd2)
-
-            # k4
-            x4 = x + dt_sub * dx3
-            y4 = y + dt_sub * dy3
-            th4 = th - dt_over_hbar * e2s
-            dx4, dy4 = rhs_amp(x4, y4, th4, nd4)
-
-            x = x + one_sixth_dt * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4)
-            y = y + one_sixth_dt * (dy1 + 2.0 * dy2 + 2.0 * dy3 + dy4)
-
-            # Exact for linearly interpolated E over this substep.
-            th = th - e2s * dt_over_hbar
-
-        th = torch.remainder(th + torch.pi, 2.0 * torch.pi) - torch.pi
-
-        amp[..., 0] = x
-        amp[..., 1] = y
-        amp[..., 2] = th
-
-        # ------------------------------------------------------------------
-        # Cheap final-time hop integral estimate.
-        # ------------------------------------------------------------------
-        ct = torch.cos(th)
-        st = torch.sin(th)
-
-        u_re = x * ct - y * st
-        u_im = x * st + y * ct
-
-        hop_int = u_re.unsqueeze(2) * u_re.unsqueeze(1) + u_im.unsqueeze(2) * u_im.unsqueeze(1)
-
-        hop_int.mul_(nd_new)
-        hop_int.mul_(2.0 * dt_total)
-
         eye = self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0)
-        hop_int.mul_(1.0 - eye)
-
+        propagate = _electronic_propagation_dispatch or _electronic_propagation_kernel
+        amp_new, hop_int = propagate(amp, e0, e1, nd_old, nd_new, eye, float(dt_total), nsub)
+        amp.copy_(amp_new)
         self._hop_integral = hop_int
 
     def _thermo_potential(self, molecule):
@@ -972,6 +989,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         }
         if isinstance(self._cache_old, dict):
             cache_old = {}
+            energies = self._cache_old.get("energies")
+            if torch.is_tensor(energies):
+                cache_old["energies"] = self._tensor_cpu(energies)
+            cis_amp = self._cache_old.get("cis_amp")
+            if torch.is_tensor(cis_amp):
+                cache_old["cis_amp"] = self._tensor_cpu(cis_amp)
             nac_dot = self._cache_old.get("nac_dot")
             if torch.is_tensor(nac_dot):
                 cache_old["nac_dot"] = self._tensor_cpu(nac_dot)

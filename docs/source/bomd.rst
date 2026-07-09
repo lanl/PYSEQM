@@ -293,13 +293,12 @@ Parameters:
 - ``timestep`` (``float``): integration step size in femtoseconds
 - ``Temp`` (``float``): initial temperature (K); Initializes velocities drawn from a Maxwell–Boltzmann at this temperature
 - ``output`` (``dict``): controls console/XYZ/HDF5 cadence and checkpointing (see below)
-- ``torch_compile`` (``bool`` or ``dict``): optional compile mode for repeated dynamics calls.
-  ``True`` enables known compile-safe tensor kernels where available, including
+- ``torch_compile`` (``bool`` or ``dict``): compile mode for repeated dynamics calls.
+  It is enabled by default for known compile-safe tensor kernels, including
   restricted s,p Fock construction, OMx pair kernels, and uniform-batch CIS/RPA
-  tensor contractions. Use ``{'enabled': True, 'mode': 'reduce-overhead'}`` to
-  pass options through to ``torch.compile``. The full force path is not compiled
-  because SCF/integral code still contains dynamic masks, scalar exits, and
-  Python convergence loops that can graph-break.
+  tensor contractions. Set ``False`` or ``{'enabled': False}`` to keep these
+  kernels eager. Use ``{'enabled': True, 'mode': 'reduce-overhead'}`` to
+  pass options through to ``torch.compile``. 
   Set ``compile_fock=False``, ``compile_cis=False``, ``compile_nac=False``, or
   ``compile_omx=False`` in the dict to disable specific kernel families.
 
