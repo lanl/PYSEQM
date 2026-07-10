@@ -15,7 +15,6 @@ _makeA_pi_batched_dispatch = None
 _makeA_pi_symm_batch_dispatch = None
 _ao_transition_density_dispatch = None
 _mo_fock_action_dispatch = None
-_cis_density_dispatch = None
 _relaxed_rhs_dispatch = None
 _relaxed_finish_dispatch = None
 
@@ -26,7 +25,6 @@ def enable_rcis_compile(mode=None, **options):
     global _makeA_pi_symm_batch_dispatch
     global _ao_transition_density_dispatch
     global _mo_fock_action_dispatch
-    global _cis_density_dispatch
     global _relaxed_rhs_dispatch
     global _relaxed_finish_dispatch
 
@@ -45,9 +43,6 @@ def enable_rcis_compile(mode=None, **options):
     )
     _mo_fock_action_dispatch = optional_compile_function(
         _mo_fock_action_kernel, compile_options=compile_options, label="rcis.mo_fock_action"
-    )
-    _cis_density_dispatch = optional_compile_function(
-        _cis_density_kernel, compile_options=compile_options, label="rcis.cis_density"
     )
     _relaxed_rhs_dispatch = optional_compile_function(
         _relaxed_rhs_kernel, compile_options=compile_options, label="rcis.relaxed_rhs"
@@ -1180,8 +1175,9 @@ def make_cis_densities(
 
     cis_densities = {}
     if not rpa and (do_difference_density or do_relaxed_density):
-        make_density = _cis_density_dispatch or _cis_density_kernel
-        R, B, B_virt, B_occ = make_density(Cocc, Cvirt, amp_ia_X)
+        # Keep eager: outputs are reused after compiled calls, and CUDA Graph
+        # output buffers would require extra clones.
+        R, B, B_virt, B_occ = _cis_density_kernel(Cocc, Cvirt, amp_ia_X)
         if do_transition_denisty or do_relaxed_density:
             cis_densities["transition_density"] = R
         if do_difference_density:

@@ -1,8 +1,10 @@
+import os
 import warnings
 
 import torch
 
 _COMPILE_CONTROL_KEYS = {"enabled", "compile_omx", "compile_cis", "compile_fock", "compile_nac", "options"}
+_DISABLE_DEFAULT_ENV = "PYSEQM_DISABLE_TORCH_COMPILE_DEFAULT"
 
 
 def _compile_config(enabled):
@@ -16,6 +18,10 @@ def _compile_config(enabled):
     }
 
 
+def _default_enabled():
+    return os.environ.get(_DISABLE_DEFAULT_ENV, "").strip().lower() not in {"1", "true", "yes", "on"}
+
+
 def normalize_torch_compile_config(seqm_parameters, override=None):
     """
     Normalize the torch.compile configuration used by dynamics drivers.
@@ -26,7 +32,7 @@ def normalize_torch_compile_config(seqm_parameters, override=None):
       torch_compile={"enabled": True, "mode": "reduce-overhead"}
       torch_compile={"enabled": True, "options": {"mode": "reduce-overhead"}}
     """
-    raw = seqm_parameters.get("torch_compile", True) if override is None else override
+    raw = seqm_parameters.get("torch_compile", _default_enabled()) if override is None else override
     if raw is None or raw is False:
         return _compile_config(False)
     if raw is True:

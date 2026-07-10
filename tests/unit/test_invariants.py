@@ -4,6 +4,9 @@ import torch
 from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
+from seqm.seqm_functions.om1_core_corrections import _fmtgen_fortran
+from seqm.seqm_functions.om1_pair_backend import boys_from_table
+from seqm.seqm_functions.omx_basis import BoysInterpolationTable
 
 from ..reference_data import OMX_METHODS, assert_allclose
 
@@ -22,6 +25,16 @@ def _rotation_matrix_z(theta):
 
 def _rotate(coords, R):
     return torch.einsum("...i,ij->...j", coords, R)
+
+
+def test_omx_boys_direct_region_matches_fmtgen():
+    boys_table = BoysInterpolationTable()
+    x = torch.linspace(boys_table.xmax, boys_table.xlim, 5, dtype=torch.float64)
+
+    actual = torch.stack(boys_from_table(x, boys_table, 5), dim=-1)
+    expected = _fmtgen_fortran(x, 5)
+
+    assert_allclose(actual, expected, rtol=1e-11, atol=1e-11)
 
 
 @pytest.mark.parametrize("method", OMX_METHODS)

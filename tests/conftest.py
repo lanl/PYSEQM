@@ -6,6 +6,8 @@ import torch
 
 from seqm.seqm_functions.read_xyz import read_xyz
 
+os.environ.setdefault("PYSEQM_DISABLE_TORCH_COMPILE_DEFAULT", "1")
+
 
 @pytest.fixture(scope="session")
 def device():

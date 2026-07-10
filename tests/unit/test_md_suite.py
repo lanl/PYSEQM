@@ -195,9 +195,11 @@ def test_md_langevin_single(tmp_path, device, methane_molecule_data, method):
     _assert_temperature_envelope(metrics[0])
 
 
-def test_torch_compile_config_rejects_targets():
+def test_torch_compile_config_rejects_targets(monkeypatch):
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
+    assert not normalize_torch_compile_config({})["enabled"]
+    monkeypatch.delenv("PYSEQM_DISABLE_TORCH_COMPILE_DEFAULT", raising=False)
     assert normalize_torch_compile_config({})["enabled"]
     assert not normalize_torch_compile_config({"torch_compile": False})["enabled"]
     assert not normalize_torch_compile_config({"torch_compile": {"enabled": False}})["enabled"]
@@ -215,6 +217,7 @@ def test_md_torch_compile_enabled_by_default(monkeypatch):
     import seqm.MolecularDynamics as md_module
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
+    monkeypatch.delenv("PYSEQM_DISABLE_TORCH_COMPILE_DEFAULT", raising=False)
     calls = []
     monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
 
@@ -287,7 +290,6 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
     monkeypatch.setattr(rcis_batch, "_makeA_pi_symm_batch_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_ao_transition_density_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_mo_fock_action_dispatch", None)
-    monkeypatch.setattr(rcis_batch, "_cis_density_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_relaxed_rhs_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_relaxed_finish_dispatch", None)
     monkeypatch.setattr(rcis_grad_batch, "_rcis_grad_contract_dispatch", None)

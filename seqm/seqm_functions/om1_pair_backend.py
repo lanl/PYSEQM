@@ -4,7 +4,6 @@ import torch
 
 from .constants import ev
 from .om1_core_corrections import (
-    _fmtgen_fortran,
     om1_apply_valpot_scaling,
     om1_assemble_core,
     om1_cordef,
@@ -263,19 +262,22 @@ def boys_from_table(x, boys_table, m_count):
         X > XLIM          unused here; SP code handles asymptotic separately
     Returns F0...F_{m_count-1}.
     """
-    vals = x.new_zeros(x.shape + (m_count,))
-
-    use_table = x < boys_table.xmax
-    use_direct = (x >= boys_table.xmax) & (x <= boys_table.xlim)
-
-    if bool(use_table.any()):
-        tab_vals = boys_table(x[use_table], m_count)
-        vals[use_table] = torch.stack(tab_vals, dim=-1)
-
-    if bool(use_direct.any()):
-        vals[use_direct] = _fmtgen_fortran(x[use_direct], m_count)
-
+    tab_vals = torch.stack(boys_table(x.clamp(max=boys_table.xmax), m_count), dim=-1)
+    direct_vals = _boys_direct_fixed(x.clamp(min=boys_table.xmax, max=boys_table.xlim), m_count)
+    use_direct = ((x >= boys_table.xmax) & (x <= boys_table.xlim)).unsqueeze(-1)
+    vals = torch.where(use_direct, direct_vals, tab_vals)
     return tuple(vals[..., m] for m in range(m_count))
+
+
+def _boys_direct_fixed(t, m_count):
+    sqrt_t = torch.sqrt(t)
+    texp = torch.exp(-t)
+    cur = 0.5 * math.sqrt(math.pi) * torch.erf(sqrt_t) / sqrt_t
+    vals = [cur]
+    for m in range(1, m_count):
+        cur = (float(2 * m - 1) * cur - texp) / (2.0 * t)
+        vals.append(cur)
+    return torch.stack(vals, dim=-1)
 
 
 def _sp0000_batch(p, q, rab, boys_table):

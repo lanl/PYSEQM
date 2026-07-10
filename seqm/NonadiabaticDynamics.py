@@ -636,7 +636,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 )
 
             if bad_diag_overlap(ov_pc, 0.85).any():
-                print("Bad amp overlap, ", ov_pc)
                 return None
 
         return nac_dt
