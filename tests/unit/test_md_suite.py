@@ -199,10 +199,10 @@ def test_torch_compile_config_rejects_targets(monkeypatch):
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
     assert not normalize_torch_compile_config({})["enabled"]
-    monkeypatch.delenv("PYSEQM_DISABLE_TORCH_COMPILE_DEFAULT", raising=False)
-    assert normalize_torch_compile_config({})["enabled"]
     assert not normalize_torch_compile_config({"torch_compile": False})["enabled"]
     assert not normalize_torch_compile_config({"torch_compile": {"enabled": False}})["enabled"]
+    assert normalize_torch_compile_config({"torch_compile": True})["enabled"]
+    assert normalize_torch_compile_config({"torch_compile": {"enabled": True}})["enabled"]
     assert not normalize_torch_compile_config({}, False)["enabled"]
 
     cfg = normalize_torch_compile_config({}, {"enabled": True, "mode": "reduce-overhead"})
@@ -213,11 +213,10 @@ def test_torch_compile_config_rejects_targets(monkeypatch):
         normalize_torch_compile_config({}, {"enabled": True, "target": "force"})
 
 
-def test_md_torch_compile_enabled_by_default(monkeypatch):
+def test_md_torch_compile_requires_explicit_opt_in(monkeypatch):
     import seqm.MolecularDynamics as md_module
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
-    monkeypatch.delenv("PYSEQM_DISABLE_TORCH_COMPILE_DEFAULT", raising=False)
     calls = []
     monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
 
@@ -230,6 +229,12 @@ def test_md_torch_compile_enabled_by_default(monkeypatch):
     md._torch_compile_config = normalize_torch_compile_config(seqm_parameters)
     md._torch_compile_applied = False
     md.seqm_parameters = seqm_parameters
+    md_module.Molecular_Dynamics_Basic._enable_torch_compile_if_requested(md, DummyMolecule())
+
+    assert calls == []
+    assert not md._torch_compile_applied
+
+    md._torch_compile_config = normalize_torch_compile_config({"method": "AM1", "torch_compile": True})
     md_module.Molecular_Dynamics_Basic._enable_torch_compile_if_requested(md, DummyMolecule())
 
     assert calls == ["fock"]

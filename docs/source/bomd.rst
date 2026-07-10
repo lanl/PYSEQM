@@ -294,11 +294,13 @@ Parameters:
 - ``Temp`` (``float``): initial temperature (K); Initializes velocities drawn from a Maxwell–Boltzmann at this temperature
 - ``output`` (``dict``): controls console/XYZ/HDF5 cadence and checkpointing (see below)
 - ``torch_compile`` (``bool`` or ``dict``): compile mode for repeated dynamics calls.
-  It is enabled by default for known compile-safe tensor kernels, including
-  restricted s,p Fock construction, OMx pair kernels, and uniform-batch CIS/RPA
-  tensor contractions. Set ``False`` or ``{'enabled': False}`` to keep these
-  kernels eager. Use ``{'enabled': True, 'mode': 'reduce-overhead'}`` to
-  pass options through to ``torch.compile``. 
+  By default these kernels stay eager. Set ``True`` or
+  ``{'enabled': True, 'mode': 'reduce-overhead'}`` to opt into compilation for
+  known compile-safe tensor kernels, including restricted s,p Fock
+  construction, OMx pair kernels, and uniform-batch CIS/RPA tensor
+  contractions. Use ``False`` or ``{'enabled': False}`` to keep compilation
+  disabled, and pass additional options through to ``torch.compile`` via the
+  dict.
   Set ``compile_fock=False``, ``compile_cis=False``, ``compile_nac=False``, or
   ``compile_omx=False`` in the dict to disable specific kernel families.
 

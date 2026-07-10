@@ -179,11 +179,11 @@ Important FSSH inputs
   a simple collapse rule, not a continuous decoherence-time correction.
 
 ``torch_compile``
-  The NAMD drivers inherit the BOMD ``torch_compile`` option. By default for
-  repeated dynamics, it compiles the same SCF/CIS kernels as excited-state BOMD
-  and also registers tensor contractions used by CIS NAC vectors. Set
-  ``torch_compile=False`` to disable compilation, or ``compile_nac=False`` to
-  leave NAC contractions eager.
+  The NAMD drivers inherit the BOMD ``torch_compile`` option. By default they
+  leave repeated-dynamics kernels eager. Set ``torch_compile=True`` to opt into
+  compiling the same SCF/CIS kernels as excited-state BOMD and the tensor
+  contractions used by CIS NAC vectors, or set ``compile_nac=False`` to leave
+  NAC contractions eager while compiling the rest.
 
 ``nonadiabatic['detect_crossings']``
   Enables trivial crossing detection. The default is ``True``.
