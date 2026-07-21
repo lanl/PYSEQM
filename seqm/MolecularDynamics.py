@@ -901,6 +901,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             enable_nac_compile(mode=kernel_mode, **kernel_options)
             enable_tdc_hamiltonian_fd_compile(mode=kernel_mode, **kernel_options)
 
+    def _mark_torch_compile_step(self, molecule):
+        mark = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
+        if self._torch_compile_config["enabled"] and molecule.coordinates.is_cuda and mark:
+            mark()
+
     def _thermo_potential(self, molecule):
         """Potential energy for thermodynamics (override in subclasses)."""
         return molecule.Etot
@@ -1109,6 +1114,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         try:
             for i in range(self.step_offset, steps):
+                self._mark_torch_compile_step(molecule)
                 self._do_integrator_step(i, molecule, learned_parameters, *args, **kwargs)
 
                 with torch.no_grad():

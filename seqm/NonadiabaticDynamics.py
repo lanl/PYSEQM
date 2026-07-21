@@ -899,6 +899,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             *args,
             **kwargs,
         )
+        self._mark_torch_compile_step(molecule)
         self.esdriver.conservative_force.energy.namd = True
         excitation_energies = self._build_state_energies(molecule)
         cache_old = self._cache_old or {}

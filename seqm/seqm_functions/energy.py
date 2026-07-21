@@ -179,7 +179,7 @@ def pair_nuclear_energy(
 
 
 def total_energy(nmol, pair_molid, EnucAB, Eelec):
-    """
+    r"""
     total energy for each molecule
     total energy E_tot^mol= Eelec + \sum{pair A,B,A<B} E_nuc^AB
     #nuclear energy between pair of atom A and B: E_nuc^AB
@@ -196,7 +196,7 @@ def total_energy(nmol, pair_molid, EnucAB, Eelec):
 
 
 def heat_formation(const, nmol, atom_molid, Z, Etot, Eiso, flag=True):
-    """
+    r"""
     get the heat of formation for each molecule
     return Hf : shape (nmol,)
     #heat of formation : delta H_f^mol
