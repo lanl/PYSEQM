@@ -218,6 +218,7 @@ def test_md_torch_compile_requires_explicit_opt_in(monkeypatch):
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
     calls = []
+    monkeypatch.setattr(md_module, "enable_two_center_compile", lambda **kwargs: calls.append("integrals"))
     monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
 
     seqm_parameters = {"method": "AM1"}
@@ -237,7 +238,7 @@ def test_md_torch_compile_requires_explicit_opt_in(monkeypatch):
     md._torch_compile_config = normalize_torch_compile_config({"method": "AM1", "torch_compile": True})
     md_module.Molecular_Dynamics_Basic._enable_torch_compile_if_requested(md, DummyMolecule())
 
-    assert calls == ["fock"]
+    assert calls == ["integrals", "fock"]
     assert md._torch_compile_applied
 
 
@@ -246,6 +247,7 @@ def test_md_torch_compile_family_toggles(monkeypatch):
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
     calls = []
+    monkeypatch.setattr(md_module, "enable_two_center_compile", lambda **kwargs: calls.append("integrals"))
     monkeypatch.setattr(md_module, "enable_omx_compile", lambda **kwargs: calls.append("omx"))
     monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
     monkeypatch.setattr(md_module, "enable_rcis_compile", lambda **kwargs: calls.append("cis"))
@@ -281,7 +283,7 @@ def test_md_torch_compile_family_toggles(monkeypatch):
 
 def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, device, methane_molecule_data):
     from seqm.dynamics import tdc_hamiltonian_fd
-    from seqm.seqm_functions import fock, nac, rcis_batch, rcis_grad_batch
+    from seqm.seqm_functions import fock, nac, rcis_batch, rcis_grad_batch, two_elec_two_center_int
 
     calls = []
 
@@ -290,6 +292,7 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
         return fn
 
     monkeypatch.setattr(torch, "compile", fake_compile)
+    monkeypatch.setattr(two_elec_two_center_int, "_rotate_sp_integrals_dispatch", None)
     monkeypatch.setattr(fock, "_fock_sp_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_makeA_pi_batched_dispatch", None)
     monkeypatch.setattr(rcis_batch, "_makeA_pi_symm_batch_dispatch", None)
@@ -324,6 +327,7 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
     _run_md(md, molecule, steps=1)
 
     compiled_names = {name for name, _ in calls}
+    assert "_rotate_sp_integrals_kernel" in compiled_names
     assert "_fock_sp_kernel" in compiled_names
     assert "_makeA_pi_batched_kernel" in compiled_names
     assert "_ao_transition_density_kernel" in compiled_names
@@ -331,6 +335,7 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
     assert "_rcis_grad_contract_kernel" in compiled_names
     assert all(kwargs["mode"] == "reduce-overhead" for _, kwargs in calls)
     assert getattr(fock._fock_sp_dispatch, "is_torch_compile_wrapper", False)
+    assert getattr(two_elec_two_center_int._rotate_sp_integrals_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(rcis_batch._makeA_pi_symm_batch_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(rcis_grad_batch._rcis_grad_contract_dispatch, "is_torch_compile_wrapper", False)
     assert getattr(nac._contract_nac_density_dispatch, "is_torch_compile_wrapper", False)

@@ -2,6 +2,8 @@ import math
 
 import torch
 
+from seqm.utils.torch_compile import optional_compile_function
+
 from .RotationMatrixD import GenerateRotationMatrix, Rotate2Center2Electron
 from .cal_par import AIJL, POIJ, additive_term_rho1, additive_term_rho2, dd_qq
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
@@ -10,6 +12,29 @@ from .constants import ev
 
 
 _PM6_D_PARAM_CACHE = {}
+_rotate_sp_integrals_dispatch = None
+
+_SP_PAIR_FIRST = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], dtype=torch.long)
+_SP_PAIR_SECOND = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], dtype=torch.long)
+_SP_LOCAL_OUT = torch.tensor(
+    [0,1,2,5,9,10,11,12,15,19,20,21,22,25,29,33,34,43,44,50,51,52,55,59,66,67,76,77,88,90,91,92,95,99], dtype=torch.long
+)
+_SP_LOCAL_RI = torch.tensor(
+    [0,4,10,11,11,1,5,12,13,13,2,7,15,17,17,6,14,9,19,3,8,16,18,20,6,14,9,19,21,3,8,16,20,18], dtype=torch.long
+)
+_SP_XH_LOCAL_OUT = torch.tensor([0, 1, 2, 5, 9], dtype=torch.long)
+_SP_XH_LOCAL_RI = torch.tensor([0, 1, 2, 3, 3], dtype=torch.long)
+
+
+def enable_two_center_compile(mode=None, **options):
+    global _rotate_sp_integrals_dispatch
+    compile_options = dict(options)
+    if mode is not None:
+        compile_options["mode"] = mode
+    _rotate_sp_integrals_dispatch = optional_compile_function(
+        _rotate_sp_integrals_kernel, compile_options=compile_options, label="two_center.rotate_sp_integrals"
+    )
+
 
 def _pm6_d_param_key(method, category, z, qn0, zetas, zetap, zetad, zs, zp, zd, g2sd):
     return (
@@ -678,197 +703,97 @@ def binom(a, b):
 
       return k 
 
-def w_withquaternion(mol,tore,ni, nj, xij, riXH, ri, wHH):
-
-    dtype = xij.dtype
-    device = xij.device
-
+def w_withquaternion(mol, tore, ni, nj, xij, riXH, ri, wHH):
     HH = (ni == 1) & (nj == 1)
     XH = (ni > 1) & (nj == 1)
     XX = (ni > 1) & (nj > 1)
 
-    v = -xij
-    rot = rotate_with_quaternion(v)
-    rotXH = rot[XH]
-    rot = rot[XX]
+    kernel = _rotate_sp_integrals_dispatch or _rotate_sp_integrals_kernel
+    wXH, w = kernel(xij[XH], xij[XX], riXH, ri)
 
-    w = torch.zeros(ri.shape[0], 100, device=device, dtype=dtype)
-    wXH = torch.zeros(XH.sum(), 10, device=device, dtype=dtype)
-
-    # 1) preslice rot blocks into row‐views
-    #    so r0[:,i] == rot[:,0,i],    etc.
-    r0  = rot[:, 0]   # (B,3)
-    r1  = rot[:, 1]
-    r2  = rot[:, 2]
-    rx0 = rotXH[:,0]  # (BH,3)
-    rx1 = rotXH[:,1]
-    rx2 = rotXH[:,2]
-
-    # 2) unpack all of the ri‐integrals and riXH‐integrals
-    ri_s    = ri.unbind(dim=-1)    # tuple of length 22
-    riXH_s  = riXH.unbind(dim=-1)  # tuple of length 4
-
-    # 3) build the *flattened* list of all (kk,ll,mm,nn) combos in the order
-    combos = [
-      (kk, ll, mm, nn)
-      for kk in range(4)
-      for ll in range(kk+1)
-      for mm in range(4)
-      for nn in range(mm+1)
-    ]
-
-    idx    = 0
-    idxXH  = 0
-
-    for kk, ll, mm, nn in combos:
-        k = kk - 1
-        l = ll - 1
-        m = mm - 1
-        n = nn - 1
-
-        if kk == 0:
-            # ─── ss|·· cases ──────────────────────────────────────
-            if mm == 0:
-                # (ss|ss)
-                w[:,idx]   = ri_s[0]
-                wXH[:,idxXH] = riXH_s[0]
-                idxXH += 1
-
-            elif nn == 0:
-                # (ss|ps)
-                w[:,idx] = ri_s[4] * r0[:,m]
-
-            else:
-                # (ss|pp)
-                term1 = ri_s[10] * (r0[:, m] * r0[:, n])
-                term2 = ri_s[11] * (r1[:, m]*r1[:, n] + r2[:, m]*r2[:, n])
-                w[:, idx] = term1 + term2
-
-        elif ll == 0:
-            # ─── ps|·· cases ──────────────────────────────────────
-            if mm == 0:
-                # (ps|ss)
-                w[:,idx]     = ri_s[1] * r0[:,k]
-                wXH[:,idxXH] = riXH_s[1] * rx0[:,k]
-                idxXH += 1
-
-            elif nn == 0:
-                # (ps|ps)
-                term1 = ri_s[5] * (r0[:, k] * r0[:, m])
-                term2 = ri_s[6] * (r1[:, k]*r1[:, m] + r2[:, k]*r2[:, m])
-                w[:, idx] = term1 + term2
-
-            else:
-                # (ps|pp)
-                t0 = r0[:, k] * r0[:, m] * r0[:, n]
-                t1 = (r1[:, m]*r1[:, n] + r2[:, m]*r2[:, n]) * r0[:, k]
-                mix = r1[:, k]*(r1[:, n]*r0[:, m] + r1[:, m]*r0[:, n]) \
-                    + r2[:, k]*(r2[:, m]*r0[:, n] + r2[:, n]*r0[:, m])
-                w[:, idx] = ri_s[12]*t0 + ri_s[13]*t1 + ri_s[14]*mix
-
-        else:
-            # ─── pp|·· cases ──────────────────────────────────────
-            if mm == 0:
-                # (pp|ss)
-                t0 = r0[:, k] * r0[:, l]
-                t1 = r1[:, k]*r1[:, l] + r2[:, k]*r2[:, l]
-                w[:, idx]   = ri_s[2]*t0 + ri_s[3]*t1
-
-                # XH block
-                x0 = rx0[:, k] * rx0[:, l]
-                x1 = rx1[:, k]*rx1[:, l] + rx2[:, k]*rx2[:, l]
-                wXH[:, idxXH] = riXH_s[2]*x0 + riXH_s[3]*x1
-
-                idxXH += 1
-
-            elif nn == 0:
-                # (pp|ps)
-                t0 = r0[:, k] * r0[:, l] * r0[:, m]
-                t1 = (r1[:, k]*r1[:, l] + r2[:, k]*r2[:, l]) * r0[:, m]
-                t2 = r1[:, l]*r1[:, m] + r2[:, l]*r2[:, m]
-                w[:, idx] = ri_s[7]*t0 + ri_s[8]*t1 + ri_s[9]*(r0[:, k]*t2 + r0[:, l]*(r1[:, k]*r1[:, m] + r2[:, k]*r2[:, m]))
-
-            else:
-                # (pp|pp)
-                # term 1: ri[15]*(r0k*r0l*r0m*r0n)
-                t0 = r0[:, k]*r0[:, l]*r0[:, m]*r0[:, n]
-                w[:,idx] = ri_s[15]*t0
-
-                # term 2: ri[16]*((r1k*r1l+r2k*r2l)*r0m*r0n)
-                t1 = (r1[:,k]*r1[:,l] + r2[:,k]*r2[:,l])*r0[:,m]*r0[:,n]
-                w[:,idx].add_( ri_s[16] * t1 )
-
-                # term 3: ri[17]*(r0k*r0l*(r1m*r1n+r2m*r2n))
-                t2 = (r1[:, m]*r1[:, n] + r2[:, m]*r2[:, n]) * (r0[:, k]*r0[:, l])
-                w[:,idx].add_( ri_s[17] * t2 )
-
-                # term 4: ri[18]*(r1k*r1l*r1m*r1n + r2k*r2l*r2m*r2n)
-                quad = r1[:,k]*r1[:,l]*r1[:,m]*r1[:,n] + r2[:,k]*r2[:,l]*r2[:,m]*r2[:,n]
-                w[:,idx].add_( ri_s[18] * quad )
-
-                # term 5: ri[19]*big‐mixed‐coupling
-                mix1 = r0[:,m]*(r1[:,l]*r1[:,n] + r2[:,l]*r2[:,n])
-                mix2 = r0[:,n]*(r1[:,l]*r1[:,m] + r2[:,l]*r2[:,m])
-                val5 = r0[:,k]*(mix1 + mix2) + r0[:,l]*(r0[:,m]*(r1[:,k]*r1[:,n]+r2[:,k]*r2[:,n])
-                                                   + r0[:,n]*(r1[:,k]*r1[:,m]+r2[:,k]*r2[:,m]))
-                w[:,idx].add_( ri_s[19] * val5 )
-
-                # term 6: ri[20]*another‐cross term
-                mix3 = r1[:,k]*r1[:,l]*r2[:,m]*r2[:,n]+ r2[:,k]*r2[:,l]*r1[:,m]*r1[:,n]
-                w[:,idx].add_( ri_s[20] * mix3 )
-
-                # term 7: ri[21]*“cross” permuted pp‐coupling
-                cross = (r1[:,k]*r2[:,l] + r2[:,k]*r1[:,l]) * (r1[:,m]*r2[:,n] + r2[:,m]*r1[:,n])
-                w[:,idx].add_( ri_s[21] * cross )
-
-        idx += 1
-
-    # Core-elecron interaction
     e1b = torch.zeros((xij.shape[0], 4, 4), dtype=w.dtype, device=w.device)
     e2a = torch.zeros((xij.shape[0], 4, 4), dtype=w.dtype, device=w.device)
-
-    w_ = w.view(-1,10,10)
-    e1b[HH, 0, 0] = -tore[1] * wHH
-    e2a[HH, 0, 0] = -tore[1] * wHH
-    e1b[XH, 0, 0] = -tore[nj[XH]] * wXH[:, 0]
+    w_ = w.view(-1, 10, 10)
+    p = _SP_PAIR_FIRST.to(xij.device)
+    q = _SP_PAIR_SECOND.to(xij.device)
+    for target, mask, values, atoms in (
+        (e1b, XH, wXH, nj),
+        (e1b, XX, w_[:, :, 0], nj),
+        (e2a, XX, w_[:, 0, :], ni),
+    ):
+        idx = torch.where(mask)[0]
+        target[idx[:, None], q, p] = -tore[atoms[idx], None] * values
+    e1b[HH, 0, 0] = e2a[HH, 0, 0] = -tore[1] * wHH
     e2a[XH, 0, 0] = -tore[ni[XH]] * wXH[:, 0]
-    e1b[XX, 0, 0] = -tore[nj[XX]] * w_[:, 0, 0]
-    e2a[XX, 0, 0] = -tore[ni[XX]] * w_[:, 0, 0]
-
-    e1b[XH, 0, 1] = -tore[nj[XH]] * wXH[:, 1]
-    e1b[XH, 1, 1] = -tore[nj[XH]] * wXH[:, 2]
-    e1b[XH, 0, 2] = -tore[nj[XH]] * wXH[:, 3]
-    e1b[XH, 1, 2] = -tore[nj[XH]] * wXH[:, 4]
-    e1b[XH, 2, 2] = -tore[nj[XH]] * wXH[:, 5]
-    e1b[XH, 0, 3] = -tore[nj[XH]] * wXH[:, 6]
-    e1b[XH, 1, 3] = -tore[nj[XH]] * wXH[:, 7]
-    e1b[XH, 2, 3] = -tore[nj[XH]] * wXH[:, 8]
-    e1b[XH, 3, 3] = -tore[nj[XH]] * wXH[:, 9]
-
-    e1b[XX, 0, 1] = -tore[nj[XX]] * w_[:, 1, 0]
-    e1b[XX, 1, 1] = -tore[nj[XX]] * w_[:, 2, 0]
-    e1b[XX, 0, 2] = -tore[nj[XX]] * w_[:, 3, 0]
-    e1b[XX, 1, 2] = -tore[nj[XX]] * w_[:, 4, 0]
-    e1b[XX, 2, 2] = -tore[nj[XX]] * w_[:, 5, 0]
-    e1b[XX, 0, 3] = -tore[nj[XX]] * w_[:, 6, 0]
-    e1b[XX, 1, 3] = -tore[nj[XX]] * w_[:, 7, 0]
-    e1b[XX, 2, 3] = -tore[nj[XX]] * w_[:, 8, 0]
-    e1b[XX, 3, 3] = -tore[nj[XX]] * w_[:, 9, 0]
-
-    e2a[XX, 0, 1] = -tore[ni[XX]] * w_[:, 0, 1]
-    e2a[XX, 1, 1] = -tore[ni[XX]] * w_[:, 0, 2]
-    e2a[XX, 0, 2] = -tore[ni[XX]] * w_[:, 0, 3]
-    e2a[XX, 1, 2] = -tore[ni[XX]] * w_[:, 0, 4]
-    e2a[XX, 2, 2] = -tore[ni[XX]] * w_[:, 0, 5]
-    e2a[XX, 0, 3] = -tore[ni[XX]] * w_[:, 0, 6]
-    e2a[XX, 1, 3] = -tore[ni[XX]] * w_[:, 0, 7]
-    e2a[XX, 2, 3] = -tore[ni[XX]] * w_[:, 0, 8]
-    e2a[XX, 3, 3] = -tore[ni[XX]] * w_[:, 0, 9]
-
-    # print(f"given w is\n{w}")
-    # print(f"new w is\n{w_final}")
 
     return e1b, e2a, wXH, w
+
+
+def _pair_rotation_matrix(rot):
+    device = rot.device
+    first = _SP_PAIR_FIRST.to(device=device)
+    second = _SP_PAIR_SECOND.to(device=device)
+
+    U = torch.zeros((rot.shape[0], 4, 4), dtype=rot.dtype, device=device)
+    U[:, 0, 0] = 1.0
+    U[:, 1:, 1:] = rot
+
+    transform = U[:, first[:, None], first[None, :]] * U[:, second[:, None], second[None, :]]
+    swapped = U[:, second[:, None], first[None, :]] * U[:, first[:, None], second[None, :]]
+    transform = transform + swapped * (first != second).reshape(1, -1, 1)
+    return transform.transpose(1, 2)
+
+
+def pair_rotation_matrix_derivative(rot, rot_der):
+    device = rot.device
+    first = _SP_PAIR_FIRST.to(device=device)
+    second = _SP_PAIR_SECOND.to(device=device)
+
+    U = torch.zeros((rot.shape[0], 4, 4), dtype=rot.dtype, device=device)
+    U[:, 0, 0] = 1.0
+    U[:, 1:, 1:] = rot
+    dU = torch.zeros((rot.shape[0], 3, 4, 4), dtype=rot.dtype, device=device)
+    dU[:, :, 1:, 1:] = rot_der
+
+    a_k = U[:, first[:, None], first[None, :]].unsqueeze(1)
+    b_l = U[:, second[:, None], second[None, :]].unsqueeze(1)
+    b_k = U[:, second[:, None], first[None, :]].unsqueeze(1)
+    a_l = U[:, first[:, None], second[None, :]].unsqueeze(1)
+    da_k = dU[:, :, first[:, None], first[None, :]]
+    db_l = dU[:, :, second[:, None], second[None, :]]
+    db_k = dU[:, :, second[:, None], first[None, :]]
+    da_l = dU[:, :, first[:, None], second[None, :]]
+
+    derivative = da_k * b_l + a_k * db_l
+    derivative = derivative + (db_k * a_l + b_k * da_l) * (first != second).reshape(1, 1, -1, 1)
+    return derivative.transpose(-2, -1)
+
+
+def local_sp_integral_matrix(ri):
+    local = ri.new_zeros((*ri.shape[:-1], 100))
+    local[..., _SP_LOCAL_OUT.to(device=ri.device)] = ri[..., _SP_LOCAL_RI.to(device=ri.device)]
+    return local.view(*ri.shape[:-1], 10, 10)
+
+
+def local_xh_integral_vector(riXH):
+    local = riXH.new_zeros((*riXH.shape[:-1], 10))
+    local[..., _SP_XH_LOCAL_OUT.to(device=riXH.device)] = riXH[
+        ..., _SP_XH_LOCAL_RI.to(device=riXH.device)
+    ]
+    return local
+
+
+def _rotate_sp_integrals_kernel(xij_xh, xij_xx, riXH, ri):
+    local = local_sp_integral_matrix(ri)
+    local_xh = local_xh_integral_vector(riXH)
+
+    transform = _pair_rotation_matrix(rotate_with_quaternion(-xij_xx))
+    w = transform @ local @ transform.transpose(1, 2)
+
+    transform_xh = _pair_rotation_matrix(rotate_with_quaternion(-xij_xh))
+    wXH = (transform_xh @ local_xh.unsqueeze(-1)).squeeze(-1)
+    return wXH, w.reshape(-1, 100)
+
 
 def rotate_with_quaternion(v,calculate_gradient=False):
     '''

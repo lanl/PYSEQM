@@ -22,6 +22,7 @@ from seqm.seqm_functions.omx_utils import OMX_METHODS
 from seqm.seqm_functions.rcis_batch import enable_rcis_compile
 from seqm.seqm_functions.rcis_grad_batch import enable_rcis_grad_compile
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
+from seqm.seqm_functions.two_elec_two_center_int import enable_two_center_compile
 from seqm.utils.torch_compile import normalize_torch_compile_config
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -889,6 +890,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         if cfg["compile_omx"] and method in OMX_METHODS:
             enable_omx_compile(mode=kernel_mode)
+        if method not in OMX_METHODS:
+            enable_two_center_compile(mode=kernel_mode, **kernel_options)
         if cfg["compile_fock"]:
             enable_fock_compile(mode=kernel_mode, **kernel_options)
         if cfg["compile_cis"] and self.seqm_parameters.get("excited_states"):

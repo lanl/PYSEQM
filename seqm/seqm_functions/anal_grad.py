@@ -8,10 +8,31 @@ from .dispersion_am1_fs1 import dEdisp_dr
 from .energy import pair_nuclear_energy
 from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 from .om2_hcore import build_omx_pair_context
-from .two_elec_two_center_int import rotate_with_quaternion
+from .two_elec_two_center_int import (
+    _pair_rotation_matrix,
+    local_sp_integral_matrix,
+    local_xh_integral_vector,
+    pair_rotation_matrix_derivative,
+    rotate_with_quaternion,
+)
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
 delta = 5e-6  # delta for finite difference calcs
+_VECTORIZED_SP_DERIVATIVES = True
+
+
+def _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_x):
+    T = _pair_rotation_matrix(rot)
+    dT = pair_rotation_matrix_derivative(rot, rot_der)
+    W = local_sp_integral_matrix(ri)
+    dW = local_sp_integral_matrix(ri_x)
+    T3, W3, Tt3 = T[:, None], W[:, None], T.transpose(1, 2)[:, None]
+    w_x = dT @ W3 @ Tt3 + T3 @ dW @ Tt3 + T3 @ W3 @ dT.transpose(-1, -2)
+
+    T, dT = _pair_rotation_matrix(rotXH), pair_rotation_matrix_derivative(rotXH, rot_derXH)
+    W, dW = local_xh_integral_vector(riXH), local_xh_integral_vector(riXH_x)
+    wXH_x = (dT @ W[:, None, :, None] + T[:, None] @ dW.unsqueeze(-1)).squeeze(-1)
+    return wXH_x, w_x
 
 
 # @profile
@@ -1214,6 +1235,14 @@ def der_TETCILF(
     rot = rot[XX, ...]
     rot_derXH = rot_der[XH, ...]
     rot_der = rot_der[XX, ...]
+
+    if _VECTORIZED_SP_DERIVATIVES:
+        wXH_x, w_x = _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_x)
+
+        w_x_final[HH, :, 0, 0] = riHH_x
+        w_x_final[XH, :, :, 0] = wXH_x
+        w_x_final[XX, ...] = w_x
+        return
 
     w_x = torch.zeros(ri.shape[0], 3, 100, device=device, dtype=dtype)
     wXH_x = torch.zeros(XH.sum(), 3, 10, device=device, dtype=dtype)

@@ -296,13 +296,15 @@ Parameters:
 - ``torch_compile`` (``bool`` or ``dict``): compile mode for repeated dynamics calls.
   By default these kernels stay eager. Set ``True`` or
   ``{'enabled': True, 'mode': 'reduce-overhead'}`` to opt into compilation for
-  known compile-safe tensor kernels, including restricted s,p Fock
-  construction, OMx pair kernels, and uniform-batch CIS/RPA tensor
-  contractions. Use ``False`` or ``{'enabled': False}`` to keep compilation
+  known compile-safe tensor kernels, including two-center s,p integral
+  rotation, restricted s,p Fock construction, OMx pair kernels, and
+  uniform-batch CIS/RPA tensor contractions. Use ``False`` or
+  ``{'enabled': False}`` to keep compilation
   disabled, and pass additional options through to ``torch.compile`` via the
   dict.
   Set ``compile_fock=False``, ``compile_cis=False``, ``compile_nac=False``, or
-  ``compile_omx=False`` in the dict to disable specific kernel families.
+  ``compile_omx=False`` in the dict to disable specific kernel families. Since
+  compilation is lazy, exclude the first MD step from benchmarks.
 
 
 .. code-block:: python
