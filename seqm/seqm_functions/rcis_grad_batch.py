@@ -16,7 +16,7 @@ from seqm.seqm_functions.fock import (
     _cached_index,
     _cached_tensor,
 )
-from seqm.seqm_functions.rcis_batch import make_cis_densities, unpackone_batch
+from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, make_cis_densities, unpackone_batch
 from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0, ev
@@ -60,8 +60,7 @@ def rcis_grad_batch(
          state for which the gradient is required has to be selected and put together into the amp tensor
     """
     molsize = mol.molsize
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
+    nHeavy, nHydro, _, _ = _uniform_molecule_dimensions(mol)
     cis_densities = make_cis_densities(
         mol,
         do_transition_denisty=True,

@@ -18,6 +18,7 @@ from seqm.seqm_functions.fock import (
     _cached_tensor,
 )
 from seqm.seqm_functions.rcis_batch import (
+    _uniform_molecule_dimensions,
     get_occ_virt,
     make_A_times_zvector_batched,
     makeA_pi_batched,
@@ -432,8 +433,8 @@ def calc_nac(
     if include_response_terms:
         nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
     else:
-        nocc = int(mol.nocc[0].item())
-        nvirt = int(mol.norb[0].item()) - nocc
+        _, _, norb, nocc = _uniform_molecule_dimensions(mol)
+        nvirt = norb - nocc
         Cocc = mol.molecular_orbitals[:, :, :nocc]
         Cvirt = mol.molecular_orbitals[:, :, nocc : nocc + nvirt]
     nroots = amp.shape[1]
@@ -448,8 +449,7 @@ def calc_nac(
         )
         w_x = None
 
-    nHeavy = int(mol.nHeavy[0].item())
-    nHydro = int(mol.nHydro[0].item())
+    nHeavy, nHydro, _, _ = _uniform_molecule_dimensions(mol)
     size_full = molsize * 4
     pair_batch_size = max(1, int(pair_batch_size))
     nac_cis = torch.empty((nmol, n_state_pairs, molsize, 3), dtype=dtype, device=device)

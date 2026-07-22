@@ -3,6 +3,7 @@ import math
 import torch
 
 from seqm.dynamics.active_state import active_state_tensor
+from seqm.utils.profiling import record_runtime_diagnostic
 from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0
@@ -17,6 +18,20 @@ _ao_transition_density_dispatch = None
 _mo_fock_action_dispatch = None
 _relaxed_rhs_dispatch = None
 _relaxed_finish_dispatch = None
+
+
+def _uniform_molecule_dimensions(mol):
+    """Return immutable uniform-molecule dimensions without repeated CUDA syncs."""
+    cached = getattr(mol, "_rcis_uniform_dimensions", None)
+    if cached is None:
+        cached = (
+            int(mol.nHeavy[0].item()),
+            int(mol.nHydro[0].item()),
+            int(mol.norb[0].item()),
+            int(mol.nocc[0].item()),
+        )
+        mol._rcis_uniform_dimensions = cached
+    return cached
 
 
 def enable_rcis_compile(mode=None, **options):
@@ -85,7 +100,9 @@ def rcis_batch(
     dtype = w.dtype
 
     norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
-    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
+    if nmol > 1 and (
+        not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0])
+    ):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
 
     nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window, e_mo)
@@ -154,6 +171,8 @@ def rcis_batch(
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
+    collapse_events = 0
+    chunk_plan_cache = {}
     mol_idx = torch.arange(nmol, device=device)
     subspace_idx = torch.arange(maxSubspacesize, device=device)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
@@ -183,7 +202,9 @@ def rcis_batch(
             V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
-        HV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
+        HV_batch = matrix_vector_product_batched(
+            mol, V_batched, w, ea_ei, Cocc, Cvirt, chunk_plan_cache=chunk_plan_cache
+        )
         if dense_gather:
             HV[batch_idx, abs_idx, :] = HV_batch
         else:
@@ -222,6 +243,7 @@ def rcis_batch(
         )
         collapse_mask = (~done) & (~mol_converged) & collapse_condition
         if collapse_mask.sum() > 0:
+            collapse_events += 1
             if davidson_iter == 1:
                 raise Exception(
                     "Insufficient memory to perform even a single iteration of subspace expansion"
@@ -286,6 +308,8 @@ def rcis_batch(
     #         print(f"State {i:3d}: {energy:.15f} eV")
     # print("")
 
+    record_runtime_diagnostic("davidson", iterations=davidson_iter, collapse_events=collapse_events)
+
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
@@ -302,7 +326,7 @@ def rcis_batch(
     return e_val_n, amplitude_store
 
 
-def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
+def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, chunk_plan_cache=None):
     # C: Molecule Orbital Coefficients
     nmol, nNewRoots, _ = V.shape
 
@@ -314,7 +338,15 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
     # I often run out of memory because I calculate \sum_ia (ia||jb)V_ia in makeA_pi_batched for all the roots in V_ia
     # at once. To avoid this, we first estimate the peak memory usage and then chunk over nNewRoots.
     # TODO: Also chunk over the nmol dimension
-    need_to_chunk, chunk_size = getMemUse(V.dtype, V.device, mol, nNewRoots)
+    chunk_key = int(nNewRoots)
+    if chunk_plan_cache is None:
+        need_to_chunk, chunk_size = getMemUse(V.dtype, V.device, mol, nNewRoots)
+    else:
+        plan = chunk_plan_cache.get(chunk_key)
+        if plan is None:
+            plan = getMemUse(V.dtype, V.device, mol, nNewRoots)
+            chunk_plan_cache[chunk_key] = plan
+        need_to_chunk, chunk_size = plan
     make_density = _ao_transition_density_dispatch or _ao_transition_density_kernel
     make_post = _mo_fock_action_dispatch or _mo_fock_action_kernel
 
@@ -384,9 +416,7 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
     npairs_per_mol = (int(mol.molsize) * (int(mol.molsize) - 1)) // 2
     nmol = int(mol.nmol)
     molsize = int(mol.molsize)
-    nHeavy = int(mol.nHeavy[0].item())
-    nHydro = int(mol.nHydro[0].item())
-    norb = int(mol.norb[0].item())
+    nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
 
     dispatch = _makeA_pi_batched_dispatch or _makeA_pi_batched_kernel
     nnewRoots = P_xi.shape[1]
@@ -1077,9 +1107,9 @@ def get_occ_virt(mol, orbital_window=None, e_mo=None):
     nmol, nbasis = C.shape[:2]
     device, dtype = C.device, C.dtype
 
-    uniform = torch.all(nocc_b == nocc_b[0]) and torch.all(norb_b == norb_b[0])
+    uniform = nmol == 1 or (torch.all(nocc_b == nocc_b[0]) and torch.all(norb_b == norb_b[0]))
     if uniform:
-        nocc, norb = int(nocc_b[0]), int(norb_b[0])
+        _, _, norb, nocc = _uniform_molecule_dimensions(mol)
         if orbital_window is not None:
             n_below, m_above = map(int, orbital_window)
             if not (0 <= n_below <= nocc and 0 <= m_above <= norb - nocc):
@@ -1123,8 +1153,7 @@ def get_occ_virt(mol, orbital_window=None, e_mo=None):
 
 def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
     nmol = int(mol.nmol)
-    norb = int(mol.norb[0])
-    nocc = int(mol.nocc[0])
+    _, _, norb, nocc = _uniform_molecule_dimensions(mol)
     nvirt = norb - nocc
 
     nroots = z.shape[0] // nmol

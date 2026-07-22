@@ -2,6 +2,8 @@ from typing import Callable, Optional
 
 import torch
 
+from seqm.utils.profiling import record_runtime_diagnostic
+
 
 def conjugate_gradient_batch(
     A: Callable[[torch.Tensor], torch.Tensor],
@@ -60,6 +62,7 @@ def conjugate_gradient_batch(
 
     for i in range(max_iter):
         if not active.any():
+            record_runtime_diagnostic("cg", iterations=i, converged=True)
             return x
 
         Ap = A(p)  # [B, D1…Dk]
@@ -99,7 +102,9 @@ def conjugate_gradient_batch(
         #     print(f"Iteration {i:3}: Residual norms = {r_norm}")
 
     if torch.any(active):
+        record_runtime_diagnostic("cg", iterations=max_iter, converged=False)
         raise RuntimeError(f"Conjugate gradient did not converge in {max_iter} steps (resid={r_norm})")
+    record_runtime_diagnostic("cg", iterations=max_iter, converged=True)
     return x
 
 

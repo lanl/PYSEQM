@@ -4,7 +4,8 @@ from typing import Dict, List, Optional, Union
 import torch
 from scipy.optimize import linear_sum_assignment
 
-from seqm.seqm_functions.rcis_batch import packone_batch
+from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, packone_batch
+from seqm.utils.profiling import record_runtime_diagnostic
 from seqm.utils.torch_compile import optional_compile_function
 
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
@@ -110,7 +111,8 @@ def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: f
     de = e1 - e0
     dnd = nd_new - nd_old
 
-    inv_nsub = 1.0 / float(nsub)
+    inv_nsub = 1.0 / nsub
+    de_sub = de * inv_nsub
     dt_sub = dt_total * inv_nsub
     half_dt_sub = 0.5 * dt_sub
     dt_over_hbar = dt_sub / HBAR_EV_FS
@@ -137,12 +139,12 @@ def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: f
 
         x2 = x + half_dt_sub * dx1
         y2 = y + half_dt_sub * dy1
-        th2 = th - half_dt_over_hbar * e1s
+        th2 = th - half_dt_over_hbar * (e1s + 0.25 * de_sub)
         dx2, dy2 = _electronic_rhs_kernel(x2, y2, th2, nd2)
 
         x3 = x + half_dt_sub * dx2
         y3 = y + half_dt_sub * dy2
-        th3 = th - half_dt_over_hbar * e2s
+        th3 = th2
         dx3, dy3 = _electronic_rhs_kernel(x3, y3, th3, nd2)
 
         x4 = x + dt_sub * dx3
@@ -289,8 +291,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             return
 
         options = dict(cfg["options"])
-        if "mode" not in options and molecule.coordinates.is_cuda:
-            options["mode"] = "reduce-overhead"
         kernel_mode = options.pop("mode", None)
         enable_nonadiabatic_compile(mode=kernel_mode, **options)
 
@@ -564,8 +564,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         Returns:
           nac_dt: (nmol, nstates, nstates)
         """
-        nocc = int(molecule.nocc[0].item())
-        nvirt = int(molecule.norb[0].item()) - nocc
+        _, _, norb, nocc = _uniform_molecule_dimensions(molecule)
+        nvirt = norb - nocc
         nmol = int(molecule.nmol)
         nov = nocc * nvirt
 
@@ -918,12 +918,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             if self._tdc_method == "overlap":
                 if molecule.nocc.dim() != 1:
                     raise NotImplementedError("Overlap TDC currently supports restricted closed-shell only.")
-                norb = int(molecule.norb[0].item())
-                self._overlap_pack_spec = (
-                    4 * int(molecule.nHeavy[0].item()),
-                    int(molecule.nHydro[0].item()),
-                    norb,
-                )
+                nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(molecule)
+                self._overlap_pack_spec = (4 * nHeavy, nHydro, norb)
                 self._coords_prev = torch.empty_like(molecule.coordinates)
                 self._mos_prev = torch.empty_like(molecule.molecular_orbitals)
                 self._packed_overlap_prev = packone_batch(
@@ -1136,6 +1132,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 molecule, coords_prev, mos_prev, cache_old.get("cis_amp"), cache_new.get("cis_amp"), dt
             )
             if nac_dt is None:
+                record_runtime_diagnostic("overlap_tdc", fallback=True)
                 # print("Bad previous overlap")
                 nac_dt = compute_tdc_hamiltonian_fd(
                     self,
@@ -1151,6 +1148,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     self._packed_overlap_prev = packone_batch(
                         overlap_matrix_current_geometry(molecule), *self._overlap_pack_spec
                     )
+            else:
+                record_runtime_diagnostic("overlap_tdc", fallback=False)
         else:
             raise RuntimeError(f"Unsupported TDC method '{self._tdc_method}'.")
 

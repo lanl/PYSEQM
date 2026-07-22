@@ -883,8 +883,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
         method = str(self.seqm_parameters.get("method", "")).upper()
         options = dict(cfg["options"])
-        if "mode" not in options and molecule.coordinates.is_cuda:
-            options["mode"] = "reduce-overhead"
         kernel_options = dict(options)
         kernel_mode = kernel_options.pop("mode", None)
 

@@ -294,11 +294,14 @@ Parameters:
 - ``Temp`` (``float``): initial temperature (K); Initializes velocities drawn from a Maxwell–Boltzmann at this temperature
 - ``output`` (``dict``): controls console/XYZ/HDF5 cadence and checkpointing (see below)
 - ``torch_compile`` (``bool`` or ``dict``): compile mode for repeated dynamics calls.
-  By default these kernels stay eager. Set ``True`` or
-  ``{'enabled': True, 'mode': 'reduce-overhead'}`` to opt into compilation for
+  By default these kernels stay eager. Set ``True`` to compile with PyTorch's
+  default mode, or pass a dict such as
+  ``{'enabled': True, 'mode': 'reduce-overhead'}`` to select a mode explicitly, for
   known compile-safe tensor kernels, including two-center s,p integral
   rotation, restricted s,p Fock construction, OMx pair kernels, and
-  uniform-batch CIS/RPA tensor contractions. Use ``False`` or
+  uniform-batch CIS/RPA tensor contractions. CUDA Graph modes such as
+  ``reduce-overhead`` remain explicit opt-ins because they cache workspace and
+  impose stricter output-lifetime requirements. Use ``False`` or
   ``{'enabled': False}`` to keep compilation
   disabled, and pass additional options through to ``torch.compile`` via the
   dict.

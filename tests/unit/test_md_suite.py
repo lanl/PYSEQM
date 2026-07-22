@@ -218,13 +218,15 @@ def test_md_torch_compile_requires_explicit_opt_in(monkeypatch):
     from seqm.utils.torch_compile import normalize_torch_compile_config
 
     calls = []
-    monkeypatch.setattr(md_module, "enable_two_center_compile", lambda **kwargs: calls.append("integrals"))
-    monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append("fock"))
+    monkeypatch.setattr(
+        md_module, "enable_two_center_compile", lambda **kwargs: calls.append(("integrals", kwargs))
+    )
+    monkeypatch.setattr(md_module, "enable_fock_compile", lambda **kwargs: calls.append(("fock", kwargs)))
 
     seqm_parameters = {"method": "AM1"}
 
     class DummyMolecule:
-        coordinates = torch.zeros(1)
+        coordinates = type("Coordinates", (), {"is_cuda": True})()
 
     md = type("DummyMD", (), {})()
     md._torch_compile_config = normalize_torch_compile_config(seqm_parameters)
@@ -238,7 +240,7 @@ def test_md_torch_compile_requires_explicit_opt_in(monkeypatch):
     md._torch_compile_config = normalize_torch_compile_config({"method": "AM1", "torch_compile": True})
     md_module.Molecular_Dynamics_Basic._enable_torch_compile_if_requested(md, DummyMolecule())
 
-    assert calls == ["integrals", "fock"]
+    assert calls == [("integrals", {"mode": None}), ("fock", {"mode": None})]
     assert md._torch_compile_applied
 
 

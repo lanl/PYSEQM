@@ -82,6 +82,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print(header)
     # print("-" * len(header))
 
+    chunk_plan_cache = {}
     while davidson_iter <= max_iter:  # Davidson loop
         # Determine current subspace dimensions per molecule
         delta = vend - vstart
@@ -101,7 +102,9 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
-        AV_batch, BV_batch = matrix_vector_product_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt, makeB=True)
+        AV_batch, BV_batch = matrix_vector_product_batched(
+            mol, V_batched, w, ea_ei, Cocc, Cvirt, makeB=True, chunk_plan_cache=chunk_plan_cache
+        )
         if mask is None:
             AV[mol_idx[:, None], dense_idx, :] = AV_batch
             BV[mol_idx[:, None], dense_idx, :] = BV_batch

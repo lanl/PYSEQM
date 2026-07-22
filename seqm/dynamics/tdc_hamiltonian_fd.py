@@ -15,7 +15,7 @@ from seqm.seqm_functions.fock import (
 from seqm.seqm_functions.nac import _build_pair_response_density_batch
 from seqm.seqm_functions.om2_hcore import build_omx_pair_context
 from seqm.seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas
-from seqm.seqm_functions.rcis_batch import unpackone_batch
+from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, unpackone_batch
 from seqm.seqm_functions.two_elec_two_center_int import two_elec_two_center_int as TETCI
 from seqm.utils.torch_compile import optional_compile_function
 
@@ -517,7 +517,7 @@ def compute_tdc_hamiltonian_fd(
 
     nmol = int(molecule.nmol)
     molsize = int(molecule.molsize)
-    nocc = int(molecule.nocc[0].item())
+    nHeavy, nHydro, norb, nocc = _uniform_molecule_dimensions(molecule)
     nstates = int(ref_amp.shape[1])
     nov = int(ref_amp.shape[2])
     if nocc <= 0 or nov % nocc != 0:
@@ -525,7 +525,7 @@ def compute_tdc_hamiltonian_fd(
     if ref_energies.shape[1] < nstates:
         raise ValueError("Energies tensor has fewer states than cis_amp.")
     nvirt = nov // nocc
-    if int(molecule.norb[0].item()) < (nocc + nvirt):
+    if norb < (nocc + nvirt):
         raise ValueError("Not enough orbitals to match CIS amplitude dimensions.")
 
     P = (
@@ -547,8 +547,6 @@ def compute_tdc_hamiltonian_fd(
     if state_i.numel() == 0:
         raise RuntimeError("At least two excited states are required for TD-NAC.")
     n_state_pairs = int(state_i.numel())
-    nHeavy = int(molecule.nHeavy[0].item())
-    nHydro = int(molecule.nHydro[0].item())
     size_full = molsize * 4
     pair_batch_size = nstates
     dot_h_upper = torch.zeros((nmol, n_state_pairs), dtype=ref_amp.dtype, device=ref_amp.device)
