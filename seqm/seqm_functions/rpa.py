@@ -1,6 +1,7 @@
 import torch
 
 from .rcis_batch import (
+    _uniform_molecule_dimensions,
     getMaxSubspacesize,
     make_guess,
     matrix_vector_product_batched,
@@ -10,7 +11,6 @@ from .rcis_batch import (
 
 
 def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
-    torch.set_printoptions(linewidth=200)
     """Calculate the RPA (random phase approximation) excitation energies and amplitudes
        for TDHF (time-dependent Hartree-Fock)
        using davidson diagonalization
@@ -19,7 +19,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     :param w: 2-electron integrals
     :param e_mo: Molecular Orbital energies
     :param nroots: Number of RPA states requested
-    :returns: 
+    :returns:
         e_val_n: RPA excitation energies
         amplitude_store: tensor containing the [X;Y] RPA amplitudes.
                          amplitude_store has shape (2,nmol,nroots,nov),
@@ -30,9 +30,11 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     dtype = w.dtype
 
     norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
-    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
+    if nmol > 1 and (
+        not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0])
+    ):
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
-    norb, nocc = norb_batch[0], nocc_batch[0]
+    _, _, norb, nocc = _uniform_molecule_dimensions(mol)
     nvirt = norb - nocc
     nov = nocc * nvirt
 
@@ -90,7 +92,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
 
         # Gather current subspace vectors into V_batched
-        if torch.all(delta == max_v):
+        if nmol == 1 or torch.all(delta == max_v):
             dense_idx = vstart[:, None] + rel_idx
             V_batched = V[mol_idx[:, None], dense_idx, :]
             mask = None

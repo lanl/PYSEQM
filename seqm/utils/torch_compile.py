@@ -8,10 +8,12 @@ _COMPILE_CONTROL_KEYS = {"enabled", "compile_omx", "compile_cis", "compile_fock"
 def _compile_config(enabled):
     return {
         "enabled": enabled,
-        "compile_omx": True,
+        # Safe excited-state defaults. Ground-only MD selects its ground kernels
+        # contextually; the other groups remain internal diagnostic toggles.
+        "compile_omx": False,
         "compile_cis": True,
-        "compile_fock": True,
-        "compile_nac": True,
+        "compile_fock": False,
+        "compile_nac": False,
         "options": {},
     }
 
@@ -41,12 +43,13 @@ def normalize_torch_compile_config(seqm_parameters, override=None):
     for key, value in raw.items():
         if key not in _COMPILE_CONTROL_KEYS:
             options[key] = value
+    defaults = _compile_config(enabled)
     return {
         "enabled": enabled,
-        "compile_omx": bool(raw.get("compile_omx", True)),
-        "compile_cis": bool(raw.get("compile_cis", True)),
-        "compile_fock": bool(raw.get("compile_fock", True)),
-        "compile_nac": bool(raw.get("compile_nac", True)),
+        "compile_omx": bool(raw.get("compile_omx", defaults["compile_omx"])),
+        "compile_cis": bool(raw.get("compile_cis", defaults["compile_cis"])),
+        "compile_fock": bool(raw.get("compile_fock", defaults["compile_fock"])),
+        "compile_nac": bool(raw.get("compile_nac", defaults["compile_nac"])),
         "options": options,
     }
 

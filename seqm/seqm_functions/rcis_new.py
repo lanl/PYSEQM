@@ -25,7 +25,6 @@ from .rcis_batch import (
 
 
 def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
-    torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
        This function is called when all the molecules in the batch are NOT the same
@@ -34,7 +33,7 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     :param w: 2-electron integrals
     :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
-    :returns: 
+    :returns:
 
     """
 

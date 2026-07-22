@@ -120,11 +120,18 @@ def test_nonadiabatic_compile_hook_registers_kernels(monkeypatch):
     monkeypatch.setattr(
         namd_module.Molecular_Dynamics_Langevin, "_enable_torch_compile_if_requested", fake_super
     )
-    monkeypatch.setattr(namd_module, "enable_nonadiabatic_compile", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(
+        namd_module, "enable_electronic_propagation_compile", lambda **kwargs: calls.append(kwargs)
+    )
 
     nad = DummyNAD()
     nad._torch_compile_applied = False
-    nad._torch_compile_config = {"enabled": True, "compile_nac": True, "options": {"mode": "reduce-overhead"}}
+    nad._torch_compile_config = {
+        "enabled": True,
+        "compile_cis": True,
+        "compile_nac": False,
+        "options": {"mode": "reduce-overhead"},
+    }
     molecule = SimpleNamespace(coordinates=torch.zeros((1, 1, 3)))
     nad._enable_torch_compile_if_requested(molecule)
 
@@ -161,12 +168,12 @@ def test_nonadiabatic_compile_wrappers_execute(monkeypatch):
         flat, flat * 0.0, flat, flat * 0.0, view, view * 0.0, dSoo, dSvv, 1.0, 1, 2
     )
 
-    nad = make_dummy(substeps=2)
+    nad = make_dummy(substeps=8)
     cache = {
         "energies": torch.zeros((1, 2), dtype=torch.float64),
         "nac_dot": torch.zeros((1, 2, 2), dtype=torch.float64),
     }
-    nad._propagate_electronic(cache, cache, substeps=2)
+    nad._propagate_electronic(cache, cache, substeps=8)
 
     assert {
         "_tdc_mo_overlap_blocks_kernel",
@@ -174,6 +181,31 @@ def test_nonadiabatic_compile_wrappers_execute(monkeypatch):
         "_tdc_rpa_coupling_kernel",
         "_electronic_propagation_kernel",
     }.issubset(set(compiled))
+
+
+def test_nonadiabatic_compiled_propagation_is_limited_to_eight_substeps(monkeypatch):
+    calls = []
+    eager_kernel = namd_module._electronic_propagation_kernel
+
+    def compiled(*args, **kwargs):
+        calls.append(("compiled", args[-1]))
+        return eager_kernel(*args, **kwargs)
+
+    def eager(*args, **kwargs):
+        calls.append(("eager", args[-1]))
+        return eager_kernel(*args, **kwargs)
+
+    monkeypatch.setattr(namd_module, "_electronic_propagation_dispatch", compiled)
+    monkeypatch.setattr(namd_module, "_electronic_propagation_kernel", eager)
+
+    cache = {
+        "energies": torch.zeros((1, 2), dtype=torch.float64),
+        "nac_dot": torch.zeros((1, 2, 2), dtype=torch.float64),
+    }
+    make_dummy(substeps=8)._propagate_electronic(cache, cache, substeps=8)
+    make_dummy(substeps=9)._propagate_electronic(cache, cache, substeps=9)
+
+    assert calls == [("compiled", 8), ("eager", 9)]
 
 
 def test_crossing_detection_triggers():

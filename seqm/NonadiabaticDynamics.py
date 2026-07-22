@@ -25,12 +25,23 @@ _tdc_rpa_coupling_dispatch = None
 _electronic_propagation_dispatch = None
 
 
+def enable_electronic_propagation_compile(mode=None, **options):
+    """Compile only the guarded eight-substep electronic propagator."""
+    global _electronic_propagation_dispatch
+
+    compile_options = dict(options)
+    if mode is not None:
+        compile_options["mode"] = mode
+    _electronic_propagation_dispatch = optional_compile_function(
+        _electronic_propagation_kernel, compile_options=compile_options, label="namd.electronic_propagation"
+    )
+
+
 def enable_nonadiabatic_compile(mode=None, **options):
     """Compile tensor kernels used by overlap TD-NAC and electronic propagation."""
     global _tdc_mo_overlap_dispatch
     global _tdc_cis_coupling_dispatch
     global _tdc_rpa_coupling_dispatch
-    global _electronic_propagation_dispatch
 
     compile_options = dict(options)
     if mode is not None:
@@ -45,9 +56,7 @@ def enable_nonadiabatic_compile(mode=None, **options):
     _tdc_rpa_coupling_dispatch = optional_compile_function(
         _tdc_rpa_coupling_kernel, compile_options=compile_options, label="namd.tdc_rpa_coupling"
     )
-    _electronic_propagation_dispatch = optional_compile_function(
-        _electronic_propagation_kernel, compile_options=compile_options, label="namd.electronic_propagation"
-    )
+    enable_electronic_propagation_compile(mode=mode, **options)
 
 
 def _tdc_mo_overlap_blocks_kernel(Cc, S_ao, Cp, nocc: int):
@@ -287,12 +296,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         cfg = self._torch_compile_config
         if was_applied or not cfg["enabled"] or getattr(self, "k", None) is not None:
             return
-        if not cfg["compile_nac"]:
-            return
-
         options = dict(cfg["options"])
         kernel_mode = options.pop("mode", None)
-        enable_nonadiabatic_compile(mode=kernel_mode, **options)
+        if cfg["compile_nac"]:
+            enable_nonadiabatic_compile(mode=kernel_mode, **options)
+        elif cfg["compile_cis"]:
+            enable_electronic_propagation_compile(mode=kernel_mode, **options)
 
     def _normalize_initial_state(self, nmol: int, device) -> torch.Tensor:
         init = self.initial_state
@@ -614,7 +623,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             make_overlap = _tdc_mo_overlap_dispatch or _tdc_mo_overlap_blocks_kernel
             Soo, Svv = make_overlap(Cc, S_ao, Cp, nocc)
 
-            if bad_diag_overlap(Soo, 0.85).any() or bad_diag_overlap(Svv, 0.85).any():
+            bad_mo_overlap = bad_diag_overlap(Soo, 0.85) | bad_diag_overlap(Svv, 0.85)
+            if bad_mo_overlap.any():
                 return None
 
             dSoo = Soo.transpose(1, 2) - Soo
@@ -838,7 +848,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             nsub = int(substeps)
 
         eye = self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0)
-        propagate = _electronic_propagation_dispatch or _electronic_propagation_kernel
+        # Inductor unrolls the Python RK4 loop. The common eight-substep graph
+        # is small and profitable, while larger adaptive nsub values produced
+        # very large, severely regressive graphs. Keep those cases eager.
+        if nsub == 8 and _electronic_propagation_dispatch is not None:
+            propagate = _electronic_propagation_dispatch
+        else:
+            propagate = _electronic_propagation_kernel
         amp_new, hop_int = propagate(amp, e0, e1, nd_old, nd_new, eye, float(dt_total), nsub)
         amp.copy_(amp_new)
         self._hop_integral = hop_int

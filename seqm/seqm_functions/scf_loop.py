@@ -97,7 +97,14 @@ def make_Pnew_factory(method, sp2, molsize, backward, scf_converger, openshell):
             core_step = lambda F, nsh, nh, nhy, nOcc: sym_eig_trunc1(F, nh, nhy, nOcc)[1]
 
     # 3)  Expose a single "inner" that always accepts the same 5 args
+    single_counts = None
+
     def inner(F, nSuperHeavy, nHeavy, nHydro, nOccMO):
+        nonlocal single_counts
+        if method != "PM6" and not openshell and F.shape[0] == 1:
+            if single_counts is None:
+                single_counts = tuple(int(x[0].item()) for x in (nHeavy, nHydro, nOccMO))
+            nHeavy, nHydro, nOccMO = single_counts
         return core_step(F, nSuperHeavy, nHeavy, nHydro, nOccMO)
 
     return inner
@@ -132,7 +139,7 @@ def get_error(
         bad = bad | diis_bad
 
     # Only compute DM error where energy & DIIS don't already fail
-    dm_mask = active & ~(bad)
+    dm_mask = active & ~bad
     if dm_mask.any():
         dP = P[dm_mask] - Pold[dm_mask]
         if unrestricted:

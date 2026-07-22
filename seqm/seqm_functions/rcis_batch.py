@@ -35,13 +35,10 @@ def _uniform_molecule_dimensions(mol):
 
 
 def enable_rcis_compile(mode=None, **options):
-    """Compile CIS/RPA tensor contractions used inside Davidson iterations."""
+    """Compile the repeatedly profitable CIS Davidson tensor contractions."""
     global _makeA_pi_batched_dispatch
-    global _makeA_pi_symm_batch_dispatch
     global _ao_transition_density_dispatch
     global _mo_fock_action_dispatch
-    global _relaxed_rhs_dispatch
-    global _relaxed_finish_dispatch
 
     compile_options = dict(options)
     if mode is not None:
@@ -50,20 +47,11 @@ def enable_rcis_compile(mode=None, **options):
     _makeA_pi_batched_dispatch = optional_compile_function(
         _makeA_pi_batched_kernel, compile_options=compile_options, label="rcis.makeA_pi_batched"
     )
-    _makeA_pi_symm_batch_dispatch = optional_compile_function(
-        _makeA_pi_symm_batch_kernel, compile_options=compile_options, label="rcis.makeA_pi_symm_batch"
-    )
     _ao_transition_density_dispatch = optional_compile_function(
         _ao_transition_density_kernel, compile_options=compile_options, label="rcis.ao_transition_density"
     )
     _mo_fock_action_dispatch = optional_compile_function(
         _mo_fock_action_kernel, compile_options=compile_options, label="rcis.mo_fock_action"
-    )
-    _relaxed_rhs_dispatch = optional_compile_function(
-        _relaxed_rhs_kernel, compile_options=compile_options, label="rcis.relaxed_rhs"
-    )
-    _relaxed_finish_dispatch = optional_compile_function(
-        _relaxed_finish_kernel, compile_options=compile_options, label="rcis.relaxed_finish"
     )
 
 
@@ -79,7 +67,6 @@ def rcis_batch(
     save_tdm=False,
     compute_transition_properties=True,
 ):
-    torch.set_printoptions(linewidth=200)
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
        This function is called when all the molecules in the batch are the same
@@ -88,11 +75,11 @@ def rcis_batch(
     :param w: 2-electron integrals
     :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
-    :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, and fix the descrepancy b/w 
+    :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, and fix the descrepancy b/w
                                  molecular orbital signs from previous and this step. Leave it alone when doing XL-ESMD
     :param save_tdm: save transition density matrices; this option will be used for XL-ESMD
     :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
-    :returns: 
+    :returns:
 
     """
 
@@ -194,7 +181,7 @@ def rcis_batch(
 
         # Gather current subspace vectors into V_batched. If every active molecule
         # has max_v new vectors, avoid zero-padding and boolean scatter.
-        dense_gather = bool(torch.all(mask).item())
+        dense_gather = nmol == 1 or bool(torch.all(mask).item())
         if dense_gather:
             V_batched = V[batch_idx, abs_idx, :]
         else:
@@ -754,6 +741,12 @@ def get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal):
     else:
         nmol, subspacesize = H.shape[0], H.shape[1]
         e_vec_n = torch.zeros(nmol, subspacesize, nroots, device=H.device, dtype=H.dtype)
+        if nmol == 1:
+            r_eval, r_evec = torch.linalg.eigh(H)
+            e_val_n[0] = r_eval[0, :nroots]
+            e_vec_n[0] = r_evec[0, :, :nroots]
+            return e_vec_n
+
         active_indices = torch.nonzero(~done, as_tuple=False).squeeze(1)
 
         for v in torch.unique(vend[active_indices]):

@@ -24,6 +24,9 @@ PADDING_EIGENSHIFT_INCREMENT = 0.005  # dx increment for eigenvalue shifts
 
 def _apply_padding_eigen_shifts(x0, norb):
     """Move padded orbitals above the physical spectrum before diagonalization."""
+    if isinstance(norb, int):
+        return False
+
     nmol, size, _ = x0.shape
     aii = x0.diagonal(dim1=1, dim2=2)
     ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
@@ -50,6 +53,8 @@ def _apply_padding_eigen_shifts(x0, norb):
 
 
 def _zero_padding_eigenvalues(e, norb, has_padding):
+    if has_padding is False:
+        return e
     if has_padding.any():
         size = e.shape[-1]
         for i in torch.nonzero(has_padding, as_tuple=False).flatten():
@@ -58,6 +63,12 @@ def _zero_padding_eigenvalues(e, norb, has_padding):
 
 
 def _occupied_density(e, v, nocc):
+    if isinstance(nocc, int):
+        if CHECK_DEGENERACY:
+            nocc_tensor = torch.tensor(nocc, device=e.device)
+            return torch.stack([construct_P(ei, vi, nocc_tensor) for ei, vi in zip(e, v)])
+        occupied = v[:, :, :nocc]
+        return 2.0 * torch.matmul(occupied, occupied.transpose(1, 2))
     if CHECK_DEGENERACY:
         return torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
     return 2.0 * torch.stack(

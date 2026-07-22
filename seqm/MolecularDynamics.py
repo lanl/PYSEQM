@@ -20,7 +20,6 @@ from seqm.seqm_functions.nac import enable_nac_compile
 from seqm.seqm_functions.om1_pair_backend import enable_omx_compile
 from seqm.seqm_functions.omx_utils import OMX_METHODS
 from seqm.seqm_functions.rcis_batch import enable_rcis_compile
-from seqm.seqm_functions.rcis_grad_batch import enable_rcis_grad_compile
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
 from seqm.seqm_functions.two_elec_two_center_int import enable_two_center_compile
 from seqm.utils.torch_compile import normalize_torch_compile_config
@@ -885,16 +884,17 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         options = dict(cfg["options"])
         kernel_options = dict(options)
         kernel_mode = kernel_options.pop("mode", None)
+        excited = bool(self.seqm_parameters.get("excited_states"))
+        compile_ground = cfg["compile_fock"] or (not excited and method not in OMX_METHODS)
 
         if cfg["compile_omx"] and method in OMX_METHODS:
             enable_omx_compile(mode=kernel_mode)
-        if method not in OMX_METHODS:
+        if compile_ground and method not in OMX_METHODS:
             enable_two_center_compile(mode=kernel_mode, **kernel_options)
-        if cfg["compile_fock"]:
+        if compile_ground:
             enable_fock_compile(mode=kernel_mode, **kernel_options)
-        if cfg["compile_cis"] and self.seqm_parameters.get("excited_states"):
+        if cfg["compile_cis"] and excited:
             enable_rcis_compile(mode=kernel_mode, **kernel_options)
-            enable_rcis_grad_compile(mode=kernel_mode, **kernel_options)
         if cfg["compile_nac"] and self.seqm_parameters.get("nonadiabatic"):
             enable_nac_compile(mode=kernel_mode, **kernel_options)
             enable_tdc_hamiltonian_fd_compile(mode=kernel_mode, **kernel_options)

@@ -73,6 +73,9 @@ def pack(x, nHeavy, nHydro):
     if x.dim() == 4:
         x = x.flatten(start_dim=0, end_dim=1)
 
+    if isinstance(nho, int) and isinstance(nHydro, int):
+        return _pack_batch_same(x, nho, nHydro)
+
     if _same_counts(nho, nHydro):
         return _pack_batch_same(x, nho[0].item(), nHydro[0].item())
 
@@ -84,6 +87,9 @@ def unpack(x0, nHeavy, nHydro, size):
     nho = 4 * nHeavy
     if x0.dim() == 2:
         return unpackone(x0, nho, nHydro, size)
+
+    if isinstance(nho, int) and isinstance(nHydro, int):
+        return _unpack_batch_same(x0, nho, nHydro, size)
 
     if _same_counts(nho, nHydro):
         return _unpack_batch_same(x0, nho[0].item(), nHydro[0].item(), size)
