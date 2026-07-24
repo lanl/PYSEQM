@@ -29,11 +29,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     device = w.device
     dtype = w.dtype
 
-    norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
-    if nmol > 1 and (
-        not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0])
-    ):
-        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    nmol = mol.nmol
     _, _, norb, nocc = _uniform_molecule_dimensions(mol)
     nvirt = norb - nocc
     nov = nocc * nvirt

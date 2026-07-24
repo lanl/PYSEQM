@@ -17,26 +17,10 @@ from seqm.seqm_functions.fock import (
     _cached_tensor,
 )
 from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, make_cis_densities, unpackone_batch
-from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0, ev
 from .dispersion_am1_fs1 import dEdisp_dr
 from .omx_utils import get_orbital_zetas
-
-_rcis_grad_contract_dispatch = None
-
-
-def enable_rcis_grad_compile(mode=None, **options):
-    """Compile tensor contractions used after CIS derivative integrals are built."""
-    global _rcis_grad_contract_dispatch
-
-    compile_options = dict(options)
-    if mode is not None:
-        compile_options["mode"] = mode
-
-    _rcis_grad_contract_dispatch = optional_compile_function(
-        _rcis_grad_contract_kernel, compile_options=compile_options, label="rcis_grad.contract"
-    )
 
 
 def rcis_grad_batch(
@@ -171,8 +155,7 @@ def rcis_grad_batch(
     idx1 = _cached_index(UPPER_IDX1_4, device)
     scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
 
-    contract = _rcis_grad_contract_dispatch or _rcis_grad_contract_kernel
-    grad_cis = contract(
+    grad_cis = _contract_rcis_gradient(
         B0,
         R0,
         P0,
@@ -201,7 +184,7 @@ def rcis_grad_batch(
     return grad_cis
 
 
-def _rcis_grad_contract_kernel(
+def _contract_rcis_gradient(
     B0,
     R0,
     P0,

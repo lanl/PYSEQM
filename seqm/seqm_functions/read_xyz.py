@@ -172,15 +172,17 @@ def read_xyz_trajectory(
     for j, fr in enumerate(order_out):
         out_map.setdefault(int(fr), []).append(j)
     want = set(out_map.keys())
+    last_wanted = max(want)
     M = len(order_out)
 
     # ---- main pass (one scan; cache species/order; fill all requested output slots) ----
     species_fixed = order = None
     numeric = None
 
-    with open(file, "r", buffering=64 << 20) as f, (
-        open(vel_file, "r", buffering=64 << 20) if return_vel else open(os.devnull, "r")
-    ) as vf:
+    with (
+        open(file, "r", buffering=64 << 20) as f,
+        open(vel_file, "r", buffering=64 << 20) if return_vel else open(os.devnull, "r") as vf,
+    ):
         nline = f.readline()
         if not nline:
             raise ValueError("Empty XYZ.")
@@ -253,5 +255,7 @@ def read_xyz_trajectory(
                     vf.readline()
 
             frame_i += 1
+            if frame_i > last_wanted:
+                break
 
     return (species, coords, vels) if return_vel else (species, coords)

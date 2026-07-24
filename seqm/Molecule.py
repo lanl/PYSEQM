@@ -1,6 +1,4 @@
 # ruff: noqa: I001
-import copy
-
 from typing import Optional
 import torch
 
@@ -88,9 +86,8 @@ class Molecule(torch.nn.Module):
             if callable(learned_parameters)
             else learned_parameters
         )
-        self.parameters, self.alp, self.chi = copy.deepcopy(
-            self.packpar(self.Z, learned_params=learned_params)
-        )
+        self.parameters, self.alp, self.chi = self.packpar(self.Z, learned_params=learned_params)
+        self._default_parameters = not callable(learned_parameters) and not learned_params
 
         self.norb = self.nHydro + 4 * self.nHeavy  # number of orbitals
 

@@ -1,4 +1,3 @@
-import copy
 import os
 import time
 
@@ -340,10 +339,8 @@ class Parser(torch.nn.Module):
 
         nmol, molsize = molecule.species.shape
         nonblank = molecule.species > 0
-        n_real_atoms = torch.sum(nonblank)
-
-        atom_index = torch.arange(nmol * molsize, device=device, dtype=torch.int64)
-        real_atoms = atom_index[nonblank.reshape(-1) > 0]
+        real_atoms = torch.nonzero(nonblank.reshape(-1), as_tuple=False).squeeze(1)
+        n_real_atoms = real_atoms.numel()
 
         Z = molecule.species.reshape(-1)[real_atoms]
 
@@ -547,11 +544,7 @@ class Pack_Parameters(torch.nn.Module):
             else os.path.abspath(os.path.dirname(__file__)) + "/params/"
         )
         self.parameters = parameterlist[self.method]
-        self.required_list = []
-        for i in self.parameters:
-            if i not in self.learned_list:
-                self.required_list.append(i)
-        self.nrp = len(self.required_list)
+        self.required_list = [name for name in self.parameters if name not in self.learned_list]
         self.p = params(
             method=self.method, elements=self.elements, root_dir=self.filedir, parameters=self.required_list
         )
@@ -564,10 +557,9 @@ class Pack_Parameters(torch.nn.Module):
         """
         combine the learned_parames with other required parameters
         """
-        learned_params = {} if learned_params is None else learned_params
-        for i in range(self.nrp):
-            learned_params[self.required_list[i]] = self.p[Z, i]  # .contiguous()
-        return learned_params, self.alpha, self.chi
+        combined = {} if learned_params is None else dict(learned_params)
+        combined.update({name: self.p[Z, i] for i, name in enumerate(self.required_list)})
+        return combined, self.alpha, self.chi
 
 
 class Hamiltonian(torch.nn.Module):
@@ -878,7 +870,7 @@ class Energy(torch.nn.Module):
             return (alpha, K, L, M)
         return None
 
-    def _refresh_md_geometry(self, molecule):
+    def _refresh_geometry(self, molecule):
         real_atoms = getattr(molecule, "_real_atom_flat_idx", None)
         if real_atoms is None or real_atoms.device != molecule.coordinates.device:
             real_atoms = torch.nonzero(molecule.species.reshape(-1) > 0, as_tuple=False).squeeze(1)
@@ -895,46 +887,53 @@ class Energy(torch.nn.Module):
             parser_kwargs = dict(kwargs)
             parser_kwargs.pop("xl_bomd_params", None)
 
-        md_static = (
-            self.md
-            and not callable(learned_parameters)
-            and not args
+        reuse_topology = (
+            not args
             and not parser_kwargs
             and torch.is_tensor(getattr(molecule, "idxi", None))
-            and isinstance(getattr(molecule, "parameters", None), dict)
+            and (self.md or self.parser.outercutoff == 1e10)
         )
-        if md_static:
-            self._refresh_md_geometry(molecule)
-            return
+        if reuse_topology:
+            self._refresh_geometry(molecule)
+        else:
+            (
+                molecule.nmol,
+                molecule.molsize,
+                molecule.nSuperHeavy,
+                molecule.nHeavy,
+                molecule.nHydro,
+                molecule.nocc,
+                molecule.Z,
+                molecule.maskd,
+                molecule.atom_molid,
+                molecule.mask,
+                molecule.pair_molid,
+                molecule.ni,
+                molecule.nj,
+                molecule.idxi,
+                molecule.idxj,
+                molecule.xij,
+                molecule.rij,
+            ) = self.parser(molecule, self.method, *args, **parser_kwargs)
 
-        (
-            molecule.nmol,
-            molecule.molsize,
-            molecule.nSuperHeavy,
-            molecule.nHeavy,
-            molecule.nHydro,
-            molecule.nocc,
-            molecule.Z,
-            molecule.maskd,
-            molecule.atom_molid,
-            molecule.mask,
-            molecule.pair_molid,
-            molecule.ni,
-            molecule.nj,
-            molecule.idxi,
-            molecule.idxj,
-            molecule.xij,
-            molecule.rij,
-        ) = self.parser(molecule, self.method, *args, **parser_kwargs)
+        reuse_parameters = (
+            reuse_topology
+            and not callable(learned_parameters)
+            and isinstance(getattr(molecule, "parameters", None), dict)
+            and (self.md or (not learned_parameters and getattr(molecule, "_default_parameters", False)))
+        )
+        if reuse_parameters:
+            return
 
         learned_params = (
             learned_parameters(molecule.species, molecule.coordinates)
             if callable(learned_parameters)
             else learned_parameters
         )
-        molecule.parameters, molecule.alp, molecule.chi = copy.deepcopy(
-            self.packpar(molecule.Z, learned_params=learned_params)
+        molecule.parameters, molecule.alp, molecule.chi = self.packpar(
+            molecule.Z, learned_params=learned_params
         )
+        molecule._default_parameters = not callable(learned_parameters) and not learned_params
 
         params = molecule.parameters
         params["beta"] = build_beta_tensor(params, molecule.method)
@@ -984,13 +983,12 @@ class Energy(torch.nn.Module):
         else:
             e_gap = None
 
-        prev_mos = getattr(molecule, "molecular_orbitals", None)
-        all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
-        # if (self.xlesmd or self.namd) and all_same_mols:
-        if not self.uhf:
+        if (self.excited_states or self.xlesmd) and not self.uhf:
+            prev_mos = getattr(molecule, "molecular_orbitals", None)
+            all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
             if all_same_mols:
                 molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals(
-                    molecular_orbitals, prev_mos, molecule.nocc[0].item(), e.clone()
+                    molecular_orbitals, prev_mos, molecule.nocc[0].item(), e
                 )
             else:
                 molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals_grouped(
@@ -1223,15 +1221,10 @@ class Energy(torch.nn.Module):
                     if is_rpa:
                         idx = active_idx.view(1, -1, 1, 1).expand(2, -1, 1, amplitudes.shape[-1])
                         gathered = amplitudes.gather(2, idx).squeeze(2)
-                        mask_expand = excited_mask.view(1, -1, 1)
-                        out = torch.zeros_like(gathered)
-                        out[mask_expand.expand_as(out)] = gathered[mask_expand.expand_as(out)]
-                        return out
+                        return gathered * excited_mask.view(1, -1, 1)
                     idx = active_idx.view(-1, 1, 1).expand(-1, 1, amplitudes.shape[-1])
                     gathered = amplitudes.gather(1, idx).squeeze(1)
-                    out = torch.zeros_like(gathered)
-                    out[excited_mask] = gathered[excited_mask]
-                    return out
+                    return gathered * excited_mask.unsqueeze(1)
 
                 if do_analytical_gradient[0]:
                     if not all_same_mols:
@@ -1291,9 +1284,10 @@ class Energy(torch.nn.Module):
 
                 molecule.cis_energies = excitation_energies
                 nroots = self.excited_states["n_states"]
-                molecule.all_forces = torch.empty(molecule.nmol, nroots + 1, molecule.molsize, 3)
-                molecule.all_cis_relaxed_diploles = torch.empty(molecule.nmol, nroots, 3)
-                molecule.all_cis_unrelaxed_diploles = torch.empty(molecule.nmol, nroots, 3)
+                empty = molecule.coordinates.new_empty
+                molecule.all_forces = empty(molecule.nmol, nroots + 1, molecule.molsize, 3)
+                molecule.all_cis_relaxed_diploles = empty(molecule.nmol, nroots, 3)
+                molecule.all_cis_unrelaxed_diploles = empty(molecule.nmol, nroots, 3)
                 molecule.all_forces[:, 0, ...] = -molecule.analytical_gradient
                 for i in range(1, nroots + 1):
                     molecule.active_state = i
@@ -1495,7 +1489,7 @@ class Force(torch.nn.Module):
                 force = -molecule.coordinates.grad.detach()
                 molecule.coordinates.grad.zero_()
         else:
-            force = torch.tensor([])
+            force = Hf.new_empty(0)
             return (
                 force.detach(),
                 D.detach(),

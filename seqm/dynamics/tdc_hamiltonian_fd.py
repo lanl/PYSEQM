@@ -17,38 +17,6 @@ from seqm.seqm_functions.om2_hcore import build_omx_pair_context
 from seqm.seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas
 from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, unpackone_batch
 from seqm.seqm_functions.two_elec_two_center_int import two_elec_two_center_int as TETCI
-from seqm.utils.torch_compile import optional_compile_function
-
-_prepare_directional_pair_ops_dispatch = None
-_contract_pair_density_directional_dispatch = None
-_contract_mixed_transition_directional_dispatch = None
-
-
-def enable_tdc_hamiltonian_fd_compile(mode=None, **options):
-    """Compile tensor contractions used by Hamiltonian finite-difference TD-NAC."""
-    global _prepare_directional_pair_ops_dispatch
-    global _contract_pair_density_directional_dispatch
-    global _contract_mixed_transition_directional_dispatch
-
-    compile_options = dict(options)
-    if mode is not None:
-        compile_options["mode"] = mode
-
-    _prepare_directional_pair_ops_dispatch = optional_compile_function(
-        _prepare_pair_operators_directional_kernel,
-        compile_options=compile_options,
-        label="tdc_fd.prepare_pair_ops",
-    )
-    _contract_pair_density_directional_dispatch = optional_compile_function(
-        _contract_pair_density_directional_kernel,
-        compile_options=compile_options,
-        label="tdc_fd.contract_density",
-    )
-    _contract_mixed_transition_directional_dispatch = optional_compile_function(
-        _contract_mixed_transition_directional_kernel,
-        compile_options=compile_options,
-        label="tdc_fd.contract_mixed_transition",
-    )
 
 
 def build_fd_displaced_geometries(
@@ -218,37 +186,15 @@ def _prepare_pair_operators_for_directional_nac(mol, P, overlap_t, w_t, e1b_t, e
     idx1 = _cached_index(UPPER_IDX1_4, device)
     scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
 
-    dispatch = _prepare_directional_pair_ops_dispatch or _prepare_pair_operators_directional_kernel
-    return dispatch(
-        P,
-        overlap_t,
-        w_t,
-        e1b_t,
-        e2a_t,
-        mol.mask,
-        mol.maskd,
-        mol.idxi,
-        mol.idxj,
-        ind,
-        idx0,
-        idx1,
-        weight,
-        scale_emat,
-    )
-
-
-def _prepare_pair_operators_directional_kernel(
-    P, overlap_t, w_t, e1b_t, e2a_t, mask, maskd, idxi, idxj, ind, idx0, idx1, weight, scale_emat
-):
     overlap_eff = overlap_t.clone()
-    P_offdiag = P[mask]
+    P_offdiag = P[mol.mask]
     for i in range(4):
         w_i = w_t[..., ind[i], :]
         for j in range(4):
             overlap_eff[..., i, j].sub_(torch.sum(P_offdiag * (w_i[..., :, ind[j]]), dim=(1, 2)))
 
-    PA = P[maskd[idxi]][..., idx0, idx1] * weight
-    PB = P[maskd[idxj]][..., idx0, idx1] * weight
+    PA = P[mol.maskd[mol.idxi]][..., idx0, idx1] * weight
+    PB = P[mol.maskd[mol.idxj]][..., idx0, idx1] * weight
     suma = torch.einsum("pi,pij->pj", PA, w_t)
     sumb = torch.einsum("pj,pij->pi", PB, w_t)
 
@@ -265,32 +211,15 @@ def _prepare_pair_operators_directional_kernel(
 
 def _contract_pair_density_directional_batch(mol, B, overlap_eff, e1b_eff, e2a_eff, nmol):
     # B: (nmol*molsize*molsize, n_state_pairs, 4, 4)
-    dispatch = _contract_pair_density_directional_dispatch or _contract_pair_density_directional_kernel
-    return dispatch(
-        B,
-        overlap_eff,
-        e1b_eff,
-        e2a_eff,
-        mol.mask,
-        mol.maskd[mol.idxi],
-        mol.maskd[mol.idxj],
-        mol.pair_molid,
-        int(nmol),
-    )
-
-
-def _contract_pair_density_directional_kernel(
-    B, overlap_eff, e1b_eff, e2a_eff, mask, maskd_idxi, maskd_idxj, pair_molid, nmol: int
-):
-    B_offdiag = B[mask]
-    B_diag_j = B[maskd_idxj]
-    B_diag_i = B[maskd_idxi]
+    B_offdiag = B[mol.mask]
+    B_diag_j = B[mol.maskd[mol.idxj]]
+    B_diag_i = B[mol.maskd[mol.idxi]]
     pair_val = (B_offdiag * overlap_eff[:, None, :, :]).sum(dim=(2, 3))
     pair_val = pair_val + (B_diag_j * e2a_eff[:, None, :, :]).sum(dim=(2, 3))
     pair_val = pair_val + (B_diag_i * e1b_eff[:, None, :, :]).sum(dim=(2, 3))
 
-    out = torch.zeros((nmol, pair_val.shape[1]), dtype=B.dtype, device=B.device)
-    out.index_add_(0, pair_molid, pair_val)
+    out = torch.zeros((int(nmol), pair_val.shape[1]), dtype=B.dtype, device=B.device)
+    out.index_add_(0, mol.pair_molid, pair_val)
     return out
 
 
@@ -303,18 +232,18 @@ def _contract_mixed_transition_terms_directional_batch(mol, RI0, RJ0, w_t, dtype
     scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     ind = _cached_index(K_ind_4, device)
 
-    dispatch = (
-        _contract_mixed_transition_directional_dispatch or _contract_mixed_transition_directional_kernel
-    )
-    return dispatch(
-        RI0,
-        RJ0,
+    RI_symm = 0.5 * (RI0 + RI0.transpose(-1, -2))
+    RJ_symm = 0.5 * (RJ0 + RJ0.transpose(-1, -2))
+    RI_antisymm = 0.5 * (RI0 - RI0.transpose(-1, -2))
+    RJ_antisymm = 0.5 * (RJ0 - RJ0.transpose(-1, -2))
+    pair_val = 2.0 * _directional_mixed_component(
+        RI_symm,
+        RJ_symm,
         w_t,
         mol.mask,
         mol.maskd,
         mol.idxi,
         mol.idxj,
-        mol.pair_molid,
         idx0,
         idx1,
         weight,
@@ -323,7 +252,30 @@ def _contract_mixed_transition_terms_directional_batch(mol, RI0, RJ0, w_t, dtype
         nmol,
         nbatch,
         molsize,
+        True,
     )
+    pair_val += 2.0 * _directional_mixed_component(
+        RI_antisymm,
+        RJ_antisymm,
+        w_t,
+        mol.mask,
+        mol.maskd,
+        mol.idxi,
+        mol.idxj,
+        idx0,
+        idx1,
+        weight,
+        scale_emat,
+        ind,
+        nmol,
+        nbatch,
+        molsize,
+        False,
+    )
+
+    out = torch.zeros((nmol, nbatch), dtype=RI0.dtype, device=RI0.device)
+    out.index_add_(0, mol.pair_molid, pair_val)
+    return out
 
 
 def _ao4_directional(T, nmol: int, nbatch: int, molsize: int):
@@ -376,70 +328,6 @@ def _directional_mixed_component(
             overlap_rt[..., i, j] = -0.5 * torch.sum(Pp * w_i[:, None, :, ind[j]], dim=(2, 3))
     pair_val.add_((2.0 * Rl[mask] * overlap_rt).sum(dim=(2, 3)))
     return pair_val
-
-
-def _contract_mixed_transition_directional_kernel(
-    RI0,
-    RJ0,
-    w_t,
-    mask,
-    maskd,
-    idxi,
-    idxj,
-    pair_molid,
-    idx0,
-    idx1,
-    weight,
-    scale_emat,
-    ind,
-    nmol: int,
-    nbatch: int,
-    molsize: int,
-):
-    RI_symm = 0.5 * (RI0 + RI0.transpose(-1, -2))
-    RJ_symm = 0.5 * (RJ0 + RJ0.transpose(-1, -2))
-    RI_antisymm = 0.5 * (RI0 - RI0.transpose(-1, -2))
-    RJ_antisymm = 0.5 * (RJ0 - RJ0.transpose(-1, -2))
-    pair_val = 2.0 * _directional_mixed_component(
-        RI_symm,
-        RJ_symm,
-        w_t,
-        mask,
-        maskd,
-        idxi,
-        idxj,
-        idx0,
-        idx1,
-        weight,
-        scale_emat,
-        ind,
-        nmol,
-        nbatch,
-        molsize,
-        True,
-    )
-    pair_val += 2.0 * _directional_mixed_component(
-        RI_antisymm,
-        RJ_antisymm,
-        w_t,
-        mask,
-        maskd,
-        idxi,
-        idxj,
-        idx0,
-        idx1,
-        weight,
-        scale_emat,
-        ind,
-        nmol,
-        nbatch,
-        molsize,
-        False,
-    )
-
-    out = torch.zeros((nmol, nbatch), dtype=RI0.dtype, device=RI0.device)
-    out.index_add_(0, pair_molid, pair_val)
-    return out
 
 
 def compute_tdc_hamiltonian_fd(

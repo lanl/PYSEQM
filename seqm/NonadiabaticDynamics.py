@@ -5,7 +5,6 @@ import torch
 from scipy.optimize import linear_sum_assignment
 
 from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, packone_batch
-from seqm.utils.profiling import record_runtime_diagnostic
 from seqm.utils.torch_compile import optional_compile_function
 
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
@@ -19,9 +18,6 @@ from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 
 HBAR_EV_FS = 0.6582119514  # Planck's constant (reduced) in eV·fs
-_tdc_mo_overlap_dispatch = None
-_tdc_cis_coupling_dispatch = None
-_tdc_rpa_coupling_dispatch = None
 _electronic_propagation_dispatch = None
 
 
@@ -37,41 +33,14 @@ def enable_electronic_propagation_compile(mode=None, **options):
     )
 
 
-def enable_nonadiabatic_compile(mode=None, **options):
-    """Compile tensor kernels used by overlap TD-NAC and electronic propagation."""
-    global _tdc_mo_overlap_dispatch
-    global _tdc_cis_coupling_dispatch
-    global _tdc_rpa_coupling_dispatch
-
-    compile_options = dict(options)
-    if mode is not None:
-        compile_options["mode"] = mode
-
-    _tdc_mo_overlap_dispatch = optional_compile_function(
-        _tdc_mo_overlap_blocks_kernel, compile_options=compile_options, label="namd.tdc_mo_overlap"
-    )
-    _tdc_cis_coupling_dispatch = optional_compile_function(
-        _tdc_cis_coupling_kernel, compile_options=compile_options, label="namd.tdc_cis_coupling"
-    )
-    _tdc_rpa_coupling_dispatch = optional_compile_function(
-        _tdc_rpa_coupling_kernel, compile_options=compile_options, label="namd.tdc_rpa_coupling"
-    )
-    enable_electronic_propagation_compile(mode=mode, **options)
-
-
-def _tdc_mo_overlap_blocks_kernel(Cc, S_ao, Cp, nocc: int):
-    S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)
-    return S_mo[:, :nocc, :nocc], S_mo[:, nocc:, nocc:]
-
-
-def _mo_term_virtual_kernel(C_view, dSvv, nmol: int, nov: int):
+def _mo_term_virtual(C_view, dSvv, nmol: int, nov: int):
     Cd = torch.matmul(C_view, dSvv.transpose(1, 2).unsqueeze(1))
     Cf = C_view.reshape(nmol, C_view.shape[1], nov)
     Cdf = Cd.reshape(nmol, Cd.shape[1], nov)
     return torch.bmm(Cf, Cdf.transpose(1, 2))
 
 
-def _mo_term_occ_kernel(C_view, dSoo, nmol: int, nov: int):
+def _mo_term_occ(C_view, dSoo, nmol: int, nov: int):
     Ct = C_view.permute(0, 1, 3, 2)
     Ctd = torch.matmul(Ct, dSoo.transpose(1, 2).unsqueeze(1))
     Cd = Ctd.permute(0, 1, 3, 2)
@@ -80,28 +49,7 @@ def _mo_term_occ_kernel(C_view, dSoo, nmol: int, nov: int):
     return torch.bmm(Cf, Cdf.transpose(1, 2))
 
 
-def _tdc_cis_coupling_kernel(flat_p, flat_c, view_c, dSoo, dSvv, dt: float, nmol: int, nov: int):
-    ov_pc = torch.bmm(flat_p, flat_c.transpose(1, 2))
-    coup = ov_pc - ov_pc.transpose(-2, -1)
-    coup = coup + _mo_term_virtual_kernel(view_c, dSvv, nmol, nov)
-    coup = coup + _mo_term_occ_kernel(view_c, dSoo, nmol, nov)
-    asym = coup - coup.transpose(1, 2)
-    return 0.25 * asym / dt, ov_pc
-
-
-def _tdc_rpa_coupling_kernel(Xp_f, Yp_f, Xc_f, Yc_f, Xc_v, Yc_v, dSoo, dSvv, dt: float, nmol: int, nov: int):
-    ov_pc = torch.bmm(Xp_f, Xc_f.transpose(1, 2)) + torch.bmm(Yp_f, Yc_f.transpose(1, 2))
-    ov_cp = torch.bmm(Xc_f, Xp_f.transpose(1, 2)) + torch.bmm(Yc_f, Yp_f.transpose(1, 2))
-    coup = ov_pc - ov_cp
-    coup = coup + _mo_term_virtual_kernel(Xc_v, dSvv, nmol, nov)
-    coup = coup + _mo_term_occ_kernel(Xc_v, dSoo, nmol, nov)
-    coup = coup + _mo_term_virtual_kernel(Yc_v, dSvv, nmol, nov)
-    coup = coup + _mo_term_occ_kernel(Yc_v, dSoo, nmol, nov)
-    asym = coup - coup.transpose(1, 2)
-    return 0.25 * asym / dt, ov_pc
-
-
-def _electronic_rhs_kernel(xr, yi, theta, nac_proj):
+def _electronic_rhs(xr, yi, theta, nac_proj):
     ct = torch.cos(theta)
     st = torch.sin(theta)
 
@@ -144,22 +92,22 @@ def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: f
         nd2 = nd_old + tau_half * dnd
         nd4 = nd_old + tau_full * dnd
 
-        dx1, dy1 = _electronic_rhs_kernel(x, y, th, nd1)
+        dx1, dy1 = _electronic_rhs(x, y, th, nd1)
 
         x2 = x + half_dt_sub * dx1
         y2 = y + half_dt_sub * dy1
         th2 = th - half_dt_over_hbar * (e1s + 0.25 * de_sub)
-        dx2, dy2 = _electronic_rhs_kernel(x2, y2, th2, nd2)
+        dx2, dy2 = _electronic_rhs(x2, y2, th2, nd2)
 
         x3 = x + half_dt_sub * dx2
         y3 = y + half_dt_sub * dy2
         th3 = th2
-        dx3, dy3 = _electronic_rhs_kernel(x3, y3, th3, nd2)
+        dx3, dy3 = _electronic_rhs(x3, y3, th3, nd2)
 
         x4 = x + dt_sub * dx3
         y4 = y + dt_sub * dy3
         th4 = th - dt_over_hbar * e2s
-        dx4, dy4 = _electronic_rhs_kernel(x4, y4, th4, nd4)
+        dx4, dy4 = _electronic_rhs(x4, y4, th4, nd4)
 
         x = x + one_sixth_dt * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4)
         y = y + one_sixth_dt * (dy1 + 2.0 * dy2 + 2.0 * dy3 + dy4)
@@ -298,10 +246,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             return
         options = dict(cfg["options"])
         kernel_mode = options.pop("mode", None)
-        if cfg["compile_nac"]:
-            enable_nonadiabatic_compile(mode=kernel_mode, **options)
-        elif cfg["compile_cis"]:
-            enable_electronic_propagation_compile(mode=kernel_mode, **options)
+        enable_electronic_propagation_compile(mode=kernel_mode, **options)
 
     def _normalize_initial_state(self, nmol: int, device) -> torch.Tensor:
         init = self.initial_state
@@ -620,8 +565,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             # MO overlap: S_mo = C(t)^T S_ao(t,t-dt) C(t-dt)
             Cc = molecule.molecular_orbitals  # (nmol, nao, norb)
             Cp = mos_prev  # (nmol, nao, norb)
-            make_overlap = _tdc_mo_overlap_dispatch or _tdc_mo_overlap_blocks_kernel
-            Soo, Svv = make_overlap(Cc, S_ao, Cp, nocc)
+            S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)
+            Soo, Svv = S_mo[:, :nocc, :nocc], S_mo[:, nocc:, nocc:]
 
             bad_mo_overlap = bad_diag_overlap(Soo, 0.85) | bad_diag_overlap(Svv, 0.85)
             if bad_mo_overlap.any():
@@ -633,22 +578,27 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             if curr[0] == "cis":
                 _, flat_p, _ = prev
                 _, flat_c, view_c = curr
-                make_coup = _tdc_cis_coupling_dispatch or _tdc_cis_coupling_kernel
-                nac_dt, ov_pc = make_coup(flat_p, flat_c, view_c, dSoo, dSvv, float(dt), nmol, nov)
+                ov_pc = torch.bmm(flat_p, flat_c.transpose(1, 2))
+                coup = ov_pc - ov_pc.transpose(-2, -1)
+                coup = coup + _mo_term_virtual(view_c, dSvv, nmol, nov)
+                coup = coup + _mo_term_occ(view_c, dSoo, nmol, nov)
 
             else:
                 _, (Xp_f, Yp_f), _ = prev
                 _, (Xc_f, Yc_f), (Xc_v, Yc_v) = curr
 
-                make_coup = _tdc_rpa_coupling_dispatch or _tdc_rpa_coupling_kernel
-                nac_dt, ov_pc = make_coup(
-                    Xp_f, Yp_f, Xc_f, Yc_f, Xc_v, Yc_v, dSoo, dSvv, float(dt), nmol, nov
-                )
+                ov_pc = torch.bmm(Xp_f, Xc_f.transpose(1, 2)) + torch.bmm(Yp_f, Yc_f.transpose(1, 2))
+                ov_cp = torch.bmm(Xc_f, Xp_f.transpose(1, 2)) + torch.bmm(Yc_f, Yp_f.transpose(1, 2))
+                coup = ov_pc - ov_cp
+                coup = coup + _mo_term_virtual(Xc_v, dSvv, nmol, nov)
+                coup = coup + _mo_term_occ(Xc_v, dSoo, nmol, nov)
+                coup = coup + _mo_term_virtual(Yc_v, dSvv, nmol, nov)
+                coup = coup + _mo_term_occ(Yc_v, dSoo, nmol, nov)
 
             if bad_diag_overlap(ov_pc, 0.85).any():
                 return None
 
-        return nac_dt
+        return 0.25 * (coup - coup.transpose(1, 2)) / float(dt)
 
     def _detect_crossings(self, cache_old, cache_new):
         # Trivial-crossing (cross==2 in NEXMD) detection (crossed states have overlap >= 0.9)
@@ -1148,7 +1098,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 molecule, coords_prev, mos_prev, cache_old.get("cis_amp"), cache_new.get("cis_amp"), dt
             )
             if nac_dt is None:
-                record_runtime_diagnostic("overlap_tdc", fallback=True)
                 # print("Bad previous overlap")
                 nac_dt = compute_tdc_hamiltonian_fd(
                     self,
@@ -1164,8 +1113,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     self._packed_overlap_prev = packone_batch(
                         overlap_matrix_current_geometry(molecule), *self._overlap_pack_spec
                     )
-            else:
-                record_runtime_diagnostic("overlap_tdc", fallback=False)
         else:
             raise RuntimeError(f"Unsupported TDC method '{self._tdc_method}'.")
 

@@ -24,37 +24,9 @@ from seqm.seqm_functions.rcis_batch import (
     makeA_pi_batched,
     unpackone_batch,
 )
-from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0
 from .omx_utils import OMX_METHODS, get_orbital_zetas
-
-_contract_nac_density_dispatch = None
-_contract_mixed_transition_terms_dispatch = None
-_pair_response_rhs_dispatch = None
-
-
-def enable_nac_compile(mode=None, **options):
-    """Compile tensor contractions used by CIS nonadiabatic coupling vectors."""
-    global _contract_nac_density_dispatch
-    global _contract_mixed_transition_terms_dispatch
-    global _pair_response_rhs_dispatch
-
-    compile_options = dict(options)
-    if mode is not None:
-        compile_options["mode"] = mode
-
-    _contract_nac_density_dispatch = optional_compile_function(
-        _contract_nac_density_kernel, compile_options=compile_options, label="nac.contract_density"
-    )
-    _contract_mixed_transition_terms_dispatch = optional_compile_function(
-        _contract_mixed_transition_terms_kernel,
-        compile_options=compile_options,
-        label="nac.contract_mixed_transition",
-    )
-    _pair_response_rhs_dispatch = optional_compile_function(
-        _pair_response_rhs_kernel, compile_options=compile_options, label="nac.pair_response_rhs"
-    )
 
 
 def _state_pair_tensors(state_pairs, device):
@@ -165,20 +137,16 @@ def _build_nac_derivative_operators(mol, P0, ri, riXH, dtype, device, return_w_x
 def _contract_nac_density_batch(
     mol, B, B0, overlap_KAB_x, e1b_x, e2a_x, _unused_p0_ortho_grad, ortho_cache, nmol, molsize
 ):
-    dispatch = _contract_nac_density_dispatch or _contract_nac_density_kernel
-    nac_cis = dispatch(
-        B,
-        overlap_KAB_x,
-        e1b_x,
-        e2a_x,
-        mol.mask,
-        mol.maskd[mol.idxi],
-        mol.maskd[mol.idxj],
-        mol.idxi,
-        mol.idxj,
-        nmol,
-        molsize,
+    pair_grad = torch.einsum("pbxy,pcxy->pbc", B[mol.mask], overlap_KAB_x)
+    pair_grad.add_(
+        torch.einsum("pbxy,pcxy->pbc", B[mol.maskd[mol.idxj]], e2a_x)
+        + torch.einsum("pbxy,pcxy->pbc", B[mol.maskd[mol.idxi]], e1b_x)
     )
+    nac_cis = torch.zeros(nmol * molsize, pair_grad.shape[1], 3, dtype=B.dtype, device=B.device)
+    nac_cis.index_add_(0, mol.idxi, pair_grad)
+    nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
+    nac_cis = nac_cis.view(nmol, molsize, pair_grad.shape[1], 3).permute(0, 2, 1, 3)
+
     if ortho_cache is not None:
         nac_cis += omx_threebody_ortho_grad(
             mol,
@@ -190,21 +158,6 @@ def _contract_nac_density_batch(
             unrestricted=False,
         )
     return nac_cis
-
-
-def _contract_nac_density_kernel(
-    B, overlap_KAB_x, e1b_x, e2a_x, mask, maskd_idxi, maskd_idxj, idxi, idxj, nmol: int, molsize: int
-):
-    pair_grad = torch.einsum("pbxy,pcxy->pbc", B[mask], overlap_KAB_x)
-    pair_grad.add_(
-        torch.einsum("pbxy,pcxy->pbc", B[maskd_idxj], e2a_x)
-        + torch.einsum("pbxy,pcxy->pbc", B[maskd_idxi], e1b_x)
-    )
-
-    nac_cis = torch.zeros(nmol * molsize, pair_grad.shape[1], 3, dtype=B.dtype, device=B.device)
-    nac_cis.index_add_(0, idxi, pair_grad)
-    nac_cis.index_add_(0, idxj, pair_grad, alpha=-1.0)
-    return nac_cis.view(nmol, molsize, pair_grad.shape[1], 3).permute(0, 2, 1, 3)
 
 
 def _build_pair_response_density_batch(
@@ -225,8 +178,11 @@ def _build_pair_response_density_batch(
     RI_pi = pair_pi[:, nbatch : 2 * nbatch]
     RJ_pi = pair_pi[:, 2 * nbatch :]
 
-    make_rhs = _pair_response_rhs_dispatch or _pair_response_rhs_kernel
-    rhs = make_rhs(Cocc, Cvirt, BIJ_pi, RI_pi, RJ_pi, Bv_i, Bv_j, Bo_i, Bo_j)
+    rhs = -torch.einsum("Nni,Nbmn,Nma->Nbia", Cocc, BIJ_pi, Cvirt)
+    rhs -= torch.einsum("Nbni,Nbmn,Nma->Nbia", Bv_i, RJ_pi, Cvirt)
+    rhs -= torch.einsum("Nbni,Nbmn,Nma->Nbia", Bv_j, RI_pi, Cvirt)
+    rhs += torch.einsum("Nni,Nbmn,Nbma->Nbia", Cocc, RI_pi, Bo_j)
+    rhs += torch.einsum("Nni,Nbmn,Nbma->Nbia", Cocc, RJ_pi, Bo_i)
     ea_ei = e_mo[:, nocc : nocc + nvirt].unsqueeze(1) - e_mo[:, :nocc].unsqueeze(2)
     rhs_flat = rhs.reshape(nmol * nbatch, nocc * nvirt)
     ea_flat = ea_ei.repeat_interleave(nbatch, dim=0).reshape(nmol * nbatch, nocc * nvirt)
@@ -241,15 +197,6 @@ def _build_pair_response_density_batch(
     return Dij, RI, RJ
 
 
-def _pair_response_rhs_kernel(Cocc, Cvirt, BIJ_pi, RI_pi, RJ_pi, Bv_i, Bv_j, Bo_i, Bo_j):
-    rhs = -torch.einsum("Nni,Nbmn,Nma->Nbia", Cocc, BIJ_pi, Cvirt)
-    rhs -= torch.einsum("Nbni,Nbmn,Nma->Nbia", Bv_i, RJ_pi, Cvirt)
-    rhs -= torch.einsum("Nbni,Nbmn,Nma->Nbia", Bv_j, RI_pi, Cvirt)
-    rhs += torch.einsum("Nni,Nbmn,Nbma->Nbia", Cocc, RI_pi, Bo_j)
-    rhs += torch.einsum("Nni,Nbmn,Nbma->Nbia", Cocc, RJ_pi, Bo_i)
-    return rhs
-
-
 def _contract_mixed_transition_terms(mol, RI0, RJ0, w_x, dtype, device):
     molsize = int(mol.molsize)
     nmol = int(mol.nmol)
@@ -259,10 +206,15 @@ def _contract_mixed_transition_terms(mol, RI0, RJ0, w_x, dtype, device):
     scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     ind = _cached_index(K_ind_4, device)
 
-    dispatch = _contract_mixed_transition_terms_dispatch or _contract_mixed_transition_terms_kernel
-    return dispatch(
-        RI0,
-        RJ0,
+    nbatch = RI0.shape[1]
+    RI_symm = 0.5 * (RI0 + RI0.transpose(-1, -2))
+    RJ_symm = 0.5 * (RJ0 + RJ0.transpose(-1, -2))
+    RI_antisymm = 0.5 * (RI0 - RI0.transpose(-1, -2))
+    RJ_antisymm = 0.5 * (RJ0 - RJ0.transpose(-1, -2))
+
+    pair_grad = 2.0 * _mixed_transition_component(
+        RI_symm,
+        RJ_symm,
         w_x,
         mol.mask,
         mol.maskd,
@@ -275,7 +227,30 @@ def _contract_mixed_transition_terms(mol, RI0, RJ0, w_x, dtype, device):
         ind,
         nmol,
         molsize,
+        True,
     )
+    pair_grad += 2.0 * _mixed_transition_component(
+        RI_antisymm,
+        RJ_antisymm,
+        w_x,
+        mol.mask,
+        mol.maskd,
+        mol.idxi,
+        mol.idxj,
+        idx0,
+        idx1,
+        weight,
+        scale_emat,
+        ind,
+        nmol,
+        molsize,
+        False,
+    )
+
+    nac_cis = torch.zeros(nmol * molsize, nbatch, 3, dtype=RI0.dtype, device=RI0.device)
+    nac_cis.index_add_(0, mol.idxi, pair_grad)
+    nac_cis.index_add_(0, mol.idxj, pair_grad, alpha=-1.0)
+    return nac_cis.view(nmol, molsize, nbatch, 3).permute(0, 2, 1, 3)
 
 
 def _ao4_nac(T, nmol: int, nbatch: int, molsize: int):
@@ -333,56 +308,6 @@ def _mixed_transition_component(
             overlap_rx[..., i, j] = -0.5 * torch.sum(Pp * w_x_i[..., :, ind[j]], dim=(3, 4))
     pair_grad.add_((2.0 * Rl[mask].unsqueeze(2) * overlap_rx).sum(dim=(3, 4)))
     return pair_grad
-
-
-def _contract_mixed_transition_terms_kernel(
-    RI0, RJ0, w_x, mask, maskd, idxi, idxj, idx0, idx1, weight, scale_emat, ind, nmol: int, molsize: int
-):
-    nbatch = RI0.shape[1]
-    RI_symm = 0.5 * (RI0 + RI0.transpose(-1, -2))
-    RJ_symm = 0.5 * (RJ0 + RJ0.transpose(-1, -2))
-    RI_antisymm = 0.5 * (RI0 - RI0.transpose(-1, -2))
-    RJ_antisymm = 0.5 * (RJ0 - RJ0.transpose(-1, -2))
-
-    pair_grad = 2.0 * _mixed_transition_component(
-        RI_symm,
-        RJ_symm,
-        w_x,
-        mask,
-        maskd,
-        idxi,
-        idxj,
-        idx0,
-        idx1,
-        weight,
-        scale_emat,
-        ind,
-        nmol,
-        molsize,
-        True,
-    )
-    pair_grad += 2.0 * _mixed_transition_component(
-        RI_antisymm,
-        RJ_antisymm,
-        w_x,
-        mask,
-        maskd,
-        idxi,
-        idxj,
-        idx0,
-        idx1,
-        weight,
-        scale_emat,
-        ind,
-        nmol,
-        molsize,
-        False,
-    )
-
-    nac_cis = torch.zeros(nmol * molsize, nbatch, 3, dtype=RI0.dtype, device=RI0.device)
-    nac_cis.index_add_(0, idxi, pair_grad)
-    nac_cis.index_add_(0, idxj, pair_grad, alpha=-1.0)
-    return nac_cis.view(nmol, molsize, nbatch, 3).permute(0, 2, 1, 3)
 
 
 def calc_nac(

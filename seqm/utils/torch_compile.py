@@ -2,20 +2,12 @@ import warnings
 
 import torch
 
-_COMPILE_CONTROL_KEYS = {"enabled", "compile_omx", "compile_cis", "compile_fock", "compile_nac", "options"}
+_COMPILE_CONTROL_KEYS = {"enabled", "options"}
+_COMPILE_SELECTION_KEYS = {"target", "compile_omx", "compile_cis", "compile_fock", "compile_nac"}
 
 
 def _compile_config(enabled):
-    return {
-        "enabled": enabled,
-        # Safe excited-state defaults. Ground-only MD selects its ground kernels
-        # contextually; the other groups remain internal diagnostic toggles.
-        "compile_omx": False,
-        "compile_cis": True,
-        "compile_fock": False,
-        "compile_nac": False,
-        "options": {},
-    }
+    return {"enabled": enabled, "options": {}}
 
 
 def normalize_torch_compile_config(seqm_parameters, override=None):
@@ -35,29 +27,21 @@ def normalize_torch_compile_config(seqm_parameters, override=None):
         return _compile_config(True)
     if not isinstance(raw, dict):
         raise TypeError("torch_compile must be a bool or a configuration dict.")
-    if "target" in raw:
-        raise ValueError("torch_compile no longer accepts target; it only compiles repeated kernels.")
+    if _COMPILE_SELECTION_KEYS.intersection(raw):
+        raise ValueError(
+            "torch_compile does not accept kernel selection; PYSEQM selects kernels automatically."
+        )
 
     enabled = bool(raw.get("enabled", True))
     options = dict(raw.get("options", {}))
     for key, value in raw.items():
         if key not in _COMPILE_CONTROL_KEYS:
             options[key] = value
-    defaults = _compile_config(enabled)
-    return {
-        "enabled": enabled,
-        "compile_omx": bool(raw.get("compile_omx", defaults["compile_omx"])),
-        "compile_cis": bool(raw.get("compile_cis", defaults["compile_cis"])),
-        "compile_fock": bool(raw.get("compile_fock", defaults["compile_fock"])),
-        "compile_nac": bool(raw.get("compile_nac", defaults["compile_nac"])),
-        "options": options,
-    }
+    return {"enabled": enabled, "options": options}
 
 
 class OptionalCompiledFunction:
     """torch.compile wrapper for function-level kernels with eager fallback."""
-
-    is_torch_compile_wrapper = True
 
     def __init__(self, fn, compile_options=None, label=None):
         self.fn = fn
@@ -85,10 +69,10 @@ class OptionalCompiledFunction:
         return self._compiled_fn
 
     def __call__(self, *args, **kwargs):
-        compiled = self._compiled()
-        if compiled is None:
-            return self.fn(*args, **kwargs)
         try:
+            compiled = self._compiled()
+            if compiled is None:
+                return self.fn(*args, **kwargs)
             return compiled(*args, **kwargs)
         except Exception as exc:
             self._compile_disabled = True
@@ -104,6 +88,4 @@ class OptionalCompiledFunction:
 
 
 def optional_compile_function(fn, compile_options=None, label=None):
-    if getattr(fn, "is_torch_compile_wrapper", False):
-        return fn
     return OptionalCompiledFunction(fn, compile_options=compile_options, label=label)

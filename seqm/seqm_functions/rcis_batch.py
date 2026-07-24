@@ -3,7 +3,6 @@ import math
 import torch
 
 from seqm.dynamics.active_state import active_state_tensor
-from seqm.utils.profiling import record_runtime_diagnostic
 from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0
@@ -13,32 +12,25 @@ from .fock import UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index,
 # from seqm.seqm_functions.pack import packone, unpackone
 
 _makeA_pi_batched_dispatch = None
-_makeA_pi_symm_batch_dispatch = None
-_ao_transition_density_dispatch = None
-_mo_fock_action_dispatch = None
-_relaxed_rhs_dispatch = None
-_relaxed_finish_dispatch = None
 
 
 def _uniform_molecule_dimensions(mol):
     """Return immutable uniform-molecule dimensions without repeated CUDA syncs."""
     cached = getattr(mol, "_rcis_uniform_dimensions", None)
-    if cached is None:
-        cached = (
-            int(mol.nHeavy[0].item()),
-            int(mol.nHydro[0].item()),
-            int(mol.norb[0].item()),
-            int(mol.nocc[0].item()),
-        )
-        mol._rcis_uniform_dimensions = cached
+    if cached is not None:
+        return cached
+
+    dimensions = torch.stack((mol.nHeavy, mol.nHydro, mol.norb, mol.nocc), dim=1).cpu()
+    if dimensions.shape[0] > 1 and not torch.equal(dimensions, dimensions[:1].expand_as(dimensions)):
+        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    cached = tuple(map(int, dimensions[0]))
+    mol._rcis_uniform_dimensions = cached
     return cached
 
 
 def enable_rcis_compile(mode=None, **options):
-    """Compile the repeatedly profitable CIS Davidson tensor contractions."""
+    """Compile the profitable CIS Davidson two-electron contraction."""
     global _makeA_pi_batched_dispatch
-    global _ao_transition_density_dispatch
-    global _mo_fock_action_dispatch
 
     compile_options = dict(options)
     if mode is not None:
@@ -46,12 +38,6 @@ def enable_rcis_compile(mode=None, **options):
 
     _makeA_pi_batched_dispatch = optional_compile_function(
         _makeA_pi_batched_kernel, compile_options=compile_options, label="rcis.makeA_pi_batched"
-    )
-    _ao_transition_density_dispatch = optional_compile_function(
-        _ao_transition_density_kernel, compile_options=compile_options, label="rcis.ao_transition_density"
-    )
-    _mo_fock_action_dispatch = optional_compile_function(
-        _mo_fock_action_kernel, compile_options=compile_options, label="rcis.mo_fock_action"
     )
 
 
@@ -86,11 +72,8 @@ def rcis_batch(
     device = w.device
     dtype = w.dtype
 
-    norb_batch, nocc_batch, nmol = mol.norb, mol.nocc, mol.nmol
-    if nmol > 1 and (
-        not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0])
-    ):
-        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
+    nmol = mol.nmol
+    _, _, norb, _ = _uniform_molecule_dimensions(mol)
 
     nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window, e_mo)
 
@@ -119,7 +102,7 @@ def rcis_batch(
             make_best_guess_from_previous_amplitudes(mol, init_amplitude_guess, V, nocc)
         else:
             if (
-                init_amplitude_guess.shape[-1] == norb_batch[0]
+                init_amplitude_guess.shape[-1] == norb
             ):  # initial amplitude guess provided in AO basis, i.e. transition density matrices
                 V[:, :nroots] = torch.einsum(
                     "bmi,brmn,bna->bria", Cocc, init_amplitude_guess[:, :nroots], Cvirt
@@ -158,7 +141,6 @@ def rcis_batch(
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
-    collapse_events = 0
     chunk_plan_cache = {}
     mol_idx = torch.arange(nmol, device=device)
     subspace_idx = torch.arange(maxSubspacesize, device=device)
@@ -230,7 +212,6 @@ def rcis_batch(
         )
         collapse_mask = (~done) & (~mol_converged) & collapse_condition
         if collapse_mask.sum() > 0:
-            collapse_events += 1
             if davidson_iter == 1:
                 raise Exception(
                     "Insufficient memory to perform even a single iteration of subspace expansion"
@@ -295,8 +276,6 @@ def rcis_batch(
     #         print(f"State {i:3d}: {energy:.15f} eV")
     # print("")
 
-    record_runtime_diagnostic("davidson", iterations=davidson_iter, collapse_events=collapse_events)
-
     # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
@@ -334,13 +313,10 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, ch
             plan = getMemUse(V.dtype, V.device, mol, nNewRoots)
             chunk_plan_cache[chunk_key] = plan
         need_to_chunk, chunk_size = plan
-    make_density = _ao_transition_density_dispatch or _ao_transition_density_kernel
-    make_post = _mo_fock_action_dispatch or _mo_fock_action_kernel
-
     if not need_to_chunk:
-        P_xi = make_density(Cocc, Via, Cvirt)
+        P_xi = _ao_transition_density(Cocc, Via, Cvirt)
         F0 = makeA_pi_batched(mol, P_xi, w)
-        result = make_post(Via, F0, ea_ei, Cocc, Cvirt, bool(makeB), torch.is_grad_enabled())
+        result = _mo_fock_action(Via, F0, ea_ei, Cocc, Cvirt, bool(makeB), torch.is_grad_enabled())
         if makeB:
             A, B = result
         else:
@@ -352,14 +328,16 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, ch
         for start in range(0, nNewRoots, chunk_size):
             end = min(start + chunk_size, nNewRoots)
             Via_chunk = Via[:, start:end]
-            P_xi = make_density(Cocc, Via_chunk, Cvirt)
+            P_xi = _ao_transition_density(Cocc, Via_chunk, Cvirt)
             F0 = makeA_pi_batched(mol, P_xi, w)
             if makeB:
-                A[:, start:end], B[:, start:end] = make_post(
+                A[:, start:end], B[:, start:end] = _mo_fock_action(
                     Via_chunk, F0, ea_ei, Cocc, Cvirt, True, torch.is_grad_enabled()
                 )
             else:
-                A[:, start:end] = make_post(Via_chunk, F0, ea_ei, Cocc, Cvirt, False, torch.is_grad_enabled())
+                A[:, start:end] = _mo_fock_action(
+                    Via_chunk, F0, ea_ei, Cocc, Cvirt, False, torch.is_grad_enabled()
+                )
     A = A.reshape(nmol, nNewRoots, -1)
 
     if makeB:
@@ -369,14 +347,14 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, ch
     return A
 
 
-def _ao_transition_density_kernel(Cocc, Via, Cvirt, symmetrize: bool = False):
+def _ao_transition_density(Cocc, Via, Cvirt, symmetrize: bool = False):
     density = torch.einsum("bmi,bria,bna->brmn", Cocc, Via, Cvirt)
     if symmetrize:
         density = density + density.transpose(-1, -2)
     return density
 
 
-def _mo_fock_action_kernel(Via, F0, ea_ei, Cocc, Cvirt, makeB: bool, grad_enabled: bool):
+def _mo_fock_action(Via, F0, ea_ei, Cocc, Cvirt, makeB: bool, grad_enabled: bool):
     A = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
     if grad_enabled:
         A = A + Via * ea_ei.unsqueeze(1)
@@ -451,7 +429,7 @@ def _makeA_pi_batched_kernel(
     device = P0.device
     dtype = P0.dtype
     nnewRoots = P0.shape[1]
-    F = _makeA_pi_symm_batch_kernel(
+    F = _makeA_pi_symm_batch_impl(
         P0, w, mask, maskd, mask_l, idxi, idxj, gss, gsp, gpp, gp2, hsp, molsize, nmol
     )
 
@@ -499,8 +477,7 @@ def makeA_pi_symm_batch(mol, P0, w):
     nmol = int(mol.nmol)
     npairs_per_mol = (molsize * (molsize - 1)) // 2
 
-    dispatch = _makeA_pi_symm_batch_dispatch or _makeA_pi_symm_batch_kernel
-    return dispatch(
+    return _makeA_pi_symm_batch_impl(
         P0,
         w,
         mol.mask[:npairs_per_mol],
@@ -518,7 +495,7 @@ def makeA_pi_symm_batch(mol, P0, w):
     )
 
 
-def _makeA_pi_symm_batch_kernel(
+def _makeA_pi_symm_batch_impl(
     P0, w, mask, maskd, mask_l, idxi, idxj, gss, gsp, gpp, gp2, hsp, molsize: int, nmol: int
 ):
     nnewRoots = P0.shape[1]
@@ -565,6 +542,8 @@ def _makeA_pi_symm_batch_kernel(
     else:
         sumK = sumB
     Pp = P[:, :, mask]
+    # Keep the loop unless a fused contraction preserves peak memory; expanded
+    # root/pair/orbital intermediates can exceed the Davidson memory budget.
     for i in range(4):
         for j in range(4):
             sumK[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", Pp, w[..., ind[i], :][..., :, ind[j]])
@@ -802,9 +781,7 @@ def _store_tdm_by_mode(mol, R, tdm_mode):
 
 
 def pack_dipole_matrix(mol, dipole_mat):
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
+    nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
     return packone_batch(
         dipole_mat.view(3 * mol.nmol, 4 * mol.molsize, 4 * mol.molsize), 4 * nHeavy, nHydro, norb
     ).view(mol.nmol, 3, norb, norb)
@@ -912,18 +889,18 @@ def print_rcis_analysis(excitation_energies, transition_dipole, oscillator_stren
     print("-" * 65)
 
     nmol = excitation_energies.shape[0]
-    # Loop over molecules and states using enumerate and zip
-    for mol_idx, (mol_energy, mol_dipole, mol_strength) in enumerate(
-        zip(excitation_energies, transition_dipole, oscillator_strength), start=1
-    ):
+    values = (
+        excitation_energies.detach().cpu().tolist(),
+        transition_dipole.detach().cpu().tolist(),
+        oscillator_strength.detach().cpu().tolist(),
+    )
+    for mol_idx, (mol_energy, mol_dipole, mol_strength) in enumerate(zip(*values), start=1):
         if nmol > 1:
             print(f"Molecule {mol_idx}:")
-        for energy_val, dipole_vals, strength_val in zip(mol_energy, mol_dipole, mol_strength):
-            # Convert single-value tensors to Python floats
-            e = energy_val.item()
-            dx, dy, dz = dipole_vals.tolist()
-            s = strength_val.item()
-            print(row_format.format(f"{e:.6f}", f"{dx:.6f}", f"{dy:.6f}", f"{dz:.6f}", f"{s:.6f}"))
+        for energy, (dx, dy, dz), strength in zip(mol_energy, mol_dipole, mol_strength):
+            print(
+                row_format.format(f"{energy:.6f}", f"{dx:.6f}", f"{dy:.6f}", f"{dz:.6f}", f"{strength:.6f}")
+            )
         print("")
 
 
@@ -1002,27 +979,13 @@ def make_guess(ea_ei, nroots, maxSubspacesize, V, nmol, nov):
 
 
 def calc_cis_energy(mol, w, e_mo, amplitude, F, P, rpa=False, orbital_window=None):
-    norb_batch, nocc_batch = mol.norb, mol.nocc
-    if not torch.all(norb_batch == norb_batch[0]) or not torch.all(nocc_batch == nocc_batch[0]):
-        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
-
+    _, _, norb, nocc = _uniform_molecule_dimensions(mol)
     # for near-degenerate use the formulation where E_cis is expressed in atomic orbital basis only
-    norb, nocc = norb_batch[0], nocc_batch[0]
-    if ((e_mo[:norb, 1:] - e_mo[:norb, :-1]) < 1e-4).any() and not rpa:
+    orbital_energies = e_mo[:, :norb]
+    if ((orbital_energies[:, 1:] - orbital_energies[:, :-1]) < 1e-4).any() and not rpa:
         return calc_cis_energy_from_density(mol, w, F, P, amplitude, rpa, orbital_window)
 
-    if orbital_window is not None:
-        n_below, m_above = orbital_window
-        occ_idx = torch.arange(nocc - n_below, nocc)
-        virt_idx = torch.arange(nocc, nocc + m_above)
-    else:
-        occ_idx = torch.arange(nocc)
-        virt_idx = torch.arange(nocc, norb)
-    ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
-
-    C = mol.molecular_orbitals
-    Cocc = C[:, :, occ_idx]
-    Cvirt = C[:, :, virt_idx]
+    _, _, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window, e_mo)
 
     if not rpa:  # CIS: w = XAX
         HV = matrix_vector_product_batched(mol, amplitude.unsqueeze(1), w, ea_ei, Cocc, Cvirt)
@@ -1055,9 +1018,7 @@ def calc_cis_energy_from_density(mol, w, F, P, amplitude, rpa=False, orbital_win
     nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol, orbital_window=orbital_window)
     with torch.no_grad():
         R = torch.einsum("bmi,bia,bna->bmn", Cocc, amplitude.view(-1, nocc, nvirt), Cvirt)
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
+    nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
     D = packone_batch(P, 4 * nHeavy, nHydro, norb)  # occ subspace projector/density matrix
     Q = torch.eye(D.shape[1], dtype=D.dtype, device=D.device).unsqueeze(0) - D  # virtual subspace projector
 
@@ -1100,24 +1061,32 @@ def get_occ_virt(mol, orbital_window=None, e_mo=None):
     nmol, nbasis = C.shape[:2]
     device, dtype = C.device, C.dtype
 
-    uniform = nmol == 1 or (torch.all(nocc_b == nocc_b[0]) and torch.all(norb_b == norb_b[0]))
-    if uniform:
+    try:
         _, _, norb, nocc = _uniform_molecule_dimensions(mol)
+    except ValueError:
+        uniform = False
+    else:
+        uniform = True
+
+    if uniform:
         if orbital_window is not None:
             n_below, m_above = map(int, orbital_window)
             if not (0 <= n_below <= nocc and 0 <= m_above <= norb - nocc):
                 raise ValueError("orbital_window out of bounds.")
-            occ_idx = torch.arange(nocc - n_below, nocc, device=device)
-            virt_idx = torch.arange(nocc, nocc + m_above, device=device)
+            occ_start, occ_stop = nocc - n_below, nocc
+            virt_start, virt_stop = nocc, nocc + m_above
         else:
-            occ_idx = torch.arange(nocc, device=device)
-            virt_idx = torch.arange(nocc, norb, device=device)
-        Cocc, Cvirt = C[:, :, occ_idx], C[:, :, virt_idx]
+            occ_start, occ_stop = 0, nocc
+            virt_start, virt_stop = nocc, norb
+        Cocc = C[:, :, occ_start:occ_stop]
+        Cvirt = C[:, :, virt_start:virt_stop]
+        nocc = occ_stop - occ_start
+        nvirt = virt_stop - virt_start
 
         if e_mo is not None:
-            ea_ei = e_mo[:, virt_idx].unsqueeze(1) - e_mo[:, occ_idx].unsqueeze(2)
-            return occ_idx.numel(), virt_idx.numel(), Cocc, Cvirt, ea_ei
-        return occ_idx.numel(), virt_idx.numel(), Cocc, Cvirt
+            ea_ei = e_mo[:, virt_start:virt_stop].unsqueeze(1) - e_mo[:, occ_start:occ_stop].unsqueeze(2)
+            return nocc, nvirt, Cocc, Cvirt, ea_ei
+        return nocc, nvirt, Cocc, Cvirt
 
     if orbital_window is not None:
         raise ValueError("orbital_window requires uniform nocc/norb across the batch.")
@@ -1151,12 +1120,10 @@ def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):
 
     nroots = z.shape[0] // nmol
     Via = z.reshape(nmol, nroots, nocc, nvirt)
-    make_density = _ao_transition_density_dispatch or _ao_transition_density_kernel
-    make_post = _mo_fock_action_dispatch or _mo_fock_action_kernel
-    P_xi = make_density(Cocc, Via, Cvirt, True)
+    P_xi = _ao_transition_density(Cocc, Via, Cvirt, True)
 
     F0 = makeA_pi_batched(mol, P_xi, w, allSymmetric=True)
-    A = make_post(Via, F0, ea_ei, Cocc, Cvirt, False, torch.is_grad_enabled())
+    A = _mo_fock_action(Via, F0, ea_ei, Cocc, Cvirt, False, torch.is_grad_enabled())
 
     return A.reshape(nmol * nroots, nocc * nvirt)
 
@@ -1197,9 +1164,10 @@ def make_cis_densities(
 
     cis_densities = {}
     if not rpa and (do_difference_density or do_relaxed_density):
-        # Keep eager: outputs are reused after compiled calls, and CUDA Graph
-        # output buffers would require extra clones.
-        R, B, B_virt, B_occ = _cis_density_kernel(Cocc, Cvirt, amp_ia_X)
+        R = torch.einsum("bmi,bia,bna->bmn", Cocc, amp_ia_X, Cvirt)
+        B_virt = torch.einsum("Nma,Nia->Nmi", Cvirt, amp_ia_X)
+        B_occ = torch.einsum("Nmi,Nia->Nma", Cocc, amp_ia_X)
+        B = torch.einsum("Nmi,Nni->Nmn", B_virt, B_virt) - torch.einsum("Nmi,Nni->Nmn", B_occ, B_occ)
         if do_transition_denisty or do_relaxed_density:
             cis_densities["transition_density"] = R
         if do_difference_density:
@@ -1228,8 +1196,9 @@ def make_cis_densities(
             # make RHS of the CPSCF equation:
             B_pi = makeA_pi_batched(mol, B.unsqueeze(1), w, allSymmetric=True).squeeze(1) * 2.0
             R_pi = makeA_pi_batched(mol, R.unsqueeze(1), w).squeeze(1) * 2.0
-            make_rhs = _relaxed_rhs_dispatch or _relaxed_rhs_kernel
-            RHS = make_rhs(Cocc, Cvirt, B_pi, R_pi, B_virt, B_occ)
+            RHS = -torch.einsum("Nni,Nmn,Nma->Nia", Cocc, B_pi, Cvirt)
+            RHS -= torch.einsum("Nni,Nmn,Nma->Nia", B_virt, R_pi, Cvirt)
+            RHS += torch.einsum("Nni,Nmn,Nma->Nia", Cocc, R_pi, B_occ)
 
             if rpa:
                 RHS -= torch.einsum("Nni,Nnm,Nma->Nia", B_virt_Y, R_pi, Cvirt)
@@ -1246,40 +1215,16 @@ def make_cis_densities(
 
             zvec = conjugate_gradient_batch(applyA, RHS, ea_flat, tol=zvec_tolerance, x0=rhs0)
 
-            make_relaxed = _relaxed_finish_dispatch or _relaxed_finish_kernel
-            cis_densities["relaxed_difference_density"] = make_relaxed(
-                Cocc, Cvirt, zvec, B, nmol, nocc, nvirt
-            )
+            z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
+            cis_densities["relaxed_difference_density"] = B + z_ao + z_ao.transpose(1, 2)
 
     return cis_densities
-
-
-def _cis_density_kernel(Cocc, Cvirt, amp_ia):
-    R = torch.einsum("bmi,bia,bna->bmn", Cocc, amp_ia, Cvirt)
-    B_virt = torch.einsum("Nma,Nia->Nmi", Cvirt, amp_ia)
-    B_occ = torch.einsum("Nmi,Nia->Nma", Cocc, amp_ia)
-    B = torch.einsum("Nmi,Nni->Nmn", B_virt, B_virt) - torch.einsum("Nmi,Nni->Nmn", B_occ, B_occ)
-    return R, B, B_virt, B_occ
-
-
-def _relaxed_rhs_kernel(Cocc, Cvirt, B_pi, R_pi, B_virt, B_occ):
-    RHS = -torch.einsum("Nni,Nmn,Nma->Nia", Cocc, B_pi, Cvirt)
-    RHS -= torch.einsum("Nni,Nmn,Nma->Nia", B_virt, R_pi, Cvirt)
-    RHS += torch.einsum("Nni,Nmn,Nma->Nia", Cocc, R_pi, B_occ)
-    return RHS
-
-
-def _relaxed_finish_kernel(Cocc, Cvirt, zvec, B, nmol: int, nocc: int, nvirt: int):
-    z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
-    return B + z_ao + z_ao.transpose(1, 2)
 
 
 # Function to verify the linearization of energy (w.r.t. density, transition density) for XL-BOMD
 def cis_energy_from_transition_density(mol, F, R, w, D, Hcore):
     F0 = makeA_pi_batched(mol, R.unsqueeze(1), w).squeeze(1) * 2.0
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
+    nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
     F_ = packone_batch(F, 4 * nHeavy, nHydro, norb).squeeze(1)
 
     F0 -= F_ @ R - R @ F_
@@ -1349,9 +1294,7 @@ def cis_energy_from_transition_density(mol, F, R, w, D, Hcore):
 
 
 def linearlized_cis_energy(mol, F, R, Q, w):
-    nHeavy = mol.nHeavy[0]
-    nHydro = mol.nHydro[0]
-    norb = mol.norb[0]
+    nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
     F_ = packone_batch(F, 4 * nHeavy, nHydro, norb).squeeze(1)
 
     F1 = -(F_ @ R - R @ F_)

@@ -1,5 +1,6 @@
 import math
 import os
+from functools import lru_cache
 
 import torch
 
@@ -69,27 +70,25 @@ def dispersion_damping(mol, get_grad_factor=False):
     return f_damp, C6ij, alpha
 
 
+@lru_cache(maxsize=32)
+def _grimme_parameter_tensors(max_element, device, dtype):
+    C_6 = torch.zeros(max_element + 1, device=device, dtype=dtype)
+    R_0 = torch.zeros_like(C_6)
+    file_path = os.path.join(os.path.dirname(__file__), "../params/grimme_2006_b97-d.csv")
+    with open(file_path) as f:
+        next(f)
+        for line in f:
+            at_no, _, c6, r0 = line.replace(" ", "").split(",")
+            at_no = int(at_no)
+            if at_no <= max_element:
+                C_6[at_no] = float(c6)
+                R_0[at_no] = float(r0)
+    return C_6, R_0
+
+
 def get_c6_r0_params(mol, elements):
     # Parameters taken from Grimme, S. Semiempirical GGA-Type Density Functional Constructed with a Long-Range Dispersion Correction. J. Com- put. Chem. 2006, 27, 1787–1799.
-    file_path = os.path.join(os.path.dirname(__file__), "../params/grimme_2006_b97-d.csv")
-
-    m = max(elements)
-    C_6 = torch.zeros(
-        m + 1, device=mol.rij.device, dtype=mol.rij.dtype
-    )  # m+1 because indexing starts from 1 for atomic number
-    R_0 = torch.zeros(m + 1, device=mol.rij.device, dtype=mol.rij.dtype)
-
-    # Open file and read line by line
-    with open(file_path, "r") as f:
-        _ = f.readline()  # Read the header line
-
-        for line in f:
-            values = line.strip().replace(" ", "").split(",")  # Split CSV row
-            at_no = int(values[0])  # Convert at_no to int
-
-            if at_no in elements:  # Check if at_no is in the target set
-                C_6[at_no] = float(values[2])  # Store C6 directly
-                R_0[at_no] = float(values[3])  # Store R0 directly
+    C_6, R_0 = _grimme_parameter_tensors(max(elements), mol.rij.device, mol.rij.dtype)
 
     C6ij = torch.sqrt(C_6[mol.ni] * C_6[mol.nj])  # J nm^6 / mol
 

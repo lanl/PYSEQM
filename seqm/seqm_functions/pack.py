@@ -62,7 +62,7 @@ def _unpack_batch_same(x0_flat, nho: int, nHy: int, size: int):
 
 
 def _same_counts(*counts):
-    return all(count.unique().numel() == 1 for count in counts)
+    return all(count.numel() == 1 or torch.equal(count, count[:1].expand_as(count)) for count in counts)
 
 
 def pack(x, nHeavy, nHydro):

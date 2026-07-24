@@ -14,9 +14,6 @@ from .om1_core_corrections import (
 )
 from .om1_ppecp import om1_ppecp_local
 
-_OMX_COMPILE_ENABLED = False
-_OMX_COMPILE_DONE = False
-
 _XX3498 = 34.9868366552497
 
 MAXFMT = 400
@@ -33,10 +30,6 @@ def _sq_terms(p, q):
     sq1 = torch.sqrt(PT7853 / (gab * gcd))
     sq2 = 1.0 / torch.sqrt(gab + gcd)
     return sq1, sq2
-
-
-def _select_pair_data(data, idx):
-    return {k: v[idx] for k, v in data.items()}
 
 
 # ---------------------------------------------------------------------
@@ -905,53 +898,6 @@ def om2_corpp2_local_batch(ni, nj, rij, om2_tables, basis_i, basis_j, fast_cache
     return corpp
 
 
-def enable_omx_compile(mode=None):
-    """
-    Compile selected tensor-heavy kernels once.
-
-    mode=None is usually better for CPU.
-    mode="reduce-overhead" is usually better for CUDA small-kernel workloads.
-    """
-    global _OMX_COMPILE_ENABLED
-    global _OMX_COMPILE_DONE
-
-    _OMX_COMPILE_ENABLED = True
-
-    # If this was already compiled, do not wrap compiled functions again.
-    if _OMX_COMPILE_DONE:
-        return
-
-    _compile_omx_kernels(mode=mode)
-
-
-def _compile_omx_kernels(mode=None):
-    global _OMX_COMPILE_DONE
-    global _sp0000_batch
-    global _sp0011_batch
-    global _sp1111_batch
-    global _om1_rotate_w_batch
-    global _spgto2_local_batch
-
-    if _OMX_COMPILE_DONE:
-        return
-
-    if not hasattr(torch, "compile"):
-        _OMX_COMPILE_DONE = True
-        return
-
-    kwargs = {}
-    if mode is not None:
-        kwargs["mode"] = mode
-
-    _sp0000_batch = torch.compile(_sp0000_batch, **kwargs)
-    _sp0011_batch = torch.compile(_sp0011_batch, **kwargs)
-    _sp1111_batch = torch.compile(_sp1111_batch, **kwargs)
-    _om1_rotate_w_batch = torch.compile(_om1_rotate_w_batch, **kwargs)
-    _spgto2_local_batch = torch.compile(_spgto2_local_batch, **kwargs)
-
-    _OMX_COMPILE_DONE = True
-
-
 # ---------------------------------------------------------------------
 # Public callers
 # ---------------------------------------------------------------------
@@ -1044,12 +990,6 @@ def omx_pair_hcore_terms(
     om2_tables=None,
     fast_cache=None,
 ):
-    if _OMX_COMPILE_ENABLED and not _OMX_COMPILE_DONE:
-        if rij.is_cuda:
-            _compile_omx_kernels(mode="reduce-overhead")
-        else:
-            _compile_omx_kernels(mode=None)
-
     if fast_cache is None:
         fast_cache = make_omx_fast_cache(basis_i, basis_j, basis_tables, om2_tables, ni=ni, nj=nj)
 

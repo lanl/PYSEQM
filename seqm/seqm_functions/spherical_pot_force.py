@@ -1,7 +1,7 @@
 import torch
 
 
-def Spherical_Pot_Force(molecule, radius, k=1.0, center=[0.0, 0.0, 0.0]):
+def Spherical_Pot_Force(molecule, radius, k=1.0, center=(0.0, 0.0, 0.0)):
     """
     Spherical potential around zero-potential bubble.
 
@@ -13,11 +13,11 @@ def Spherical_Pot_Force(molecule, radius, k=1.0, center=[0.0, 0.0, 0.0]):
 
     center = torch.as_tensor(center, dtype=molecule.coordinates.dtype, device=molecule.coordinates.device)
 
-    r_from_center = torch.norm(molecule.coordinates - center, dim=2).unsqueeze(-1)
-    force_mask = r_from_center > radius  # find atoms beyond radius
-    closest_point_on_sphere = center + radius * (molecule.coordinates - center) / r_from_center
-
-    dxdydz = (molecule.coordinates - closest_point_on_sphere) * force_mask
+    displacement = molecule.coordinates - center
+    distance = torch.linalg.vector_norm(displacement, dim=2, keepdim=True)
+    extension = torch.clamp_min(distance - radius, 0.0)
+    safe_distance = distance.clamp_min(torch.finfo(distance.dtype).tiny)
+    dxdydz = displacement * (extension / safe_distance)
     force = -k * dxdydz
 
     E = 0.5 * k * torch.sum(torch.square(dxdydz), dim=(1, 2))

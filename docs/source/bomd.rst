@@ -284,7 +284,7 @@ API reference (BOMD)
        timestep: float = 0.5,          # fs
        Temp: float = 0.0,              # K (sets initial velocity distribution)
        output: dict | None = None,
-       torch_compile: bool | dict | None = None,
+       torch_compile: bool | None = None,
    )
 
 Parameters:
@@ -293,21 +293,27 @@ Parameters:
 - ``timestep`` (``float``): integration step size in femtoseconds
 - ``Temp`` (``float``): initial temperature (K); Initializes velocities drawn from a Maxwell–Boltzmann at this temperature
 - ``output`` (``dict``): controls console/XYZ/HDF5 cadence and checkpointing (see below)
-- ``torch_compile`` (``bool`` or ``dict``): compile mode for repeated dynamics calls.
-  By default these kernels stay eager. Set ``True`` to compile with PyTorch's
-  default mode, or pass a dict such as
-  ``{'enabled': True, 'mode': 'reduce-overhead'}`` to select a mode explicitly, for
-  known compile-safe tensor kernels, including two-center s,p integral
-  rotation, restricted s,p Fock construction, OMx pair kernels, and
-  uniform-batch CIS/RPA tensor contractions. CUDA Graph modes such as
-  ``reduce-overhead`` remain explicit opt-ins because they cache workspace and
-  impose stricter output-lifetime requirements. Use ``False`` or
-  ``{'enabled': False}`` to keep compilation
-  disabled, and pass additional options through to ``torch.compile`` via the
-  dict.
-  Set ``compile_fock=False``, ``compile_cis=False``, ``compile_nac=False``, or
-  ``compile_omx=False`` in the dict to disable specific kernel families. Since
-  compilation is lazy, exclude the first MD step from benchmarks.
+- ``torch_compile`` (``bool``): optional CUDA acceleration for long dynamics
+  runs. The default is ``False`` (ordinary eager PyTorch execution). Set it to
+  ``True`` to let PYSEQM automatically compile the small set of kernels that
+  have been found useful for the requested type of dynamics:
+
+  .. code-block:: python
+
+     md = Molecular_Dynamics_Basic(
+         seqm_parameters=seqm_parameters,
+         timestep=0.5,
+         Temp=300.0,
+         output=output,
+         torch_compile=True,
+     ).to(device)
+
+  Users do not need to choose kernels, compiler modes, or compile targets.
+  Compilation is most useful for long trajectories. It has a cold-start
+  cost on the first step and may reserve additional memory, so leave it
+  disabled for short runs, debugging, or memory-constrained
+  jobs. If a selected kernel cannot be compiled, PYSEQM warns and falls back to
+  eager execution.
 
 
 .. code-block:: python

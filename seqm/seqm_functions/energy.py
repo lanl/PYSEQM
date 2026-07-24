@@ -115,10 +115,8 @@ def pair_nuclear_energy(
     t1 = tore[ni] * tore[nj] * gam
     # special case for C-H and O-H
     XH = ((ni == 7) | (ni == 8)) & (nj == 1)
-    t2 = torch.zeros_like(t1)
     tmp = torch.exp(-alpha[idxi] * rija)
-    t2[~XH] = tmp[~XH]
-    t2[XH] = tmp[XH] * rija[XH]
+    t2 = torch.where(XH, tmp * rija, tmp)
     t3 = torch.exp(-alpha[idxj] * rija)
     if method == "MNDO":
         # in mopac, rij is in unit of angstrom

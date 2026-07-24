@@ -179,11 +179,12 @@ Important FSSH inputs
   a simple collapse rule, not a continuous decoherence-time correction.
 
 ``torch_compile``
-  The NAMD drivers inherit the BOMD ``torch_compile`` option. By default they
-  leave repeated-dynamics kernels eager. Set ``torch_compile=True`` to opt into
-  compiling the same SCF/CIS kernels as excited-state BOMD and the tensor
-  contractions used by CIS NAC vectors, or set ``compile_nac=False`` to leave
-  NAC contractions eager while compiling the rest.
+  Optional acceleration for long trajectories. The default is ``False``.
+  Set ``torch_compile=True`` on ``SurfaceHoppingDynamics`` and PYSEQM will
+  automatically select the compile-safe CIS and electronic-propagation
+  kernels.
+  Compilation has a cold-start and memory cost, so keep the default for short
+  runs, debugging, or memory-constrained jobs.
 
 ``nonadiabatic['detect_crossings']``
   Enables trivial crossing detection. The default is ``True``.

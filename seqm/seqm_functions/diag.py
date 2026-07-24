@@ -28,17 +28,17 @@ def _apply_padding_eigen_shifts(x0, norb):
         return False
 
     nmol, size, _ = x0.shape
+    pnorb = size - norb
+    has_padding = pnorb > 0
+    if not has_padding.any():
+        return False
+
     aii = x0.diagonal(dim1=1, dim2=2)
     ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
     hN = torch.max(aii + ri, dim=1)[0]
     dE = hN - torch.min(aii - ri, dim=1)[0]
 
-    pnorb = size - norb
     max_padding = int(torch.max(pnorb).item())
-    has_padding = pnorb > 0
-    if not has_padding.any():
-        return has_padding
-
     shifts = torch.arange(
         PADDING_EIGENSHIFT_START_FACTOR + PADDING_EIGENSHIFT_INCREMENT,
         PADDING_EIGENSHIFT_START_FACTOR + (max_padding + 1) * PADDING_EIGENSHIFT_INCREMENT,
@@ -71,6 +71,9 @@ def _occupied_density(e, v, nocc):
         return 2.0 * torch.matmul(occupied, occupied.transpose(1, 2))
     if CHECK_DEGENERACY:
         return torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
+    if nocc.numel() == 1 or torch.equal(nocc, nocc[:1].expand_as(nocc)):
+        occupied = v[:, :, : int(nocc[0].item())]
+        return 2.0 * torch.matmul(occupied, occupied.transpose(1, 2))
     return 2.0 * torch.stack(
         list(map(lambda a, n: torch.matmul(a[:, :n], a[:, :n].transpose(0, 1)), v, nocc))
     )

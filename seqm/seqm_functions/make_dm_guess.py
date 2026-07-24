@@ -16,7 +16,6 @@ from .fock_u_batch import fock_u_batch
 from .hcore import hcore
 from .omx_utils import get_orbital_zetas
 from .pack import pack, unpack
-from .packd import packd, unpackd
 
 CHECK_DEGENERACY = False
 
@@ -48,18 +47,20 @@ def make_dm_guess(
     seqm_parameters,
     mix_homo_lumo=False,
     mix_coeff=0.4,
-    learned_parameters=dict(),
+    learned_parameters=None,
     overwrite_existing_dm=False,
     assignDM=True,
 ):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
-    packpar = Pack_Parameters(seqm_parameters).to(molecule.coordinates.device)
+    packpar = (
+        molecule.packpar
+        if seqm_parameters is molecule.seqm_parameters
+        else Pack_Parameters(seqm_parameters).to(molecule.coordinates.device)
+    )
 
     if callable(learned_parameters):
-        adict = learned_parameters(molecule.species, molecule.coordinates)
-        parameters, alp, chi = packpar(molecule.Z, learned_params=adict)
-    else:
-        parameters, alp, chi = packpar(molecule.Z, learned_params=learned_parameters)
+        learned_parameters = learned_parameters(molecule.species, molecule.coordinates)
+    parameters, _, _ = packpar(molecule.Z, learned_params=learned_parameters)
 
     if molecule.method == "PM6":
         zetas = parameters["zeta_s"]
@@ -119,204 +120,74 @@ def make_dm_guess(
             )
             # W_exch = torch.tensor([0], device=molecule.nocc.device)
     else:
-        W = torch.tensor([0], device=molecule.nocc.device)
+        W = molecule.coordinates.new_zeros(1)
         # W_exch = torch.tensor([0], device=molecule.nocc.device)
 
     if molecule.nocc.dim() == 2:
         P = molecule.dm
         if mix_homo_lumo:
-            M, w, rho0xi, rho0xj, _, _ = hcore(molecule)
-            if molecule.method == "PM6":
-                x = fock_u_batch(
-                    nmol,
-                    molecule.molsize,
-                    P,
-                    M,
-                    molecule.maskd,
-                    molecule.mask,
-                    molecule.idxi,
-                    molecule.idxj,
-                    w,
-                    W,
-                    gss,
-                    gpp,
-                    gsp,
-                    gp2,
-                    hsp,
-                    molecule.method,
-                    zetas,
-                    zetap,
-                    zetad,
-                    molecule.Z,
-                    F0SD,
-                    G2SD,
-                )
+            M, w, *_ = hcore(molecule)
+            x = fock_u_batch(
+                nmol,
+                molecule.molsize,
+                P,
+                M,
+                molecule.maskd,
+                molecule.mask,
+                molecule.idxi,
+                molecule.idxj,
+                w,
+                W,
+                gss,
+                gpp,
+                gsp,
+                gp2,
+                hsp,
+                molecule.method,
+                zetas,
+                zetap,
+                zetad,
+                molecule.Z,
+                F0SD,
+                G2SD,
+            )
 
-                # modified sym_eig_trunc below:
-                dtype = x.dtype
-                device = x.device
+            nheavyatom = molecule.nHeavy.repeat_interleave(2)
+            nH = molecule.nHydro.repeat_interleave(2)
+            nocc = molecule.nocc.flatten()
+            x_orig_shape = x.shape
+            x0 = pack(x, nheavyatom, nH)
 
-                nSuperHeavy = molecule.nSuperHeavy.repeat_interleave(2)
-                nheavyatom = molecule.nHeavy.repeat_interleave(2)
-                nH = molecule.nHydro.repeat_interleave(2)
-                nocc = molecule.nocc.flatten()
-                x_orig_shape = x.size()
-                x0 = packd(x, nSuperHeavy, nheavyatom, nH)
+            norb = nheavyatom * 4 + nH
+            has_padding = _apply_padding_eigen_shifts(x0, norb)
+            try:
+                e0, v = sym_eigh(x0)
+            except Exception:
+                if torch.isnan(x0).any():
+                    print("isnan(x0) in DM guess", x0)
+                e0, v = sym_eigh(x0)
 
-                size = x0.shape[1]
-                norb = nheavyatom * 4 + nH + nSuperHeavy * 9
-                has_padding = _apply_padding_eigen_shifts(x0, norb)
-                try:
-                    e0, v = sym_eigh(x0)
-                except:
-                    if torch.isnan(x0).any():
-                        print("isnan(x0) #1 in DM guess", x0)
-                    e0, v = sym_eigh(x0)
-                nmol = x0.shape[0]
-                e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
-                e[..., :size] = e0
-                e = _zero_padding_eigenvalues(e, norb, has_padding)
+            e = x.new_zeros(x0.shape[0], x.shape[-1])
+            e[..., : x0.shape[1]] = e0
+            e = _zero_padding_eigenvalues(e, norb, has_padding).reshape(x_orig_shape[:3])
+            v = v.reshape(x_orig_shape[0], 2, v.shape[1], v.shape[2])
 
-                # $$$ the code below can and SHOULD be optimized. Too many reshapes
+            homo_idx = (molecule.nocc[:, :1, None] - 1).expand(-1, v.shape[-1], -1)
+            lumo_idx = homo_idx + 1
+            v_homo = v[:, 0].gather(2, homo_idx)
+            v_lumo = v[:, 0].gather(2, lumo_idx)
+            v[:, 0].scatter_(2, homo_idx, (1 - mix_coeff) * v_homo + mix_coeff * v_lumo)
 
-                e = e.reshape(x_orig_shape[0:3])
-                v = v.reshape(int(v.shape[0] / 2), 2, v.shape[1], v.shape[2])
-
-                v_lumo = v[:, 0].gather(
-                    2, molecule.nocc[:, 0].unsqueeze(0).unsqueeze(0).T.repeat(1, v.shape[-1], 1)
-                )
-                v_homo = v[:, 0].gather(
-                    2, molecule.nocc[:, 0].unsqueeze(0).unsqueeze(0).T.repeat(1, v.shape[-1], 1) - 1
-                )
-
-                mix_coeff = torch.tensor([mix_coeff], device=device)
-
-                v_a_homo = (1 - mix_coeff) * v_homo + (mix_coeff) * v_lumo
-                # v_a_lumo = -(mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
-
-                # v_b_homo = (1-mix_coeff)*v_homo - torch.sin(mix_coeff)*v_lumo
-                # v_b_lumo =  (mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
-
-                v[:, 0].scatter_(
-                    2, molecule.nocc[:, 0].unsqueeze(0).unsqueeze(0).T.repeat(1, v.shape[-1], 1) - 1, v_a_homo
-                )
-                # v[:,0].scatter_(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1), v_a_lumo)
-
-                # v[:,1].scatter_(2, molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1, v_b_homo)
-                # v[:,1].scatter_(2, molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1), v_b_lumo)
-
-                v = v.reshape(int(v.shape[0] * 2), v.shape[2], v.shape[3])
-
-                if CHECK_DEGENERACY:
-                    t = torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
-                else:
-                    t = 2.0 * torch.stack(
-                        list(map(lambda a, n: torch.matmul(a[:, :n], a[:, :n].transpose(0, 1)), v, nocc))
-                    )
-
-                P = unpackd(t, nSuperHeavy, nheavyatom, nH, x.shape[-1])
-
-                v = v.reshape(int(v.shape[0] / 2), 2, v.shape[1], v.shape[2])
-                P = P.reshape(x_orig_shape)
-                if assignDM:
-                    molecule.dm = P
-                return P, v
-
+            v_flat = v.flatten(0, 1)
+            if CHECK_DEGENERACY:
+                t = torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v_flat, nocc)))
             else:
-                x = fock_u_batch(
-                    nmol,
-                    molecule.molsize,
-                    P,
-                    M,
-                    molecule.maskd,
-                    molecule.mask,
-                    molecule.idxi,
-                    molecule.idxj,
-                    w,
-                    W,
-                    gss,
-                    gpp,
-                    gsp,
-                    gp2,
-                    hsp,
-                    molecule.method,
-                    zetas,
-                    zetap,
-                    zetad,
-                    molecule.Z,
-                    F0SD,
-                    G2SD,
-                )
+                t = torch.stack([a[:, :n] @ a[:, :n].T for a, n in zip(v_flat, nocc)])
 
-                # modified sym_eig_trunc below:
-                dtype = x.dtype
-                device = x.device
-
-                nheavyatom = molecule.nHeavy.repeat_interleave(2)
-                nH = molecule.nHydro.repeat_interleave(2)
-                nocc = molecule.nocc.flatten()
-                x_orig_shape = x.size()
-                x0 = pack(x, nheavyatom, nH)
-
-                size = x0.shape[1]
-                norb = nheavyatom * 4 + nH
-                has_padding = _apply_padding_eigen_shifts(x0, norb)
-                try:
-                    e0, v = sym_eigh(x0)
-                except:
-                    if torch.isnan(x0).any():
-                        print("isnan(x0) #2 in DM guess", x0)
-                    e0, v = sym_eigh(x0)
-                nmol = x0.shape[0]
-                e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
-                e[..., :size] = e0
-                e = _zero_padding_eigenvalues(e, norb, has_padding)
-
-                # $$$ the code below can and SHOULD be optimized. Too many reshapes
-
-                e = e.reshape(x_orig_shape[0:3])
-                v = v.reshape(int(v.shape[0] / 2), 2, v.shape[1], v.shape[2])
-
-                v_lumo = v[:, 0].gather(
-                    2, molecule.nocc[:, 0].unsqueeze(0).unsqueeze(0).T.repeat(1, v.shape[-1], 1)
-                )
-                v_homo = v[:, 0].gather(
-                    2, molecule.nocc[:, 0].unsqueeze(0).unsqueeze(0).T.repeat(1, v.shape[-1], 1) - 1
-                )
-
-                mix_coeff = torch.tensor([mix_coeff], device=device)
-
-                v_a_homo = (1 - mix_coeff) * v_homo + (mix_coeff) * v_lumo
-                # v_a_lumo = -(mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
-
-                # v_b_homo = (1-mix_coeff)*v_homo - torch.sin(mix_coeff)*v_lumo
-                # v_b_lumo =  (mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
-
-                v[:, 0].scatter_(
-                    2, molecule.nocc[:, 0].unsqueeze(0).unsqueeze(0).T.repeat(1, v.shape[-1], 1) - 1, v_a_homo
-                )
-                # v[:,0].scatter_(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1), v_a_lumo)
-
-                # v[:,1].scatter_(2, molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1, v_b_homo)
-                # v[:,1].scatter_(2, molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1), v_b_lumo)
-
-                v = v.reshape(int(v.shape[0] * 2), v.shape[2], v.shape[3])
-
-                if CHECK_DEGENERACY:
-                    t = torch.stack(list(map(lambda a, b, n: construct_P(a, b, n), e, v, nocc)))
-                else:
-                    # list(map(lambda a,n : print('norm', torch.norm(v, dim=0), n), v, nocc))
-                    # print(torch.norm())
-                    t = 2.0 * torch.stack(
-                        list(map(lambda a, n: torch.matmul(a[:, :n], a[:, :n].transpose(0, 1)), v, nocc))
-                    )
-
-                P = unpack(t, nheavyatom, nH, x.shape[-1])
-                v = v.reshape(int(v.shape[0] / 2), 2, v.shape[1], v.shape[2])
-                P = P.reshape(x_orig_shape) / 2
-                if assignDM:
-                    molecule.dm = P
-                return P, v
+            P = unpack(t, nheavyatom, nH, x.shape[-1]).reshape(x_orig_shape)
+            if assignDM:
+                molecule.dm = P
+            return P, v
         else:
             return P, None
     else:

@@ -13,11 +13,8 @@ import torch
 
 from seqm.basics import Force
 from seqm.dynamics.active_state import active_state_tensor
-from seqm.dynamics.tdc_hamiltonian_fd import enable_tdc_hamiltonian_fd_compile
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
 from seqm.seqm_functions.fock import enable_fock_compile
-from seqm.seqm_functions.nac import enable_nac_compile
-from seqm.seqm_functions.om1_pair_backend import enable_omx_compile
 from seqm.seqm_functions.omx_utils import OMX_METHODS
 from seqm.seqm_functions.rcis_batch import enable_rcis_compile
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
@@ -586,16 +583,16 @@ class XYZWriter:
         Et = (Ek + L).detach().cpu()
 
         for mol in self.config.molid:
-            n_atoms = int(torch.sum(molecule.species[mol] > 0))
+            species = molecule.species[mol].detach().cpu().tolist()
+            xyz = molecule.coordinates[mol].detach().cpu().numpy()
+            n_atoms = sum(z > 0 for z in species)
             s = StringIO()
             s.write(f"{n_atoms}\n")
             s.write(f"step: {step + 1}  E_total = {float(Et[mol]):12.9f}  \n")
 
-            xyz = molecule.coordinates[mol]
-            Z = molecule.species[mol]
             for a in range(n_atoms):
-                label = molecule.const.label[Z[a].item()]
-                x, y, z = xyz[a, 0].item(), xyz[a, 1].item(), xyz[a, 2].item()
+                label = molecule.const.label[species[a]]
+                x, y, z = xyz[a]
                 s.write(f"{label} {x:15.5f} {y:15.5f} {z:15.5f}\n")
 
             self.files[mol].write(s.getvalue())
@@ -881,23 +878,15 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             return
 
         method = str(self.seqm_parameters.get("method", "")).upper()
-        options = dict(cfg["options"])
-        kernel_options = dict(options)
+        kernel_options = dict(cfg["options"])
         kernel_mode = kernel_options.pop("mode", None)
         excited = bool(self.seqm_parameters.get("excited_states"))
-        compile_ground = cfg["compile_fock"] or (not excited and method not in OMX_METHODS)
 
-        if cfg["compile_omx"] and method in OMX_METHODS:
-            enable_omx_compile(mode=kernel_mode)
-        if compile_ground and method not in OMX_METHODS:
-            enable_two_center_compile(mode=kernel_mode, **kernel_options)
-        if compile_ground:
-            enable_fock_compile(mode=kernel_mode, **kernel_options)
-        if cfg["compile_cis"] and excited:
+        if excited:
             enable_rcis_compile(mode=kernel_mode, **kernel_options)
-        if cfg["compile_nac"] and self.seqm_parameters.get("nonadiabatic"):
-            enable_nac_compile(mode=kernel_mode, **kernel_options)
-            enable_tdc_hamiltonian_fd_compile(mode=kernel_mode, **kernel_options)
+        elif method not in OMX_METHODS and int(molecule.nmol) == 1:
+            enable_two_center_compile(mode=kernel_mode, **kernel_options)
+            enable_fock_compile(mode=kernel_mode, **kernel_options)
 
     def _mark_torch_compile_step(self, molecule):
         mark = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
@@ -1168,6 +1157,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
 
                 del Ek, T
                 if i % 1000 == 0:
+                    # Do not remove this. Clearing CUDA cache prevents out of memory issues for long trajectories
                     torch.cuda.empty_cache()
 
         finally:
