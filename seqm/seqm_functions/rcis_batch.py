@@ -7,25 +7,24 @@ from seqm.utils.torch_compile import optional_compile_function
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
+from .excited_state_utils import (
+    _uniform_molecule_dimensions,
+    gather_new_subspace,
+    get_occ_virt,
+    getMaxSubspacesize,
+    getMemUse,
+    make_guess,
+    orthogonalize_to_current_subspace,
+    print_rcis_analysis,
+    raise_max_iterations,
+    scatter_new_subspace,
+    update_subspace_status,
+)
 from .fock import UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 
 # from seqm.seqm_functions.pack import packone, unpackone
 
 _makeA_pi_batched_dispatch = None
-
-
-def _uniform_molecule_dimensions(mol):
-    """Return immutable uniform-molecule dimensions without repeated CUDA syncs."""
-    cached = getattr(mol, "_rcis_uniform_dimensions", None)
-    if cached is not None:
-        return cached
-
-    dimensions = torch.stack((mol.nHeavy, mol.nHydro, mol.norb, mol.nocc), dim=1).cpu()
-    if dimensions.shape[0] > 1 and not torch.equal(dimensions, dimensions[:1].expand_as(dimensions)):
-        raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
-    cached = tuple(map(int, dimensions[0]))
-    mol._rcis_uniform_dimensions = cached
-    return cached
 
 
 def enable_rcis_compile(mode=None, **options):
@@ -53,16 +52,16 @@ def rcis_batch(
     save_tdm=False,
     compute_transition_properties=True,
 ):
-    """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
-       using davidson diagonalization
+    """Calculate the restricted Configuration Interaction Singles (RCIS) excitation energies and amplitudes
+       using davidson diagonalization for singlet states.
        This function is called when all the molecules in the batch are the same
 
     :param mol: Molecule Orbital Coefficients
     :param w: 2-electron integrals
     :param e_mo: Orbital energies
     :param nroots: Number of CIS states requested
-    :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, and fix the descrepancy b/w
-                                 molecular orbital signs from previous and this step. Leave it alone when doing XL-ESMD
+    :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, after making them suitable for current step.
+                                 Dont do this with XL-ESMD
     :param save_tdm: save transition density matrices; this option will be used for XL-ESMD
     :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
     :returns:
@@ -119,10 +118,6 @@ def rcis_batch(
                 V[:, :nroots] = init_amplitude_guess[:, :nroots]
         nstart = nroots
 
-        # # fix signs of the Molecular Orbitals by looking at the MOs from the previous step.
-        # # This fails when orbitals are degenerate and switch order
-        # mol.molecular_orbitals *= torch.sign((torch.einsum('Nmp,Nmp->Np',mol.molecular_orbitals,mol.old_mos))).unsqueeze(1)
-
     max_iter = int(mol.seqm_parameters.get("excited_states", {}).get("max_iter", 200))
     davidson_iter = 0
     vstart = torch.zeros(nmol, dtype=torch.long, device=device)
@@ -132,61 +127,31 @@ def rcis_batch(
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False  # TODO: User-defined/fixed
 
-    # C = mol.molecular_orbitals
-    # Cocc = C[:,:,occ_idx]
-    # Cvirt = C[:,:,virt_idx]
-
     e_val_n = torch.empty(nmol, nroots, dtype=dtype, device=device)
     amplitude_store = torch.empty(nmol, nroots, nov, dtype=dtype, device=device)
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
     chunk_plan_cache = {}
-    mol_idx = torch.arange(nmol, device=device)
-    subspace_idx = torch.arange(maxSubspacesize, device=device)
-    # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
-    # print("-" * len(header))
-    # print(header)
-    # print("-" * len(header))
 
     while davidson_iter <= max_iter:  # Davidson loop
-        # Determine current subspace dimensions per molecule
-        delta = vend - vstart
-        delta[done] = 0
-        max_v = int(delta.max().item())
-        if max_v == 0:
+        V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend, done)
+        if V_batched is None:
             break
-        rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
-        abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-        mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-        batch_idx = mol_idx.unsqueeze(1).expand(-1, max_v)
-
-        # Gather current subspace vectors into V_batched. If every active molecule
-        # has max_v new vectors, avoid zero-padding and boolean scatter.
-        dense_gather = nmol == 1 or bool(torch.all(mask).item())
-        if dense_gather:
-            V_batched = V[batch_idx, abs_idx, :]
-        else:
-            V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-            V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
 
         # Compute the matrix-vector product in the current subspace
         HV_batch = matrix_vector_product_batched(
             mol, V_batched, w, ea_ei, Cocc, Cvirt, chunk_plan_cache=chunk_plan_cache
         )
-        if dense_gather:
-            HV[batch_idx, abs_idx, :] = HV_batch
-        else:
-            HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
+        scatter_new_subspace(HV, HV_batch, batch_idx, abs_idx, mask)
 
-        # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
         active_mask = ~done
         H = torch.empty(nmol, vend_max, vend_max, dtype=dtype, device=device)
         H[active_mask] = torch.einsum("bno,bro->bnr", V[active_mask, :vend_max], HV[active_mask, :vend_max])
 
         davidson_iter = davidson_iter + 1
-        n_iters[active_mask] = davidson_iter
+        n_iters[~done] = davidson_iter
 
         # Diagonalize the subspace hamiltonian
         e_vec_n = get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal)
@@ -199,18 +164,12 @@ def rcis_batch(
         resid_norm = torch.linalg.vector_norm(residual, dim=2, ord=torch.inf)
         roots_not_converged = resid_norm > root_tol
 
-        # Mark molecules with all roots converged and store amplitudes
-        mol_converged = roots_not_converged.sum(dim=1) == 0
-        done_this_loop = (~done) & mol_converged
-        done[done_this_loop] = True
-        n_iters[done_this_loop] = davidson_iter
+        mol_converged, done_this_loop, collapse_mask = update_subspace_status(
+            done, roots_not_converged, vend, maxSubspacesize, nov, davidson_iter, n_iters
+        )
         amplitude_store[done_this_loop] = amplitudes[done_this_loop]
 
         # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
-        collapse_condition = (roots_not_converged.sum(dim=1) + vend > maxSubspacesize) & (
-            maxSubspacesize != nov
-        )
-        collapse_mask = (~done) & (~mol_converged) & collapse_condition
         if collapse_mask.sum() > 0:
             if davidson_iter == 1:
                 raise Exception(
@@ -230,14 +189,14 @@ def rcis_batch(
         # Orthogonalize the residual vectors for molecules
         orthogonalize_mask = (~done) & (~mol_converged)  # & (~collapse_condition)
         mols_to_ortho = torch.nonzero(orthogonalize_mask).squeeze(1)
+
+        # Molecules converge at different rates so we have to loop through molecules one by one
         for i in mols_to_ortho:
             newsubspace = residual[i, roots_not_converged[i], :] / (
                 e_val_n[i, roots_not_converged[i]].unsqueeze(1) - approxH[i].unsqueeze(0)
             )
 
             vstart[i] = vend[i]
-            # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function.
-            # This means changes inside the function will directly modify 'V[i]'
             vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
             if vend[i] - vstart[i] == 0:
                 done[i] = True
@@ -246,35 +205,13 @@ def rcis_batch(
 
             # if davidson_iter % 5 == 0:
             # print(f"davidson_iteration {davidson_iter:2}: Found {nroots-roots_left}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
-            # states_found = f'{nroots-roots_left:3d}/{nroots:3d}'
-            # print(f"{davidson_iter:10d} | {states_found:^15} | {total_error[i]:15.4e}")
 
         if torch.all(done):
             break
         if davidson_iter > max_iter:
-            n_converged = torch.where(
-                done, torch.full_like(n_iters, nroots), (~roots_not_converged).sum(dim=1)
+            raise_max_iterations(
+                done, roots_not_converged, resid_norm, vend, maxSubspacesize, n_iters, n_collapses, nroots
             )
-            info = []
-            for j in range(nmol):
-                missing = roots_not_converged[j] & ~done[j]
-                max_err = resid_norm[j, missing].max().item() if missing.any() else 0.0
-                errs = ", ".join(f"{x:.2e}" for x in resid_norm[j].detach().cpu().tolist())
-                info.append(
-                    f"mol {j}: {n_converged[j].item()}/{nroots} roots converged, "
-                    f"max remaining error {max_err:.3e}, subspace {vend[j].item()}/{maxSubspacesize}, "
-                    f"errors [{errs}], iters {n_iters[j].item()}, collapses {n_collapses[j].item()}"
-                )
-            raise Exception("Maximum iterations reached but roots have not converged; " + "; ".join(info))
-
-    # print("-" * len(header))
-    # print("\nCIS excited states:")
-    # for j in range(nmol):
-    #     if nmol>1: print(f"\nMolecule {j+1}")
-    #     print(f"Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}")
-    #     for i, energy in enumerate(e_val_n[j], start=1):
-    #         print(f"State {i:3d}: {energy:.15f} eV")
-    # print("")
 
     # Post CIS analysis
     if mol.verbose:
@@ -581,112 +518,6 @@ def _makeA_pi_symm_batch_impl(
     return F
 
 
-def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
-    """
-    Block orthogonalize newsubspace against V[:vend], then append an
-    orthonormal basis for the surviving new directions.
-
-    V, newsubspace have row vectors.
-    """
-
-    V_old = V[:vend]
-
-    # Project the whole new block against the existing subspace.
-    W = newsubspace
-
-    W = W - (W @ V_old.T) @ V_old
-    # Reorthogonalization for numerical stability of Gram-Schmidt
-    W = W - (W @ V_old.T) @ V_old
-
-    # Drop rows that do not survive projection against the old subspace.
-    row_norms = torch.linalg.vector_norm(W, dim=1)
-    W = W[row_norms > tol]
-
-    if W.shape[0] == 0:
-        return vend
-
-    # Robustly get an orthonormal basis for the row span of W. QR factorization without pivoting is problematic.
-    # Vh rows are orthonormal right singular vectors, i.e. basis vectors
-    # in the same ambient space as rows of V.
-    _, s, Vh = torch.linalg.svd(W, full_matrices=False)
-
-    keep = s > tol
-    Q_new = Vh[keep]
-
-    if Q_new.shape[0] == 0:
-        return vend
-
-    # Optional but useful: clean up against old V again in finite precision.
-    overlap = Q_new @ V_old.T
-    max_leak = overlap.abs().max()
-    orth_atol = 1e-13 if Q_new.dtype == torch.float64 else 1e-6
-
-    if max_leak > orth_atol:
-        Q_new -= (Q_new @ V[:vend].T) @ V[:vend]
-        Q_new -= (Q_new @ V[:vend].T) @ V[:vend]
-        # Re-orthonormalize after cleanup.
-        _, s2, Vh2 = torch.linalg.svd(Q_new, full_matrices=False)
-        Q_new = Vh2[s2 > tol]
-
-    k = Q_new.shape[0]
-
-    if vend + k > V.shape[0]:
-        raise ValueError(f"Not enough space in V: need {vend + k} rows, but V only has {V.shape[0]} rows.")
-
-    V[vend : vend + k] = Q_new
-    return vend + k
-
-
-import psutil  # to get the memory size
-
-
-def getMaxSubspacesize(
-    dtype, device, nov, nroots, nmol=1, num_big_matrices=2, memory_fraction=0.4, retry_memory_fraction=0.65
-):
-    """Calculate the maximum size of the subspace dimension
-    based on available memory. The full subspace size is nov
-    """
-
-    device = device.type
-
-    bytes_per_element = torch.finfo(dtype).bits // 8  # Bytes per element
-
-    def _candidate(frac):
-        # Get available memory
-        if device == "cpu":
-            available_memory = psutil.virtual_memory().available
-        elif device == "cuda":
-            available_memory, _ = torch.cuda.mem_get_info(device)
-        else:
-            raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
-        usable_memory = available_memory * frac
-        n_calculated = int(usable_memory // (nov * nmol * bytes_per_element * num_big_matrices))
-        return max(1, min(n_calculated, nov))
-
-    maxSubspacesize = _candidate(memory_fraction)
-    min_required_subspace = min(nov, 3 * nroots)
-    if maxSubspacesize >= min_required_subspace:
-        return maxSubspacesize
-
-    if device == "cuda":
-        torch.cuda.empty_cache()
-        maxSubspacesize = _candidate(memory_fraction)
-
-    if maxSubspacesize >= min_required_subspace:
-        return maxSubspacesize
-
-    maxSubspacesize_retry = _candidate(retry_memory_fraction)
-    if maxSubspacesize_retry >= min_required_subspace:
-        return maxSubspacesize_retry
-
-    raise RuntimeError(
-        "Unable to allocate a Davidson subspace large enough for the requested roots. "
-        f"Requested at least 3*nroots={3 * nroots}, got {maxSubspacesize} at memory_fraction={memory_fraction:.2f} "
-        f"and {maxSubspacesize_retry} at memory_fraction={retry_memory_fraction:.2f} "
-        f"with nov={nov}, nmol={nmol}, num_big_matrices={num_big_matrices}."
-    )
-
-
 def get_subspace_eig_batched(H, nroots, vend, e_val_n, done, nonorthogonal):
     if nonorthogonal:
         raise NotImplementedError("Non-orthogonal davidson not yet implemented")
@@ -879,105 +710,6 @@ def calc_transition_dipoles(
     return transition_dipole, oscillator_strength
 
 
-def print_rcis_analysis(excitation_energies, transition_dipole, oscillator_strength):
-    print(f"Number of excited states: {excitation_energies.shape[1]}\n")
-    print("Excitation energies E (eV), Transition dipoles d (au), and Oscillator strengths f (au)")
-    row_format = "{:<10}   {:>10}   {:>10}   {:>10}      {:<10}"
-
-    # Print header
-    print(row_format.format("E", "d x", "d y", "d z", "f"))
-    print("-" * 65)
-
-    nmol = excitation_energies.shape[0]
-    values = (
-        excitation_energies.detach().cpu().tolist(),
-        transition_dipole.detach().cpu().tolist(),
-        oscillator_strength.detach().cpu().tolist(),
-    )
-    for mol_idx, (mol_energy, mol_dipole, mol_strength) in enumerate(zip(*values), start=1):
-        if nmol > 1:
-            print(f"Molecule {mol_idx}:")
-        for energy, (dx, dy, dz), strength in zip(mol_energy, mol_dipole, mol_strength):
-            print(
-                row_format.format(f"{energy:.6f}", f"{dx:.6f}", f"{dy:.6f}", f"{dz:.6f}", f"{strength:.6f}")
-            )
-        print("")
-
-
-def getMemUse(dtype, device, mol, nroots=1):
-    r"""
-    Estimate the peak memory usage while calculating  \sum_ia (ia||jb)V_ia
-    (contracting the roots with the two-e integrals)
-    We approximate the largest intermediate allocations (P, F, PA, PB, suma, sumA etc. in makeA_pi_symm_batch())
-    via a factor ~ 200 * nmol * nnewRoots * (molsize^2) * bytes_per_element.
-    If that estimate exceeds available memory, we return need_to_chunk=True
-    and compute a chunk_size to avoid out-of-memory issues.
-
-    Returns:
-        need_to_chunk (bool): Whether we must chunk the computation.
-        chunk_size (int or None): Suggested chunk size if need_to_chunk=True, else None.
-    """
-
-    dev_type = device.type
-    if dev_type == "cpu":
-        available_memory = psutil.virtual_memory().available
-    elif dev_type == "cuda":
-        available_memory, _ = torch.cuda.mem_get_info(device)
-    else:
-        raise ValueError("Unsupported device type. Use 'cpu' or 'cuda'.")
-
-    bytes_per_element = torch.finfo(dtype).bits // 8
-    # 200 is an approximate factor from analyzing the shape and count
-    # of all major tensors in makeA_pi_symm_batch. The factor seems to perform well while benchmarking
-    mem_per_root = 200.0 * mol.nmol * (mol.molsize**2) * bytes_per_element
-    total_mem_estimate = mem_per_root * nroots
-
-    # print(f"Available: {available_memory/1073741824} GiB; Max memory used will be {total_mem_estimate/1073741824} GiB, per root: {mem_per_root/1073741824} GiB")
-    need_to_chunk = total_mem_estimate > available_memory
-    chunk_size = nroots
-
-    if need_to_chunk:
-        # Ensure at least 1, up to nroots
-        chunk_size = max(1, min(nroots, int(available_memory // mem_per_root)))
-
-    return need_to_chunk, chunk_size
-
-
-def make_guess(ea_ei, nroots, maxSubspacesize, V, nmol, nov):
-    # Make the davidson guess vectors
-    sorted_ediff, sortedidx = torch.sort(
-        ea_ei, stable=True, descending=False
-    )  # stable to preserve the order of degenerate orbitals
-
-    nroots_expand = nroots
-    # If the last chosen root was degenerate in ea_ei, then expand the subspace to include all the degenerate roots
-    while nroots_expand < len(sorted_ediff[0]) and torch.all(
-        (sorted_ediff[:, nroots_expand] - sorted_ediff[:, nroots_expand - 1]) < 1e-4
-    ):
-        nroots_expand += 1
-    if nroots_expand > nroots:
-        print(
-            f"Increasing the number of states calculated from {nroots} to {nroots_expand} because of orbital degeneracies"
-        )
-        nroots = nroots_expand
-
-    extra_subspace = min(7, nov - nroots)
-    # if after the extra_subspace i dont have enough space for subspace expansion then i shouldnt use extra_subspace
-    extra_subspace = (
-        extra_subspace
-        if 2 * nroots + extra_subspace < maxSubspacesize
-        else max(0, maxSubspacesize - 2 * nroots)
-    )
-    nstart = nroots + extra_subspace
-    V[
-        torch.arange(nmol, device=V.device).unsqueeze(1),
-        torch.arange(nstart, device=V.device),
-        sortedidx[:, :nstart],
-    ] = 1.0
-
-    return nstart, nroots
-
-
 def calc_cis_energy(mol, w, e_mo, amplitude, F, P, rpa=False, orbital_window=None):
     _, _, norb, nocc = _uniform_molecule_dimensions(mol)
     # for near-degenerate use the formulation where E_cis is expressed in atomic orbital basis only
@@ -1052,65 +784,6 @@ def make_best_guess_from_previous_amplitudes(mol, V_old, V, nocc):
         ).reshape(mol.nmol, nroots, -1)
     except RuntimeError:
         V[:, :nroots] = V_old
-
-
-def get_occ_virt(mol, orbital_window=None, e_mo=None):
-    C = mol.molecular_orbitals  # (nmol, nbasis, norb_i)
-    nocc_b, norb_b = mol.nocc, mol.norb  # (nmol,)
-    nvirt_b = norb_b - nocc_b
-    nmol, nbasis = C.shape[:2]
-    device, dtype = C.device, C.dtype
-
-    try:
-        _, _, norb, nocc = _uniform_molecule_dimensions(mol)
-    except ValueError:
-        uniform = False
-    else:
-        uniform = True
-
-    if uniform:
-        if orbital_window is not None:
-            n_below, m_above = map(int, orbital_window)
-            if not (0 <= n_below <= nocc and 0 <= m_above <= norb - nocc):
-                raise ValueError("orbital_window out of bounds.")
-            occ_start, occ_stop = nocc - n_below, nocc
-            virt_start, virt_stop = nocc, nocc + m_above
-        else:
-            occ_start, occ_stop = 0, nocc
-            virt_start, virt_stop = nocc, norb
-        Cocc = C[:, :, occ_start:occ_stop]
-        Cvirt = C[:, :, virt_start:virt_stop]
-        nocc = occ_stop - occ_start
-        nvirt = virt_stop - virt_start
-
-        if e_mo is not None:
-            ea_ei = e_mo[:, virt_start:virt_stop].unsqueeze(1) - e_mo[:, occ_start:occ_stop].unsqueeze(2)
-            return nocc, nvirt, Cocc, Cvirt, ea_ei
-        return nocc, nvirt, Cocc, Cvirt
-
-    if orbital_window is not None:
-        raise ValueError("orbital_window requires uniform nocc/norb across the batch.")
-
-    nocc_max = int(nocc_b.max().item())
-    nvirt_max = int(nvirt_b.max().item())
-    Cocc = torch.zeros((nmol, nbasis, nocc_max), device=device, dtype=dtype)
-    Cvirt = torch.zeros((nmol, nbasis, nvirt_max), device=device, dtype=dtype)
-
-    for i in range(nmol):
-        nocc_i, norb_i = int(nocc_b[i].item()), int(norb_b[i].item())
-        Cocc[i, :, :nocc_i] = C[i, :, :nocc_i]
-        Cvirt[i, :, : nvirt_b[i]] = C[i, :, nocc_i:norb_i]
-
-    if e_mo is not None:
-        ea_ei = torch.zeros(nmol, nocc_max, nvirt_max, device=device, dtype=dtype)
-        for i in range(nmol):
-            nocc_i, norb_i = int(nocc_b[i].item()), int(norb_b[i].item())
-            ea_ei[i, :nocc_i, : nvirt_b[i]] = e_mo[i, nocc_i:norb_i].unsqueeze(0) - e_mo[
-                i, :nocc_i
-            ].unsqueeze(1)
-        return nocc_max, nvirt_max, Cocc, Cvirt, ea_ei
-
-    return nocc_max, nvirt_max, Cocc, Cvirt
 
 
 def make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt):

@@ -3,7 +3,8 @@ from typing import Callable, Dict, Optional, Tuple
 import numpy as np
 import torch
 
-from .rcis_batch import get_occ_virt, makeA_pi_batched
+from .excited_state_utils import get_occ_virt
+from .rcis_batch import makeA_pi_batched
 
 
 def get_exact_excited(mol, w, e_mo, R):

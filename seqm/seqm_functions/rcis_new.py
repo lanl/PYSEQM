@@ -15,12 +15,16 @@ from seqm.seqm_functions.pack import packone, unpackone
 
 from .constants import a0
 from .dipole import calc_dipole_matrix
-from .rcis_batch import (
+from .excited_state_utils import (
+    gather_new_subspace,
     get_occ_virt,
     getMaxSubspacesize,
     getMemUse,
     orthogonalize_to_current_subspace,
     print_rcis_analysis,
+    raise_max_iterations,
+    scatter_new_subspace,
+    update_subspace_status,
 )
 
 
@@ -95,8 +99,6 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
-    mol_idx = torch.arange(nmol, device=device)
-    subspace_idx = torch.arange(maxSubspacesize, device=device)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -105,31 +107,12 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     active_root_mask = root_idx < nroots_target.unsqueeze(1)  # (nmol, k_max)
 
     while davidson_iter <= max_iter:  # Davidson loop
-        # Determine current subspace dimensions per molecule
-        delta = vend - vstart
-        max_v = int(delta.max().item())
-        rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
-
-        # Gather current subspace vectors into V_batched
-        if torch.all(delta == max_v):
-            dense_idx = vstart[:, None] + rel_idx
-            V_batched = V[mol_idx[:, None], dense_idx, :]
-            mask = None
-        else:
-            abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-            mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-            batch_idx = mol_idx.unsqueeze(1).expand(-1, max_v)
-            V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-            V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
+        V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend)
 
         # Compute the matrix-vector product in the current subspace
         HV_batch = matrix_vector_product_any_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
-        if mask is None:
-            HV[mol_idx[:, None], dense_idx, :] = HV_batch
-        else:
-            HV[batch_idx[mask], abs_idx[mask], :] = HV_batch[mask]
+        scatter_new_subspace(HV, HV_batch, batch_idx, abs_idx, mask)
 
-        # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
         H = torch.einsum("bno,bro->bnr", V[:, :vend_max], HV[:, :vend_max])
 
@@ -151,18 +134,12 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         resid_norm = torch.linalg.vector_norm(residual, dim=2, ord=torch.inf)
         roots_not_converged = (resid_norm > root_tol) & active_root_mask
 
-        # Mark molecules with all roots converged and store amplitudes
-        mol_converged = roots_not_converged.sum(dim=1) == 0
-        done_this_loop = (~done) & mol_converged
-        done[done_this_loop] = True
-        n_iters[done_this_loop] = davidson_iter
+        mol_converged, done_this_loop, collapse_mask = update_subspace_status(
+            done, roots_not_converged, vend, maxSubspacesize, nov, davidson_iter, n_iters
+        )
         amplitude_store[done_this_loop] = amplitudes[done_this_loop]
 
         # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
-        collapse_condition = (roots_not_converged.sum(dim=1) + vend > maxSubspacesize) & (
-            maxSubspacesize != nov
-        )
-        collapse_mask = (~done) & (~mol_converged) & collapse_condition
         if collapse_mask.sum() > 0:
             if davidson_iter == 1:
                 raise Exception(
@@ -190,8 +167,6 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             )
 
             vstart[i] = vend[i]
-            # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function.
-            # This means changes inside the function will directly modify 'V[i]'
             vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol[i])
             if vend[i] - vstart[i] == 0:
                 done[i] = True
@@ -206,11 +181,16 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if torch.all(done):
             break
         if davidson_iter > max_iter:
-            for j in range(nmol):
-                print(
-                    f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}"
-                )
-            raise Exception("Maximum iterations reached but roots have not converged")
+            raise_max_iterations(
+                done,
+                roots_not_converged,
+                resid_norm,
+                vend,
+                maxSubspacesize,
+                n_iters,
+                n_collapses,
+                nroots_target,
+            )
 
     # print("-" * len(header))
     # print("\nCIS excited states:")

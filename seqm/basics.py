@@ -596,8 +596,8 @@ class Hamiltonian(torch.nn.Module):
         # put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         # be used to restart jobs
         self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters["scf_eps"]), requires_grad=False)
-        self.sp2 = seqm_parameters.get("sp2", [False])
-        self.scf_converger = seqm_parameters.setdefault("scf_converger", 1)
+        self.sp2 = seqm_parameters.get("sp2", (False,))
+        self.scf_converger = seqm_parameters.get("scf_converger", (1,))
         # whether return eigenvalues, eigenvectors, and gap. Otherwise they are None
         self.eig = seqm_parameters.get("eig", True)
         self.scf_backward = seqm_parameters.get("scf_backward", 0)

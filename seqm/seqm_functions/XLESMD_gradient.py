@@ -4,9 +4,10 @@ from .anal_grad import core_core_der, overlap_der_finiteDiff, w_der
 from .cg_solver import conjugate_gradient_batch
 from .constants import a0
 from .dispersion_am1_fs1 import dEdisp_dr
+from .excited_state_utils import get_occ_virt
 from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 from .omx_utils import get_orbital_zetas
-from .rcis_batch import get_occ_virt, make_A_times_zvector_batched, makeA_pi_batched, unpackone_batch
+from .rcis_batch import make_A_times_zvector_batched, makeA_pi_batched, unpackone_batch
 from .rcis_grad_batch import make_cis_state_dipole
 
 

@@ -1,13 +1,18 @@
+import math
+
 import torch
 
-from .rcis_batch import (
+from .excited_state_utils import (
     _uniform_molecule_dimensions,
+    gather_new_subspace,
     getMaxSubspacesize,
     make_guess,
-    matrix_vector_product_batched,
     orthogonalize_to_current_subspace,
-    rcis_analysis,
+    raise_max_iterations,
+    scatter_new_subspace,
+    update_subspace_status,
 )
+from .rcis_batch import matrix_vector_product_batched, rcis_analysis
 
 
 def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
@@ -44,7 +49,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     ea_ei = e_mo[:, nocc:norb].unsqueeze(1) - e_mo[:, :nocc].unsqueeze(2)
     approxH = ea_ei.view(-1, nov)
 
-    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nroots, num_big_matrices=3)  # TODO: User-defined
+    maxSubspacesize = getMaxSubspacesize(dtype, device, nov, nroots, num_big_matrices=3)
 
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     AV = torch.empty_like(V)
@@ -57,8 +62,8 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         nstart = nroots
         V[:, :nstart, :] = init_amplitude_guess
 
-    max_iter = 100  # TODO: User-defined
-    vector_tol = root_tol * 0.02  # Vectors whose norm is smaller than this will be discarded
+    max_iter = int(mol.seqm_parameters.get("excited_states", {}).get("max_iter", 200))
+    vector_tol = root_tol * 0.01 * math.sqrt(nov)  # Vectors whose norm is smaller than this will be discarded
     davidson_iter = 0
     vstart = torch.zeros(nmol, dtype=torch.long, device=device)
     vend = torch.full((nmol,), nstart, dtype=torch.long, device=device)
@@ -73,8 +78,6 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
-    mol_idx = torch.arange(nmol, device=device)
-    subspace_idx = torch.arange(maxSubspacesize, device=device)
     # header = f"{'Iteration':>10} | {'States Found':^15} | {'Total Error':>15}"
     # print("-" * len(header))
     # print(header)
@@ -82,35 +85,15 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
     chunk_plan_cache = {}
     while davidson_iter <= max_iter:  # Davidson loop
-        # Determine current subspace dimensions per molecule
-        delta = vend - vstart
-        max_v = int(delta.max().item())
-        rel_idx = subspace_idx[:max_v].unsqueeze(0)  # (1, max_v)
-
-        # Gather current subspace vectors into V_batched
-        if nmol == 1 or torch.all(delta == max_v):
-            dense_idx = vstart[:, None] + rel_idx
-            V_batched = V[mol_idx[:, None], dense_idx, :]
-            mask = None
-        else:
-            abs_idx = rel_idx + vstart.unsqueeze(1)  # (nmol, max_v)
-            mask = rel_idx < delta.unsqueeze(1)  # (nmol, max_v)
-            batch_idx = mol_idx.unsqueeze(1).expand(-1, max_v)
-            V_batched = torch.zeros(nmol, max_v, nov, dtype=dtype, device=device)
-            V_batched[mask] = V[batch_idx[mask], abs_idx[mask], :]
+        V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend)
 
         # Compute the matrix-vector product in the current subspace
         AV_batch, BV_batch = matrix_vector_product_batched(
             mol, V_batched, w, ea_ei, Cocc, Cvirt, makeB=True, chunk_plan_cache=chunk_plan_cache
         )
-        if mask is None:
-            AV[mol_idx[:, None], dense_idx, :] = AV_batch
-            BV[mol_idx[:, None], dense_idx, :] = BV_batch
-        else:
-            AV[batch_idx[mask], abs_idx[mask], :] = AV_batch[mask]
-            BV[batch_idx[mask], abs_idx[mask], :] = BV_batch[mask]
+        scatter_new_subspace(AV, AV_batch, batch_idx, abs_idx, mask)
+        scatter_new_subspace(BV, BV_batch, batch_idx, abs_idx, mask)
 
-        # Make H by multiplying V.T * HV
         vend_max = int(torch.max(vend).item())
         A = torch.einsum("bno,bro->bnr", V[:, :vend_max], AV[:, :vend_max])
         B = torch.einsum("bno,bro->bnr", V[:, :vend_max], BV[:, :vend_max])
@@ -119,7 +102,6 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         ApB += B  # Make A+B
 
         davidson_iter = davidson_iter + 1
-
         # Diagonalize the subspace hamiltonian
         zero_pad = vend_max - vend  # Zero-padding for molecules with smaller subspaces
         X, Y = rpa_subspace_eig(ApB, AmB, nroots, zero_pad, e_val_n, done)
@@ -135,19 +117,13 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
 
         roots_not_converged = resid_norm > root_tol
 
-        # Mark molecules with all roots converged and store amplitudes
-        mol_converged = roots_not_converged.sum(dim=1) == 0
-        done_this_loop = (~done) & mol_converged
-        done[done_this_loop] = True
-        n_iters[done_this_loop] = davidson_iter
+        mol_converged, done_this_loop, collapse_mask = update_subspace_status(
+            done, roots_not_converged, vend, maxSubspacesize, nov, davidson_iter, n_iters
+        )
         amplitude_store[0, done_this_loop] = amplitude_X[done_this_loop]
         amplitude_store[1, done_this_loop] = amplitude_Y[done_this_loop]
 
         # Collapse the subspace for those molecules whose subspace will exceed maxSubspacesize
-        collapse_condition = (roots_not_converged.sum(dim=1) + vend > maxSubspacesize) & (
-            maxSubspacesize != nov
-        )
-        collapse_mask = (~done) & (~mol_converged) & collapse_condition
         if collapse_mask.sum() > 0:
             # collapsing subspace means that the guess space will be reset to 2*nroots vectors. Following that, the roots that didn't converge this cycle
             # will also be added to the guess space. So we have to check if all these vectors will fit in
@@ -155,7 +131,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
                 raise Exception("Insufficient memory to perform subspace expansion following collapse")
 
             mols_to_collapse = torch.nonzero(collapse_mask).squeeze(1)
-            XY_ = torch.cat((X[collapse_condition], Y[collapse_condition]), dim=2)
+            XY_ = torch.cat((X[collapse_mask], Y[collapse_mask]), dim=2)
             XY_, _ = torch.linalg.qr(XY_, mode="reduced")
             for i in mols_to_collapse:
                 vend_i = vend[i]
@@ -177,8 +153,6 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
             # newsubspace = torch.cat((correction_directionR[i,roots_not_converged[i],:],correction_directionL[i,roots_not_converged[i],:]),dim=0)
 
             vstart[i] = vend[i]
-            # The original 'V' vector is passed by reference to the 'orthogonalize_to_current_subspace' function.
-            # This means changes inside the function will directly modify 'V[i]'
             newsubspace = correction_directionR[i, roots_not_converged[i], :]
             vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
             newsubspace = correction_directionL[i, roots_not_converged[i], :]
@@ -198,13 +172,9 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if torch.all(done):
             break
         if davidson_iter > max_iter:
-            # for i in range(nmol):
-            #     print(f"Mol {i+1} Iterations: {davidson_iter:2}: Found {nroots-roots_not_converged[i].sum().item()}/{nroots} states, Total Error: {torch.sum(resid_norm[i]):.4e}")
-            for j in range(nmol):
-                print(
-                    f"Molecule {j}: Number of davidson iterations: {n_iters[j]}, number of subspace collapses: {n_collapses[j]}"
-                )
-            raise Exception("Maximum iterations reached but roots have not converged")
+            raise_max_iterations(
+                done, roots_not_converged, resid_norm, vend, maxSubspacesize, n_iters, n_collapses, nroots
+            )
 
     # print("-" * len(header))
     print("\nRPA excited states:")
