@@ -229,12 +229,14 @@ what excited-state properties are computed:
 
 Configuration constraints:
 
-- ``output['h5']['data']`` must be ``> 0`` if any of
-  ``output['h5']['transition_density_matrices']``,
-  ``output['h5']['transition_properties']``, or
-  ``output['h5']['write_mo']`` is enabled.
-- On restart, keep ``transition_density_matrices_mode`` consistent with the
-  existing HDF5 file (``full`` vs ``diag``), since dataset shapes differ.
+- ``output['h5']['data']`` must be ``> 0`` if
+  ``output['h5']['transition_properties']`` or ``output['h5']['write_mo']`` is
+  enabled. Transition-density matrices use their own cadence.
+- Nonadiabatic, transition-property, and transition-density output require
+  ``excited_states``.
+- On restart, retain the same HDF5 configuration. The writer validates the
+  stored schema metadata, atom identities, cadences, and dataset shapes before
+  it appends data.
 
 You do not need to set separate compute flags in ``seqm_parameters`` for these
 HDF5 outputs.

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -5,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from io import StringIO
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -110,47 +111,227 @@ class OutputConfig:
         return int(self.h5_config.get("nonadiabatic", 0))
 
 
-class HDF5Writer:
-    """Manages HDF5 file writing for MD trajectories."""
+@dataclass
+class _H5Track:
+    """A fixed-capacity stepped group, optionally with a values dataset."""
 
-    def __init__(self, output_config: OutputConfig, seqm_parameters: Dict, timestep: float):
+    group: h5py.Group
+    steps: h5py.Dataset
+    count: int = 0
+    values: Optional[h5py.Dataset] = None
+
+    @property
+    def capacity(self) -> int:
+        return int(self.steps.shape[0])
+
+    def commit(self) -> None:
+        self.group.attrs["n_written"] = np.int64(self.count)
+
+
+@dataclass
+class _MoleculeState:
+    h5: h5py.File
+    nat: int
+    norb: int
+    restricted: bool
+    data: Optional[_H5Track] = None
+    nonadiabatic: Optional[_H5Track] = None
+    series: Dict[str, _H5Track] = field(default_factory=dict)
+
+    def tracks(self) -> Iterator[_H5Track]:
+        if self.data is not None:
+            yield self.data
+        if self.nonadiabatic is not None:
+            yield self.nonadiabatic
+        yield from self.series.values()
+
+
+@dataclass(frozen=True)
+class _H5Layout:
+    """Fixed capacities for all HDF5 output streams in one MD run."""
+
+    data: int
+    tdm: int
+    nonadiabatic: int
+    vectors: Dict[str, int]
+
+
+class HDF5Writer:
+    """Write fixed-size HDF5 molecular-dynamics trajectories."""
+
+    _SCHEMA_VERSION = 2
+    _CHUNK_TARGET_BYTES = 512 << 10
+
+    def __init__(self, output_config: "OutputConfig", seqm_parameters: Dict, timestep: float):
         self.config = output_config
         self.seqm_parameters = seqm_parameters
         self.timestep = float(timestep)
-        self.handles: Dict[int, h5py.File] = {}
-        self.i_data: Dict[int, int] = {}
-        self.i_vec: Dict[int, Dict[str, int]] = {}
-        self.i_tdm: Dict[int, int] = {}
-        self.i_na: Dict[int, int] = {}
-        self.flags: Dict[int, Dict] = {}
+        self._states: Dict[int, _MoleculeState] = {}
 
-        self._cadence = output_config.get_h5_cadence()
-        self._data_every = output_config.get_h5_data_every()
-        self._write_mo = output_config.get_h5_write_mo()
-        self._write_tdm = output_config.get_h5_write_tdm()
-        self._tdm_mode = output_config.get_h5_tdm_mode()
-        self._write_transition_properties = output_config.get_h5_transition_properties()
-        self._write_nonadiabatic = output_config.get_h5_write_nonadiabatic()
+        self._cadence = {str(k): int(v) for k, v in output_config.get_h5_cadence().items()}
+        self._data_every = int(output_config.get_h5_data_every())
+        self._write_mo = bool(output_config.get_h5_write_mo())
+        self._write_tdm = int(output_config.get_h5_write_tdm())
+        self._tdm_mode = str(output_config.get_h5_tdm_mode())
+        self._write_transition_properties = bool(output_config.get_h5_transition_properties())
+        self._write_nonadiabatic = int(output_config.get_h5_write_nonadiabatic())
 
-    @staticmethod
-    def _n_timepoints(steps: int, stride: int, include_initial: bool = False) -> int:
-        """Calculate number of timepoints for given stride."""
-        if stride <= 0:
-            return 0
-        if include_initial:
-            # Include t=0 snapshot plus the regular cadence.
-            return (steps + stride) // stride
-        return (steps + stride - 1) // stride
+        self._steps = 0
+        self._nstates = 0
+        self._include_initial = False
 
     @staticmethod
-    def _create_row_chunked(
-        group: h5py.Group, path: str, shape: Tuple, dtype=np.float64, compression="gzip", complvl=4
-    ) -> h5py.Dataset:
-        """Create chunked dataset optimized for row-wise writing."""
-        chunks = (1,) + tuple(shape[1:])
-        return group.create_dataset(
-            path, shape=shape, dtype=dtype, chunks=chunks, compression=compression, compression_opts=complvl
+    def _n_timepoints(steps: int, stride: int, include_initial: bool) -> int:
+        return 0 if stride <= 0 else steps // stride + int(include_initial)
+
+    def _due(self, step: int, stride: int) -> bool:
+        return (
+            stride > 0
+            and 0 <= step <= self._steps
+            and step % stride == 0
+            and (step != 0 or self._include_initial)
         )
+
+    def _layout(self) -> _H5Layout:
+        return _H5Layout(
+            data=self._n_timepoints(self._steps, self._data_every, self._include_initial),
+            tdm=self._n_timepoints(self._steps, self._write_tdm, self._include_initial),
+            nonadiabatic=self._n_timepoints(self._steps, self._write_nonadiabatic, self._include_initial),
+            vectors={
+                name: self._n_timepoints(self._steps, stride, self._include_initial)
+                for name, stride in self._cadence.items()
+            },
+        )
+
+    def _iter_live(self, live_mask) -> Iterator[Tuple[int, _MoleculeState]]:
+        if live_mask is None:
+            yield from self._states.items()
+            return
+        mask = np.asarray(_to_np(live_mask), dtype=bool)
+        yield from ((mol, state) for mol, state in self._states.items() if mask[mol])
+
+    @classmethod
+    def _chunk_shape(cls, shape: Tuple[int, ...], dtype) -> Tuple[int, ...]:
+        frame_items = int(np.prod(shape[1:], dtype=np.int64)) if len(shape) > 1 else 1
+        frame_bytes = max(1, frame_items * np.dtype(dtype).itemsize)
+        rows = max(1, min(shape[0], cls._CHUNK_TARGET_BYTES // frame_bytes))
+        return (rows,) + shape[1:]
+
+    @classmethod
+    def _create_dataset(
+        cls, group: h5py.Group, path: str, shape: Tuple[int, ...], dtype=np.float64, *, compress: bool = False
+    ) -> h5py.Dataset:
+        kwargs: Dict[str, Any] = {"shape": shape, "dtype": dtype}
+        if compress:
+            kwargs.update(
+                chunks=cls._chunk_shape(shape, dtype), compression="gzip", compression_opts=1, shuffle=True
+            )
+        return group.create_dataset(path, **kwargs)
+
+    @staticmethod
+    def _require_group(parent: h5py.Group, path: str) -> h5py.Group:
+        obj = parent.get(path)
+        if not isinstance(obj, h5py.Group):
+            raise RuntimeError(f"Required HDF5 group is missing: {path}")
+        return obj
+
+    @staticmethod
+    def _require_dataset(parent: h5py.Group, path: str, shape: Tuple[int, ...], dtype=None) -> h5py.Dataset:
+        obj = parent.get(path)
+        if not isinstance(obj, h5py.Dataset):
+            raise RuntimeError(f"Required HDF5 dataset is missing: {path}")
+        if obj.shape != shape:
+            raise RuntimeError(f"Shape mismatch for {obj.name}: found {obj.shape}, expected {shape}.")
+        if dtype is not None and obj.dtype != np.dtype(dtype):
+            raise RuntimeError(
+                f"Dtype mismatch for {obj.name}: found {obj.dtype}, expected {np.dtype(dtype)}."
+            )
+        return obj
+
+    @classmethod
+    def _create_fields(cls, group: h5py.Group, fields: Dict[str, Tuple[Tuple[int, ...], Any]]) -> None:
+        for path, (shape, dtype) in fields.items():
+            cls._create_dataset(group, path, shape, dtype)
+
+    def _config_signature(self, *, nat: int, norb: int, restricted: bool) -> str:
+        config = {
+            "schema": self._SCHEMA_VERSION,
+            "timestep_fs": self.timestep,
+            "n_atoms": nat,
+            "n_orbitals": norb,
+            "n_excited_states": self._nstates,
+            "restricted": restricted,
+            "include_initial": self._include_initial,
+            "total_steps": self._steps,
+            "data_stride": self._data_every,
+            "vector_strides": self._cadence,
+            "tdm_stride": self._write_tdm,
+            "tdm_mode": self._tdm_mode,
+            "nonadiabatic_stride": self._write_nonadiabatic,
+            "write_mo": self._write_mo,
+            "write_transition_properties": self._write_transition_properties,
+        }
+        return json.dumps(config, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _load_count(group: h5py.Group) -> int:
+        if "n_written" not in group.attrs:
+            raise RuntimeError(f"Missing n_written on {group.name}.")
+        count = int(group.attrs["n_written"])
+        capacity = int(group["steps"].shape[0])
+        if not 0 <= count <= capacity:
+            raise RuntimeError(f"Invalid n_written={count} on {group.name}; capacity={capacity}.")
+        return count
+
+    @classmethod
+    def _new_track(
+        cls,
+        group: h5py.Group,
+        length: int,
+        stride: int,
+        values_shape: Optional[Tuple[int, ...]] = None,
+        *,
+        compress: bool = False,
+    ) -> _H5Track:
+        group.attrs["stride"] = np.int64(stride)
+        group.attrs["n_written"] = np.int64(0)
+        steps = cls._create_dataset(group, "steps", (length,), np.int64)
+        values = (
+            None
+            if values_shape is None
+            else cls._create_dataset(group, "values", values_shape, compress=compress)
+        )
+        return _H5Track(group, steps, values=values)
+
+    @classmethod
+    def _load_track(
+        cls, group: h5py.Group, length: int, stride: int, values_shape: Optional[Tuple[int, ...]] = None
+    ) -> _H5Track:
+        if int(group.attrs.get("stride", -1)) != stride:
+            raise RuntimeError(f"Stride mismatch for {group.name}.")
+        steps = cls._require_dataset(group, "steps", (length,), np.int64)
+        values = (
+            None if values_shape is None else cls._require_dataset(group, "values", values_shape, np.float64)
+        )
+        return _H5Track(group, steps, cls._load_count(group), values)
+
+    @staticmethod
+    def _start_row(track: _H5Track, step: int, *, mol: int) -> int:
+        i = track.count
+        if i >= track.capacity:
+            raise RuntimeError(f"HDF5 {track.group.name} capacity exceeded for molecule {mol}.")
+        if i and step <= int(track.steps[i - 1]):
+            raise RuntimeError(
+                f"Non-increasing step for {track.group.name}: previous={int(track.steps[i - 1])}, new={step}."
+            )
+        track.steps[i] = np.int64(step)
+        return i
+
+    @classmethod
+    def _append_series(cls, track: _H5Track, step: int, value, *, mol: int) -> None:
+        i = cls._start_row(track, step, mol=mol)
+        track.values[i] = value
+        track.count = i + 1
 
     def open(
         self,
@@ -161,412 +342,325 @@ class HDF5Writer:
         resume: bool = False,
         step_offset: int = 0,
         include_initial: bool = False,
-    ):
-        """Open HDF5 files for writing."""
-        Tw_data = self._n_timepoints(steps, self._data_every, include_initial=include_initial)
-        Tw_vec = {
-            k: self._n_timepoints(steps, v, include_initial=include_initial) for k, v in self._cadence.items()
-        }
-        Tw_tdm = self._n_timepoints(steps, self._write_tdm, include_initial=include_initial)
-        Tw_na = self._n_timepoints(steps, self._write_nonadiabatic, include_initial=include_initial)
+    ) -> None:
+        if self._states:
+            raise RuntimeError("HDF5Writer is already open.")
+        if steps < 0:
+            raise ValueError("steps must be non-negative.")
+
+        self._steps = int(steps)
+        self._nstates = max(0, int(excited_states))
+        self._include_initial = bool(include_initial)
+        if self._nstates == 0 and (
+            self._write_tdm > 0 or self._write_transition_properties or self._write_nonadiabatic > 0
+        ):
+            raise ValueError("Excited-state output requires at least one excited state.")
 
         restricted = not bool(self.seqm_parameters.get("UHF", False))
-        active_states = active_state_tensor(
-            molecule.active_state, int(molecule.nmol), molecule.coordinates.device
-        )
-
-        for mol in self.config.molid:
-            h5_path = f"{prefix}.{mol}.h5"
-            Nat_mol = int(torch.sum(molecule.species[mol] > 0))
-            Norb_mol = int(molecule.norb[mol])
-            R = int(excited_states) if excited_states > 0 else 0
-            Tw_na_mol = Tw_na if R > 0 else 0
-
-            self.flags[mol] = {
-                "restricted": restricted,
-                "Norb": Norb_mol,
-                "Nat": Nat_mol,
-                "active_slice": slice(0, Nat_mol),
-                "n_excited_states": R,
-                "write_mo": self._write_mo,
-                "write_tdm": bool(Tw_tdm > 0),
-                "write_transition_properties": self._write_transition_properties,
-                "write_nonadiabatic": bool(Tw_na_mol > 0),
-                "Tw_data": Tw_data,
-                "Tw_tdm": Tw_tdm,
-                "Tw_na": Tw_na_mol,
-                "Tw_vec": Tw_vec.copy(),
-                "stride": self._cadence.copy(),
-                "tdm_stride": self._write_tdm,
-                "na_stride": self._write_nonadiabatic,
-            }
-
-            if resume:
-                self._open_resume(h5_path, mol, step_offset)
-            else:
-                self._create_new(
-                    h5_path,
-                    mol,
-                    molecule,
-                    Nat_mol,
-                    Norb_mol,
-                    R,
-                    Tw_data,
-                    Tw_vec,
-                    Tw_tdm,
-                    Tw_na_mol,
-                    active_states=active_states,
-                )
-
-    def _open_resume(self, h5_path: str, mol: int, step_offset: int):
-        """Open existing HDF5 file for resuming."""
-        h5 = h5py.File(h5_path, "r+")
-        self.handles[mol] = h5
-
-        # Read existing capacities
-        Tw_data_exist = h5["data/steps"].shape[0] if ("data" in h5 and "steps" in h5["data"]) else 0
-        Tw_vec_exist = {
-            k: h5[f"{k}/steps"].shape[0] if k in h5 else 0 for k in ["coordinates", "velocities", "forces"]
-        }
-        Tw_tdm_exist = (
-            h5["data/excitation/transition_density_matrices/steps"].shape[0]
-            if (
-                "data" in h5
-                and "excitation" in h5["data"]
-                and "transition_density_matrices" in h5["data/excitation"]
+        layout = None
+        active_states = None
+        if not resume:
+            layout = self._layout()
+            active_states = active_state_tensor(
+                molecule.active_state, int(molecule.nmol), molecule.coordinates.device
             )
-            else 0
-        )
-        Tw_na_exist = (
-            h5["data/nonadiabatic/steps"].shape[0]
-            if ("data" in h5 and "nonadiabatic" in h5["data"] and "steps" in h5["data/nonadiabatic"])
-            else 0
-        )
 
-        # Validate
-        if self._data_every > 0 and Tw_data_exist == 0:
-            raise RuntimeError("Resume requested but /data group not present in HDF5.")
-        for k, cad in self._cadence.items():
-            if cad > 0 and Tw_vec_exist[k] == 0:
-                raise RuntimeError(f"Resume requested but /{k} group not present in HDF5.")
-        if self._write_tdm > 0 and Tw_tdm_exist == 0:
-            raise RuntimeError("Resume: /data/excitation/transition_density_matrices not present.")
-        if self._write_tdm > 0 and Tw_tdm_exist > 0:
-            vals = h5["data/excitation/transition_density_matrices/values"]
-            expect_rank = 4 if self._tdm_mode == "full" else 3
-            if vals.ndim != expect_rank:
-                raise RuntimeError(
-                    f"Resume: transition_density_matrices shape rank mismatch (found {vals.ndim}, expected {expect_rank} for mode '{self._tdm_mode}')."
+        try:
+            for mol in self.config.molid:
+                nat = int(torch.sum(molecule.species[mol] > 0))
+                norb = int(molecule.norb[mol])
+                path = f"{prefix}.{mol}.h5"
+                if resume:
+                    state = self._open_resume(
+                        path, mol, molecule, nat, norb, restricted, step_offset=step_offset
+                    )
+                else:
+                    state = self._create_new(
+                        path, mol, molecule, nat, norb, restricted, layout, active_states
+                    )
+                self._states[mol] = state
+        except BaseException:
+            self._close_all()
+            raise
+
+    def _open_resume(
+        self, path: str, mol: int, molecule, nat: int, norb: int, restricted: bool, *, step_offset: int
+    ) -> _MoleculeState:
+        h5 = h5py.File(path, "r+")
+        state = _MoleculeState(h5, nat, norb, restricted)
+        try:
+            actual = h5.attrs.get("writer_config")
+            if isinstance(actual, bytes):
+                actual = actual.decode()
+            try:
+                stored = json.loads(actual)
+                self._include_initial = bool(stored["include_initial"])
+            except (KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"Invalid writer configuration in {path}.") from exc
+
+            expected = self._config_signature(nat=nat, norb=norb, restricted=restricted)
+            if actual != expected:
+                raise RuntimeError(f"Writer configuration does not match {path}.")
+
+            layout = self._layout()
+
+            atoms = self._require_dataset(h5, "atoms", (nat,))
+            if not np.array_equal(atoms[...], _to_np(molecule.species[mol, :nat])):
+                raise RuntimeError(f"Atom identities do not match in {path}.")
+
+            data_len = layout.data
+            if ("data/steps" in h5) != bool(data_len):
+                raise RuntimeError(f"Data-output configuration does not match {path}.")
+            if data_len:
+                gd = self._require_group(h5, "data")
+                state.data = self._load_track(gd, data_len, self._data_every)
+
+            for name, stride in self._cadence.items():
+                length = layout.vectors[name]
+                if (name in h5) != bool(length):
+                    raise RuntimeError(f"Vector configuration for {name!r} does not match {path}.")
+                if length:
+                    group = self._require_group(h5, name)
+                    state.series[name] = self._load_track(group, length, stride, (length, nat, 3))
+
+            tdm_len = layout.tdm
+            tdm_path = "data/excitation/transition_density_matrices"
+            has_tdm = bool(tdm_len and self._nstates)
+            if (tdm_path in h5) != has_tdm:
+                raise RuntimeError(f"TDM configuration does not match {path}.")
+            if has_tdm:
+                group = self._require_group(h5, tdm_path)
+                state.series["tdm"] = self._load_track(
+                    group, tdm_len, self._write_tdm, self._tdm_shape(tdm_len, norb)
                 )
-        if self._write_transition_properties and (
-            Tw_data_exist == 0
-            or "excitation" not in h5["data"]
-            or "transition_dipole" not in h5["data/excitation"]
-            or "oscillator_strength" not in h5["data/excitation"]
-        ):
-            raise RuntimeError("Resume: transition_properties requested but not present in HDF5.")
-        if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0 and Tw_na_exist == 0:
-            raise RuntimeError("Resume: /data/nonadiabatic not present.")
-        if self.flags[mol]["n_excited_states"] > 0 and Tw_data_exist > 0:
-            if "state_energies" not in h5["data/excitation"]:
-                self._create_row_chunked(
-                    h5["data"],
-                    "excitation/state_energies",
-                    (Tw_data_exist, self.flags[mol]["n_excited_states"] + 1),
-                )
 
-        # Set indices (assume an initial snapshot at step 0 exists in resumed files)
-        self.i_data[mol] = (step_offset // self._data_every) + 1 if self._data_every > 0 else 0
-        self.i_vec[mol] = {k: ((step_offset // v) + 1 if v > 0 else 0) for k, v in self._cadence.items()}
-        self.i_tdm[mol] = (step_offset // self._write_tdm) + 1 if self._write_tdm > 0 else 0
-        if self._write_nonadiabatic > 0 and self.flags[mol]["n_excited_states"] > 0:
-            self.i_na[mol] = (step_offset // self._write_nonadiabatic) + 1
-        else:
-            self.i_na[mol] = 0
+            na_len = layout.nonadiabatic
+            na_path = "data/nonadiabatic"
+            has_na = bool(na_len and self._nstates)
+            if (na_path in h5) != has_na:
+                raise RuntimeError(f"Nonadiabatic configuration does not match {path}.")
+            if has_na:
+                group = self._require_group(h5, na_path)
+                state.nonadiabatic = self._load_track(group, na_len, self._write_nonadiabatic)
 
-        # Update flags with existing capacities
-        self.flags[mol].update(
-            {"Tw_data": Tw_data_exist, "Tw_tdm": Tw_tdm_exist, "Tw_na": Tw_na_exist, "Tw_vec": Tw_vec_exist}
-        )
+            for track in state.tracks():
+                if track.count and int(track.steps[track.count - 1]) > step_offset:
+                    raise RuntimeError(
+                        f"{track.group.name} contains data beyond checkpoint step {step_offset}."
+                    )
+            return state
+        except BaseException:
+            h5.close()
+            raise
 
     def _create_new(
         self,
-        h5_path: str,
+        path: str,
         mol: int,
         molecule,
-        Nat_mol: int,
-        Norb_mol: int,
-        R: int,
-        Tw_data: int,
-        Tw_vec: Dict,
-        Tw_tdm: int,
-        Tw_na: int,
-        active_states=None,
-    ):
-        """Create new HDF5 file."""
-        _rotate_existing(h5_path)
-        h5 = h5py.File(h5_path, "w")
-        h5.attrs["timestep_fs"] = float(self.timestep)
-        self.handles[mol] = h5
-        self.i_data[mol] = 0
-        self.i_vec[mol] = {"coordinates": 0, "velocities": 0, "forces": 0}
-        self.i_tdm[mol] = 0
-        self.i_na[mol] = 0
+        nat: int,
+        norb: int,
+        restricted: bool,
+        layout: _H5Layout,
+        active_states,
+    ) -> _MoleculeState:
+        _rotate_existing(path)
+        h5 = h5py.File(path, "w")
+        state = _MoleculeState(h5, nat, norb, restricted)
+        try:
+            h5.attrs["writer_config"] = self._config_signature(nat=nat, norb=norb, restricted=restricted)
+            h5.create_dataset("atoms", data=_to_np(molecule.species[mol, :nat]))
+            gd = h5.create_group("data") if any((layout.data, layout.tdm, layout.nonadiabatic)) else None
 
-        S = slice(0, Nat_mol)
-        h5.create_dataset("atoms", data=_to_np(molecule.species[mol, S]))
-
-        # Create /data group
-        gd = None
-        if Tw_data > 0 or Tw_na > 0:
-            gd = h5.create_group("data")
-        if Tw_data > 0:
-            self._create_row_chunked(gd, "steps", (Tw_data,), np.int64)
-            self._create_row_chunked(gd, "thermo/T", (Tw_data,))
-            self._create_row_chunked(gd, "thermo/Ek", (Tw_data,))
-            self._create_row_chunked(gd, "thermo/Ep", (Tw_data,))
-            self._create_row_chunked(gd, "properties/ground_dipole", (Tw_data, 3))
-
-            if R > 0:
-                if active_states is not None:
+            data_len = layout.data
+            if data_len:
+                state.data = self._new_track(gd, data_len, self._data_every)
+                self._create_fields(gd, self._data_fields(data_len, restricted))
+                if self._nstates:
                     gd.create_dataset("excitation/active_state", data=int(active_states[mol].item()))
-                else:
-                    gd.create_dataset("excitation/active_state", data=int(molecule.active_state))
-                self._create_row_chunked(gd, "excitation/state_energies", (Tw_data, R + 1))
-                if self._write_transition_properties:
-                    self._create_row_chunked(gd, "excitation/transition_dipole", (Tw_data, R, 3))
-                    self._create_row_chunked(gd, "excitation/oscillator_strength", (Tw_data, R))
-
-                if Tw_tdm > 0:
-                    gtdm = gd["excitation"].create_group("transition_density_matrices")
-                    self._create_row_chunked(gtdm, "steps", (Tw_tdm,), np.int64)
-                    if self._tdm_mode == "diag":
-                        self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol))
-                    else:
-                        self._create_row_chunked(gtdm, "values", (Tw_tdm, R, Norb_mol, Norb_mol))
-
                 if self._write_mo:
-                    restricted = self.flags[mol]["restricted"]
-                    shape = (Tw_data, 1) if restricted else (Tw_data, 2)
-                    self._create_row_chunked(gd, "mo/homo_lumo_gap", shape)
-                    nocc_data = int(molecule.nocc[mol].item()) if restricted else _to_np(molecule.nocc[mol])
-                    gd.create_dataset("mo/nocc", data=nocc_data)
+                    nocc = int(molecule.nocc[mol].item()) if restricted else _to_np(molecule.nocc[mol])
+                    gd.create_dataset("mo/nocc", data=nocc)
 
-        if Tw_na > 0 and R > 0:
-            if gd is None:
-                gd = h5.create_group("data")
-            gna = gd.create_group("nonadiabatic")
-            self._create_row_chunked(gna, "steps", (Tw_na,), np.int64)
-            self._create_row_chunked(gna, "active_surface", (Tw_na,), np.int64)
-            self._create_row_chunked(gna, "electronic_amplitudes", (Tw_na, R, 2))
-            self._create_row_chunked(gna, "NACT", (Tw_na, R, R))
-
-        # Create vector groups
-        for name, Tlen in Tw_vec.items():
-            if Tlen > 0:
-                g = h5.create_group(name)
-                self._create_row_chunked(g, "steps", (Tlen,), np.int64)
-                self._create_row_chunked(g, "values", (Tlen, Nat_mol, 3))
-
-    def append_data(self, step_idx: int, molecule, T, Ek, Ep, e_gap):
-        """Append scalar data (thermo, MO, excitations)."""
-        do_tdm = self._write_tdm > 0 and (step_idx % self._write_tdm) == 0
-        tdm_diag_mode = self._tdm_mode == "diag"
-        write_mo = self._write_mo
-        active = molecule.active_state
-        active_vals = _to_np(active) if torch.is_tensor(active) else None
-        active_scalar = None if active_vals is not None else int(active)
-        live_mask = getattr(molecule, "_trajectory_live_mask", None)
-        for mol in self.config.molid:
-            if torch.is_tensor(live_mask) and not bool(live_mask[mol].item()):
-                continue
-            i = self.i_data.get(mol)
-            if i is None or self.flags[mol]["Tw_data"] == 0:
-                continue
-
-            h5 = self.handles[mol]
-            gd = h5["data"]
-            flags = self.flags[mol]
-
-            gd["steps"][i] = int(step_idx)
-            gd["thermo/T"][i] = float(T[mol].detach().cpu())
-            gd["thermo/Ek"][i] = float(Ek[mol].detach().cpu())
-            gd["thermo/Ep"][i] = float(Ep[mol].detach().cpu())
-            gd["properties/ground_dipole"][i, ...] = _to_np(molecule.dipole[mol])
-
-            R = flags["n_excited_states"]
-            if R > 0:
-                active_mol = int(active_vals[mol]) if active_vals is not None else active_scalar
-                e0 = molecule.Etot[mol]
-                if active_mol > 0:
-                    e0 = e0 - molecule.cis_energies[mol, active_mol - 1]
-                e0 = float(e0.detach().cpu())
-                cis = _to_np(molecule.cis_energies[mol, :R])
-                row = np.empty((R + 1,), dtype=np.float64)
-                row[0] = e0
-                row[1:] = e0 + cis
-                gd["excitation/state_energies"][i, ...] = row
-                if flags.get("write_transition_properties"):
-                    gd["excitation/transition_dipole"][i, ...] = _to_np(molecule.transition_dipole[mol, :R])
-                    gd["excitation/oscillator_strength"][i, ...] = _to_np(
-                        molecule.oscillator_strength[mol, :R]
+            for name, length in layout.vectors.items():
+                if length:
+                    group = h5.create_group(name)
+                    state.series[name] = self._new_track(
+                        group, length, self._cadence[name], (length, nat, 3), compress=True
                     )
 
-                if flags.get("write_tdm") and do_tdm:
-                    i_tdm = self.i_tdm[mol]
-                    if i_tdm < flags["Tw_tdm"]:
-                        gtdm = gd["excitation/transition_density_matrices"]
-                        gtdm["steps"][i_tdm] = int(step_idx)
-                        Norb = flags["Norb"]
-                        tdm = molecule.transition_density_matrices[mol, :R]
-                        if tdm_diag_mode:
-                            if tdm.dim() == 3:
-                                tdm = torch.diagonal(tdm[:, :Norb, :Norb], dim1=-2, dim2=-1)
-                            else:
-                                tdm = tdm[:, :Norb]
-                        else:
-                            tdm = tdm[:, :Norb, :Norb]
-                        gtdm["values"][i_tdm, ...] = _to_np(tdm)
-                        self.i_tdm[mol] = i_tdm + 1
+            tdm_len = layout.tdm
+            if tdm_len and self._nstates:
+                group = gd.require_group("excitation").create_group("transition_density_matrices")
+                state.series["tdm"] = self._new_track(
+                    group, tdm_len, self._write_tdm, self._tdm_shape(tdm_len, norb), compress=True
+                )
 
-            if write_mo:
-                Norb = flags["Norb"]
-                if flags["restricted"]:
-                    gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol, None])
-                else:
-                    gd["mo/homo_lumo_gap"][i, ...] = _to_np(e_gap[mol])
+            na_len = layout.nonadiabatic
+            if na_len and self._nstates:
+                group = gd.create_group("nonadiabatic")
+                state.nonadiabatic = self._new_track(group, na_len, self._write_nonadiabatic)
+                self._create_fields(group, self._nonadiabatic_fields(na_len))
+            return state
+        except BaseException:
+            h5.close()
+            raise
 
-            self.i_data[mol] = i + 1
-            if (i + 1) % 100 == 0:
-                h5.flush()
+    def _data_fields(self, length: int, restricted: bool):
+        fields = {
+            "thermo/T": ((length,), np.float64),
+            "thermo/Ek": ((length,), np.float64),
+            "thermo/Ep": ((length,), np.float64),
+            "properties/ground_dipole": ((length, 3), np.float64),
+        }
+        if self._nstates:
+            fields["excitation/state_energies"] = ((length, self._nstates + 1), np.float64)
+            if self._write_transition_properties:
+                fields["excitation/transition_dipole"] = ((length, self._nstates, 3), np.float64)
+                fields["excitation/oscillator_strength"] = ((length, self._nstates), np.float64)
+        if self._write_mo:
+            fields["mo/homo_lumo_gap"] = ((length, 1 if restricted else 2), np.float64)
+        return fields
 
-    def append_vectors(self, step_idx: int, molecule):
-        """Append vector data (coordinates, velocities, forces)."""
-        write_names = [
-            name for name, stride in self._cadence.items() if stride > 0 and (step_idx % stride) == 0
-        ]
-        if not write_names:
-            return
+    def _nonadiabatic_fields(self, length: int):
+        return {
+            "active_surface": ((length,), np.int64),
+            "electronic_amplitudes": ((length, self._nstates, 2), np.float64),
+            "NACT": ((length, self._nstates, self._nstates), np.float64),
+        }
 
-        live_mask = getattr(molecule, "_trajectory_live_mask", None)
-        for mol in self.config.molid:
-            if torch.is_tensor(live_mask) and not bool(live_mask[mol].item()):
-                continue
-            h5 = self.handles[mol]
-            f = self.flags[mol]
-            S = f["active_slice"]
+    def _tdm_shape(self, length: int, norb: int) -> Tuple[int, ...]:
+        shape = (length, self._nstates, norb)
+        return shape + (norb,) if self._tdm_mode == "full" else shape
 
-            did_write = False
-            for name in write_names:
-                i = self.i_vec[mol][name]
-                if i >= f["Tw_vec"][name]:
-                    continue
+    def append_data(self, step: int, molecule, T, Ek, Ep, e_gap) -> None:
+        T_np, Ek_np, Ep_np = map(_to_np, (T, Ek, Ep))
+        dipole_np = _to_np(molecule.dipole)
+        active_np = (
+            _to_np(molecule.active_state) if torch.is_tensor(molecule.active_state) else molecule.active_state
+        )
+        etot_np = _to_np(molecule.Etot) if self._nstates else None
+        cis_np = _to_np(molecule.cis_energies[:, : self._nstates]) if self._nstates else None
+        td_np = (
+            _to_np(molecule.transition_dipole[:, : self._nstates])
+            if self._write_transition_properties
+            else None
+        )
+        osc_np = (
+            _to_np(molecule.oscillator_strength[:, : self._nstates])
+            if self._write_transition_properties
+            else None
+        )
+        gap_np = _to_np(e_gap) if self._write_mo else None
 
-                g = h5[name]
-                g["steps"][i] = int(step_idx)
-                g["values"][i] = _to_np(getattr(molecule, name if name != "forces" else "force")[mol, S])
-                self.i_vec[mol][name] = i + 1
-                did_write = did_write or (self.i_vec[mol][name] % 100 == 0)
+        for mol, state in self._iter_live(getattr(molecule, "_trajectory_live_mask", None)):
+            track = state.data
+            i = self._start_row(track, step, mol=mol)
+            gd = track.group
+            gd["thermo/T"][i], gd["thermo/Ek"][i], gd["thermo/Ep"][i] = T_np[mol], Ek_np[mol], Ep_np[mol]
+            gd["properties/ground_dipole"][i] = dipole_np[mol]
 
-            if did_write:
-                h5.flush()
+            if self._nstates:
+                active = int(active_np[mol]) if np.ndim(active_np) else int(active_np)
+                e0 = etot_np[mol] - (cis_np[mol, active - 1] if active > 0 else 0.0)
+                gd["excitation/state_energies"][i] = np.r_[e0, e0 + cis_np[mol]]
+                if self._write_transition_properties:
+                    gd["excitation/transition_dipole"][i] = td_np[mol]
+                    gd["excitation/oscillator_strength"][i] = osc_np[mol]
 
-    def append_nonadiabatic(self, step_idx: int, active_states, amplitudes, nac_dot, live_mask=None):
-        """Append nonadiabatic data (active surface, electronic amplitudes, NACT)."""
-        stride = self._write_nonadiabatic
-        if stride <= 0 or (step_idx % stride) != 0:
-            return
+            if self._write_mo:
+                gd["mo/homo_lumo_gap"][i] = gap_np[mol, None] if state.restricted else gap_np[mol]
+            track.count = i + 1
 
-        flags = self.flags
-        handles = self.handles
-        i_na = self.i_na
-
-        active_vals = None
-        if torch.is_tensor(active_states):
-            active_vals = active_states.detach().cpu().numpy()
-
-        amp_np_all = None
-        if torch.is_tensor(amplitudes):
-            amp_tensor = amplitudes
-            if torch.is_complex(amp_tensor):
-                amp_tensor = torch.stack((amp_tensor.real, amp_tensor.imag), dim=-1)
-            elif amp_tensor.dim() == 2:
-                amp_tensor = torch.stack((amp_tensor, torch.zeros_like(amp_tensor)), dim=-1)
-            amp_np_all = _to_np(amp_tensor)
-
-        nac_np_all = _to_np(nac_dot) if torch.is_tensor(nac_dot) else None
-
-        for mol in self.config.molid:
-            if torch.is_tensor(live_mask) and not bool(live_mask[mol].item()):
-                continue
-            f = flags.get(mol)
-            if f is None or f["Tw_na"] == 0 or not f.get("write_nonadiabatic"):
-                continue
-            i = i_na.get(mol)
-            if i is None or i >= f["Tw_na"]:
-                continue
-
-            n_states = f["n_excited_states"]
-            if n_states <= 0:
-                continue
-
-            h5 = handles[mol]
-            gna = h5["data/nonadiabatic"]
-            gna["steps"][i] = int(step_idx)
-
-            active_val = -1
-            if active_vals is not None:
-                active_val = int(active_vals[mol])
-            elif active_states is not None:
-                active_val = int(active_states)
-            gna["active_surface"][i] = active_val
-
-            if amplitudes is None:
-                amp_np = np.full((n_states, 2), np.nan, dtype=np.float64)
-            elif amp_np_all is not None:
-                amp_np = amp_np_all[mol]
+    def append_tdm(self, step: int, molecule) -> None:
+        for mol, state in self._iter_live(getattr(molecule, "_trajectory_live_mask", None)):
+            tdm = molecule.transition_density_matrices[mol, : self._nstates]
+            if self._tdm_mode == "diag":
+                tdm = (
+                    torch.diagonal(tdm[:, : state.norb, : state.norb], dim1=-2, dim2=-1)
+                    if tdm.dim() == 3
+                    else tdm[:, : state.norb]
+                )
             else:
-                amp_mol = amplitudes[mol]
-                amp_np = np.asarray(amp_mol)
-                if np.iscomplexobj(amp_np):
-                    amp_np = np.stack((amp_np.real, amp_np.imag), axis=-1)
-                elif amp_np.ndim == 1:
-                    amp_np = np.stack((amp_np, np.zeros_like(amp_np)), axis=-1)
-            gna["electronic_amplitudes"][i, ...] = amp_np
+                tdm = tdm[:, : state.norb, : state.norb]
+            self._append_series(state.series["tdm"], step, _to_np(tdm), mol=mol)
 
-            if nac_dot is None:
-                gna["NACT"][i, ...] = np.nan
-            elif nac_np_all is not None:
-                gna["NACT"][i, ...] = nac_np_all[mol, :n_states, :n_states]
-            else:
-                gna["NACT"][i, ...] = _to_np(nac_dot[mol, :n_states, :n_states])
+    def append_vectors(self, step: int, molecule) -> None:
+        names = [name for name, stride in self._cadence.items() if self._due(step, stride)]
+        if not names:
+            return
+        arrays = {name: _to_np(getattr(molecule, "force" if name == "forces" else name)) for name in names}
+        for mol, state in self._iter_live(getattr(molecule, "_trajectory_live_mask", None)):
+            for name in names:
+                self._append_series(state.series[name], step, arrays[name][mol, : state.nat], mol=mol)
 
-            i_na[mol] = i + 1
-            if (i + 1) % 100 == 0:
-                h5.flush()
+    @staticmethod
+    def _amplitudes_array(amplitudes):
+        if amplitudes is None:
+            return None
+        array = np.asarray(_to_np(amplitudes) if torch.is_tensor(amplitudes) else amplitudes)
+        if np.iscomplexobj(array):
+            return np.stack((array.real, array.imag), axis=-1)
+        return (
+            array if array.ndim and array.shape[-1] == 2 else np.stack((array, np.zeros_like(array)), axis=-1)
+        )
 
-    def flush(self):
-        """Flush all HDF5 buffers."""
-        for h in self.handles.values():
+    def append_nonadiabatic(self, step: int, active_states, amplitudes, nac_dot, live_mask=None) -> None:
+        active_np = None if active_states is None else np.asarray(_to_np(active_states))
+        amp_np = self._amplitudes_array(amplitudes)
+        nac_np = None if nac_dot is None else np.asarray(_to_np(nac_dot))
+
+        for mol, state in self._iter_live(live_mask):
+            track = state.nonadiabatic
+            i = self._start_row(track, step, mol=mol)
+            group = track.group
+            group["active_surface"][i] = (
+                -1 if active_np is None else int(active_np[mol] if active_np.ndim else active_np)
+            )
+            group["electronic_amplitudes"][i] = (
+                np.full((self._nstates, 2), np.nan) if amp_np is None else amp_np[mol]
+            )
+            group["NACT"][i] = np.nan if nac_np is None else nac_np[mol, : self._nstates, : self._nstates]
+            track.count = i + 1
+
+    def flush(self) -> None:
+        """Persist values first, then publish committed row counts."""
+        for state in self._states.values():
+            state.h5.flush()
+        for state in self._states.values():
+            for track in state.tracks():
+                track.commit()
+            state.h5.flush()
+
+    def _close_all(self):
+        error = None
+        for state in self._states.values():
             try:
-                h.flush()
-            except Exception:
-                pass
+                state.h5.close()
+            except BaseException as exc:
+                error = error or exc
+        self._states.clear()
+        return error
 
-    def close(self):
-        """Close all HDF5 files."""
-        self.flush()
-        for h in self.handles.values():
-            try:
-                h.close()
-            except Exception:
-                pass
-        self.handles.clear()
-        self.i_data.clear()
-        self.i_vec.clear()
-        self.i_tdm.clear()
-        self.i_na.clear()
-        self.flags.clear()
+    def close(self) -> None:
+        error = None
+        try:
+            self.flush()
+        except BaseException as exc:
+            error = exc
+        error = error or self._close_all()
+        if error is not None:
+            raise error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        if exc_type is None:
+            self.close()
+        else:
+            self._close_all()
+        return False
 
 
 class XYZWriter:
@@ -750,13 +844,12 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
     def _validate_h5_output_config(self):
         h5 = self.output_config.h5_config if isinstance(self.output_config.h5_config, dict) else {}
         data_every = int(h5.get("data", 0))
+        if (
+            int(h5.get("transition_density_matrices", 0)) > 0 or bool(h5.get("transition_properties", False))
+        ) and not isinstance(self.seqm_parameters.get("excited_states"), dict):
+            raise ValueError("Excited-state HDF5 output requires excited_states.")
         if data_every > 0:
             return
-        if int(h5.get("transition_density_matrices", 0)) > 0:
-            raise ValueError(
-                "output.h5.transition_density_matrices requires output.h5.data > 0 "
-                "(TDM is written through append_data cadence)."
-            )
         if bool(h5.get("transition_properties", False)):
             raise ValueError(
                 "output.h5.transition_properties requires output.h5.data > 0 "
@@ -998,9 +1091,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         self._do_h5 = (
             self.output_config.get_h5_data_every() > 0
             or any(self.output_config.get_h5_cadence().values())
+            or self.output_config.get_h5_write_tdm() > 0
             or self.output_config.get_h5_write_nonadiabatic() > 0
         ) and has_molid
         h5_data_every = self.output_config.get_h5_data_every()
+        h5_tdm_every = self.output_config.get_h5_write_tdm()
         h5_vectors_every = self.output_config.h5_vectors_every
 
         if steps is None:
@@ -1039,6 +1134,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 if self._do_h5:
                     if h5_data_every > 0:
                         self._h5_writer.append_data(0, molecule, T0, Ek0, V0, molecule.e_gap)
+                    if h5_tdm_every > 0:
+                        self._h5_writer.append_tdm(0, molecule)
                     if h5_vectors_every:
                         self._h5_writer.append_vectors(0, molecule)
 
@@ -1103,6 +1200,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         do_xyz = self._do_xyz
         do_h5 = self._do_h5
         h5_data_every = self.output_config.get_h5_data_every()
+        h5_tdm_every = self.output_config.get_h5_write_tdm()
         h5_vectors_every = self.output_config.h5_vectors_every
         print_every = self.output_config.print_every
         xyz_every = self.output_config.xyz_every
@@ -1153,6 +1251,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     if do_h5:
                         if h5_data_every > 0 and (i + 1) % h5_data_every == 0:
                             self._h5_writer.append_data(i + 1, molecule, T, Ek, V, molecule.e_gap)
+                        if h5_tdm_every > 0 and (i + 1) % h5_tdm_every == 0:
+                            self._h5_writer.append_tdm(i + 1, molecule)
                         if h5_vectors_every and (i + 1) % h5_vectors_every == 0:
                             self._h5_writer.append_vectors(i + 1, molecule)
 

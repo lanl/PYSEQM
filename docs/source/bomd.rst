@@ -63,9 +63,9 @@ written and how often using the ``output`` dictionary (see below).
 
 - Path: ``{prefix}.{molid}.h5`` (e.g., ``./runs/water.0.h5``).
 - Machine-friendly, structured, and **appendable** across restarts.
-- You choose **independent cadences** (steps) for writing data, coordinates, velocitites, forces: 
+- You choose **independent cadences** (steps) for writing data, coordinates, velocities, and forces.
 
-**HDF5 layout** (a group exists **only** if its cadence > 0):
+**HDF5 layout** (a dataset group exists only when its associated output is enabled):
 
 - ``/atoms`` : (Natoms,) atomic numbers for the atoms in the molecule
 - ``/coordinates``:
@@ -126,8 +126,11 @@ written and how often using the ``output`` dictionary (see below).
       (Tdata, 1) for restricted SCF, or (Tdata, 2) for unrestricted runs.
       Contains the instantaneous HOMO–LUMO energy gap (eV).
 
-**Each group maintains its own ``steps`` array as a commit log**, with **absolute**
-step numbers that continue across restarts.
+Every stepped group has a ``steps`` dataset and an ``n_written`` attribute. Only
+the first ``n_written`` rows are committed; a preallocated tail can remain after
+an interrupted run. The root ``writer_config`` attribute records the writer
+schema, system shape, cadences, and output options so restart compatibility can
+be verified.
 
 4) Checkpoint (restart) file
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -142,6 +145,11 @@ files at the correct positions.
 The checkpoint is written **atomically** (temp file + rename) after flushing
 HDF5/XYZ, so it always reflects everything that was persisted to disk up to
 that step.
+
+On restart, the HDF5 writer verifies the atom identities, fixed dataset shapes,
+cadences, output options, and committed row counts before appending. Restart
+with the same MD configuration; HDF5 files created by older writer schemas
+cannot be resumed by this implementation.
 
 Configuring outputs (details)
 -----------------------------
@@ -184,9 +192,12 @@ The ``output`` dictionary controls all output behavior. It should contain the fo
     big systems. **Default:** ``0``
   - ``'transition_density_matrices_mode'``: storage mode for transition-density output.
     Options: ``'full'`` (default) or ``'diag'``.
+  - ``'nonadiabatic'``: cadence for nonadiabatic state history. This requires
+    ``excited_states`` and is described in :doc:`nonadiabatic_dynamics`.
   - ``'data'`` must be ``> 0`` when any of
-    ``'transition_density_matrices'``, ``'transition_properties'``, or ``'write_mo'``
-    are enabled, because those datasets are written through the ``/data`` cadence.
+    ``'transition_properties'`` or ``'write_mo'`` are enabled, because those
+    datasets are written through the ``/data`` cadence. Transition-density
+    matrices use their own cadence and require ``excited_states``.
 
 Initializing velocities
 -----------------------

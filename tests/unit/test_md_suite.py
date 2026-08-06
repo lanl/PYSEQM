@@ -91,9 +91,12 @@ def _assert_output_files(prefix, molid, steps, expect_excited=False, n_states=No
         with h5py.File(h5_path, "r") as h5:
             assert "data" in h5
             assert h5["data/steps"].shape[0] == expected_steps
+            assert h5["data"].attrs["n_written"] == expected_steps
             assert h5["coordinates/values"].shape[0] == expected_steps
             assert h5["velocities/values"].shape[0] == expected_steps
             assert h5["forces/values"].shape[0] == expected_steps
+            for name in ("coordinates", "velocities", "forces"):
+                assert h5[name].attrs["n_written"] == expected_steps
             if expect_excited:
                 assert "excitation" in h5["data"]
                 assert "excitation_energy" not in h5["data/excitation"]
@@ -434,6 +437,49 @@ def test_md_excited_transition_properties_opt_in(tmp_path, device, methanal_batc
     with h5py.File(f"{prefix}.0.h5", "r") as h5:
         assert h5["data/excitation/transition_dipole"].shape == (3, 4, 3)
         assert h5["data/excitation/oscillator_strength"].shape == (3, 4)
+
+
+@pytest.mark.parametrize("tdm_mode", ("full", "diag"))
+def test_md_transition_density_output(tmp_path, device, methanal_batch_data, tdm_mode):
+    species, coordinates = methanal_batch_data
+    seqm_parameters = _seqm_parameters("AM1", excited=True)
+
+    prefix = str(tmp_path / f"md_tdm_{tdm_mode}")
+    molecule = _build_molecule(device, species, coordinates, seqm_parameters)
+    output = _output_config(prefix, [0])
+    output["h5"]["data"] = 0
+    output["h5"]["transition_density_matrices"] = 1
+    output["h5"]["transition_density_matrices_mode"] = tdm_mode
+    md = Molecular_Dynamics_Basic(
+        seqm_parameters=seqm_parameters, timestep=0.5, Temp=300.0, output=output
+    ).to(device)
+
+    _run_md(md, molecule, steps=1)
+    with h5py.File(f"{prefix}.0.h5", "r") as h5:
+        tdm = h5["data/excitation/transition_density_matrices"]
+        norb = int(molecule.norb[0])
+        shape = (2, 4, norb, norb) if tdm_mode == "full" else (2, 4, norb)
+        assert tdm["values"].shape == shape
+        assert tdm.attrs["n_written"] == 2
+        np.testing.assert_array_equal(tdm["steps"], [0, 1])
+        assert "steps" not in h5["data"]
+
+
+def test_md_mo_output_without_excited_states(tmp_path, device, methanal_batch_data):
+    species, coordinates = methanal_batch_data
+    params = _seqm_parameters("AM1")
+    prefix = str(tmp_path / "md_mo_ground")
+    output = _output_config(prefix, [0])
+    output["h5"]["write_mo"] = True
+    molecule = _build_molecule(device, species, coordinates, params)
+
+    md = Molecular_Dynamics_Basic(seqm_parameters=params, timestep=0.5, Temp=300.0, output=output).to(device)
+    _run_md(md, molecule, steps=1)
+
+    with h5py.File(f"{prefix}.0.h5", "r") as h5:
+        gap = h5["data/mo/homo_lumo_gap"][...]
+        assert gap.shape == (2, 1)
+        assert np.isfinite(gap).all()
 
 
 @pytest.mark.parametrize("method", LANGEVIN_METHODS)
