@@ -45,7 +45,7 @@ class OutputConfig:
     molid: List[int] = field(default_factory=lambda: [0])
     prefix: str = "md"
     print_every: int = 1
-    checkpoint_every: int = 100
+    checkpoint_every: int = 0
     xyz_every: int = 0
     h5_config: Dict[str, Any] = field(default_factory=dict)
     h5_vectors_every: Optional[int] = None
@@ -376,7 +376,10 @@ class HDF5Writer:
         active = molecule.active_state
         active_vals = _to_np(active) if torch.is_tensor(active) else None
         active_scalar = None if active_vals is not None else int(active)
+        live_mask = getattr(molecule, "_trajectory_live_mask", None)
         for mol in self.config.molid:
+            if torch.is_tensor(live_mask) and not bool(live_mask[mol].item()):
+                continue
             i = self.i_data.get(mol)
             if i is None or self.flags[mol]["Tw_data"] == 0:
                 continue
@@ -445,7 +448,10 @@ class HDF5Writer:
         if not write_names:
             return
 
+        live_mask = getattr(molecule, "_trajectory_live_mask", None)
         for mol in self.config.molid:
+            if torch.is_tensor(live_mask) and not bool(live_mask[mol].item()):
+                continue
             h5 = self.handles[mol]
             f = self.flags[mol]
             S = f["active_slice"]
@@ -465,7 +471,7 @@ class HDF5Writer:
             if did_write:
                 h5.flush()
 
-    def append_nonadiabatic(self, step_idx: int, active_states, amplitudes, nac_dot):
+    def append_nonadiabatic(self, step_idx: int, active_states, amplitudes, nac_dot, live_mask=None):
         """Append nonadiabatic data (active surface, electronic amplitudes, NACT)."""
         stride = self._write_nonadiabatic
         if stride <= 0 or (step_idx % stride) != 0:
@@ -491,6 +497,8 @@ class HDF5Writer:
         nac_np_all = _to_np(nac_dot) if torch.is_tensor(nac_dot) else None
 
         for mol in self.config.molid:
+            if torch.is_tensor(live_mask) and not bool(live_mask[mol].item()):
+                continue
             f = flags.get(mol)
             if f is None or f["Tw_na"] == 0 or not f.get("write_nonadiabatic"):
                 continue
@@ -1103,6 +1111,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             for i in range(self.step_offset, steps):
                 self._mark_torch_compile_step(molecule)
                 self._do_integrator_step(i, molecule, learned_parameters, *args, **kwargs)
+                if getattr(self, "_terminate_run", False):
+                    break
 
                 with torch.no_grad():
                     if torch.is_tensor(molecule.coordinates.grad):
@@ -1173,6 +1183,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             getattr(self, "_print_hop_log", None)
         ):
             self._print_hop_log()
+        if callable(getattr(self, "_print_termination_log", None)):
+            self._print_termination_log()
         return molecule.coordinates, molecule.velocities, molecule.acc
 
     def _flush_all(self):

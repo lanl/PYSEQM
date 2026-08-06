@@ -1129,13 +1129,25 @@ class Energy(torch.nn.Module):
                 bool(self.excited_states.get(k, False))
                 for k in ("save_tdm_xlbomd", "save_tdm_output", "save_tdm")
             )
+            needs_cis_grad = (
+                method in {"cis", "tda"}
+                and bool(self.seqm_parameters.get("cis_backward", False))
+                and (
+                    molecule.coordinates.requires_grad
+                    or any(
+                        torch.is_tensor(value) and value.requires_grad
+                        for value in molecule.parameters.values()
+                    )
+                )
+            )
             prev_cis_amp = molecule.cis_amplitudes if hasattr(molecule, "cis_amplitudes") else None
-            with torch.no_grad():
+            is_namd = "nonadiabatic" in self.seqm_parameters
+            with torch.set_grad_enabled(needs_cis_grad):
                 if all_same_mols:
                     if molecule.const.do_timing:
                         t0 = time.time()
                     if method in {"cis", "tda"}:
-                        excitation_energies, exc_amps = rcis_batch(
+                        cis_result = rcis_batch(
                             molecule,
                             w,
                             e,
@@ -1144,13 +1156,14 @@ class Energy(torch.nn.Module):
                             best_guess_from_prev=best_guess_from_prev,
                             init_amplitude_guess=cis_amp,
                             orbital_window=orbital_window,
-                            save_tdm=need_tdm,
+                            save_tdm=need_tdm and not needs_cis_grad,
                             compute_transition_properties=self.excited_states[
                                 "compute_transition_properties"
                             ],
+                            completed_mask=notconverged,
                         )
                     elif is_rpa:
-                        excitation_energies, exc_amps = rpa(
+                        cis_result = rpa(
                             molecule,
                             w,
                             e,
@@ -1164,19 +1177,34 @@ class Energy(torch.nn.Module):
                     if molecule.const.do_timing:
                         t0 = time.time()
                     if method == "cis":
-                        excitation_energies, exc_amps = rcis_any_batch(
+                        cis_result = rcis_any_batch(
                             molecule,
                             w,
                             e,
                             self.excited_states["n_states"],
                             cis_tol,
                             init_amplitude_guess=cis_amp,
+                            completed_mask=notconverged,
                         )
                     else:
                         raise NotImplementedError("RPA for non-uniform batch not yet available")
-                exc_amps = self._phase_align_cis(exc_amps, prev_cis_amp, rpa=is_rpa)
-                molecule.cis_amplitudes = exc_amps
-                molecule.cis_energies = excitation_energies
+                if method == "cis":
+                    excitation_energies, exc_amps, molecule.cis_converged, molecule.cis_unstable = cis_result
+                else:
+                    excitation_energies, exc_amps = cis_result
+                    molecule.cis_converged = torch.ones(
+                        molecule.nmol, dtype=torch.bool, device=excitation_energies.device
+                    )
+                    molecule.cis_unstable = torch.zeros_like(molecule.cis_converged)
+                if not is_namd:
+                    failed = notconverged | ~molecule.cis_converged
+                    if bool(failed.any().item()):
+                        indices = torch.nonzero(failed, as_tuple=False).squeeze(1).tolist()
+                        raise RuntimeError(f"SCF or CIS did not converge for molecule(s) {indices}.")
+                with torch.no_grad():
+                    exc_amps_aligned = self._phase_align_cis(exc_amps, prev_cis_amp, rpa=is_rpa)
+                    molecule.cis_amplitudes = exc_amps_aligned
+                    molecule.cis_energies = excitation_energies.detach()
 
                 # # Verify some stuff for excited state XL-BOMD
                 # tmp = make_cis_densities(molecule, True, False, False)
@@ -1193,19 +1221,20 @@ class Energy(torch.nn.Module):
 
                 if nac_settings.enabled:
                     pair_list = self._nac_pair_list()
-                    pair_nac = calc_nac(
-                        molecule,
-                        exc_amps,
-                        excitation_energies,
-                        P,
-                        ri,
-                        riXH,
-                        pair_list,
-                        rpa=is_rpa,
-                        include_response_terms=nac_settings.include_response_terms,
-                        w=w,
-                        e_mo=e,
-                    )
+                    with torch.no_grad():
+                        pair_nac = calc_nac(
+                            molecule,
+                            exc_amps_aligned,
+                            excitation_energies,
+                            P,
+                            ri,
+                            riXH,
+                            pair_list,
+                            rpa=is_rpa,
+                            include_response_terms=nac_settings.include_response_terms,
+                            w=w,
+                            e_mo=e,
+                        )
                     nac_vec = {}
                     for pair_idx, (s1, s2) in enumerate(pair_list):
                         nac_vec[(s1 - 1, s2 - 1)] = pair_nac[:, pair_idx]

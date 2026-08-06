@@ -196,9 +196,9 @@ def make_guess(ea_ei, nroots, maxSubspacesize, V, nmol, nov):
     return nstart, nroots
 
 
-def get_occ_virt(mol, orbital_window=None, e_mo=None):
+def get_occ_virt(mol, orbital_window=None, e_mo=None, molecular_orbitals=None):
     """Return occupied/virtual MO blocks for uniform or mixed molecule batches."""
-    C = mol.molecular_orbitals
+    C = mol.molecular_orbitals if molecular_orbitals is None else molecular_orbitals
     nocc_b, norb_b = mol.nocc, mol.norb
     nvirt_b = norb_b - nocc_b
     nmol, nbasis = C.shape[:2]

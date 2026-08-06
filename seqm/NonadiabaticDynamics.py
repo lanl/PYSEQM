@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Dict, List, Optional, Union
 
 import torch
@@ -16,9 +17,19 @@ from .seqm_functions.hcore import (
 )
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
+from .seqm_functions.scf_loop import build_initial_density
 
 HBAR_EV_FS = 0.6582119514  # Planck's constant (reduced) in eV·fs
 _electronic_propagation_dispatch = None
+
+_TERM_S0_S1_GAP = 1
+_TERM_SCF_FAILED = 2
+_TERM_CIS_FAILED = 3
+_TERM_REASON_NAMES = {
+    _TERM_S0_S1_GAP: "S0/S1 gap below threshold",
+    _TERM_SCF_FAILED: "SCF did not converge",
+    _TERM_CIS_FAILED: "CIS did not converge",
+}
 
 
 def enable_electronic_propagation_compile(mode=None, **options):
@@ -237,6 +248,18 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._full_nac_pair_keys = None
         self._full_nac_state_i = None
         self._full_nac_state_j = None
+        term_cfg = dict(na_cfg.get("trajectory_termination", {}))
+        self._termination_enabled = bool(term_cfg.get("enabled", True))
+        self._s0_s1_threshold_ev = float(term_cfg.get("s0_s1_gap_ev", 0.2))
+        if self._s0_s1_threshold_ev < 0.0:
+            raise ValueError("nonadiabatic.trajectory_termination.s0_s1_gap_ev must be non-negative.")
+        self._terminated_mask = None
+        self._live_mask_cache = None
+        self._termination_reason = None
+        self._termination_step = None
+        self._has_terminated = False
+        self._terminate_run = False
+        self._reset_cis_guess = False
 
     def _enable_torch_compile_if_requested(self, molecule):
         was_applied = self._torch_compile_applied
@@ -568,7 +591,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)
             Soo, Svv = S_mo[:, :nocc, :nocc], S_mo[:, nocc:, nocc:]
 
-            bad_mo_overlap = bad_diag_overlap(Soo, 0.85) | bad_diag_overlap(Svv, 0.85)
+            bad_mo_overlap = bad_diag_overlap(Soo, 0.75) | bad_diag_overlap(Svv, 0.75)
             if bad_mo_overlap.any():
                 return None
 
@@ -595,7 +618,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 coup = coup + _mo_term_virtual(Yc_v, dSvv, nmol, nov)
                 coup = coup + _mo_term_occ(Yc_v, dSoo, nmol, nov)
 
-            if bad_diag_overlap(ov_pc, 0.85).any():
+            if bad_diag_overlap(ov_pc, 0.75).any():
                 return None
 
         return 0.25 * (coup - coup.transpose(1, 2)) / float(dt)
@@ -650,6 +673,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         active_row = ov_win[mol_ar, active]  # (nmol, n)
         active_mask = diag_idx.view(1, -1) == active.view(-1, 1)
         active_has_partner = active_row.masked_fill(active_mask, 0.0).max(dim=1).values >= thr  # (nmol,)
+        live = self._live_mask()
+        if live is not None:
+            has_strong_offdiag &= live
+            active_has_partner &= live
 
         # Two groups may need assignment (i.e., permutation):
         #  (1) probe group: in holdoff, but we might reset holdoff early (NEXMD conthop reset)
@@ -770,9 +797,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         e0 = energies_old
         e1 = energies_new
 
-        dnd = nd_new - nd_old
-
         # ------------------------------------------------------------------
+        live = self._live_mask()
         # Cheap adaptive nsub: default baseline, increase only for NAC spikes.
         # ------------------------------------------------------------------
         if substeps is None:
@@ -783,8 +809,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             # Dimensionless NAC severity over the nuclear step.
             # chi = dt * max(max |D|, max |Delta D|)
             # With dt = 0.1 fs and D = 100 fs^-1, chi = 10.
-            dmax = torch.maximum(torch.abs(nd_old), torch.abs(nd_new)).amax()
-            djump = torch.abs(dnd).amax()
+            nd_old_max = nd_old if live is None else nd_old[live]
+            nd_new_max = nd_new if live is None else nd_new[live]
+            dmax = torch.maximum(torch.abs(nd_old_max), torch.abs(nd_new_max)).amax()
+            djump = torch.abs(nd_new_max - nd_old_max).amax()
             chi = dt_total * torch.maximum(dmax, djump)
 
             # Soft spike response:
@@ -806,8 +834,109 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         else:
             propagate = _electronic_propagation_kernel
         amp_new, hop_int = propagate(amp, e0, e1, nd_old, nd_new, eye, float(dt_total), nsub)
-        amp.copy_(amp_new)
-        self._hop_integral = hop_int
+        if live is None:
+            amp.copy_(amp_new)
+            self._hop_integral = hop_int
+        else:
+            amp[live] = amp_new[live]
+            hop_int[~live] = 0.0
+            self._hop_integral = hop_int
+
+    def _init_termination_state(self, molecule):
+        if not self._termination_enabled:
+            return
+        self._terminate_run = False
+        nmol = molecule.species.shape[0]
+        device = molecule.coordinates.device
+        if not torch.is_tensor(getattr(self.esdriver, "notconverged", None)):
+            self.esdriver.notconverged = torch.tensor(False, device=device)
+        if not torch.is_tensor(getattr(molecule, "cis_converged", None)):
+            molecule.cis_converged = torch.tensor(True, device=device)
+        if self._terminated_mask is None or self._terminated_mask.shape[0] != nmol:
+            self._terminated_mask = torch.zeros(nmol, dtype=torch.bool, device=device)
+            self._termination_reason = torch.zeros(nmol, dtype=torch.int8, device=device)
+            self._termination_step = torch.full((nmol,), -1, dtype=torch.long, device=device)
+        else:
+            self._terminated_mask = self._terminated_mask.to(device=device, dtype=torch.bool)
+            self._termination_reason = self._termination_reason.to(device=device, dtype=torch.int8)
+            if self._termination_step is None:
+                self._termination_step = torch.full((nmol,), -1, dtype=torch.long, device=device)
+            else:
+                self._termination_step = self._termination_step.to(device=device, dtype=torch.long)
+        self._has_terminated = bool(self._terminated_mask.any().item())
+        self._live_mask_cache = None
+        if self._has_terminated:
+            self._live_mask_cache = ~self._terminated_mask
+            molecule._trajectory_live_mask = self._live_mask_cache
+
+    def _live_mask(self):
+        if getattr(self, "_termination_enabled", False) and getattr(self, "_has_terminated", False):
+            return self._live_mask_cache
+        return None
+
+    def _freeze_terminated(self, molecule):
+        with torch.no_grad():
+            molecule.velocities[self._terminated_mask] = 0.0
+            molecule.acc[self._terminated_mask] = 0.0
+
+    def _update_termination(self, molecule, energies, coords_before, step):
+        """Freeze terminal rows; failed electronic-structure rows return to the prior geometry."""
+        if not self._termination_enabled:
+            return
+        scf_bad = self.esdriver.notconverged
+        failed = scf_bad | ~molecule.cis_converged
+        gap_stop = ~failed & (energies[:, 0] < self._s0_s1_threshold_ev)
+        if self._has_terminated:
+            failed &= self._live_mask_cache
+            gap_stop &= self._live_mask_cache
+        stopped = failed | gap_stop
+        if not bool(stopped.any().item()):
+            return
+        scf_failed = failed & scf_bad
+        with torch.no_grad():
+            molecule.coordinates[failed] = coords_before[failed]
+            if bool(scf_failed.any().item()):
+                molecule.dm[scf_failed] = build_initial_density(molecule, molecule.dm)[scf_failed]
+            if bool(failed.any().item()):
+                self._reset_cis_guess = True
+            self._terminated_mask[stopped] = True
+            self._termination_step[stopped] = step
+            self._termination_reason[gap_stop] = _TERM_S0_S1_GAP
+            self._termination_reason[scf_failed] = _TERM_SCF_FAILED
+            self._termination_reason[failed & ~scf_bad] = _TERM_CIS_FAILED
+            self._live_mask_cache = ~self._terminated_mask
+            molecule._trajectory_live_mask = self._live_mask_cache
+        self._has_terminated = True
+        self._terminate_run = not bool(self._live_mask_cache.any().item())
+        self._freeze_terminated(molecule)
+
+    def _print_termination_log(self):
+        if not self._has_terminated:
+            return
+        print("Terminated trajectories:")
+        for mol in torch.nonzero(self._terminated_mask, as_tuple=False).squeeze(1).tolist():
+            reason = _TERM_REASON_NAMES.get(int(self._termination_reason[mol]), "unknown")
+            print(f"  molecule {mol}: step {int(self._termination_step[mol])}, {reason}")
+
+    def _apply_langevin_thermostat(self, molecule):
+        super()._apply_langevin_thermostat(molecule)
+        if self._termination_enabled and self._terminated_mask is not None and self._has_terminated:
+            self._freeze_terminated(molecule)
+
+    def _zero_com(self, molecule, **kwargs):
+        live = self._live_mask()
+        if live is None:
+            return super()._zero_com(molecule, **kwargs)
+        subset = SimpleNamespace(
+            mass=molecule.mass[live],
+            coordinates=molecule.coordinates[live],
+            velocities=molecule.velocities[live],
+        )
+        super()._zero_com(subset, **kwargs)
+        with torch.no_grad():
+            if kwargs.get("translate_to_origin", False):
+                molecule.coordinates[live] = subset.coordinates
+            molecule.velocities[live] = subset.velocities
 
     def _thermo_potential(self, molecule):
         if self._current_potential is not None:
@@ -852,6 +981,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._overlap_pack_spec = None
         self._setup_states(molecule)
         self._init_coeffs(molecule)
+        self._init_termination_state(molecule)
         molecule.active_state = (
             self._active_states + 1
         )  # excited-state index (1-based for downstream grad routines)
@@ -865,6 +995,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             *args,
             **kwargs,
         )
+        if self._termination_enabled:
+            self._coords_prev = torch.empty_like(molecule.coordinates)
         self._mark_torch_compile_step(molecule)
         self.esdriver.conservative_force.energy.namd = True
         excitation_energies = self._build_state_energies(molecule)
@@ -886,7 +1018,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     raise NotImplementedError("Overlap TDC currently supports restricted closed-shell only.")
                 nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(molecule)
                 self._overlap_pack_spec = (4 * nHeavy, nHydro, norb)
-                self._coords_prev = torch.empty_like(molecule.coordinates)
+                if self._coords_prev is None:
+                    self._coords_prev = torch.empty_like(molecule.coordinates)
                 self._mos_prev = torch.empty_like(molecule.molecular_orbitals)
                 self._packed_overlap_prev = packone_batch(
                     overlap_matrix_current_geometry(molecule), *self._overlap_pack_spec
@@ -939,6 +1072,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                 )
 
         self._apply_resume_state(molecule)
+        if self._has_terminated:
+            molecule._trajectory_live_mask = self._live_mask_cache
+            self._freeze_terminated(molecule)
 
     def save_checkpoint(self, molecule, steps: int, reuse_P, remove_com, *, step_done: int, path: str):
         """Save checkpoint for restart (nonadiabatic dynamics)."""
@@ -949,6 +1085,14 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             "prev_state": self._tensor_cpu(getattr(self, "prev_state", None)),
             "current_potential": self._tensor_cpu(self._current_potential),
         }
+        if self._termination_enabled:
+            nad_state.update(
+                {
+                    "terminated_mask": self._tensor_cpu(self._terminated_mask),
+                    "termination_reason": self._tensor_cpu(self._termination_reason),
+                    "termination_step": self._tensor_cpu(self._termination_step),
+                }
+            )
         if isinstance(self._cache_old, dict):
             cache_old = {}
             energies = self._cache_old.get("energies")
@@ -1014,6 +1158,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         amp_phase = resume_state.get("amp_phase")
         if torch.is_tensor(amp_phase):
             nad._amp_phase = amp_phase.to(device)
+        for name in ("terminated_mask", "termination_reason", "termination_step"):
+            value = resume_state.get(name)
+            if torch.is_tensor(value):
+                setattr(nad, f"_{name}", value.to(device))
         nad._resume_state = resume_state
         Molecular_Dynamics_Langevin._restore_rng(ckpt)
 
@@ -1048,6 +1196,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         cache_old = self._cache_old or self._cache_new
         if not isinstance(cache_old, dict):
             raise RuntimeError("Electronic cache is not initialized before stepping dynamics.")
+        coords_before = self._coords_prev if self._termination_enabled else None
+        if coords_before is not None:
+            coords_before.copy_(molecule.coordinates.detach())
 
         coords_prev = None
         mos_prev = None
@@ -1056,7 +1207,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             acc_old = molecule.acc.detach().clone()
         if self._tdc_method == "overlap":
             coords_prev = self._coords_prev
-            coords_prev.copy_(molecule.coordinates.detach())
+            if not self._termination_enabled:
+                coords_prev.copy_(molecule.coordinates.detach())
 
             self._mos_prev.copy_(molecule.molecular_orbitals.detach())
             mos_prev = self._mos_prev
@@ -1066,24 +1218,47 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         # ---- Half kick + drift to t+dt ----
         with torch.no_grad():
-            molecule.velocities.add_(0.5 * molecule.acc * dt)
-            molecule.coordinates.add_(molecule.velocities * dt)
+            live = self._live_mask()
+            if live is None:
+                molecule.velocities.add_(0.5 * molecule.acc * dt)
+                molecule.coordinates.add_(molecule.velocities * dt)
+            else:
+                molecule.velocities[live] += 0.5 * molecule.acc[live] * dt
+                molecule.coordinates[live] += molecule.velocities[live] * dt
 
         _ = self._compute_electronic_structure(molecule, learned_parameters, **kwargs)
-
-        # ---- Half kick to t+dt ----
-        with torch.no_grad():
-            molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
-            molecule.velocities.add_(0.5 * molecule.acc * dt)
-
-        if self.damp is not None:
-            self._apply_langevin_thermostat(molecule)
 
         cache_new = self._cache_new
         if not isinstance(cache_new, dict):
             raise RuntimeError("Failed to build electronic cache for current step.")
         if not torch.is_tensor(cache_new.get("energies")):
             raise RuntimeError("Missing 'energies' in electronic cache for current step.")
+
+        self._update_termination(molecule, cache_new["energies"], coords_before, i + self.step_offset + 1)
+
+        # ---- Half kick to t+dt (survivors only) ----
+        with torch.no_grad():
+            live = self._live_mask()
+            if live is None:
+                molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
+                molecule.velocities.add_(0.5 * molecule.acc * dt)
+            else:
+                molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
+                molecule.acc[~live] = 0.0
+                molecule.velocities[live] += 0.5 * molecule.acc[live] * dt
+
+        if self.damp is not None:
+            self._apply_langevin_thermostat(molecule)
+
+        if self._terminate_run:
+            cache_old = self._cache_old or {}
+            self._copy_cache_entry(cache_old, "energies", cache_new["energies"])
+            self._cache_old = cache_old
+            self._cache_new = None
+            if self._reset_cis_guess:
+                molecule.cis_amplitudes = None
+                self._reset_cis_guess = False
+            return
 
         if torch.is_tensor(cache_new.get("nac_dot")):
             nac_dt = cache_new.get("nac_dot")
@@ -1133,6 +1308,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._after_electronic_update(
             molecule, excitation_energies=cache_new["energies"], step=i + self.step_offset
         )
+        if self._has_terminated:
+            self._freeze_terminated(molecule)
         # molecule.w = None
 
         if self._h5_writer:
@@ -1144,6 +1321,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     active_states=self._active_states + 1,
                     amplitudes=amplitudes,
                     nac_dot=cache_new.get("nac_dot"),
+                    live_mask=self._live_mask(),
                 )
 
         # shift caches for next step
@@ -1156,6 +1334,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             cache_old.pop("cis_amp", None)
         self._cache_old = cache_old
         self._cache_new = None
+        if self._reset_cis_guess:
+            molecule.cis_amplitudes = None
+            self._reset_cis_guess = False
 
 
 class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
@@ -1285,6 +1466,7 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         device = molecule.coordinates.device
         active_idx_ref = self._active_states.clone()
         current_step = step if step is not None else self.step_offset
+        live_mask = self._live_mask()
 
         # ---------------- Trivial crossing handling (NEXMD cross==2) ----------------
         swap_to = self._trivial_crossing_mask
@@ -1295,6 +1477,8 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         if swap_to is not None:
             swap_to = swap_to.to(device=device, dtype=torch.long)  # (nmol,n)
             has_swap = (swap_to >= 0).any(dim=1)
+            if live_mask is not None:
+                has_swap &= live_mask
 
             if has_swap.any():
                 # Apply relabeling to electronic coefficients in one shot:
@@ -1347,6 +1531,8 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         # ---------------- end trivial crossing handling ----------------
 
         hop_targets_t = self._attempt_hop()
+        if live_mask is not None:
+            hop_targets_t = hop_targets_t.masked_fill(~live_mask, -1)
         # Suppress hop attempts for molecules whose active state had a trivial crossing
         if skip_hop_mask.any():
             hop_targets_t = hop_targets_t.masked_fill(skip_hop_mask, -1)

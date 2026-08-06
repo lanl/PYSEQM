@@ -45,6 +45,8 @@ def make_dummy(nstates=2, timestep=1.0, substeps=4):
     nad._active_states = torch.zeros((1,), dtype=torch.long)
     nad.post_hop_holdoff = torch.zeros((1,), dtype=torch.long)
     nad.prev_state = torch.full((1,), -1, dtype=torch.long)
+    nad._termination_enabled = False
+    nad._terminated_mask = None
     return nad
 
 
@@ -80,9 +82,47 @@ def make_dummy_molecule(nmol=1, molsize=1, dtype=torch.float64):
         coordinates=zeros.clone(),
         velocities=zeros.clone(),
         force=zeros.clone(),
+        acc=zeros.clone(),
         mass_inverse=torch.ones((nmol, molsize, 1), dtype=dtype),
         Etot=torch.full((nmol,), 1.2, dtype=dtype),
+        dm=torch.ones((nmol, 1, 1), dtype=dtype),
     )
+
+
+def test_termination_freezes_rows_and_resets_failed_guesses(monkeypatch):
+    nad = make_dummy(nstates=2)
+    nad._termination_enabled = True
+    nad._s0_s1_threshold_ev = 0.2
+    nad._terminated_mask = torch.zeros(3, dtype=torch.bool)
+    nad._termination_reason = torch.zeros(3, dtype=torch.int8)
+    nad._termination_step = torch.full((3,), -1, dtype=torch.long)
+    nad._has_terminated = False
+    nad.esdriver = SimpleNamespace(notconverged=torch.tensor([False, True, False]))
+    molecule = make_dummy_molecule(nmol=3)
+    molecule.species = torch.ones((3, 1), dtype=torch.long)
+    monkeypatch.setattr(namd_module, "build_initial_density", lambda _, dm: torch.zeros_like(dm))
+    coords_before = molecule.coordinates.clone()
+    molecule.coordinates.add_(1.0)
+    molecule.velocities.add_(2.0)
+    molecule.acc.add_(3.0)
+    molecule.cis_converged = torch.tensor([True, True, False])
+
+    nad._update_termination(
+        molecule,
+        torch.tensor([[0.1, 0.4], [0.3, 0.7], [0.3, 0.7]], dtype=torch.float64),
+        coords_before,
+        step=7,
+    )
+
+    assert nad._terminated_mask.tolist() == [True, True, True]
+    assert nad._termination_reason.tolist() == [1, 2, 3]
+    assert nad._termination_step.tolist() == [7, 7, 7]
+    assert torch.allclose(molecule.coordinates[1], coords_before[1])
+    assert torch.allclose(molecule.coordinates[2], coords_before[2])
+    assert torch.allclose(molecule.dm[1], torch.zeros_like(molecule.dm[1]))
+    assert nad._reset_cis_guess
+    assert torch.allclose(molecule.velocities, torch.zeros_like(molecule.velocities))
+    assert torch.allclose(molecule.acc, torch.zeros_like(molecule.acc))
 
 
 def test_rk4_preserves_norm_no_coupling():

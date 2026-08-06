@@ -19,3 +19,10 @@ NB:
 2) When training a new model, both model file and state_dict need to be loaded. See hipnn_LOAD_NEW_MODEL_MD_and_SINGLEPOINT.ipynb
 
 Tested with torch '1.13.1'
+
+
+Evaluating PNAS_model.pt:
+1) The published arrays and supplementary PDF are stored in training_set/. See training_set/SOURCES.md for URLs and checksums.
+2) evaluate_pnas_model.py reconstructs the original seed-8000 train/validation/test split and reports both raw PYSEQM energies and energies corrected with SI Table S3.
+3) Example: PYTHONPATH=/path/to/hippynn python evaluate_pnas_model.py --split test --sample-size 128 --device cpu
+4) The current repository does not reproduce the paper's PM3+D3H4 setup. Treat these results as a repository-checkpoint compatibility test, not a reproduction of Table 1 in the paper.

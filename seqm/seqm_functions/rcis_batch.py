@@ -16,11 +16,11 @@ from .excited_state_utils import (
     make_guess,
     orthogonalize_to_current_subspace,
     print_rcis_analysis,
-    raise_max_iterations,
     scatter_new_subspace,
     update_subspace_status,
 )
 from .fock import UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
+from .rcis_solver import make_rcis_response_builder, rcis_inputs, run_native_rcis
 
 # from seqm.seqm_functions.pack import packone, unpackone
 
@@ -40,7 +40,7 @@ def enable_rcis_compile(mode=None, **options):
     )
 
 
-def rcis_batch(
+def _run_uniform_davidson(
     mol,
     w,
     e_mo,
@@ -49,8 +49,7 @@ def rcis_batch(
     best_guess_from_prev=True,
     init_amplitude_guess=None,
     orbital_window=None,
-    save_tdm=False,
-    compute_transition_properties=True,
+    completed_mask=None,
 ):
     """Calculate the restricted Configuration Interaction Singles (RCIS) excitation energies and amplitudes
        using davidson diagonalization for singlet states.
@@ -62,7 +61,6 @@ def rcis_batch(
     :param nroots: Number of CIS states requested
     :param best_guess_from_prev: When running MD, you might want to use the amplitudes from previous step as guess, after making them suitable for current step.
                                  Dont do this with XL-ESMD
-    :param save_tdm: save transition density matrices; this option will be used for XL-ESMD
     :param orbital_window: tuple (n,m) where n orbitals below the HOMO and m orbitals above LUMO are included in the active space
     :returns:
 
@@ -123,16 +121,23 @@ def rcis_batch(
     vstart = torch.zeros(nmol, dtype=torch.long, device=device)
     vend = torch.full((nmol,), nstart, dtype=torch.long, device=device)
     done = torch.zeros(nmol, dtype=torch.bool, device=device)
+    if completed_mask is not None:
+        done.copy_(completed_mask)
+        V[done] = 0.0
 
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False  # TODO: User-defined/fixed
 
     e_val_n = torch.empty(nmol, nroots, dtype=dtype, device=device)
     amplitude_store = torch.empty(nmol, nroots, nov, dtype=dtype, device=device)
+    if completed_mask is not None:
+        e_val_n[done] = 0.0
+        amplitude_store[done] = 0.0
 
     n_collapses = torch.zeros_like(vstart)
     n_iters = torch.zeros_like(vstart)
     chunk_plan_cache = {}
+    roots_not_converged = torch.zeros(nmol, nroots, dtype=torch.bool, device=device)
 
     while davidson_iter <= max_iter:  # Davidson loop
         V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend, done)
@@ -209,27 +214,70 @@ def rcis_batch(
         if torch.all(done):
             break
         if davidson_iter > max_iter:
-            raise_max_iterations(
-                done, roots_not_converged, resid_norm, vend, maxSubspacesize, n_iters, n_collapses, nroots
-            )
+            break
 
-    # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(
-        mol,
-        e_val_n,
-        amplitude_store,
-        nroots,
-        orbital_window=orbital_window,
-        save_tdm=save_tdm,
-        compute_transition_properties=compute_transition_properties,
+    nroots_target = torch.full((nmol,), nroots, dtype=torch.long, device=device)
+    valid_transition_mask = torch.ones(nmol, nov, dtype=torch.bool, device=device)
+    # ``done`` is the solver's historical completion signal: a root can also
+    # finish when no further linearly independent correction is available.
+    converged = done
+    return e_val_n, amplitude_store, nroots_target, approxH, valid_transition_mask, maxSubspacesize, converged
+
+
+def rcis_batch(
+    mol,
+    w,
+    e_mo,
+    nroots,
+    root_tol,
+    best_guess_from_prev=True,
+    init_amplitude_guess=None,
+    orbital_window=None,
+    save_tdm=False,
+    compute_transition_properties=True,
+    completed_mask=None,
+):
+    """Calculate singlet RCIS roots with the native Davidson forward solver."""
+
+    inputs = rcis_inputs(mol, e_mo, w)
+    result = run_native_rcis(
+        lambda: _run_uniform_davidson(
+            mol,
+            w,
+            e_mo,
+            nroots,
+            root_tol,
+            best_guess_from_prev=best_guess_from_prev,
+            init_amplitude_guess=init_amplitude_guess,
+            orbital_window=orbital_window,
+            completed_mask=completed_mask,
+        ),
+        make_rcis_response_builder(
+            mol, matrix_vector_product_batched, orbital_window=orbital_window, cache_chunk_plan=True
+        ),
+        root_tol,
+        *inputs,
     )
+    excitation_energies, amplitudes, nroots_target, cis_converged, cis_unstable = result
 
-    return e_val_n, amplitude_store
+    with torch.no_grad():
+        rcis_analysis(
+            mol,
+            excitation_energies,
+            amplitudes,
+            int(nroots_target[0].item()),
+            orbital_window=orbital_window,
+            save_tdm=save_tdm,
+            compute_transition_properties=compute_transition_properties,
+        )
+    return excitation_energies, amplitudes, cis_converged, cis_unstable
 
 
-def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, chunk_plan_cache=None):
+def matrix_vector_product_batched(
+    mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, parameters=None, chunk_plan_cache=None
+):
     # C: Molecule Orbital Coefficients
     nmol, nNewRoots, _ = V.shape
 
@@ -252,7 +300,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, ch
         need_to_chunk, chunk_size = plan
     if not need_to_chunk:
         P_xi = _ao_transition_density(Cocc, Via, Cvirt)
-        F0 = makeA_pi_batched(mol, P_xi, w)
+        F0 = makeA_pi_batched(mol, P_xi, w, parameters=parameters)
         result = _mo_fock_action(Via, F0, ea_ei, Cocc, Cvirt, bool(makeB), torch.is_grad_enabled())
         if makeB:
             A, B = result
@@ -266,7 +314,7 @@ def matrix_vector_product_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, ch
             end = min(start + chunk_size, nNewRoots)
             Via_chunk = Via[:, start:end]
             P_xi = _ao_transition_density(Cocc, Via_chunk, Cvirt)
-            F0 = makeA_pi_batched(mol, P_xi, w)
+            F0 = makeA_pi_batched(mol, P_xi, w, parameters=parameters)
             if makeB:
                 A[:, start:end], B[:, start:end] = _mo_fock_action(
                     Via_chunk, F0, ea_ei, Cocc, Cvirt, True, torch.is_grad_enabled()
@@ -311,7 +359,7 @@ def _rcis_constant_tensors(dtype, device):
     return tri_i, tri_j, weight, ind
 
 
-def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
+def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False, parameters=None):
     r"""
     Given amplitudes in the AO basis, calculate \sum_jb (\mu\nu||jb)X_jb.
     """
@@ -321,6 +369,7 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
     nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
 
     dispatch = _makeA_pi_batched_dispatch or _makeA_pi_batched_kernel
+    params = mol.parameters if parameters is None else parameters
     nnewRoots = P_xi.shape[1]
     P0 = unpackone_batch(P_xi.reshape(nmol * nnewRoots, norb, norb), 4 * nHeavy, nHydro, molsize * 4).view(
         nmol, nnewRoots, 4 * molsize, 4 * molsize
@@ -333,11 +382,11 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False):
         mol.mask_l[:npairs_per_mol],
         mol.idxi[:npairs_per_mol],
         mol.idxj[:npairs_per_mol],
-        mol.parameters["g_ss"].view(nmol, -1),
-        mol.parameters["g_sp"].view(nmol, -1),
-        mol.parameters["g_pp"].view(nmol, -1),
-        mol.parameters["g_p2"].view(nmol, -1),
-        mol.parameters["h_sp"].view(nmol, -1),
+        params["g_ss"].view(nmol, -1),
+        params["g_sp"].view(nmol, -1),
+        params["g_pp"].view(nmol, -1),
+        params["g_p2"].view(nmol, -1),
+        params["h_sp"].view(nmol, -1),
         molsize,
         nmol,
         bool(allSymmetric),
@@ -409,11 +458,12 @@ def _makeA_pi_batched_kernel(
     return F0
 
 
-def makeA_pi_symm_batch(mol, P0, w):
+def makeA_pi_symm_batch(mol, P0, w, parameters=None):
     molsize = int(mol.molsize)
     nmol = int(mol.nmol)
     npairs_per_mol = (molsize * (molsize - 1)) // 2
 
+    params = mol.parameters if parameters is None else parameters
     return _makeA_pi_symm_batch_impl(
         P0,
         w,
@@ -422,11 +472,11 @@ def makeA_pi_symm_batch(mol, P0, w):
         mol.mask_l[:npairs_per_mol],
         mol.idxi[:npairs_per_mol],
         mol.idxj[:npairs_per_mol],
-        mol.parameters["g_ss"].view(nmol, -1),
-        mol.parameters["g_sp"].view(nmol, -1),
-        mol.parameters["g_pp"].view(nmol, -1),
-        mol.parameters["g_p2"].view(nmol, -1),
-        mol.parameters["h_sp"].view(nmol, -1),
+        params["g_ss"].view(nmol, -1),
+        params["g_sp"].view(nmol, -1),
+        params["g_pp"].view(nmol, -1),
+        params["g_p2"].view(nmol, -1),
+        params["h_sp"].view(nmol, -1),
         molsize,
         nmol,
     )

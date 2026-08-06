@@ -22,13 +22,13 @@ from .excited_state_utils import (
     getMemUse,
     orthogonalize_to_current_subspace,
     print_rcis_analysis,
-    raise_max_iterations,
     scatter_new_subspace,
     update_subspace_status,
 )
+from .rcis_solver import make_rcis_response_builder, rcis_inputs, run_native_rcis
 
 
-def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
+def _run_mixed_davidson(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, completed_mask=None):
     """Calculate the restricted Configuration Interaction Single (RCIS) excitation energies and amplitudes
        using davidson diagonalization
        This function is called when all the molecules in the batch are NOT the same
@@ -90,6 +90,9 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     davidson_iter = 0
     vstart = torch.zeros(nmol, dtype=torch.long, device=device)
     done = torch.zeros(nmol, dtype=torch.bool, device=device)
+    if completed_mask is not None:
+        done.copy_(completed_mask)
+        V[done] = 0.0
 
     # TODO: Test if orthogonal or nonorthogonal version is more efficient
     nonorthogonal = False  # TODO: User-defined/fixed
@@ -105,9 +108,12 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     # print("-" * len(header))
     root_idx = torch.arange(nroots_max, device=device).unsqueeze(0)  # (1, k_max)
     active_root_mask = root_idx < nroots_target.unsqueeze(1)  # (nmol, k_max)
+    roots_not_converged = torch.zeros(nmol, nroots_max, dtype=torch.bool, device=device)
 
     while davidson_iter <= max_iter:  # Davidson loop
-        V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend)
+        V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend, done)
+        if V_batched is None:
+            break
 
         # Compute the matrix-vector product in the current subspace
         HV_batch = matrix_vector_product_any_batched(mol, V_batched, w, ea_ei, Cocc, Cvirt)
@@ -181,16 +187,7 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         if torch.all(done):
             break
         if davidson_iter > max_iter:
-            raise_max_iterations(
-                done,
-                roots_not_converged,
-                resid_norm,
-                vend,
-                maxSubspacesize,
-                n_iters,
-                n_collapses,
-                nroots_target,
-            )
+            break
 
     # print("-" * len(header))
     # print("\nCIS excited states:")
@@ -201,12 +198,29 @@ def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
     #         print(f"State {i:3d}: {energy:.15f} eV")
     # print("")
 
-    # Post CIS analysis
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
-    rcis_analysis(mol, e_val_n, amplitude_store, nroots_target)
+    converged = done
+    return e_val_n, amplitude_store, nroots_target, approxH, valid.view(nmol, nov), maxSubspacesize, converged
 
-    return e_val_n, amplitude_store
+
+def rcis_any_batch(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None, completed_mask=None):
+    """Calculate RCIS roots for a heterogeneous molecular batch."""
+
+    inputs = rcis_inputs(mol, e_mo, w)
+    result = run_native_rcis(
+        lambda: _run_mixed_davidson(
+            mol, w, e_mo, nroots, root_tol, init_amplitude_guess, completed_mask=completed_mask
+        ),
+        make_rcis_response_builder(mol, matrix_vector_product_any_batched),
+        root_tol,
+        *inputs,
+    )
+    excitation_energies, amplitudes, nroots_target, cis_converged, cis_unstable = result
+
+    with torch.no_grad():
+        rcis_analysis(mol, excitation_energies, amplitudes, nroots_target)
+    return excitation_energies, amplitudes, cis_converged, cis_unstable
 
 
 def rcis_analysis(mol, excitation_energies, amplitudes, nroots_target, rpa=False):
@@ -223,7 +237,7 @@ def rcis_analysis(mol, excitation_energies, amplitudes, nroots_target, rpa=False
         mol.transition_dipole, mol.oscillator_strength = transition_dipole, oscillator_strength
 
 
-def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False):
+def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False, parameters=None):
     # C: Molecule Orbital Coefficients
     nmol, nNewRoots, _ = V.shape
 
@@ -239,7 +253,7 @@ def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False
 
     if not need_to_chunk:
         P_xi = torch.einsum("bmi,bria,bna->brmn", Cocc, Via, Cvirt)
-        F0 = makeA_pi_any_batched(mol, P_xi, w)
+        F0 = makeA_pi_any_batched(mol, P_xi, w, parameters=parameters)
         # why am I multiplying by A 2?
         A = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
         if makeB:
@@ -253,7 +267,7 @@ def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False
             end = min(start + chunk_size, nNewRoots)
             P_xi = torch.einsum("bmi,bria,bna->brmn", Cocc, Via[:, start:end], Cvirt)
             # F0[:,start:end,:] = makeA_pi_batched(mol,P_xi,w)
-            P_xi = makeA_pi_any_batched(mol, P_xi, w)
+            P_xi = makeA_pi_any_batched(mol, P_xi, w, parameters=parameters)
             F0 = P_xi
             A[:, start:end, :] = torch.einsum("bmi,brmn,bna->bria", Cocc, F0, Cvirt) * 2.0
             if makeB:
@@ -269,7 +283,7 @@ def matrix_vector_product_any_batched(mol, V, w, ea_ei, Cocc, Cvirt, makeB=False
     return A
 
 
-def makeA_pi_any_batched(mol, P_xi, w_, allSymmetric=False):
+def makeA_pi_any_batched(mol, P_xi, w_, allSymmetric=False, parameters=None):
     r"""
     Given the amplitudes in the AO basis (i.e. the transition densities)
     calculates the contraction with two-electron integrals
@@ -293,7 +307,7 @@ def makeA_pi_any_batched(mol, P_xi, w_, allSymmetric=False):
     del P_xi
 
     # Compute the (ai||jb)X_jb
-    F = makeA_pi_symm_any_batch(mol, P0, w_)
+    F = makeA_pi_symm_any_batch(mol, P0, w_, parameters=parameters)
 
     if not allSymmetric:
         P0_antisym = 0.5 * (P0 - P0.transpose(2, 3))
@@ -336,10 +350,11 @@ def makeA_pi_any_batched(mol, P_xi, w_, allSymmetric=False):
         del Pp
         del sumK
 
-        gsp = mol.parameters["g_sp"].expand(nD, -1).reshape(-1)
-        gpp = mol.parameters["g_pp"].expand(nD, -1).reshape(-1)
-        gp2 = mol.parameters["g_p2"].expand(nD, -1).reshape(-1)
-        hsp = mol.parameters["h_sp"].expand(nD, -1).reshape(-1)
+        params = mol.parameters if parameters is None else parameters
+        gsp = params["g_sp"].expand(nD, -1).reshape(-1)
+        gpp = params["g_pp"].expand(nD, -1).reshape(-1)
+        gp2 = params["g_p2"].expand(nD, -1).reshape(-1)
+        hsp = params["h_sp"].expand(nD, -1).reshape(-1)
 
         nb_diag = maskd.numel()
         maskd_exp = (
@@ -378,7 +393,7 @@ def makeA_pi_any_batched(mol, P_xi, w_, allSymmetric=False):
     return F0.view(nmol, nD, norb_max, norb_max)
 
 
-def makeA_pi_symm_any_batch(mol, P0, w):
+def makeA_pi_symm_any_batch(mol, P0, w, parameters=None):
     P0_sym = 0.5 * (P0 + P0.transpose(2, 3))
     nD = P0.shape[1]  # number of roots
 
@@ -429,11 +444,12 @@ def makeA_pi_symm_any_batch(mol, P0, w):
     # sum px,py,pz
 
     # ========== 1) One-center two-electron-like terms on diagonal blocks ==========
-    gss = mol.parameters["g_ss"].expand(nD, -1).reshape(-1)
-    gsp = mol.parameters["g_sp"].expand(nD, -1).reshape(-1)
-    gpp = mol.parameters["g_pp"].expand(nD, -1).reshape(-1)
-    gp2 = mol.parameters["g_p2"].expand(nD, -1).reshape(-1)
-    hsp = mol.parameters["h_sp"].expand(nD, -1).reshape(-1)
+    params = mol.parameters if parameters is None else parameters
+    gss = params["g_ss"].expand(nD, -1).reshape(-1)
+    gsp = params["g_sp"].expand(nD, -1).reshape(-1)
+    gpp = params["g_pp"].expand(nD, -1).reshape(-1)
+    gp2 = params["g_p2"].expand(nD, -1).reshape(-1)
+    hsp = params["h_sp"].expand(nD, -1).reshape(-1)
     # Build F2e1c for all densities and all diag blocks in one go
     md_flat = maskd_exp.reshape(-1)  # (nD*nb_diag,)
     P_md = P[md_flat]  # (nD*nb_diag, 4,4)

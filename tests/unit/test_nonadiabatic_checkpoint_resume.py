@@ -78,6 +78,10 @@ def _restore_initialized_from_checkpoint(path, device):
     amp_phase = resume_state.get("amp_phase")
     if torch.is_tensor(amp_phase):
         dyn._amp_phase = amp_phase.to(device)
+    for name in ("terminated_mask", "termination_reason", "termination_step"):
+        value = resume_state.get(name)
+        if torch.is_tensor(value):
+            setattr(dyn, f"_{name}", value.to(device))
     dyn._resume_state = resume_state
     dyn.initialize(molecule, remove_com=ckpt["remove_com"], learned_parameters={}, steps=ckpt["steps"])
     return dyn, molecule
@@ -217,6 +221,9 @@ def test_nonadiabatic_checkpoint_restores_internal_state(methanal_batch_data, de
     dyn.prev_state = custom_prev.clone()
     dyn._current_potential = custom_potential.clone()
     dyn._cache_old["nac_dot"] = custom_nac_dot.clone()
+    dyn._terminated_mask = torch.tensor([False, True, False], dtype=torch.bool, device=device)
+    dyn._termination_reason = torch.tensor([0, 2, 0], dtype=torch.int8, device=device)
+    dyn._termination_step = torch.tensor([-1, 2, -1], dtype=torch.long, device=device)
 
     ckpt_path = str(tmp_path / "nad_manual_restore.restart.pt")
     dyn.save_checkpoint(molecule, steps=4, reuse_P=True, remove_com=None, step_done=2, path=ckpt_path)
@@ -229,4 +236,10 @@ def test_nonadiabatic_checkpoint_restores_internal_state(methanal_batch_data, de
     assert torch.equal(restored_dyn.prev_state, custom_prev)
     assert_allclose(restored_dyn._current_potential, custom_potential, rtol=0.0, atol=0.0)
     assert_allclose(restored_dyn._cache_old["nac_dot"], custom_nac_dot, rtol=0.0, atol=0.0)
+    assert torch.equal(restored_dyn._terminated_mask, dyn._terminated_mask)
+    assert torch.equal(restored_dyn._termination_reason, dyn._termination_reason)
+    assert torch.equal(restored_dyn._termination_step, dyn._termination_step)
+    assert torch.equal(restored_molecule._trajectory_live_mask, ~dyn._terminated_mask)
+    assert torch.allclose(restored_molecule.velocities[1], torch.zeros_like(restored_molecule.velocities[1]))
+    assert torch.allclose(restored_molecule.acc[1], torch.zeros_like(restored_molecule.acc[1]))
     assert torch.equal(restored_molecule.active_state, custom_active + 1)

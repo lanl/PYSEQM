@@ -28,6 +28,14 @@ def geomeTRIC_optimization(molecule, traj_file: str = "geom_opt_traj.xyz", **run
                      e.g. maxsteps=100, check=1, etc.
 
     """
+    # geomeTRIC may change its working directory while it runs.  Resolve
+    # relative output paths before starting so they remain next to the program
+    # invocation, rather than alongside geomeTRIC's temporary files.
+    launch_directory = os.getcwd()
+    if not os.path.isabs(traj_file):
+        traj_file = os.path.join(launch_directory, traj_file)
+    optimized_file = os.path.join(launch_directory, "optimized.xyz")
+
     try:
         from geometric.engine import Engine
         from geometric.molecule import Elements
@@ -104,7 +112,7 @@ def geomeTRIC_optimization(molecule, traj_file: str = "geom_opt_traj.xyz", **run
             customengine=engine, input=tmpf, qccnv=True, **run_kwargs
         )  # use Q-Chem like convergence
 
-    with open("optimized.xyz", "w") as f:
+    with open(optimized_file, "w") as f:
         f.write(
             "\n".join(result.write_xyz(selection=[-1]))
         )  # Write the geometry at the last step of optimization as the optimized geometry
