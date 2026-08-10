@@ -1307,6 +1307,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             ckpt["xl_ctx"] = {
                 "Pt": self._tensor_cpu(self._xl_ctx["Pt"]),
                 "es_amp_t": self._tensor_cpu(self._xl_ctx.get("es_amp_t")),
+                "xl_E_t": self._tensor_cpu(self._xl_ctx.get("xl_E_t")),
             }
             if isinstance(molecule.dP2dt2, torch.Tensor):
                 ckpt["dP2dt2"] = self._tensor_cpu(molecule.dP2dt2)
@@ -1351,14 +1352,26 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             xl = ckpt["xl_ctx"]
             Pt = xl["Pt"].to(device)
             es_amp_t = xl.get("es_amp_t")
+            # xl_E_t = xl.get("xl_E_t")
             xl_m = ckpt["xl_bomd_params"]["k"] + 1
             cindx = (ckpt["step_done"] - 1) % xl_m  # subtract one because step_done is advanced by one step
             P = Pt[(xl_m - 1 - cindx)].clone()
             es_amp = None
+            # xl_E = None
             if isinstance(es_amp_t, torch.Tensor):
                 es_amp_t = es_amp_t.to(device)
                 es_amp = es_amp_t[(xl_m - 1 - cindx)].clone()
-            md._xl_ctx = {"P": P, "Pt": Pt, "es_amp": es_amp, "es_amp_t": es_amp_t}
+            # if isinstance(xl_E_t, torch.Tensor):
+            #     xl_E_t = xl_E_t.to(device)
+            #     xl_E = xl_E_t[(xl_m - 1 - cindx)].clone()
+            md._xl_ctx = {
+                "P": P,
+                "Pt": Pt,
+                "es_amp": es_amp,
+                "es_amp_t": es_amp_t,
+                # "xl_E": xl_E,
+                # "xl_E_t": xl_E_t,
+            }
 
         Molecular_Dynamics_Basic._restore_rng(ckpt)
         md.run(molecule=molecule, steps=ckpt["steps"], reuse_P=reuse_P, remove_com=ckpt["remove_com"])
@@ -1794,12 +1807,17 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
             if self.move_on_excited_state:
                 if do_xl_esmd:
-                    # es_amp = molecule.cis_amplitudes.clone()
+                    # Independent-state XL-ESMD propagates AO transition densities.
                     es_amp = molecule.transition_density_matrices.clone()
+                    # Coupled/MO-amplitude propagation retained for later:
+                    # es_amp = molecule.cis_amplitudes.clone()
+                    # xl_E = molecule.cis_energies.clone()
+                    # xl_E_t = xl_E.unsqueeze(0).expand((self.m,) + xl_E.shape).clone()
                 else:
                     es_amp = molecule.transition_density_matrices.clone()
+                    # xl_E, xl_E_t = None, None
                 es_amp_t = es_amp.unsqueeze(0).expand((self.m,) + es_amp.shape).clone()
-                ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)
+                ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)  # xl_E=xl_E, xl_E_t=xl_E_t)
             self._xl_ctx = ctx
 
 
@@ -1846,6 +1864,16 @@ class XL_ESMD(XL_BOMD):
             )
         return es_new
 
+    def _propagate_xl_E(self, xl_E, xl_E_t, cindx, molecule):
+        """Propagate extra XL-ESMD quantity (e.g., energies/projections) like es_amp."""
+        if getattr(molecule, "dxlE2dt2", None) is None:
+            molecule.dxlE2dt2 = torch.zeros_like(xl_E)
+            print("Warning: molecule does not have dxlE2dt2.")
+        xl_E_new = self.coeff_D * (xl_E + molecule.dxlE2dt2) + torch.sum(
+            self.coeff[cindx : (cindx + self.m)].reshape(-1, *([1] * (xl_E_t.dim() - 1))) * xl_E_t, dim=0
+        )
+        return xl_E_new
+
     def one_step(
         self, molecule, step, P, Pt, es_amp=None, es_amp_t=None, learned_parameters=None, *args, **kwargs
     ):
@@ -1865,9 +1893,13 @@ class XL_ESMD(XL_BOMD):
             P = self._propagate_P(P, Pt, cindx, molecule)
             Pt[(self.m - 1 - cindx)] = P
 
+            # Propagate each AO transition-density root independently.
             es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
+            # Coupled/MO-amplitude alternative retained for later:
             # es_amp = self._propagate_excited_amp(es_amp, es_amp_t, cindx, molecule)
             es_amp_t[(self.m - 1 - cindx)] = es_amp
+            # xl_E = self._propagate_xl_E(xl_E, xl_E_t, cindx, molecule)
+            # xl_E_t[(self.m - 1 - cindx)] = xl_E
 
             dm_prop = self.dmprop
 
@@ -1888,9 +1920,16 @@ class XL_ESMD(XL_BOMD):
             P0=P0,
             cis_amp=es_amp,
             dm_prop=dm_prop,
+            # xl_E=xl_E,
             *args,
             **kwargs,
         )
+
+        # The coupled solver replaces the history with its orthogonalized
+        # multi-state coordinate (molecule.xl_eta_Q).  Keep the independent
+        # propagated AO state in the history instead.
+        # es_amp_t[(self.m - 1 - cindx)] = molecule.xl_eta_Q
+        # es_amp = molecule.xl_eta_Q
 
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
@@ -1904,7 +1943,25 @@ class XL_ESMD(XL_BOMD):
                 torch.cuda.synchronize()
             molecule.const.timing["MD"].append(time.time() - t0)
 
-        return P, Pt, es_amp, es_amp_t
+        return P, Pt, es_amp, es_amp_t  # , xl_E, xl_E_t
+
+    # def _do_integrator_step(self, i, molecule, learned_parameters, **kwargs):
+    #     P, Pt = self._xl_ctx["P"], self._xl_ctx["Pt"]
+    #     es_amp, es_amp_t = self._xl_ctx.get("es_amp"), self._xl_ctx.get("es_amp_t")
+    #     xl_E, xl_E_t = self._xl_ctx.get("xl_E"), self._xl_ctx.get("xl_E_t")
+    #     P, Pt, es_amp, es_amp_t, xl_E, xl_E_t = self.one_step(
+    #         molecule,
+    #         i,
+    #         P,
+    #         Pt,
+    #         es_amp,
+    #         es_amp_t,
+    #         xl_E,
+    #         xl_E_t,
+    #         learned_parameters=learned_parameters,
+    #         **kwargs,
+    #     )
+    #     self._xl_ctx.update(P=P, Pt=Pt, es_amp=es_amp, es_amp_t=es_amp_t, xl_E=xl_E, xl_E_t=xl_E_t)
 
     def initialize(
         self, molecule, remove_com=None, learned_parameters=None, steps: Optional[int] = None, *args, **kwargs

@@ -28,6 +28,9 @@ from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.XLESMD import elec_energy_excited_xl
 from .seqm_functions.XLESMD_gradient import xlesmd_rcis_grad_batch
 
+# Retain the coupled solver while running the independent-state XL-ESMD path.
+# from .seqm_functions.XLESMD_coupled import elec_energy_excited_xl_coupled
+
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
 """
@@ -1356,9 +1359,16 @@ class Energy(torch.nn.Module):
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
             cis_transition_density = cis_amp
+            # Independent solve for every root.  The root dimension is batched,
+            # but no root--root coupling or orthogonalization is applied.
             E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl(
                 molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
             )
+            # Coupled multi-state alternative retained for further work:
+            # E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl_coupled(
+            #     molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
+            # )
+
             molecule.cis_energies = E_XL
             active_idx = torch.clamp(active_states - 1, min=0)
             Eexcited = E_XL.gather(1, active_idx.unsqueeze(1)).squeeze(1)

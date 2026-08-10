@@ -1,3 +1,4 @@
+import math
 from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
@@ -80,7 +81,12 @@ def get_exact_excited(mol, w, e_mo, R):
 
 
 def elec_energy_excited_xl(
-    mol, R: torch.Tensor, w, e_mo, xl_bomd_params: Optional[Dict] = None
+    # mol, R: torch.Tensor, w, e_mo, xl_E, xl_bomd_params: Optional[Dict] = None
+    mol,
+    R: torch.Tensor,
+    w,
+    e_mo,
+    xl_bomd_params: Optional[Dict] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute excited-state electronic energy and amplitudes with XL-ESMD approach
@@ -127,12 +133,15 @@ def elec_energy_excited_xl(
         # xi_flat: (b,r,n), omega_br: (b,r)
 
         xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
+
         # if hasattr(mol, "omega_xl"):
         #     omega_init = mol.omega_xl
         # else:
         #     omega_init = mol.cis_energies
         # xi_flat, omega = solve_for_amplitude_omega_newton(eta_flat, ea_ei_flat, Gx_flat, omega_init)
         # mol.omega_xl = omega
+
+        # xi_flat = refine_orthogonalize_delta3(xi_flat)
 
     E1 = (xi_flat * xi_flat * ea_ei_flat).sum(dim=2)  # (b,r)
     E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
@@ -145,20 +154,12 @@ def elec_energy_excited_xl(
         # --- Compute dxi2dt2 via rank-m Krylov ---
         if xl_bomd_params is not None and "max_rank" in xl_bomd_params:
             with torch.no_grad():
-                # precond = 1.0 / (omega.unsqueeze(-1) * (1.0 / ea_ei_flat) - 1.0 + 1e-8)  # (b,r,n)
-                # precond = torch.ones_like(eta_flat)  # no preconditioning;
-                # precond = make_apply_precond_rank1(ea_ei_flat, eta_flat, xi_flat, omega)
-                # precond = make_apply_precond_null()  # no preconditioning
-
+                # The JVP/Krylov path below acts on each (molecule, root)
+                # Each (molecule, root) is propagated independently.
                 precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
                 jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
-
-                # precond = make_apply_precond_diag_full_normalized(ea_ei_flat, eta_flat, omega, Gx_flat)
-                # jvp_xi = make_jvp_xi_full_normalized(
-                #     ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt
-                # )
-
                 dxi2dt2_flat = compute_dxi2dt2_rankm(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
+
                 # Convert to AO basis and store in mol for later use in BOMD
                 if MO_basis:
                     mol.dxi2dt2 = dxi2dt2_flat
@@ -169,6 +170,8 @@ def elec_energy_excited_xl(
     # Check if xi are orthogonal in a batch
     dot_xi = torch.einsum("brn,bRn->brR", xi_flat, xi_flat)  # (b,r,r)
     print("Xi dot product matrix (should be close to identity):\n", dot_xi)
+    # dot_eta = torch.einsum("brn,bRn->brR", eta_flat, eta_flat)  # (b,r,r)
+    # print("Eta dot product matrix (should be close to identity):\n", dot_eta)
     print(
         "Deviation of xi from orthogonality (should be close to diagonal): ",
         torch.linalg.norm(dot_xi - torch.eye(r, device=xi_flat.device).unsqueeze(0)),
@@ -177,6 +180,30 @@ def elec_energy_excited_xl(
     print("Overlap of xi with previous xi", torch.sum(xi_flat * mol.cis_amplitudes, dim=2))  # (b,r)
 
     return E, xi_AO, xi_flat
+
+
+def refine_orthogonalize_delta3(Z: torch.Tensor) -> torch.Tensor:
+    """
+    One delta^3 iterative refinement step for orthogonalizing rows of Z.
+
+    Z: shape (b, r, n), rows nearly orthonormal
+    returns: shape (b, r, n), refined columns
+    """
+
+    k = Z.shape[1]
+    I = torch.eye(k, dtype=Z.dtype, device=Z.device).unsqueeze(0)
+
+    X = Z @ Z.transpose(-2, -1)
+    # print(f"Overlap before orthogonalizing\n{X}")
+
+    # delta^3 coefficients:
+    # p(X) = 1.875 I - 1.25 X + 0.375 X^2
+    P = 1.875 * I - 1.25 * X + 0.375 * (X @ X)
+
+    # print(f"Norm of the orthogonalizing matrix is {torch.linalg.vector_norm(P, dim=(1, 2))}")
+    orthoZ = P @ Z
+    # print(f"Diff in eta before/after orthogonalizing:{torch.linalg.vector_norm(Z - orthoZ, dim=2)}")
+    return orthoZ
 
 
 def make_apply_precond_null() -> Callable[[torch.Tensor], torch.Tensor]:
@@ -473,6 +500,140 @@ def compute_dxi2dt2_rankm(
     dxi2dt2 = -torch.einsum("Bnm,Bm->Bn", Vk, alpha)  # (B,n)
 
     return dxi2dt2.reshape(b, r, n)
+
+
+def compute_dxi2dt2_projected_subspace(
+    eta_brn: torch.Tensor,  # (b,r,n)
+    xi_brn: torch.Tensor,  # (b,r,n)
+    jvp_xi: Callable[[torch.Tensor], torch.Tensor],  # v_brn -> dxi_brn
+    xl_params: Dict,
+    precond: Callable[[torch.Tensor], torch.Tensor],
+    mol,
+    eps: float = 1e-12,
+) -> torch.Tensor:
+    """
+    Solve J[Y] = eta - xi with a projected, restarted subspace iteration.
+
+    The Jacobian action is J[V] = J_xi[V] - V, while the preconditioner is only
+    used to generate new search directions from the current residual.
+    """
+    max_space = int(xl_params["max_rank"])
+    max_iter = int(xl_params.get("max_iter", max_space))
+    err_threshold = float(xl_params["err_threshold"])
+
+    b, r, n = eta_brn.shape
+    B = b * r
+
+    eta = eta_brn.reshape(B, n)
+    xi = xi_brn.reshape(B, n)
+    rhs = eta - xi
+
+    sqrtn = math.sqrt(n)
+
+    def rmsnorm(u: torch.Tensor) -> torch.Tensor:
+        return torch.linalg.vector_norm(u, dim=1) / sqrtn
+
+    def apply_jacobian(v: torch.Tensor) -> torch.Tensor:
+        v_brn = v.reshape(b, r, n)
+        return (jvp_xi(v_brn) - v_brn).reshape(B, n)
+
+    def solve_projected(T: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        m = T.shape[-1]
+        eye = torch.eye(m, dtype=T.dtype, device=T.device).unsqueeze(0).expand(T.shape[0], -1, -1)
+        return torch.linalg.solve(T + eps * eye, g.unsqueeze(-1)).squeeze(-1)
+
+    # mol.dxi2dt2 available from last step use that after converting to MO basis
+    if hasattr(mol, "dxi2dt2"):
+        nocc, nvirt, Cocc, Cvirt = get_occ_virt(mol)
+        t = torch.einsum("bmi,brmn,bna->bria", Cocc, mol.dxi2dt2, Cvirt).reshape(b, r, n).reshape(B, n)
+    else:
+        t = precond(rhs)
+    # t_norm = rmsnorm(t)
+    # active = t_norm > eps
+    # if not torch.any(active):
+    #     return torch.zeros_like(eta_brn)
+
+    V = torch.zeros((B, max_space, n), dtype=eta.dtype, device=eta.device)
+    W = torch.zeros_like(V)
+
+    Y = torch.zeros((B, n), dtype=eta.dtype, device=eta.device)
+    residual = rhs.clone()
+    # res_norm = rmsnorm(residual)
+    # if torch.max(res_norm) < err_threshold:
+    #     return Y.reshape(b, r, n)
+
+    raw_t_norm = torch.linalg.vector_norm(t, dim=1)
+    v1 = torch.zeros_like(t)
+    # v1[active] = t[active] / raw_t_norm[active].unsqueeze(-1)
+    v1 = t / raw_t_norm.unsqueeze(-1)
+    V[:, 0, :] = v1
+    W[:, 0, :] = apply_jacobian(v1)
+    m = 1
+
+    for _ in range(max_iter):
+        Vm = V[:, :m, :]
+        Wm = W[:, :m, :]
+
+        g = torch.einsum("Bmn,Bn->Bm", Vm, rhs)
+        T = torch.einsum("Bmn,Bkn->Bmk", Vm, Wm)
+        coeffs = solve_projected(T, g)
+
+        Y = torch.einsum("Bmn,Bm->Bn", Vm, coeffs)
+        JY = torch.einsum("Bmn,Bm->Bn", Wm, coeffs)
+        residual = rhs - JY
+        res_norm = rmsnorm(residual)
+
+        # print error and convergence info
+        print("Iter {}, residual norm: {:.2e}".format(m, torch.max(res_norm).item()))
+        if torch.max(res_norm) < err_threshold:
+            return Y.reshape(b, r, n)
+
+        t = precond(residual)
+        if m > 0:
+            for _ in range(2):
+                proj = torch.einsum("Bmn,Bn->Bm", Vm, t)
+                t = t - torch.einsum("Bmn,Bm->Bn", Vm, proj)
+
+        t_norm = rmsnorm(t)
+
+        if not torch.any(t_norm > eps):
+            return Y.reshape(b, r, n)
+
+        raw_t_norm = torch.linalg.vector_norm(t, dim=1)
+        t_next = torch.zeros_like(t)
+        keep = t_norm > eps
+        t_next[keep] = t[keep] / raw_t_norm[keep].unsqueeze(-1)
+
+        if m < max_space:
+            V[:, m, :] = t_next
+            W[:, m, :] = apply_jacobian(t_next)
+            m += 1
+            continue
+
+        # Restart from the current residual when the subspace is full.
+        t_restart = precond(residual)
+        y_norm = rmsnorm(Y)
+        has_y = y_norm > eps
+        if torch.any(has_y):
+            raw_y_norm = torch.linalg.vector_norm(Y, dim=1)
+            y_dir = torch.zeros_like(Y)
+            y_dir[has_y] = Y[has_y] / raw_y_norm[has_y].unsqueeze(-1)
+            t_restart = t_restart - torch.sum(t_restart * y_dir, dim=1, keepdim=True) * y_dir
+
+        t_restart_norm = rmsnorm(t_restart)
+        if not torch.any(t_restart_norm > eps):
+            return Y.reshape(b, r, n)
+
+        V.zero_()
+        W.zero_()
+        raw_t_restart_norm = torch.linalg.vector_norm(t_restart, dim=1)
+        restart_keep = t_restart_norm > eps
+        V[:, 0, :] = 0.0
+        V[restart_keep, 0, :] = t_restart[restart_keep] / raw_t_restart_norm[restart_keep].unsqueeze(-1)
+        W[:, 0, :] = apply_jacobian(V[:, 0, :])
+        m = 1
+
+    return Y.reshape(b, r, n)
 
 
 def sample_noisy_R_energy(
