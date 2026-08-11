@@ -20,6 +20,7 @@ User Guide
    Initialization
    single_point_scf
    excited_states
+   cis_transition_density_cubes
    bomd
    Feature-XLBOMD
    excited_bomd
