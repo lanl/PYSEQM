@@ -179,10 +179,20 @@ The ``output`` dictionary controls all output behavior. It should contain the fo
   **Default:** ``100``
 
 ``'h5'`` (dict) cadences for writing to HDF5 file per molecule:
+  HDF5 outputs use single-writer/multiple-reader (SWMR) mode.  They can be
+  inspected while an MD run is active with
+  ``h5py.File(path, 'r', libver='latest', swmr=True)``.  Use each group's
+  ``n_written`` attribute to select its committed prefix.
+
   - ``'data'``: cadence for the ``/data`` group (thermo/properties/state energies/MO). **Default:** ``0``
   - ``'coordinates'``: cadence for the ``/coordinates`` group. **Default:** ``0``
   - ``'velocities'``: cadence for the ``/velocities`` group. **Default:** ``0``
   - ``'forces'``: cadence for the ``/forces`` group. **Default:** ``0``
+  - ``'flush_every'``: HDF5-only commit cadence in MD steps.  ``0`` disables
+    periodic HDF5 commits; normal close and checkpoints still commit output.
+    At each commit, a complete prefix is published through each group's
+    ``n_written`` attribute.  By default, it is at least 100 steps and no
+    shorter than the earliest HDF5 output cadence.
   - ``'write_mo'`` (bool): if ``True`` include molecular orbital info in ``/data``. **Default:** ``False``
   - ``'transition_properties'`` (bool): if ``True`` include transition dipoles and
     oscillator strengths in ``/data/excitation``. They are computed and written
@@ -261,6 +271,7 @@ Getting started: a minimal BOMD run
            'coordinates': 10,      # /coordinates cadence
            'velocities':  10,      # /velocities cadence
            'forces':      10,      # /forces cadence
+           'flush_every': 100,     # publish an HDF5 prefix every 100 MD steps
            'write_mo': False,      # include MO info in /data (optional)
            'transition_density_matrices': 20,          # optional TDM cadence
            'transition_density_matrices_mode': 'diag', # 'full'|'diag'

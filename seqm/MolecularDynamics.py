@@ -110,6 +110,17 @@ class OutputConfig:
     def get_h5_write_nonadiabatic(self) -> int:
         return int(self.h5_config.get("nonadiabatic", 0))
 
+    def get_h5_flush_every(self) -> int:
+        cadences = (
+            *self.get_h5_cadence().values(),
+            self.get_h5_data_every(),
+            self.get_h5_write_tdm(),
+            self.get_h5_write_nonadiabatic(),
+        )
+        return int(
+            self.h5_config.get("flush_every", max(100, min((n for n in cadences if n > 0), default=100)))
+        )
+
 
 @dataclass
 class _H5Track:
@@ -386,7 +397,7 @@ class HDF5Writer:
     def _open_resume(
         self, path: str, mol: int, molecule, nat: int, norb: int, restricted: bool, *, step_offset: int
     ) -> _MoleculeState:
-        h5 = h5py.File(path, "r+")
+        h5 = h5py.File(path, "r+", libver="latest")
         state = _MoleculeState(h5, nat, norb, restricted)
         try:
             actual = h5.attrs.get("writer_config")
@@ -448,6 +459,9 @@ class HDF5Writer:
                     raise RuntimeError(
                         f"{track.group.name} contains data beyond checkpoint step {step_offset}."
                     )
+            if h5.attrs.get("swmr", False):
+                h5.flush()
+                h5.swmr_mode = True
             return state
         except BaseException:
             h5.close()
@@ -465,7 +479,7 @@ class HDF5Writer:
         active_states,
     ) -> _MoleculeState:
         _rotate_existing(path)
-        h5 = h5py.File(path, "w")
+        h5 = h5py.File(path, "w", libver="latest")
         state = _MoleculeState(h5, nat, norb, restricted)
         try:
             h5.attrs["writer_config"] = self._config_signature(nat=nat, norb=norb, restricted=restricted)
@@ -501,6 +515,9 @@ class HDF5Writer:
                 group = gd.create_group("nonadiabatic")
                 state.nonadiabatic = self._new_track(group, na_len, self._write_nonadiabatic)
                 self._create_fields(group, self._nonadiabatic_fields(na_len))
+            h5.attrs["swmr"] = True
+            h5.flush()
+            h5.swmr_mode = True
             return state
         except BaseException:
             h5.close()
@@ -1143,6 +1160,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     # Write an initial snapshot labeled as step 0.
                     self._xyz_writer.write(-1, molecule, Ek0, V0)
 
+                if self._do_h5:
+                    self._h5_writer.flush()
+
     def run(
         self,
         molecule,
@@ -1202,6 +1222,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         h5_data_every = self.output_config.get_h5_data_every()
         h5_tdm_every = self.output_config.get_h5_write_tdm()
         h5_vectors_every = self.output_config.h5_vectors_every
+        h5_flush_every = self.output_config.get_h5_flush_every()
         print_every = self.output_config.print_every
         xyz_every = self.output_config.xyz_every
 
@@ -1259,8 +1280,13 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                     if do_xyz and ((i + 1) % xyz_every == 0):
                         self._xyz_writer.write(i, molecule, Ek, V)
 
-                    if checkpoint_every > 0 and ((i + 1) % checkpoint_every == 0):
+                    checkpoint_due = checkpoint_every > 0 and (i + 1) % checkpoint_every == 0
+                    if checkpoint_due:
                         self._flush_all()
+                    elif do_h5 and h5_flush_every > 0 and (i + 1) % h5_flush_every == 0:
+                        self._h5_writer.flush()
+
+                    if checkpoint_due:
                         self.save_checkpoint(
                             molecule, steps, reuse_P, remove_com, step_done=i + 1, path=checkpoint_path
                         )
