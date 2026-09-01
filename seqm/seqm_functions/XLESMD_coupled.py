@@ -665,7 +665,6 @@ def make_apply_precond_null_coupled() -> Callable[[torch.Tensor], torch.Tensor]:
 
     return apply_prec
 
-
 # ------------------------------------------------------------
 # Coupled Lambda preconditioner
 # ------------------------------------------------------------
@@ -1182,76 +1181,3 @@ def make_apply_precond_constraint_lowrank_coupled(
         return z - correction
 
     return apply_prec
-
-
-def get_exact_excited_coupled(mol, w, e_mo, R):
-    nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window=None, e_mo=e_mo)
-    b = R.shape[0]
-    r = R.shape[1]
-    n = nocc * nvirt
-
-    exact = mol.cis_amplitudes  # [:,mol.active_state]
-    exact_e = mol.cis_energies  # [:,mol.active_state]
-    torch.set_printoptions(precision=15)
-    print("Exact CIS energies: ", exact_e)
-
-    # --- Build eta = Xbar in MO (occ-virt) with r blocks ---
-    with torch.no_grad():
-        eta = torch.einsum("bmi,brmn,bna->bria", Cocc, R, Cvirt)
-
-    # --- Define Coulomb-exchange integral function for amplitudes ---
-    def G_apply(Y: torch.Tensor) -> torch.Tensor:
-        # Y: (b,r,nocc,nvirt) -> G(Y): (b,r,nocc,nvirt)
-        R_y = torch.einsum("bmi,bria,bna->brmn", Cocc, Y, Cvirt)
-        G_ao = makeA_pi_batched(mol, R_y, w)  # expected (b,r,m,n)
-        G_y = torch.einsum("bmi,brmn,bna->bria", Cocc, G_ao, Cvirt)
-        return 2.0 * G_y
-
-    ea_ei_flat = ea_ei.reshape(b, 1, n)
-
-    xl_bomd_params = {"max_rank": 3, "err_threshold": 1e-8}
-
-    eta_flat = eta.reshape(b, r, n)
-    print(
-        f"Raw inital tdm diff (before occ-virt subspace projection of inital guess) is {torch.linalg.vector_norm(R - mol.transition_density_matrices, dim=(-2, -1))}"
-    )
-
-    print(
-        "Before iterations: "
-        f"diff = {torch.linalg.vector_norm(eta_flat - exact, dim=-1)}, "
-        f"diff_tdm = {torch.linalg.vector_norm(torch.einsum('bmi,bria,bna->brmn', Cocc, eta_flat.view(b, r, nocc, nvirt), Cvirt) - mol.transition_density_matrices, dim=(-2, -1))}"
-        "\n"
-    )
-    for iter in range(20):
-        Gx = G_apply(eta_flat.view(b, r, nocc, nvirt))  # (b,r,nocc,nvirt)
-
-        Gx_flat = Gx.reshape(b, r, n)
-
-        # --- Solve for xi and omega ---
-        with torch.no_grad():
-            xi_flat, lambda_ij = solve_for_amplitudes_coupled(eta_flat, ea_ei_flat, Gx_flat)
-            # xi_flat: (b,r,n), omega_br: (b,r)
-
-        E1 = (xi_flat * xi_flat * ea_ei_flat).sum(dim=2)  # (b,r)
-        E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
-        E = E1 + E2  # (b,r)
-
-        # --- Compute dxi2dt2 via rank-m Krylov ---
-        # precond = make_apply_precond_rank1(ea_ei_flat, eta_flat, xi_flat, omega)
-        precond = make_apply_precond_lambda_coupled(ea_ei_flat, lambda_ij)
-        jvp_xi = make_jvp_xi_coupled(ea_ei_flat, eta_flat, xi_flat, lambda_ij, G_apply, nocc, nvirt)
-        dxi2dt2_flat = compute_dxi2dt2_rankm_coupled(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
-
-        eta_flat = eta_flat + dxi2dt2_flat
-        print(
-            f"Iter {iter + 1}: E = {E.squeeze().cpu().numpy()}, diff = {torch.linalg.vector_norm(eta_flat - exact, dim=-1)}, "
-            # f"diff_tdm = {torch.linalg.vector_norm(torch.einsum('bmi,bria,bna->brmn', Cocc, eta_flat.view(b, r, nocc, nvirt), Cvirt) - mol.transition_density_matrices, dim=(-2, -1))}"
-        )
-        if torch.all((E - exact_e).abs() < mol.seqm_parameters["excited_states"]["cis_tol"] * 10.0):
-            print("Converged to exact energy!")
-            break
-        # # Convert to AO basis and store in mol for later use in BOMD
-        # mol.dxi2dt2 = torch.einsum(
-        #     "bmi,bria,bna->brmn", Cocc, dxi2dt2_flat.view(b, r, nocc, nvirt), Cvirt
-        # )
-    exit(0)

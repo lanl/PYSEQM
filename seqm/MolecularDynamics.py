@@ -1281,9 +1281,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         now = datetime.now()
         print(f"MD run ended at {now}")
         print(f"Time elapsed since the beginning of MD run: {now - self.start_time}", flush=True)
-        if self.__class__.__name__ == "SurfaceHoppingDynamics" and callable(
-            getattr(self, "_print_hop_log", None)
-        ):
+        if callable(getattr(self, "_print_hop_log", None)):
             self._print_hop_log()
         if callable(getattr(self, "_print_termination_log", None)):
             self._print_termination_log()

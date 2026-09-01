@@ -9,7 +9,7 @@ from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, packone
 from seqm.utils.torch_compile import optional_compile_function
 
 from .dynamics.tdc_hamiltonian_fd import compute_tdc_hamiltonian_fd
-from .MolecularDynamics import CONSTANTS, Molecular_Dynamics_Langevin
+from .MolecularDynamics import CONSTANTS, XL_ESMD, Molecular_Dynamics_Langevin
 from .seqm_functions.hcore import (
     orthogonalized_overlap_from_matrices,
     overlap_between_geometries,
@@ -18,6 +18,7 @@ from .seqm_functions.hcore import (
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.scf_loop import build_initial_density
+from .seqm_functions.XLESMD import transport_mo_transition_amplitudes
 
 HBAR_EV_FS = 0.6582119514  # Planck's constant (reduced) in eV·fs
 _electronic_propagation_dispatch = None
@@ -1601,3 +1602,344 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
             e0 = e0 - excitation_energies[idx, active_idx_ref]
             self._current_potential = e0 + excitation_energies[idx, active_idx]
             molecule.Etot = self._current_potential
+
+
+class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
+    """Simple FSSH driven by ordered multi-state XL-ESMD shadow surfaces.
+
+    The ground-state density and the complete ordered CIS auxiliary block are
+    propagated with the same extended-Lagrangian recurrences used by
+    :class:`XL_ESMD`.  The existing FSSH electronic propagator, hop selection,
+    and NAC machinery then operate on the resulting shadow roots and energies.
+
+    This first implementation deliberately treats the small non-orthogonality
+    of the shadow roots as an approximation in both time-derivative and
+    coordinate derivative couplings.  Trivial-crossing handling remains
+    disabled, while instantaneous energy ordering is optional and enabled by
+    default for this nonadiabatic driver.
+    """
+
+    _XL_COEFFICIENTS = {
+        3: [1.69, 150e-3, -2.0, 3.0, 0.0, -1.0],
+        4: [1.75, 57e-3, -3.0, 6.0, -2.0, -2.0, 1.0],
+        5: [1.82, 18e-3, -6.0, 14.0, -8.0, -3.0, 4.0, -1.0],
+        6: [1.84, 5.5e-3, -14.0, 36.0, -27.0, -2.0, 12.0, -6.0, 1.0],
+        7: [1.86, 1.6e-3, -36.0, 99.0, -88.0, 11.0, 32.0, -25.0, 8.0, -1.0],
+        8: [1.88, 0.44e-3, -99.0, 286.0, -286.0, 78.0, 78.0, -90.0, 42.0, -10.0, 1.0],
+        9: [1.89, 0.12e-3, -286.0, 858.0, -936.0, 364.0, 168.0, -300.0, 184.0, -63.0, 12.0, -1.0],
+    }
+
+    def __init__(self, seqm_parameters: Dict, xl_bomd_params: Dict, *args, **kwargs):
+        xl_params = dict(xl_bomd_params)
+        constraint_mode = str(xl_params.get("constraint_mode", "ordered_linearized")).strip().lower()
+        if constraint_mode != "ordered_linearized":
+            raise ValueError("XL-FSSH currently requires constraint_mode='ordered_linearized'.")
+        xl_params["constraint_mode"] = constraint_mode
+
+        force_mode = str(xl_params.get("force_mode", "autodiff")).strip().lower()
+        if force_mode not in {"autodiff", "experimental_analytic"}:
+            raise ValueError("XL-FSSH force_mode must be 'autodiff' or 'experimental_analytic'.")
+
+        params = dict(seqm_parameters)
+        if isinstance(params.get("excited_states"), dict):
+            params["excited_states"] = dict(params["excited_states"])
+        na_cfg = dict(params.get("nonadiabatic", {}))
+        na_cfg["detect_crossings"] = False
+        params["nonadiabatic"] = na_cfg
+        if force_mode == "autodiff":
+            scf_backward = int(xl_params.get("scf_backward", params.get("scf_backward", 2)))
+            if scf_backward not in {1, 2}:
+                raise ValueError("Autodiff XL-FSSH requires scf_backward=1 or 2.")
+            params["scf_backward"] = scf_backward
+            params["analytical_gradient"] = [False]
+        else:
+            params["analytical_gradient"] = [True]
+
+        super().__init__(seqm_parameters=params, *args, **kwargs)
+
+        self.xl_bomd_params = xl_params
+        self.xlesmd_force_mode = force_mode
+        self.xlesmd_scf_backward = self.seqm_parameters.get("scf_backward", 0)
+        self.xlesmd_energy_order_tracking = bool(xl_params.setdefault("energy_order_tracking", True))
+        self.xlesmd_energy_order_events = []
+        self.dmprop = "SCF"
+        self.xlesmd_orthogonality_log = []
+
+        self.k = int(xl_params["k"])
+        if self.k not in self._XL_COEFFICIENTS:
+            raise ValueError(
+                f"Unsupported XL history order k={self.k}; expected one of {sorted(self._XL_COEFFICIENTS)}."
+            )
+        self.m = self.k + 1
+        coeffs = self._XL_COEFFICIENTS[self.k]
+        self.kappa = coeffs[0]
+        self.alpha = coeffs[1]
+        tmp = torch.as_tensor(coeffs[2:]) * self.alpha
+        self.coeff_D = self.kappa
+        tmp[0] += 2.0 - self.kappa
+        tmp[1] -= 1.0
+        self.register_buffer("coeff", tmp.repeat(2))
+
+        self._xlesmd_step_index = 0
+        self._xlesmd_coords_before = None
+        self._xlesmd_mos_before = None
+        self._xlesmd_S_prev = None
+        self._xlesmd_learned_parameters = {}
+        self._xl_ctx = None
+
+    @staticmethod
+    def _packed_current_ao_overlap(molecule):
+        return XL_ESMD._packed_current_ao_overlap(molecule)
+
+    def _record_xlesmd_orthogonality(self, molecule, step: int):
+        xi = molecule.cis_amplitudes
+        eta = self._xl_ctx["es_amp"]
+        eye = torch.eye(xi.shape[1], dtype=xi.dtype, device=xi.device).unsqueeze(0)
+        xi_error = xi @ xi.transpose(-1, -2) - eye
+        eta_error = eta @ eta.transpose(-1, -2) - eye
+        diag_mask = torch.eye(xi.shape[1], dtype=torch.bool, device=xi.device).unsqueeze(0)
+        diagnostics = {
+            "step": int(step),
+            "xi_max_gram_error": float(xi_error.abs().amax().item()),
+            "xi_max_norm_error": float(torch.diagonal(xi_error, dim1=-2, dim2=-1).abs().amax().item()),
+            "xi_max_offdiag_overlap": float(xi_error.masked_fill(diag_mask, 0.0).abs().amax().item()),
+            "eta_max_gram_error": float(eta_error.abs().amax().item()),
+        }
+        molecule.xlesmd_nac_diagnostics = diagnostics
+        self.xlesmd_orthogonality_log.append(diagnostics)
+
+    def _propagate_xlesmd_auxiliaries(self, molecule):
+        P = self._xl_ctx["P"]
+        Pt = self._xl_ctx["Pt"]
+        es_amp = self._xl_ctx["es_amp"]
+        es_amp_t = self._xl_ctx["es_amp_t"]
+        cindx = self._xlesmd_step_index % self.m
+
+        with torch.no_grad():
+            P = XL_ESMD._propagate_P(self, P, Pt, cindx, molecule)
+            Pt[self.m - 1 - cindx] = P
+            es_amp = XL_ESMD._propagate_excited_amp(self, es_amp, es_amp_t, cindx, molecule)
+            es_amp_t[self.m - 1 - cindx] = es_amp
+            P2 = P @ P
+            P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
+        self._xl_ctx.update(P=P, Pt=Pt, es_amp=es_amp, es_amp_t=es_amp_t)
+        return P0
+
+    def _transport_xlesmd_history(self, molecule, coords_prev, mos_prev, S_prev):
+        if not self.xl_bomd_params.get("transport_mo_auxiliary", True):
+            return
+        polar = bool(self.xl_bomd_params.get("polar_unitarize_mo_transport", True))
+        es_amp = self._xl_ctx["es_amp"]
+        es_amp_t = self._xl_ctx["es_amp_t"]
+        with torch.no_grad():
+            history_shape = es_amp_t.shape
+            history_flat = es_amp_t.permute(1, 0, 2, 3).reshape(history_shape[1], -1, history_shape[-1])
+            history_flat, S_curr = transport_mo_transition_amplitudes(
+                molecule, history_flat, coords_prev, mos_prev, S_prev, polar_unitarize=polar
+            )
+            es_amp_t = history_flat.reshape(
+                history_shape[1], history_shape[0], history_shape[2], history_shape[3]
+            ).permute(1, 0, 2, 3)
+            es_amp, _ = transport_mo_transition_amplitudes(
+                molecule, es_amp, coords_prev, mos_prev, S_prev, polar_unitarize=polar
+            )
+        self._xl_ctx.update(es_amp=es_amp, es_amp_t=es_amp_t)
+        self._xlesmd_S_prev = S_curr
+
+    @staticmethod
+    def _permute_state_rows(values, permutation):
+        index = permutation
+        for _ in range(values.dim() - 2):
+            index = index.unsqueeze(-1)
+        return values.gather(1, index.expand_as(values))
+
+    @staticmethod
+    def _permute_history_state_rows(values, permutation):
+        index = permutation.unsqueeze(0)
+        for _ in range(values.dim() - 3):
+            index = index.unsqueeze(-1)
+        return values.gather(2, index.expand_as(values))
+
+    @torch.no_grad()
+    def _apply_xlesmd_energy_order(self, molecule, step: int):
+        """Relabel the XL state block and its history in ascending-energy order."""
+        if not self.xlesmd_energy_order_tracking:
+            return
+
+        nroots = self._xl_ctx["es_amp"].shape[1]
+        energies = molecule.cis_energies[:, :nroots]
+        permutation = torch.argsort(energies, dim=1)
+        identity = torch.arange(nroots, device=energies.device).expand_as(permutation)
+        if torch.equal(permutation, identity):
+            return
+
+        inverse = torch.empty_like(permutation)
+        inverse.scatter_(1, permutation, identity)
+        for name in ("cis_energies", "cis_amplitudes", "transition_density_matrices", "dxi2dt2"):
+            values = getattr(molecule, name, None)
+            if values is not None:
+                if not torch.is_tensor(values) or values.shape[1] != nroots:
+                    raise RuntimeError(f"Cannot energy-order XL state tensor '{name}'.")
+                setattr(molecule, name, self._permute_state_rows(values, permutation))
+
+        multipliers = getattr(molecule, "xlesmd_multipliers", None)
+        if torch.is_tensor(multipliers):
+            if multipliers.shape[1:] != (nroots, nroots):
+                raise RuntimeError("Cannot energy-order XL multipliers.")
+            multipliers = self._permute_state_rows(multipliers, permutation)
+            molecule.xlesmd_multipliers = multipliers.gather(
+                2, permutation.unsqueeze(1).expand_as(multipliers)
+            )
+
+        self._xl_ctx["es_amp"] = self._permute_state_rows(self._xl_ctx["es_amp"], permutation)
+        self._xl_ctx["es_amp_t"] = self._permute_history_state_rows(
+            self._xl_ctx["es_amp_t"], permutation
+        )
+        active = inverse.gather(1, self._active_states.unsqueeze(1)).squeeze(1)
+        if torch.any(active >= self._nstates):
+            raise RuntimeError("Energy ordering moved the active XL root outside the FSSH state manifold.")
+        self._active_states = active
+        molecule.active_state = active + 1
+        for mol in torch.nonzero(permutation.ne(identity).any(dim=1), as_tuple=False).squeeze(1).tolist():
+            self.xlesmd_energy_order_events.append(
+                {"step": int(step), "molecule": mol, "permutation": permutation[mol].detach().cpu().tolist()}
+            )
+
+    def _compute_electronic_structure(self, molecule, learned_parameters, **kwargs):
+        if self._xl_ctx is None:
+            raise RuntimeError("XL-FSSH auxiliary history is not initialized.")
+        self._xlesmd_learned_parameters = learned_parameters
+        P0 = self._propagate_xlesmd_auxiliaries(molecule)
+        coords_prev = self._xlesmd_coords_before
+        mos_prev = self._xlesmd_mos_before
+        S_prev = self._xlesmd_S_prev
+        polar = bool(self.xl_bomd_params.get("polar_unitarize_mo_transport", True))
+        transport = bool(self.xl_bomd_params.get("transport_mo_auxiliary", True))
+
+        old_state = molecule.active_state
+        molecule.active_state = self._active_states + 1
+        esdriver_args = kwargs.pop("esdriver_args", ())
+        try:
+            self.esdriver(
+                molecule,
+                learned_parameters=learned_parameters,
+                xl_bomd_params=self.xl_bomd_params,
+                P0=P0,
+                cis_amp=self._xl_ctx["es_amp"],
+                dm_prop=self.dmprop,
+                xlesmd_mo_transport=(coords_prev, mos_prev, S_prev, polar) if transport else None,
+                *esdriver_args,
+                **kwargs,
+            )
+        finally:
+            molecule.active_state = old_state
+
+        self._transport_xlesmd_history(molecule, coords_prev, mos_prev, S_prev)
+        self._apply_xlesmd_energy_order(molecule, self._xlesmd_step_index + self.step_offset + 1)
+        self._record_xlesmd_orthogonality(molecule, self._xlesmd_step_index + self.step_offset + 1)
+
+        energies = self._build_state_energies(molecule)
+        cache_new = {"energies": energies, "cis_amp": self._current_cis_amplitudes(molecule)}
+        if self._direct_nac_tdc:
+            molecule.nac = None
+            molecule.nac = self._compute_NACR_for_hop(molecule, self._nac_pairs())
+            cache_new["nac_dot"] = self._nac_dot_from_vectors(molecule, molecule.nac)
+        self._cache_new = cache_new
+        return energies
+
+    def _compute_NACR_for_hop(self, molecule, nac_pairs):
+        if self._direct_nac_tdc:
+            cached_nac = self._select_nac_pairs(molecule.nac, nac_pairs)
+            if cached_nac is not None:
+                return cached_nac
+        pair_nac = calc_nac(
+            molecule,
+            molecule.cis_amplitudes,
+            molecule.cis_energies,
+            molecule.dm,
+            None,
+            None,
+            nac_pairs,
+            rpa=False,
+            include_response_terms=self.esdriver.conservative_force.energy.nac_config.include_response_terms,
+            w=molecule.w,
+            e_mo=molecule.e_mo,
+        )
+        return {(s1 - 1, s2 - 1): pair_nac[:, pair_idx] for pair_idx, (s1, s2) in enumerate(nac_pairs)}
+
+    def _recompute_active_force(self, molecule):
+        """Re-evaluate the current shadow geometry on the newly active root."""
+        molecule.active_state = self._active_states + 1
+        self.esdriver(
+            molecule,
+            learned_parameters=self._xlesmd_learned_parameters,
+            xl_bomd_params=self.xl_bomd_params,
+            P0=molecule.dm,
+            cis_amp=self._xl_ctx["es_amp"],
+            dm_prop=self.dmprop,
+        )
+
+    def _do_integrator_step(self, i, molecule, learned_parameters, **kwargs):
+        self._xlesmd_step_index = i
+        with torch.no_grad():
+            self._xlesmd_coords_before = molecule.coordinates.detach().clone()
+            self._xlesmd_mos_before = molecule.molecular_orbitals.detach().clone()
+        return super()._do_integrator_step(i, molecule, learned_parameters, **kwargs)
+
+    def initialize(
+        self, molecule, remove_com=None, learned_parameters=None, steps: Optional[int] = None, *args, **kwargs
+    ):
+        learned_parameters = {} if learned_parameters is None else learned_parameters
+        self._xlesmd_learned_parameters = learned_parameters
+        super().initialize(
+            molecule,
+            remove_com=remove_com,
+            learned_parameters=learned_parameters,
+            steps=steps,
+            *args,
+            **kwargs,
+        )
+
+        initial_eta = molecule.cis_amplitudes.detach().clone()
+        self.esdriver.conservative_force.energy.excited_states = None
+        self.esdriver.conservative_force.energy.xlesmd = True
+        molecule.Electronic_entropy = torch.zeros(
+            molecule.species.shape[0], dtype=molecule.coordinates.dtype, device=molecule.coordinates.device
+        )
+
+        shadow_kwargs = dict(kwargs)
+        for key in ("dm_prop", "xl_bomd_params", "P0", "cis_amp", "xlesmd_mo_transport"):
+            shadow_kwargs.pop(key, None)
+        self.esdriver(
+            molecule,
+            learned_parameters=learned_parameters,
+            xl_bomd_params=self.xl_bomd_params,
+            P0=molecule.dm,
+            cis_amp=initial_eta,
+            dm_prop=self.dmprop,
+            *args,
+            **shadow_kwargs,
+        )
+
+        with torch.no_grad():
+            P = molecule.dm.detach().clone()
+            self._xl_ctx = {
+                "P": P,
+                "Pt": P.unsqueeze(0).expand((self.m,) + P.shape).clone(),
+                "es_amp": initial_eta.clone(),
+                "es_amp_t": initial_eta.unsqueeze(0).expand((self.m,) + initial_eta.shape).clone(),
+            }
+            self._xlesmd_S_prev = self._packed_current_ao_overlap(molecule)
+            molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
+
+        self._apply_xlesmd_energy_order(molecule, self.step_offset)
+        self._copy_cache_entry(self._cache_old, "energies", self._build_state_energies(molecule))
+        if self._cache_prev_cis_amp:
+            self._copy_cache_entry(self._cache_old, "cis_amp", self._current_cis_amplitudes(molecule))
+        if self._direct_nac_tdc:
+            molecule.nac = None
+            molecule.nac = self._compute_NACR_for_hop(molecule, self._nac_pairs())
+            self._copy_cache_entry(
+                self._cache_old, "nac_dot", self._nac_dot_from_vectors(molecule, molecule.nac)
+            )
+        self._record_xlesmd_orthogonality(molecule, self.step_offset)

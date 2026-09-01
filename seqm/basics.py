@@ -1340,20 +1340,6 @@ class Energy(torch.nn.Module):
                     molecule.all_cis_unrelaxed_diploles[:, i - 1, ...] = molecule.cis_state_unrelaxed_dipole
                 molecule.active_state = init_active_state
 
-        # # Debug XL-ESMD
-        # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
-
-        # if cis_amp is not None:
-        #     get_exact_excited(molecule, w, e, cis_amp)
-        #     elec_energy_excited_xl(molecule, cis_amp, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None))
-        #     Cocc = molecule.molecular_orbitals[:, :, : molecule.nocc[0]]
-        #     Cvir = molecule.molecular_orbitals[:, :, molecule.nocc[0] :]
-        #     cis_tdm = torch.einsum("bmi,brmn,bna->bria", Cocc, cis_amp, Cvir)
-        #     cis_tdm = torch.einsum("bmi,bria,bna->brmn", Cocc, cis_tdm, Cvir)
-        #     # diff = molecule.transition_density_matrices[:, 0] - (cis_tdm + molecule.dxi2dt2)
-        #     diff = molecule.transition_density_matrices[:, 0] - (cis_tdm)
-        #     print("Difference in eta* - converged eta is ", torch.norm(diff))
-
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
             # XL-ESMD propagates eta in the MO occupied--virtual basis.  After

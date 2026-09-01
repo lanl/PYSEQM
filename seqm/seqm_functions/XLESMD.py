@@ -1,7 +1,6 @@
 import math
 from typing import Callable, Dict, Optional, Tuple
 
-import numpy as np
 import torch
 
 from .excited_state_utils import get_occ_virt
@@ -82,78 +81,6 @@ def transport_mo_transition_amplitudes(
     transported = transport_cis_amplitudes(eta, S_oo, S_vv, polar_unitarize=polar_unitarize)
     transported = transported.reshape_as(eta_prev) if flatten_output else transported
     return transported, S_curr
-
-
-def get_exact_excited(mol, w, e_mo, R):
-    nocc, nvirt, Cocc, Cvirt, ea_ei = get_occ_virt(mol, orbital_window=None, e_mo=e_mo)
-    b = R.shape[0]
-    r = R.shape[1]
-    n = nocc * nvirt
-
-    exact = mol.cis_amplitudes  # [:,mol.active_state]
-    exact_e = mol.cis_energies  # [:,mol.active_state]
-    torch.set_printoptions(precision=15)
-    print("Exact CIS energies: ", exact_e)
-
-    # --- Build eta = Xbar in MO (occ-virt) with r blocks ---
-    with torch.no_grad():
-        eta = torch.einsum("bmi,brmn,bna->bria", Cocc, R, Cvirt)
-
-    # --- Define Coulomb-exchange integral function for amplitudes ---
-    def G_apply(Y: torch.Tensor) -> torch.Tensor:
-        # Y: (b,r,nocc,nvirt) -> G(Y): (b,r,nocc,nvirt)
-        R_y = torch.einsum("bmi,bria,bna->brmn", Cocc, Y, Cvirt)
-        G_ao = makeA_pi_batched(mol, R_y, w)  # expected (b,r,m,n)
-        G_y = torch.einsum("bmi,brmn,bna->bria", Cocc, G_ao, Cvirt)
-        return 2.0 * G_y
-
-    ea_ei_flat = ea_ei.reshape(b, 1, n)
-
-    xl_bomd_params = {"max_rank": 3, "err_threshold": 1e-8}
-
-    eta_flat = eta.reshape(b, r, n)
-    print(
-        f"Raw inital tdm diff (before occ-virt subspace projection of inital guess) is {torch.linalg.vector_norm(R - mol.transition_density_matrices, dim=(-2, -1))}"
-    )
-
-    print(
-        "Before iterations: "
-        f"diff = {torch.linalg.vector_norm(eta_flat - exact, dim=-1)}, "
-        f"diff_tdm = {torch.linalg.vector_norm(torch.einsum('bmi,bria,bna->brmn', Cocc, eta_flat.view(b, r, nocc, nvirt), Cvirt) - mol.transition_density_matrices, dim=(-2, -1))}"
-        "\n"
-    )
-    for iter in range(20):
-        Gx = G_apply(eta_flat.view(b, r, nocc, nvirt))  # (b,r,nocc,nvirt)
-
-        Gx_flat = Gx.reshape(b, r, n)
-
-        # --- Solve for xi and omega ---
-        with torch.no_grad():
-            xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
-            # xi_flat: (b,r,n), omega_br: (b,r)
-
-        E1 = (xi_flat * xi_flat * ea_ei_flat).sum(dim=2)  # (b,r)
-        E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
-        E = E1 + E2  # (b,r)
-
-        # --- Compute dxi2dt2 with the full old-Jacobian GMRES kernel ---
-        # precond = make_apply_precond_rank1(ea_ei_flat, eta_flat, xi_flat, omega)
-        precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
-        jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
-        dxi2dt2_flat = compute_dxi2dt2_rankm(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
-        eta_flat = eta_flat + dxi2dt2_flat
-        print(
-            f"Iter {iter + 1}: E = {E.squeeze().cpu().numpy()}, diff = {torch.linalg.vector_norm(eta_flat - exact, dim=-1)}, "
-            # f"diff_tdm = {torch.linalg.vector_norm(torch.einsum('bmi,bria,bna->brmn', Cocc, eta_flat.view(b, r, nocc, nvirt), Cvirt) - mol.transition_density_matrices, dim=(-2, -1))}"
-        )
-        if torch.all((E - exact_e).abs() < mol.seqm_parameters["excited_states"]["cis_tol"] * 10.0):
-            print("Converged to exact energy!")
-            break
-        # # Convert to AO basis and store in mol for later use in BOMD
-        # mol.dxi2dt2 = torch.einsum(
-        #     "bmi,bria,bna->brmn", Cocc, dxi2dt2_flat.view(b, r, nocc, nvirt), Cvirt
-        # )
-    exit(0)
 
 
 def elec_energy_excited_xl(
@@ -1117,108 +1044,6 @@ def compute_dxi2dt2_projected_subspace(
         m = 1
 
     return Y.reshape(b, r, n)
-
-
-def sample_noisy_R_energy(
-    mol,
-    R,
-    w,
-    e_mo,
-    n_steps=50,
-    noise_scale=1e-5,
-    cumulative=False,
-    seed=None,
-    return_data=False,
-    plot=True,
-    fit_order=2,
-):
-    """
-    Generate noisy copies Rbar of R, compute total energy for each, and plot |R-Rbar| vs E.
-
-    Args:
-            mol: molecule object expected by elec_energy_excited_xl
-            R: torch.Tensor, original transition-density tensor (same shape used by elec_energy_excited_xl)
-            w, e_mo: arguments forwarded to elec_energy_excited_xl
-            n_steps: number of noisy samples
-            noise_scale: standard deviation of Gaussian noise added to R (absolute scale)
-            cumulative: if True, noise is added cumulatively (Rbar <- Rbar + noise). If False, noise is added to original R each sample.
-            seed: optional int seed for reproducibility
-            return_data: if True, returns (deltas, energies)
-            plot: if True, plots |R-Rbar| vs E using matplotlib
-            fit_order: polynomial order to fit to (deltas, energies) for plotting (default 2)
-
-    Returns:
-            None or (deltas, energies) if return_data=True
-    """
-    if seed is not None:
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-
-    # Work with detached copies to avoid grads / side-effects
-    R = R.clone().detach()
-    Rbar = R.clone().detach()
-    deltas = []
-    energies = []
-    Rbase = torch.randn_like(R)
-    for i in range(n_steps):
-        noise = i * noise_scale * Rbase
-        if cumulative:
-            Rbar = Rbar + noise
-        else:
-            Rbar = R + noise
-
-        with torch.no_grad():
-            E, _ = elec_energy_excited_xl(mol, Rbar, w, e_mo)
-
-        # Reduce E to a scalar for plotting: mean across batch if batched
-        if torch.is_tensor(E):
-            energy_scalar = float(E.mean().item())
-        else:
-            energy_scalar = float(np.asarray(E).mean())
-
-        delta = float(torch.linalg.norm(R - Rbar).item())
-
-        deltas.append(delta)
-        energies.append(energy_scalar)
-        # print(f"Step {i+1}/{n_steps}: |R-Rbar| = {delta:.6e}, E = {energy_scalar:.6e}")
-
-    if plot:
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            raise RuntimeError("Plotting requires matplotlib. Install it with `pip install matplotlib`.")
-        plt.figure()
-        plt.plot(deltas, energies, marker="o", linestyle="-", label="data")
-        plt.xlabel("|R - Rbar| (transition density error)")
-        plt.ylabel("E")
-        plt.title("Energy vs Error in transition density")
-
-        # Fit an n-th order polynomial if there are enough points
-        try:
-            if len(deltas) > fit_order:
-                x = np.array(deltas)
-                y = np.array(energies)
-                # compute polynomial coefficients (highest degree first)
-                coeffs = np.polyfit(x, y, fit_order)
-                print("Fitted polynomial coefficients (highest degree first):", coeffs)
-                p = np.poly1d(coeffs)
-                # sort for a smooth curve
-                idx = np.argsort(x)
-                xs = x[idx]
-                ys = p(xs)
-                plt.plot(xs, ys, color="red", linestyle="--", label=f"polynomial fit (order={fit_order})")
-                plt.legend()
-        except Exception:
-            # don't fail plotting if fit fails; still show raw data
-            pass
-
-        plt.grid(True)
-        plt.show()
-
-    exit()
-
-    if return_data:
-        return deltas, energies
 
 
 def solve_for_amplitude_omega_newton(
