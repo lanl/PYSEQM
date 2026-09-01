@@ -16,10 +16,12 @@ from seqm.basics import Force
 from seqm.dynamics.active_state import active_state_tensor
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
 from seqm.seqm_functions.fock import enable_fock_compile
+from seqm.seqm_functions.hcore import overlap_matrix_current_geometry
 from seqm.seqm_functions.omx_utils import OMX_METHODS
-from seqm.seqm_functions.rcis_batch import enable_rcis_compile
+from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, enable_rcis_compile, packone_batch
 from seqm.seqm_functions.spherical_pot_force import Spherical_Pot_Force
 from seqm.seqm_functions.two_elec_two_center_int import enable_two_center_compile
+from seqm.seqm_functions.XLESMD import transport_mo_transition_amplitudes
 from seqm.utils.torch_compile import normalize_torch_compile_config
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -1309,6 +1311,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "es_amp_t": self._tensor_cpu(self._xl_ctx.get("es_amp_t")),
                 "xl_E_t": self._tensor_cpu(self._xl_ctx.get("xl_E_t")),
             }
+            if isinstance(self, XL_ESMD) and torch.is_tensor(getattr(self, "_xlesmd_S_prev", None)):
+                ckpt["xlesmd_S_prev"] = self._tensor_cpu(self._xlesmd_S_prev)
             if isinstance(molecule.dP2dt2, torch.Tensor):
                 ckpt["dP2dt2"] = self._tensor_cpu(molecule.dP2dt2)
 
@@ -1333,6 +1337,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             "Molecular_Dynamics_Langevin": Molecular_Dynamics_Langevin,
             "XL_BOMD": XL_BOMD,
             "KSA_XL_BOMD": KSA_XL_BOMD,
+            "XL_ESMD": XL_ESMD,
         }
 
         if md_type not in md_classes:
@@ -1341,14 +1346,14 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         md_cls = md_classes[md_type]
         kwargs = Molecular_Dynamics_Basic._checkpoint_init_kwargs(ckpt)
 
-        if md_type in ("Molecular_Dynamics_Langevin", "XL_BOMD", "KSA_XL_BOMD"):
+        if md_type in ("Molecular_Dynamics_Langevin", "XL_BOMD", "KSA_XL_BOMD", "XL_ESMD"):
             kwargs["damp"] = ckpt["damp"]
-        if md_type in ("XL_BOMD", "KSA_XL_BOMD"):
+        if md_type in ("XL_BOMD", "KSA_XL_BOMD", "XL_ESMD"):
             kwargs["xl_bomd_params"] = ckpt["xl_bomd_params"]
 
         md = md_cls(**kwargs).to(device)
 
-        if md_type in ("XL_BOMD", "KSA_XL_BOMD"):
+        if md_type in ("XL_BOMD", "KSA_XL_BOMD", "XL_ESMD"):
             xl = ckpt["xl_ctx"]
             Pt = xl["Pt"].to(device)
             es_amp_t = xl.get("es_amp_t")
@@ -1372,6 +1377,8 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 # "xl_E": xl_E,
                 # "xl_E_t": xl_E_t,
             }
+            if md_type == "XL_ESMD" and isinstance(ckpt.get("xlesmd_S_prev"), torch.Tensor):
+                md._xlesmd_S_prev = ckpt["xlesmd_S_prev"].to(device)
 
         Molecular_Dynamics_Basic._restore_rng(ckpt)
         md.run(molecule=molecule, steps=ckpt["steps"], reuse_P=reuse_P, remove_com=ckpt["remove_com"])
@@ -1807,10 +1814,10 @@ class XL_BOMD(Molecular_Dynamics_Langevin):
 
             if self.move_on_excited_state:
                 if do_xl_esmd:
-                    # Independent-state XL-ESMD propagates AO transition densities.
-                    es_amp = molecule.transition_density_matrices.clone()
-                    # Coupled/MO-amplitude propagation retained for later:
-                    # es_amp = molecule.cis_amplitudes.clone()
+                    # XL-ESMD propagates eta (or a coupled eta block) in MO space.
+                    es_amp = molecule.cis_amplitudes.clone()
+                    # AO transition-density path retained for comparison:
+                    # es_amp = molecule.transition_density_matrices.clone()
                     # xl_E = molecule.cis_energies.clone()
                     # xl_E_t = xl_E.unsqueeze(0).expand((self.m,) + xl_E.shape).clone()
                 else:
@@ -1838,6 +1845,69 @@ class KSA_XL_BOMD(XL_BOMD):
 class XL_ESMD(XL_BOMD):
     """XL-BOMD for excited state MD."""
 
+    def __init__(self, damp=None, xl_bomd_params=None, *args, **kwargs):
+        """Construct XL-ESMD with a conservative shadow-force implementation.
+
+        The hand-derived shadow CIS gradient is exact at ``xi == eta`` but is
+        not yet correct off shell.  XL dynamics necessarily samples off-shell
+        amplitudes, so the default uses the verified SCF-response autodiff
+        derivative of the variational shadow energy.  Direct differentiation
+        through the converged SCF iterations (``scf_backward=2``) is the
+        default; implicit response (``scf_backward=1``) is selectable for
+        comparison.  The old analytical path
+        remains available only through the explicit
+        ``force_mode='experimental_analytic'`` opt-in.
+        """
+        xl_bomd_params = {} if xl_bomd_params is None else dict(xl_bomd_params)
+        force_mode = str(xl_bomd_params.get("force_mode", "autodiff")).lower()
+        if force_mode not in {"autodiff", "experimental_analytic"}:
+            raise ValueError("XL-ESMD force_mode must be 'autodiff' or 'experimental_analytic'.")
+
+        seqm_parameters = kwargs.get("seqm_parameters")
+        positional_parameters = False
+        args = list(args)
+        if seqm_parameters is None and args and isinstance(args[0], dict):
+            seqm_parameters = args[0]
+            positional_parameters = True
+        if seqm_parameters is None:
+            raise ValueError("XL_ESMD requires seqm_parameters.")
+        # The MD object owns its parameter copy: selecting either force path
+        # must not mutate a caller's Electronic_Structure configuration.
+        seqm_parameters = dict(seqm_parameters)
+        if isinstance(seqm_parameters.get("excited_states"), dict):
+            seqm_parameters["excited_states"] = dict(seqm_parameters["excited_states"])
+
+        if force_mode == "autodiff":
+            scf_backward = int(xl_bomd_params.get("scf_backward", seqm_parameters.get("scf_backward", 2)))
+            if scf_backward not in {1, 2}:
+                raise ValueError(
+                    "Autodiff XL-ESMD forces require scf_backward=1 (implicit response) "
+                    "or scf_backward=2 (differentiate through the SCF iterations)."
+                )
+            seqm_parameters["scf_backward"] = scf_backward
+            seqm_parameters["analytical_gradient"] = [False]
+        else:
+            # 1a, 1b, and ordered linearized XL-ESMD use the hand-derived
+            # relaxed-density/Z-vector gradient.  Raw coupled 2a/2b reject it
+            # in the electronic driver because their variational force is the
+            # total block force instead of a selected-root force.
+            seqm_parameters["analytical_gradient"] = [True]
+
+        if positional_parameters:
+            args[0] = seqm_parameters
+        else:
+            kwargs["seqm_parameters"] = seqm_parameters
+
+        super().__init__(damp, xl_bomd_params, *tuple(args), **kwargs)
+        self.xlesmd_force_mode = force_mode
+        self.xlesmd_scf_backward = self.seqm_parameters.get("scf_backward", 0)
+
+    @staticmethod
+    def _packed_current_ao_overlap(molecule):
+        """Packed AO metric used as the previous-overlap cache for MO transport."""
+        nheavy, nhydro, norb, _ = _uniform_molecule_dimensions(molecule)
+        return packone_batch(overlap_matrix_current_geometry(molecule), 4 * nheavy, nhydro, norb)
+
     def _propagate_excited_state(self, es_amp, es_amp_t, cindx, molecule):
         """Propagate excited state transition density matrices."""
         if getattr(molecule, "dxi2dt2", None) is None:
@@ -1852,7 +1922,7 @@ class XL_ESMD(XL_BOMD):
         return es_new
 
     def _propagate_excited_amp(self, es_amp, es_amp_t, cindx, molecule):
-        """Propagate excited state transition density matrices."""
+        """Propagate occupied--virtual XL-ESMD amplitude blocks."""
         if getattr(molecule, "dxi2dt2", None) is None:
             c = 0.95
             es_new = self.coeff_D * (c * molecule.cis_amplitudes + (1.0 - c) * es_amp) + torch.sum(
@@ -1862,6 +1932,49 @@ class XL_ESMD(XL_BOMD):
             es_new = self.coeff_D * (molecule.dxi2dt2 + es_amp) + torch.sum(
                 self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1) * es_amp_t, dim=0
             )
+        # Raw coupled 2a/2b represent a state *subspace*.  Their physical
+        # coordinates live on the row-Stiefel manifold, while finite-step XL
+        # history recurrences can accumulate an unphysical radial component.
+        # Retraction is therefore the default for raw coupled modes.  Ordered
+        # labelled roots use the separate order-preserving retraction below;
+        # independent roots remain unconstrained.
+        coupled_mode = str(self.xl_bomd_params.get("constraint_mode", "")).strip().lower()
+        if self.xl_bomd_params.get("coupled_retract_auxiliary", True) and coupled_mode in {
+            "2a",
+            "2b",
+            "case_2a",
+            "case_2b",
+            "coupled_linearized",
+            "coupled_exact",
+        }:
+            overlap = es_new @ es_new.transpose(-1, -2)
+            values, vectors = torch.linalg.eigh(overlap)
+            minimum = torch.finfo(es_new.dtype).eps * torch.linalg.matrix_norm(overlap, ord=2).clamp_min(1.0)
+            if torch.any(values <= minimum[:, None]):
+                raise RuntimeError("Coupled XL-ESMD auxiliary block became rank deficient before retraction.")
+            inv_sqrt = vectors @ torch.diag_embed(values.rsqrt()) @ vectors.transpose(-1, -2)
+            es_new = inv_sqrt @ es_new
+        elif self.xl_bomd_params.get("ordered_retract_auxiliary", True) and coupled_mode in {
+            "ordered_linearized"
+        }:
+            # Ordered Case 2a keeps labelled adiabatic roots.  A polar
+            # retraction would freely mix them, so use row Gram--Schmidt in
+            # ascending-state order instead.  The recurrence otherwise lets
+            # the inactive roots acquire enormous norm/overlap errors even
+            # though the active root force looks superficially stable.
+            rows = []
+            minimum = torch.finfo(es_new.dtype).eps
+            for state in range(es_new.shape[1]):
+                row = es_new[:, state]
+                for previous in rows:
+                    row = row - torch.sum(row * previous, dim=-1, keepdim=True) * previous
+                norm = torch.linalg.vector_norm(row, dim=-1, keepdim=True)
+                if torch.any(norm <= minimum):
+                    raise RuntimeError(
+                        "Ordered XL-ESMD auxiliary block became linearly dependent before retraction."
+                    )
+                rows.append(row / norm)
+            es_new = torch.stack(rows, dim=1)
         return es_new
 
     def _propagate_xl_E(self, xl_E, xl_E_t, cindx, molecule):
@@ -1885,6 +1998,21 @@ class XL_ESMD(XL_BOMD):
         if self.damp:
             self._apply_langevin_thermostat(molecule)
 
+        if not torch.is_tensor(getattr(molecule, "molecular_orbitals", None)):
+            raise RuntimeError("XL-ESMD MO propagation requires molecular orbitals from the previous step.")
+        with torch.no_grad():
+            coords_prev = molecule.coordinates.detach().clone()
+            mos_prev = molecule.molecular_orbitals.detach().clone()
+            S_prev = getattr(self, "_xlesmd_S_prev", None)
+            if S_prev is None:
+                S_prev = self._packed_current_ao_overlap(molecule)
+            # Propagated amplitudes are expressed in the previous canonical
+            # MO basis.  Transport them to the new canonical basis before
+            # evaluating the shadow functional; an opt-out is retained only
+            # for diagnosing gauge-sensitive experiments.
+            transport_auxiliary = bool(self.xl_bomd_params.get("transport_mo_auxiliary", True))
+            polar_unitarize = bool(self.xl_bomd_params.get("polar_unitarize_mo_transport", True))
+
         with torch.no_grad():
             molecule.velocities.add_(0.5 * molecule.acc * dt)
             molecule.coordinates.add_(molecule.velocities * dt)
@@ -1893,10 +2021,11 @@ class XL_ESMD(XL_BOMD):
             P = self._propagate_P(P, Pt, cindx, molecule)
             Pt[(self.m - 1 - cindx)] = P
 
-            # Propagate each AO transition-density root independently.
-            es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
-            # Coupled/MO-amplitude alternative retained for later:
-            # es_amp = self._propagate_excited_amp(es_amp, es_amp_t, cindx, molecule)
+            # Propagate the eta block in the previous MO basis.  For raw
+            # coupled modes, dxi2dt2 is already subspace-tangent projected.
+            es_amp = self._propagate_excited_amp(es_amp, es_amp_t, cindx, molecule)
+            # AO transition-density path retained for comparison:
+            # es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
             es_amp_t[(self.m - 1 - cindx)] = es_amp
             # xl_E = self._propagate_xl_E(xl_E, xl_E_t, cindx, molecule)
             # xl_E_t[(self.m - 1 - cindx)] = xl_E
@@ -1920,16 +2049,35 @@ class XL_ESMD(XL_BOMD):
             P0=P0,
             cis_amp=es_amp,
             dm_prop=dm_prop,
+            xlesmd_mo_transport=(coords_prev, mos_prev, S_prev, polar_unitarize)
+            if transport_auxiliary
+            else None,
             # xl_E=xl_E,
             *args,
             **kwargs,
         )
 
-        # The coupled solver replaces the history with its orthogonalized
-        # multi-state coordinate (molecule.xl_eta_Q).  Keep the independent
-        # propagated AO state in the history instead.
-        # es_amp_t[(self.m - 1 - cindx)] = molecule.xl_eta_Q
-        # es_amp = molecule.xl_eta_Q
+        # The driver has now constructed the MOs at R(n+1).  Transport every
+        # history entry from the shared R(n) MO basis into that new basis so the
+        # next XL recurrence combines amplitudes expressed in one coordinate system.
+        if transport_auxiliary:
+            with torch.no_grad():
+                history_shape = es_amp_t.shape
+                history_flat = es_amp_t.permute(1, 0, 2, 3).reshape(history_shape[1], -1, history_shape[-1])
+                history_flat, S_curr = transport_mo_transition_amplitudes(
+                    molecule, history_flat, coords_prev, mos_prev, S_prev, polar_unitarize=polar_unitarize
+                )
+                es_amp_t = history_flat.reshape(
+                    history_shape[1], history_shape[0], history_shape[2], history_shape[3]
+                ).permute(1, 0, 2, 3)
+                es_amp, _ = transport_mo_transition_amplitudes(
+                    molecule, es_amp, coords_prev, mos_prev, S_prev, polar_unitarize=polar_unitarize
+                )
+                # Keep the unprojected propagated amplitudes in the XL history.
+                # Sequential locking is an electronic-solve correction only: it
+                # must not alter the auxiliary recurrence unless we explicitly
+                # formulate a constrained XL integrator for every history slice.
+                self._xlesmd_S_prev = S_curr
 
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
@@ -1983,6 +2131,37 @@ class XL_ESMD(XL_BOMD):
         self.esdriver.conservative_force.energy.xlesmd = True
         # self.dmprop = kwargs.get("dmprop","XL-BOMD")
         self.dmprop = kwargs.get("dmprop", "SCF")
+
+        if self.step_offset == 0:
+            initial_eta = molecule.cis_amplitudes.detach().clone()
+            # ``super().initialize`` obtains exact CIS amplitudes, but its force
+            # is evaluated through the ordinary excited-state path.  Re-evaluate
+            # once with the selected shadow functional so the first Verlet
+            # half-step uses the same potential as all subsequent XL-ESMD steps.
+            shadow_kwargs = dict(kwargs)
+            for key in ("dm_prop", "xl_bomd_params", "P0", "cis_amp", "xlesmd_mo_transport"):
+                shadow_kwargs.pop(key, None)
+            self.esdriver(
+                molecule,
+                learned_parameters=learned_parameters,
+                xl_bomd_params=self.xl_bomd_params,
+                P0=molecule.dm,
+                cis_amp=initial_eta,
+                dm_prop=self.dmprop,
+                *args,
+                **shadow_kwargs,
+            )
+
+        with torch.no_grad():
+            self._xlesmd_S_prev = self._packed_current_ao_overlap(molecule)
+            if self.step_offset == 0:
+                P = molecule.dm.clone()
+                self._xl_ctx["P"] = P
+                self._xl_ctx["Pt"] = P.unsqueeze(0).expand((self.m,) + P.shape).clone()
+                self._xl_ctx["es_amp"] = initial_eta.clone()
+                self._xl_ctx["es_amp_t"] = (
+                    initial_eta.unsqueeze(0).expand((self.m,) + initial_eta.shape).clone()
+                )
 
 
 """

@@ -5,7 +5,83 @@ import numpy as np
 import torch
 
 from .excited_state_utils import get_occ_virt
-from .rcis_batch import makeA_pi_batched
+from .hcore import (
+    orthogonalized_overlap_from_matrices,
+    overlap_between_geometries,
+    overlap_matrix_current_geometry,
+)
+from .rcis_batch import _uniform_molecule_dimensions, makeA_pi_batched, packone_batch
+
+
+def transport_cis_amplitudes(
+    eta: torch.Tensor,
+    occupied_overlap: torch.Tensor,
+    virtual_overlap: torch.Tensor,
+    *,
+    polar_unitarize: bool = True,
+) -> torch.Tensor:
+    """Transport occupied--virtual amplitudes between two MO gauges.
+
+    The leading dimensions of ``eta`` are arbitrary; its final two dimensions
+    are occupied and virtual indices.  The overlap blocks map old MOs into the
+    new gauge.  Keeping this algebra separate from the geometry-dependent
+    overlap construction makes gauge transport directly testable.
+    """
+    if eta.shape[-2:] != (occupied_overlap.shape[-1], virtual_overlap.shape[-1]):
+        raise ValueError("eta's final dimensions must match the occupied and virtual overlap blocks")
+
+    S_oo = occupied_overlap
+    S_vv = virtual_overlap
+    if polar_unitarize:
+        U_oo, _, Vh_oo = torch.linalg.svd(S_oo, full_matrices=False)
+        U_vv, _, Vh_vv = torch.linalg.svd(S_vv, full_matrices=False)
+        S_oo = U_oo @ Vh_oo
+        S_vv = U_vv @ Vh_vv
+
+    while S_oo.dim() < eta.dim():
+        S_oo = S_oo.unsqueeze(-3)
+        S_vv = S_vv.unsqueeze(-3)
+    return S_oo @ eta @ S_vv.transpose(-1, -2)
+
+
+def transport_mo_transition_amplitudes(
+    mol, eta_prev, coords_prev, mos_prev, S_prev, *, polar_unitarize: bool = True
+):
+    """Transport CIS amplitudes from the previous to the current MO basis.
+
+    ``eta_prev`` has shape ``(batch, roots, nov)`` or
+    ``(batch, roots, nocc, nvirt)`` and is transformed independently for every
+    root as ``S_oo @ eta_prev @ S_vv.T``.  ``S_prev`` is the packed AO overlap
+    at the previous geometry.  The returned ``S_curr`` should be saved and
+    passed as ``S_prev`` on the next step.  With ``polar_unitarize=True``,
+    occupied and virtual overlap blocks are replaced by their nearest
+    orthogonal matrices before transporting the amplitudes.
+    """
+    _, _, norb, nocc = _uniform_molecule_dimensions(mol)
+    nvirt = norb - nocc
+    nov = nocc * nvirt
+    if eta_prev.dim() == 3 and eta_prev.shape[-1] == nov:
+        eta = eta_prev.view(int(mol.nmol), eta_prev.shape[1], nocc, nvirt)
+        flatten_output = True
+    elif eta_prev.dim() == 4 and eta_prev.shape[-2:] == (nocc, nvirt):
+        eta = eta_prev
+        flatten_output = False
+    else:
+        raise ValueError("eta_prev must have shape (batch, roots, nov) or (batch, roots, nocc, nvirt)")
+
+    pack_spec = (4 * mol.nHeavy[0], mol.nHydro[0], norb)
+    coords_curr = mol.coordinates.detach()
+    S_curr = packone_batch(overlap_matrix_current_geometry(mol), *pack_spec)
+    S_cross = packone_batch(overlap_between_geometries(mol, coords_curr, coords_prev), *pack_spec)
+    S_ao = orthogonalized_overlap_from_matrices(S_curr, S_cross, S_prev)
+    C_curr = mol.molecular_orbitals
+    C_prev = mos_prev
+    S_mo = C_curr.transpose(1, 2) @ (S_ao @ C_prev)
+    S_oo = S_mo[:, :nocc, :nocc]
+    S_vv = S_mo[:, nocc:, nocc:]
+    transported = transport_cis_amplitudes(eta, S_oo, S_vv, polar_unitarize=polar_unitarize)
+    transported = transported.reshape_as(eta_prev) if flatten_output else transported
+    return transported, S_curr
 
 
 def get_exact_excited(mol, w, e_mo, R):
@@ -60,7 +136,7 @@ def get_exact_excited(mol, w, e_mo, R):
         E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
         E = E1 + E2  # (b,r)
 
-        # --- Compute dxi2dt2 via rank-m Krylov ---
+        # --- Compute dxi2dt2 with the full old-Jacobian GMRES kernel ---
         # precond = make_apply_precond_rank1(ea_ei_flat, eta_flat, xi_flat, omega)
         precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
         jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
@@ -87,6 +163,7 @@ def elec_energy_excited_xl(
     w,
     e_mo,
     xl_bomd_params: Optional[Dict] = None,
+    sequential_lock: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute excited-state electronic energy and amplitudes with XL-ESMD approach
@@ -122,26 +199,51 @@ def elec_energy_excited_xl(
         G_y = torch.einsum("bmi,brmn,bna->bria", Cocc, G_ao, Cvirt)
         return 2.0 * G_y
 
-    Gx = G_apply(eta)  # (b,r,nocc,nvirt)
-
     eta_flat = eta.reshape(b, r, n)
-    Gx_flat = Gx.reshape(b, r, n)
     ea_ei_flat = ea_ei.reshape(b, 1, n)
 
-    # --- Solve for xi and omega ---
+    constraint_mode = "independent_linearized"
+    if xl_bomd_params is not None:
+        constraint_mode = str(xl_bomd_params.get("constraint_mode", constraint_mode)).lower()
+    if sequential_lock:
+        constraint_mode = "ordered_linearized"
+
+    valid_modes = {"independent_linearized", "independent_exact", "ordered_linearized"}
+    if constraint_mode not in valid_modes:
+        raise ValueError(
+            f"Unknown XL-ESMD constraint_mode={constraint_mode!r}; expected one of {sorted(valid_modes)}"
+        )
+
+    # --- Solve for xi and multipliers ---
     with torch.no_grad():
         # xi_flat: (b,r,n), omega_br: (b,r)
+        if constraint_mode == "ordered_linearized":
+            xi_flat, omega = solve_for_amplitudes_ordered(
+                eta_flat, ea_ei_flat, lambda eta_s: G_apply(eta_s.view(b, r, nocc, nvirt)).reshape(b, r, n)
+            )
+        elif constraint_mode == "independent_exact":
+            Gx_flat = G_apply(eta).reshape(b, r, n)
+            omega_init = getattr(mol, "xlesmd_multipliers", None)
+            if not (torch.is_tensor(omega_init) and omega_init.shape == (b, r)):
+                omega_init = None
+            xi_flat, omega = solve_for_amplitude_omega_newton(
+                eta_flat, ea_ei_flat, Gx_flat, omega_init=omega_init
+            )
+        else:
+            Gx_flat = G_apply(eta).reshape(b, r, n)
+            xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
+        mol.xlesmd_multipliers = omega.detach().clone()
 
-        xi_flat, omega = solve_for_amplitude_omega(eta_flat, ea_ei_flat, Gx_flat)
+    Gx_flat = G_apply(eta_flat.view(b, r, nocc, nvirt)).reshape(b, r, n)
 
-        # if hasattr(mol, "omega_xl"):
-        #     omega_init = mol.omega_xl
-        # else:
-        #     omega_init = mol.cis_energies
-        # xi_flat, omega = solve_for_amplitude_omega_newton(eta_flat, ea_ei_flat, Gx_flat, omega_init)
-        # mol.omega_xl = omega
+    # if hasattr(mol, "omega_xl"):
+    #     omega_init = mol.omega_xl
+    # else:
+    #     omega_init = mol.cis_energies
+    # xi_flat, omega = solve_for_amplitude_omega_newton(eta_flat, ea_ei_flat, Gx_flat, omega_init)
+    # mol.omega_xl = omega
 
-        # xi_flat = refine_orthogonalize_delta3(xi_flat)
+    # xi_flat = refine_orthogonalize_delta3(xi_flat)
 
     E1 = (xi_flat * xi_flat * ea_ei_flat).sum(dim=2)  # (b,r)
     E2 = ((2.0 * xi_flat - eta_flat) * Gx_flat).sum(dim=2)  # (b,r)
@@ -154,11 +256,69 @@ def elec_energy_excited_xl(
         # --- Compute dxi2dt2 via rank-m Krylov ---
         if xl_bomd_params is not None and "max_rank" in xl_bomd_params:
             with torch.no_grad():
-                # The JVP/Krylov path below acts on each (molecule, root)
-                # Each (molecule, root) is propagated independently.
-                precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
-                jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
-                dxi2dt2_flat = compute_dxi2dt2_rankm(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
+                # # The JVP/Krylov path below acts on each (molecule, root)
+                # # Each (molecule, root) is propagated independently.
+                # precond = make_apply_precond_diagonal(ea_ei_flat, eta_flat, omega)
+                # jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
+                # dxi2dt2_flat = compute_dxi2dt2_rankm(eta_flat, xi_flat, jvp_xi, xl_bomd_params, precond)
+
+                if constraint_mode == "ordered_linearized":
+                    jvp_xi = make_jvp_xi_ordered(ea_ei_flat, eta_flat, omega, G_apply, nocc, nvirt)
+                elif constraint_mode == "independent_exact":
+                    jvp_xi = make_jvp_xi_full_normalized(
+                        ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt
+                    )
+                else:
+                    jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
+
+                # The diagonal orbital-gap/multiplier response is a cheap
+                # approximation to (J_xi - I)^-1.  The GMRES operator is
+                # (I-J_xi), so use its negative as a right preconditioner.
+                preconditioner_name = str(xl_bomd_params.get("krylov_preconditioner", "none")).lower()
+                preconditioner = None
+                if preconditioner_name == "none":
+                    pass
+                elif preconditioner_name == "diagonal":
+                    tau = float(xl_bomd_params.get("preconditioner_tau", 1.0e-5))
+                    preconditioner_omega = (
+                        torch.diagonal(omega, dim1=-2, dim2=-1) if omega.ndim == 3 else omega
+                    )
+                    kernel_inverse = make_apply_precond_diagonal(
+                        ea_ei_flat, eta_flat, preconditioner_omega, tau=tau
+                    )
+
+                    def preconditioner(v):
+                        return -kernel_inverse(v.reshape(b * r, n)).reshape(b, r, n)
+
+                elif preconditioner_name == "rank1":
+                    tau = float(xl_bomd_params.get("preconditioner_tau", 1.0e-5))
+                    preconditioner_omega = (
+                        torch.diagonal(omega, dim1=-2, dim2=-1) if omega.ndim == 3 else omega
+                    )
+                    kernel_inverse = make_apply_precond_rank1(
+                        ea_ei_flat, eta_flat, xi_flat, preconditioner_omega, tau=tau
+                    )
+
+                    def preconditioner(v):
+                        return -kernel_inverse(v.reshape(b * r, n)).reshape(b, r, n)
+
+                else:
+                    raise ValueError("krylov_preconditioner must be 'none', 'diagonal', or 'rank1'.")
+
+                dxi2dt2_flat, krylov_info = compute_dxi2dt2_old_jacobian_gmres(
+                    eta_brn=eta_flat,
+                    xi_brn=xi_flat,
+                    nu_br=omega,
+                    ea_ei_flat=ea_ei_flat,
+                    G_apply=G_apply,
+                    nocc=nocc,
+                    nvirt=nvirt,
+                    xl_params=xl_bomd_params,
+                    jvp_xi=jvp_xi,
+                    preconditioner=preconditioner,
+                    return_info=True,
+                )
+                mol.Krylov_Error = krylov_info["relative_residual"]
 
                 # Convert to AO basis and store in mol for later use in BOMD
                 if MO_basis:
@@ -167,17 +327,38 @@ def elec_energy_excited_xl(
                     mol.dxi2dt2 = torch.einsum(
                         "bmi,bria,bna->brmn", Cocc, dxi2dt2_flat.view(b, r, nocc, nvirt), Cvirt
                     )
-    # Check if xi are orthogonal in a batch
-    dot_xi = torch.einsum("brn,bRn->brR", xi_flat, xi_flat)  # (b,r,r)
-    print("Xi dot product matrix (should be close to identity):\n", dot_xi)
-    # dot_eta = torch.einsum("brn,bRn->brR", eta_flat, eta_flat)  # (b,r,r)
-    # print("Eta dot product matrix (should be close to identity):\n", dot_eta)
-    print(
-        "Deviation of xi from orthogonality (should be close to diagonal): ",
-        torch.linalg.norm(dot_xi - torch.eye(r, device=xi_flat.device).unsqueeze(0)),
-    )
-    # Check if xi is smooth with previous xi
-    print("Overlap of xi with previous xi", torch.sum(xi_flat * mol.cis_amplitudes, dim=2))  # (b,r)
+        else:
+            mol.dxi2dt2 = None
+
+        identity = torch.eye(r, dtype=eta_flat.dtype, device=eta_flat.device).unsqueeze(0)
+        diagnostics = {
+            "constraint_mode": constraint_mode,
+            "fixed_point_residual": torch.linalg.vector_norm(xi_flat - eta_flat, dim=-1),
+            "eta_orthogonality": torch.linalg.matrix_norm(eta_flat @ eta_flat.transpose(-1, -2) - identity),
+            "xi_orthogonality": torch.linalg.matrix_norm(xi_flat @ xi_flat.transpose(-1, -2) - identity),
+        }
+        if constraint_mode == "independent_exact":
+            diagnostics["minimum_pole_distance"] = torch.amin(
+                torch.abs(ea_ei_flat - omega.unsqueeze(-1)), dim=-1
+            )
+        if xl_bomd_params is not None and "max_rank" in xl_bomd_params:
+            diagnostics.update(
+                krylov_rank=krylov_info["rank"],
+                krylov_relative_residual=krylov_info["relative_residual"],
+                krylov_converged=krylov_info["converged"],
+                krylov_kernel_gain=krylov_info["kernel_gain"],
+                krylov_kernel_gain_scale=krylov_info["kernel_gain_scale"],
+                krylov_preconditioner=preconditioner_name,
+            )
+        mol.xlesmd_diagnostics = diagnostics
+    if xl_bomd_params is not None and xl_bomd_params.get("verbose_xlesmd", False):
+        dot_xi = torch.einsum("brn,bRn->brR", xi_flat, xi_flat)
+        identity = torch.eye(r, dtype=xi_flat.dtype, device=xi_flat.device).unsqueeze(0)
+        print("XL-ESMD constraint mode:", constraint_mode)
+        print("Xi overlap matrix:\n", dot_xi)
+        print("Xi orthogonality residual:", torch.linalg.norm(dot_xi - identity))
+        if torch.is_tensor(getattr(mol, "cis_amplitudes", None)):
+            print("Overlap of xi with previous xi", torch.sum(xi_flat * mol.cis_amplitudes, dim=2))
 
     return E, xi_AO, xi_flat
 
@@ -343,6 +524,194 @@ def solve_for_amplitude_omega(
     return xi, omega
 
 
+def solve_for_amplitudes_sequentially_locked(
+    eta: torch.Tensor,
+    ea_ei: torch.Tensor,
+    G_apply_one: Callable[[torch.Tensor], torch.Tensor],
+    eps: float = 1e-12,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Solve XL-ESMD roots sequentially, locking each converged ``xi``.
+
+    Root ``s`` is constrained to be Euclidean-orthogonal to all earlier roots.
+    The auxiliary input is projected against the normalized locked roots before
+    solving, and the constrained equations are solved through their small Schur
+    complement rather than by projecting a finished solution afterward.
+    """
+    if torch.any(ea_ei < 1e-14):
+        raise RuntimeError("HOMO-LUMO gaps are too small for a stable XL-ESMD kernel calculation.")
+
+    b, r, n = eta.shape
+    invD = 1.0 / ea_ei.expand(b, r, n)[:, 0]
+    xi_out = torch.empty_like(eta)
+    eta_out = torch.empty_like(eta)
+    omega_out = torch.empty((b, r), dtype=eta.dtype, device=eta.device)
+    locked = []
+
+    for root in range(r):
+        eta_root = eta[:, root]
+        if locked:
+            L = torch.stack(locked, dim=1)  # (b, nlocked, n), Euclidean-orthonormal rows
+            overlap = torch.einsum("bln,bn->bl", L, eta_root)
+            eta_root = eta_root - torch.einsum("bln,bl->bn", L, overlap)
+        else:
+            L = None
+
+        eta_norm = torch.linalg.vector_norm(eta_root, dim=1)
+        if torch.any(eta_norm < eps):
+            raise RuntimeError(
+                f"XL-ESMD sequential locking removed all of root {root}'s auxiliary amplitude."
+            )
+
+        G_root = G_apply_one(eta_root)
+        a = torch.sum(eta_root * invD * eta_root, dim=1)
+        g_eta = torch.sum(eta_root * invD * G_root, dim=1)
+        q = 1.0 + torch.sum(eta_root * eta_root, dim=1)
+
+        if L is None:
+            omega_root = (q + 2.0 * g_eta) / (2.0 * a.clamp_min(eps))
+            xi_root = invD * (-G_root + eta_root * omega_root.unsqueeze(-1))
+        else:
+            # D xi - omega eta + L lambda = -G,
+            # 2 eta^T xi = 1 + eta^T eta, and L^T xi = 0.
+            bvec = torch.einsum("bn,bln->bl", eta_root * invD, L)
+            C = torch.einsum("bln,bmn->blm", L * invD.unsqueeze(1), L)
+            g_L = torch.einsum("bln,bn->bl", L, invD * G_root)
+            nlocked = L.shape[1]
+            schur = torch.empty((b, nlocked + 1, nlocked + 1), dtype=eta.dtype, device=eta.device)
+            schur[:, 0, 0] = 2.0 * a
+            schur[:, 0, 1:] = -2.0 * bvec
+            schur[:, 1:, 0] = -bvec
+            schur[:, 1:, 1:] = C
+            rhs = torch.cat([(q + 2.0 * g_eta).unsqueeze(1), -g_L], dim=1)
+            solution = torch.linalg.solve(schur, rhs.unsqueeze(-1)).squeeze(-1)
+            omega_root = solution[:, 0]
+            lamb = solution[:, 1:]
+            xi_root = invD * (
+                -G_root + eta_root * omega_root.unsqueeze(-1) - torch.einsum("bln,bl->bn", L, lamb)
+            )
+
+        # Normalize only the locked copy: xi_root itself remains the exact
+        # constrained XL solution used in the energy expression.
+        lock_root = xi_root / torch.linalg.vector_norm(xi_root, dim=1, keepdim=True).clamp_min(eps)
+        locked.append(lock_root)
+        eta_out[:, root] = eta_root
+        xi_out[:, root] = xi_root
+        omega_out[:, root] = omega_root
+
+    return xi_out, omega_out, eta_out
+
+
+def solve_for_amplitudes_ordered(
+    eta: torch.Tensor,
+    ea_ei: torch.Tensor,
+    G_apply: Callable[[torch.Tensor], torch.Tensor],
+    eps: float = 1e-12,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Case 2a with ordered (lower-state) linearized constraints.
+
+    State ``i`` obeys
+
+        eta_j.T xi_i = 1/2 (delta_ij + eta_j.T eta_i),  j <= i.
+
+    This removes the internal state-rotation gauge of the raw block solve while
+    retaining only diagonal applications and small leading-block solves.
+    Multipliers are returned in a lower-triangular ``(batch, roots, roots)``
+    tensor, with row ``i`` holding the constraints used for state ``i``.
+    """
+    if eta.ndim != 3:
+        raise ValueError("eta must have shape (batch, roots, excitations)")
+    if torch.any(ea_ei <= 1e-14):
+        raise RuntimeError("Positive occupied--virtual gaps are required for XL-ESMD.")
+
+    b, r, n = eta.shape
+    if ea_ei.shape[0] != b or ea_ei.shape[-1] != n:
+        raise ValueError("ea_ei must have shape compatible with (batch, 1, excitations)")
+    G = G_apply(eta)
+    if G.shape != eta.shape:
+        raise ValueError(f"G_apply must preserve eta's shape; got {G.shape} instead of {eta.shape}")
+
+    invD = 1.0 / ea_ei
+    xi = torch.empty_like(eta)
+    multipliers = torch.zeros((b, r, r), dtype=eta.dtype, device=eta.device)
+
+    for state in range(r):
+        H = eta[:, : state + 1]
+        eta_i = eta[:, state]
+        G_i = G[:, state]
+        S = torch.einsum("bjn,bkn->bjk", H, invD * H)
+        gram_col = torch.einsum("bjn,bn->bj", H, eta_i)
+        delta = torch.zeros_like(gram_col)
+        delta[:, state] = 1.0
+        c = 0.5 * (delta + gram_col)
+        rhs = c + torch.einsum("bjn,bn->bj", H, invD[:, 0] * G_i)
+
+        # A singular leading Gram block means the auxiliary states do not
+        # define independent ordered constraints; silently regularizing it
+        # would change the shadow functional.
+        eval_min = torch.linalg.eigvalsh(S).amin(dim=-1)
+        scale = torch.linalg.matrix_norm(S, ord=2).clamp_min(1.0)
+        if torch.any(eval_min <= eps * scale):
+            raise RuntimeError(f"Linearly dependent auxiliary states in ordered XL-ESMD state {state}.")
+
+        lamb = torch.linalg.solve(S, rhs.unsqueeze(-1)).squeeze(-1)
+        xi[:, state] = invD[:, 0] * (torch.einsum("bjn,bj->bn", H, lamb) - G_i)
+        multipliers[:, state, : state + 1] = lamb
+
+    return xi, multipliers
+
+
+def make_jvp_xi_ordered(
+    ea_ei: torch.Tensor,
+    eta: torch.Tensor,
+    multipliers: torch.Tensor,
+    G_apply: Callable[[torch.Tensor], torch.Tensor],
+    nocc: int,
+    nvirt: int,
+    eps: float = 1e-12,
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Analytic JVP of :func:`solve_for_amplitudes_ordered`."""
+    b, r, n = eta.shape
+    if n != nocc * nvirt:
+        raise ValueError("The excitation dimension must equal nocc*nvirt.")
+    if multipliers.shape != (b, r, r):
+        raise ValueError(f"multipliers must have shape {(b, r, r)}")
+    invD = 1.0 / ea_ei
+    G_eta = G_apply(eta.reshape(b, r, nocc, nvirt)).reshape(b, r, n)
+
+    def jvp_xi(v: torch.Tensor) -> torch.Tensor:
+        if v.shape != eta.shape:
+            raise ValueError(f"Expected v shape {eta.shape}, got {v.shape}")
+        G_v = G_apply(v.reshape(b, r, nocc, nvirt)).reshape(b, r, n)
+        dxi = torch.empty_like(v)
+
+        for state in range(r):
+            H = eta[:, : state + 1]
+            V = v[:, : state + 1]
+            eta_i = eta[:, state]
+            v_i = v[:, state]
+            G_i = G_eta[:, state]
+            Gv_i = G_v[:, state]
+            lamb = multipliers[:, state, : state + 1]
+
+            S = torch.einsum("bjn,bkn->bjk", H, invD * H)
+            dS = torch.einsum("bjn,bkn->bjk", V, invD * H)
+            dS = dS + torch.einsum("bjn,bkn->bjk", H, invD * V)
+            dc = 0.5 * (torch.einsum("bjn,bn->bj", V, eta_i) + torch.einsum("bjn,bn->bj", H, v_i))
+            du = dc
+            du = du + torch.einsum("bjn,bn->bj", V, invD[:, 0] * G_i)
+            du = du + torch.einsum("bjn,bn->bj", H, invD[:, 0] * Gv_i)
+            dlamb = torch.linalg.solve(S, (du - torch.einsum("bjk,bk->bj", dS, lamb)).unsqueeze(-1)).squeeze(
+                -1
+            )
+
+            dxi[:, state] = invD[:, 0] * (
+                torch.einsum("bjn,bj->bn", V, lamb) + torch.einsum("bjn,bj->bn", H, dlamb) - Gv_i
+            )
+        return dxi
+
+    return jvp_xi
+
+
 # ----------------------------
 # JVP for xi(eta) when G is linear
 # ----------------------------
@@ -401,103 +770,217 @@ def make_jvp_xi(
 def compute_dxi2dt2_rankm(
     eta_brn: torch.Tensor,  # (b,r,n)
     xi_brn: torch.Tensor,  # (b,r,n)
-    jvp_xi: Callable[[torch.Tensor], torch.Tensor],  # v_brn -> dxi_brn
+    jvp_xi: Callable[[torch.Tensor], torch.Tensor],
     xl_params: Dict,
-    precond: Callable[[torch.Tensor], torch.Tensor],  # preconditioner of shape (b,r,n) to improve convergence
+    precond: Callable[[torch.Tensor], torch.Tensor],
     eps: float = 1e-12,
 ) -> torch.Tensor:
     """
-    Compute dxi2dt2 ≈ -V_k alpha using a rank-m Krylov / Arnoldi-like process,
-    where W_k spans Df[v] = (J_xi[v] - v), and we fit dDS = xi-eta in span(W).
+    Compute dxi2dt2 using an independent rank-m Krylov approximation
+    for every (molecule, root) block.
 
-    Returns:
-      dxi2dt2_brn: (b,r,n)
+    We solve, approximately,
+
+        (J_xi - I) Y = xi - eta
+
+    in a preconditioned Krylov subspace and return
+
+        dxi2dt2 = -Y.
+
+    Unlike the previous implementation, Krylov convergence and breakdown are
+    handled independently for every (molecule, root).  One converged or
+    rank-deficient root therefore cannot make the batched solve singular.
+
+    Shapes:
+        eta_brn, xi_brn : (b, r, n)
+        output          : (b, r, n)
     """
     Rank = int(xl_params["max_rank"])
     err_threshold = float(xl_params["err_threshold"])
 
+    if Rank <= 0:
+        return torch.zeros_like(eta_brn)
+
     b, r, n = eta_brn.shape
     B = b * r
 
-    # Flatten br into a single batch for linear algebra
     eta = eta_brn.reshape(B, n)
     xi = xi_brn.reshape(B, n)
 
-    # K0 = precond.reshape(B, n)  # (B,n)
-    K0 = precond
+    # Initial preconditioned residual / right-hand side.
+    #
+    # The existing algorithm fits
+    #
+    #     W alpha ~= dDS
+    #
+    # with
+    #
+    #     dDS = K0 (xi - eta),
+    #     W    = K0 (J_xi - I) V,
+    #
+    # and finally returns -V alpha.
+    dDS = precond(xi - eta)  # (B,n)
 
-    dDS = K0(xi - eta)  # (B,n)
-    dDS_norm = torch.linalg.vector_norm(dDS, dim=1).clamp(min=eps)
+    # Use a dtype-aware floor.  eps=1e-12 is suitable for float64 but too
+    # small to be a useful Krylov-breakdown threshold in float32.
+    finfo = torch.finfo(xi.dtype)
+    breakdown_tol = max(float(eps), 10.0 * float(finfo.eps))
+
+    dDS_norm_raw = torch.linalg.vector_norm(dDS, dim=1)  # (B,)
+    dDS_norm = dDS_norm_raw.clamp_min(breakdown_tol)
+
+    # A root with essentially zero xi-eta already needs no correction.
+    active = dDS_norm_raw > breakdown_tol
 
     V = torch.zeros((B, n, Rank), dtype=xi.dtype, device=xi.device)
-    W = torch.zeros((B, n, Rank), dtype=xi.dtype, device=xi.device)
+    W = torch.zeros_like(V)
 
     dW = dDS.clone()
-    Error = torch.full((B,), 10.0, dtype=xi.dtype, device=xi.device)
+
+    # Relative residual for each independent (molecule, root).
+    Error = torch.zeros((B,), dtype=xi.dtype, device=xi.device)
+    Error[active] = float("inf")
+
     Rank_m = 0
+    last_alpha = None
 
-    def vecnorm(u: torch.Tensor) -> torch.Tensor:
-        return torch.linalg.vector_norm(u, dim=1)
+    def solve_gram_pinv(
+        O: torch.Tensor,  # (B,m,m)
+        rhs: torch.Tensor,  # (B,m)
+    ) -> torch.Tensor:
+        """
+        Solve O alpha = rhs using the Moore-Penrose pseudoinverse
+        of the small symmetric positive-semidefinite Gram matrix.
 
-    last_alpha: Optional[torch.Tensor] = None
+        This is the key difference from torch.linalg.solve(): a root whose
+        Krylov columns are linearly dependent is allowed to be rank deficient
+        without causing the entire batch to fail.
+        """
+        evals, evecs = torch.linalg.eigh(O)  # O = U diag(lambda) U^T
+
+        # O is positive semidefinite in exact arithmetic.  Drop tiny and
+        # negative roundoff eigenvalues.
+        lam_max = evals.amax(dim=-1, keepdim=True).clamp_min(0.0)
+
+        # Relative cutoff for numerical rank.
+        rtol = max(float(eps), 10.0 * float(finfo.eps))
+        cutoff = rtol * lam_max
+
+        keep = evals > cutoff
+
+        inv_evals = torch.zeros_like(evals)
+        inv_evals[keep] = 1.0 / evals[keep]
+
+        # alpha = U diag(lambda^+) U^T rhs
+        rhs_eig = torch.einsum("Bmk,Bm->Bk", evecs, rhs)
+
+        alpha = torch.einsum("Bmk,Bk->Bm", evecs, inv_evals * rhs_eig)
+
+        return alpha
 
     for k in range(Rank):
-        if torch.max(Error) <= err_threshold:
+        # All roots have either converged or experienced Krylov breakdown.
+        if not torch.any(active):
             break
 
-        vk = dW  # (B,n)
+        vk = dW.clone()
 
-        # Modified Gram-Schmidt (2 passes for improved numerical stability)
+        # Modified Gram-Schmidt, independently for every B=(molecule,root).
         if k > 0:
             Vprev = V[:, :, :k]  # (B,n,k)
+
+            # Two passes improve orthogonality.
             for _ in range(2):
-                coeffs = torch.einsum("Bnk,Bn->Bk", Vprev, vk)  # (B,k)
-                proj = torch.einsum("Bnk,Bk->Bn", Vprev, coeffs)  # (B,n)
-                vk -= proj
+                coeffs = torch.einsum("Bnk,Bn->Bk", Vprev, vk)
+                vk = vk - torch.einsum("Bnk,Bk->Bn", Vprev, coeffs)
 
-        vknorm = vecnorm(vk)
-        if torch.all(vknorm <= eps):
-            break  # converged to invariant subspace; no more progress possible
-        vk = vk / vknorm.clamp(min=eps).unsqueeze(-1)
-        V[:, :, k] = vk
+        vknorm = torch.linalg.vector_norm(vk, dim=1)  # (B,)
 
-        # JVP expects (b,r,n)
-        vk_brn = vk.reshape(b, r, n)
-        dxi_brn = jvp_xi(vk_brn)  # (b,r,n)
-        dxi = dxi_brn.reshape(B, n)  # (B,n)
+        # IMPORTANT:
+        # breakdown is per root, not global.
+        can_expand = active & (vknorm > breakdown_tol)
 
-        # wk = K0 * (dxi - vk)  # (B,n)
-        wk_raw = dxi - vk  # (B,n)
-        wk = K0(wk_raw)  # (B,n)
+        if not torch.any(can_expand):
+            break
+
+        # Do not divide inactive/broken roots by zero.
+        vk_normalized = torch.zeros_like(vk)
+        vk_normalized[can_expand] = vk[can_expand] / vknorm[can_expand].unsqueeze(-1)
+
+        V[:, :, k] = vk_normalized
+
+        # jvp_xi is linear in the trial direction.  Inactive roots therefore
+        # receive a zero direction and produce zero JVP contribution.
+        vk_brn = vk_normalized.reshape(b, r, n)
+        dxi_brn = jvp_xi(vk_brn)
+        dxi = dxi_brn.reshape(B, n)
+
+        # W_k = K0 [(J_xi - I) V_k]
+        wk = precond(dxi - vk_normalized)
+
+        # Explicitly keep dead roots out of this column.
+        wk[~can_expand] = 0.0
+
         W[:, :, k] = wk
-        # dW = wk_raw
         dW = wk
+
         Rank_m = k + 1
 
-        # Least-squares in W-subspace: alpha = argmin ||Wk alpha - dDS||
+        # ------------------------------------------------------------
+        # Least-squares fit
+        #
+        #       alpha = argmin ||W alpha - dDS||
+        #
+        # independently for every molecule/root.
+        # ------------------------------------------------------------
         Wk = W[:, :, :Rank_m]  # (B,n,m)
-        O = torch.einsum("Bnm,Bnl->Bml", Wk, Wk)  # (B,m,m)
-        rhs = torch.einsum("Bnm,Bn->Bm", Wk, dDS)  # (B,m)
-        # rhs = torch.einsum("Bnm,Bn->Bm", Wk, dDS_tilde)  # (B,m)
 
-        alpha = torch.linalg.solve(O, rhs.unsqueeze(-1)).squeeze(-1)  # (B,m)
+        O = torch.einsum("Bnm,Bnl->Bml", Wk, Wk)
+
+        rhs = torch.einsum("Bnm,Bn->Bm", Wk, dDS)
+
+        # Rank-deficient-safe replacement for
+        #
+        #     torch.linalg.solve(O, rhs)
+        #
+        alpha = solve_gram_pinv(O, rhs)
         last_alpha = alpha
 
-        IdentRes = torch.einsum("Bnm,Bm->Bn", Wk, alpha)  # (B,n)
-        Error = vecnorm(IdentRes - dDS) / dDS_norm
-        # Error = vecnorm(IdentRes - dDS_tilde) / dDS_tilde_norm
-        # print(f"Krylov rank {Rank_m}, max relative error in dDS fit: {torch.max(Error).item():.2e}")
+        fitted = torch.einsum("Bnm,Bm->Bn", Wk, alpha)
 
-    print(f"Krylov rank used: {Rank_m}, final max relative error in dDS fit: {torch.max(Error).item():.2e}")
+        Error = torch.linalg.vector_norm(fitted - dDS, dim=1) / dDS_norm
 
-    if Rank_m == 0:
-        print("Rank-m loop did not run; check max_rank and inputs.")
-        return dDS  # fallback to zero update
+        # xi == eta -> exact zero correction, so define its error as zero.
+        Error[dDS_norm_raw <= breakdown_tol] = 0.0
 
-    # Compute final dxi2dt2 = -Vk alpha
+        # Each root continues only if:
+        #
+        #   1. it had a valid new Krylov direction, and
+        #   2. it has not yet met its requested residual tolerance.
+        #
+        # A broken root freezes at its best solution so far while the other
+        # roots continue building their own Krylov spaces.
+        active = can_expand & (Error > err_threshold)
+
+    # If all roots were already at xi == eta, or if no usable Krylov direction
+    # existed at all, the physically sensible correction is zero.
+    if Rank_m == 0 or last_alpha is None:
+        return torch.zeros_like(eta_brn)
+
     Vk = V[:, :, :Rank_m]
-    alpha = last_alpha  # should exist
-    dxi2dt2 = -torch.einsum("Bnm,Bm->Bn", Vk, alpha)  # (B,n)
+
+    # Existing XL convention:
+    #
+    #     dxi2dt2 = -V alpha
+    #
+    dxi2dt2 = -torch.einsum("Bnm,Bm->Bn", Vk, last_alpha)
+
+    # Optional diagnostic -- remove this for production if desired.
+    print(
+        f"Krylov rank used: {Rank_m}, "
+        f"final max relative error: {torch.max(Error).item():.2e}, "
+        f"converged/broken blocks: {(~active).sum().item()}/{B}"
+    )
 
     return dxi2dt2.reshape(b, r, n)
 
@@ -739,42 +1222,64 @@ def sample_noisy_R_energy(
 
 
 def solve_for_amplitude_omega_newton(
-    eta_flat: torch.Tensor,  # (b,r,n) (unused; kept for API)
+    eta_flat: torch.Tensor,  # (b,r,n), used to choose the continuous branch
     ea_ei_flat: torch.Tensor,  # (b,1,n) diagonal a_i
     Gx_flat: torch.Tensor,  # (b,r,n) g
     omega_init: Optional[torch.Tensor] = None,  # (b,r)
     *,
     pole_eps: float = 1e-6,
-    tol: float = 1e-8,
-    max_newton_iter: int = 25,
-    max_backtrack: int = 8,
+    tol: float = 1e-10,
+    max_newton_iter: int = 50,
+    max_backtrack: int = 20,
     max_step_frac_of_pole_dist: float = 0.8,
     fp_eps: float = 1e-12,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Newton solve for omega.
-    Safety rails:
-      - backtracking requires (|f| decreases) AND (stay pole_eps away from poles)
-    Returns: (xi_flat, omega) with xi normalized to ||xi||=1.
+    Safeguarded stationary-branch solve for case 1b.
+
+    ``omega_init`` should be the multiplier from the preceding geometry.  If
+    it is omitted, the Rayleigh quotient of the supplied auxiliary amplitude
+    selects the locally connected branch.  Steps may not cross a pole of
+    ``D - omega I`` and failure to solve the secular equation is reported
+    rather than hidden by normalizing a nonstationary vector afterward.
     """
     a = ea_ei_flat  # (b,1,n)
     g = Gx_flat  # (b,r,n)
     device, dtype = g.device, g.dtype
     b, r, n = g.shape
 
-    # init omega
+    if eta_flat.shape != g.shape:
+        raise ValueError(f"eta_flat and Gx_flat must have the same shape; got {eta_flat.shape} and {g.shape}")
+
+    # Initialize on the branch indicated by eta (or by the previous step).
     if omega_init is None:
-        amin = a.squeeze(1).min(dim=-1).values  # (b,)
-        omega = (amin.unsqueeze(1) - 1.0).to(device=device, dtype=dtype).expand(b, r)
+        eta_norm2 = torch.sum(eta_flat.square(), dim=-1).clamp_min(fp_eps)
+        omega = torch.sum(eta_flat * (a * eta_flat + g), dim=-1) / eta_norm2
     else:
-        omega = omega_init.to(device=device, dtype=dtype)
+        if omega_init.shape != (b, r):
+            raise ValueError(f"omega_init must have shape {(b, r)}, got {omega_init.shape}")
+        omega = omega_init.to(device=device, dtype=dtype).clone()
+
+    def signed_floor(x: torch.Tensor, floor: float) -> torch.Tensor:
+        sign = torch.where(x >= 0, torch.ones_like(x), -torch.ones_like(x))
+        return sign * x.abs().clamp_min(floor)
+
+    # A Rayleigh estimate can land exactly on a diagonal pole.  Move it by a
+    # small, deterministic amount while retaining the same local interval.
+    pole_delta = a - omega.unsqueeze(-1)
+    nearest_delta, nearest_idx = pole_delta.abs().min(dim=-1)
+    near_pole = nearest_delta < pole_eps
+    if torch.any(near_pole):
+        nearest_signed = pole_delta.gather(-1, nearest_idx.unsqueeze(-1)).squeeze(-1)
+        direction = torch.where(nearest_signed >= 0, -torch.ones_like(omega), torch.ones_like(omega))
+        omega = torch.where(near_pole, omega + direction * (2.0 * pole_eps), omega)
 
     def f(om: torch.Tensor) -> torch.Tensor:  # (b,r)
-        d = a - om.unsqueeze(-1)  # -> (b,r,n)
+        d = signed_floor(a - om.unsqueeze(-1), pole_eps)
         return (g.square() / d.square()).sum(dim=-1) - 1.0
 
     def fp(om: torch.Tensor) -> torch.Tensor:  # (b,r)
-        d = a - om.unsqueeze(-1)
+        d = signed_floor(a - om.unsqueeze(-1), pole_eps)
         return 2.0 * (g.square() / (d.square() * d)).sum(dim=-1)
 
     def pole_dist(om: torch.Tensor) -> torch.Tensor:  # (b,r)
@@ -783,18 +1288,14 @@ def solve_for_amplitude_omega_newton(
 
     val = f(omega)
     for _ in range(max_newton_iter):
-        if torch.all(torch.abs(val) < tol):
+        converged = torch.abs(val) < tol
+        if torch.all(converged):
             break
 
         der = fp(omega)
-
-        # signed floor: fp_safe = sign(fp)*max(|fp|, fp_eps)
-        sgn = torch.sign(der)
-        if torch.any(sgn == 0):
-            raise RuntimeError("Zero derivative encountered in Newton solve; check inputs.")
-        der_safe = sgn * der.abs().clamp_min(fp_eps)
-
-        step = val / der_safe  # Newton step
+        if torch.any((der.abs() < fp_eps) & (~converged)):
+            raise RuntimeError("The exact-normalization secular derivative vanished on the selected branch.")
+        step = torch.where(converged, torch.zeros_like(val), val / signed_floor(der, fp_eps))
 
         # cap step so we don't run into poles in one update
         dist = pole_dist(omega)
@@ -803,34 +1304,38 @@ def solve_for_amplitude_omega_newton(
         step = torch.clamp(step, min=-cap, max=cap)
 
         # backtracking: accept only if improves and stays away from poles
-        omega_prop = omega - step
-        val_prop = f(omega_prop)
-        dist_prop = pole_dist(omega_prop)
-
         alpha = torch.ones_like(val)
+        accepted = converged.clone()
+        omega_prop = omega.clone()
+        val_prop = val.clone()
         for _ in range(max_backtrack):
-            ok_pole = dist_prop >= pole_eps
-            ok_improve = torch.abs(val_prop) < torch.abs(val)
-            ok = ok_pole & ok_improve
-
-            if torch.all(ok | (torch.abs(val) < tol)):
+            trial = omega - alpha * step
+            trial_val = f(trial)
+            ok = converged | ((pole_dist(trial) >= pole_eps) & (torch.abs(trial_val) < torch.abs(val)))
+            newly_accepted = ok & (~accepted)
+            omega_prop = torch.where(newly_accepted, trial, omega_prop)
+            val_prop = torch.where(newly_accepted, trial_val, val_prop)
+            accepted |= ok
+            if torch.all(accepted):
                 break
+            alpha = torch.where(accepted, alpha, 0.5 * alpha)
 
-            # shrink only where not ok (elementwise)
-            need = ~ok
-            alpha = torch.where(need, 0.5 * alpha, alpha)
-            omega_prop = omega - alpha * step
-            val_prop = f(omega_prop)
-            dist_prop = pole_dist(omega_prop)
-
+        if not torch.all(accepted):
+            raise RuntimeError(
+                "Could not take a pole-safe decreasing Newton step for exact-normalization XL-ESMD."
+            )
         omega = omega_prop
         val = val_prop
-        # print(f"Newton iter: max|f|={torch.abs(val).max().item():.2e}")
 
-    # recover xi and normalize to enforce ||xi||=1
-    d = a - omega.unsqueeze(-1)
+    if not torch.all(torch.abs(val) < tol):
+        raise RuntimeError(
+            f"Exact-normalization XL-ESMD did not converge; max secular residual={torch.max(torch.abs(val)).item():.3e}."
+        )
+
+    # Recover the stationary amplitude.  Do not renormalize it: the secular
+    # equation itself is the normalization condition.
+    d = signed_floor(a - omega.unsqueeze(-1), pole_eps)
     xi = -g / d
-    xi = xi / xi.norm(dim=-1, keepdim=True).clamp_min(1e-30)
 
     return xi, omega
 
@@ -913,7 +1418,8 @@ def make_jvp_xi_full_normalized(
     # K = A - Ω I  (diagonal)
     # We'll form invK safely: invK = 1/(K)
     k = a_diag - omega.unsqueeze(-1)  # (b,r,n) via broadcast of (b,1,n)
-    invK = 1.0 / torch.where(k.abs() >= pole_eps, k, k.sign() * pole_eps)
+    k_sign = torch.where(k >= 0, torch.ones_like(k), -torch.ones_like(k))
+    invK = 1.0 / torch.where(k.abs() >= pole_eps, k, k_sign * pole_eps)
 
     def jvp_xi(v: torch.Tensor) -> torch.Tensor:
         # 1) t = G(v)
@@ -929,7 +1435,8 @@ def make_jvp_xi_full_normalized(
 
         #    denom = xi^T invK xi == sum( xi * invK * xi )
         den = torch.sum(xi * (invK * xi), dim=2)  # (b,r)
-        den = torch.where(den.abs() >= denom_eps, den, den.sign() * denom_eps)
+        den_sign = torch.where(den >= 0, torch.ones_like(den), -torch.ones_like(den))
+        den = torch.where(den.abs() >= denom_eps, den, den_sign * denom_eps)
 
         deltaOmega = num / den  # (b,r)
 
@@ -938,3 +1445,395 @@ def make_jvp_xi_full_normalized(
         return deltaXi
 
     return jvp_xi
+
+
+def compute_dxi2dt2_projected_minres(
+    eta_brn: torch.Tensor,  # (b,r,n)
+    xi_brn: torch.Tensor,  # (b,r,n)
+    nu_br: torch.Tensor,  # (b,r), solved multiplier
+    ea_ei_flat: torch.Tensor,  # (b,1,n) = D
+    G_eta_flat: torch.Tensor,  # (b,r,n), cached G(eta)
+    G_apply: Callable[[torch.Tensor], torch.Tensor],
+    nocc: int,
+    nvirt: int,
+    xl_params: Dict,
+    eps: float = 1e-12,
+) -> torch.Tensor:
+    """
+    Projected MINRES/Lanczos solve for the XL electronic correction.
+
+    Solve independently for every (molecule, root):
+
+        (P K P) y = -P K eta
+
+    where
+
+        K = D + G - nu I
+        P = I - eta eta^T / (eta^T eta)
+
+    and return y = ddot(eta) / omega_XL^2.
+
+    The XL Verlet recurrence supplies the omega_XL^2 dt^2 factor through
+    kappa, so this function does NOT multiply by an XL frequency.
+
+    Cost:
+        - RHS: no new G_apply; uses cached G_eta_flat
+        - each Krylov rank: exactly one batched G_apply
+    """
+    max_rank = int(xl_params["max_rank"])
+    err_threshold = float(xl_params.get("err_threshold", 1e-6))
+
+    if max_rank <= 0:
+        return torch.zeros_like(eta_brn)
+
+    b, r, n = eta_brn.shape
+    B = b * r
+
+    eta = eta_brn.reshape(B, n)
+    nu = nu_br.reshape(B)
+
+    D = ea_ei_flat.expand(b, r, n).reshape(B, n)
+    G_eta = G_eta_flat.reshape(B, n)
+
+    finfo = torch.finfo(eta.dtype)
+    breakdown_tol = max(float(eps), 100.0 * float(finfo.eps))
+
+    # ------------------------------------------------------------
+    # Tangent-space projector
+    #
+    #     P v = v - eta (eta^T v)/(eta^T eta)
+    # ------------------------------------------------------------
+    eta_norm2 = torch.sum(eta * eta, dim=1).clamp_min(breakdown_tol)
+
+    def project(v: torch.Tensor) -> torch.Tensor:
+        coeff = torch.sum(eta * v, dim=1) / eta_norm2
+        return v - eta * coeff.unsqueeze(-1)
+
+    # ------------------------------------------------------------
+    # Operator
+    #
+    #     A(v) = P (D + G - nu I) P v
+    #
+    # Exactly ONE expensive G_apply per call.
+    # ------------------------------------------------------------
+    def A_apply(v: torch.Tensor) -> torch.Tensor:
+        pv = project(v)
+
+        Gv = G_apply(pv.reshape(b, r, nocc, nvirt)).reshape(B, n)
+
+        Kv = (D - nu.unsqueeze(-1)) * pv + Gv
+
+        return project(Kv)
+
+    # ------------------------------------------------------------
+    # RHS
+    #
+    #     rhs = -P K eta
+    #
+    # G(eta) has already been computed in the electronic solve, so
+    # there is NO additional G_apply here.
+    # ------------------------------------------------------------
+    K_eta = (D - nu.unsqueeze(-1)) * eta + G_eta
+    rhs = -project(K_eta)
+
+    # Equivalent near an exact shadow solve:
+    #
+    #     K eta = -D (xi - eta)
+    #
+    # so
+    #
+    #     rhs = P D (xi - eta).
+    #
+    # Using K_eta directly is preferable because G_eta is already cached
+    # and it does not assume the stationarity equation is numerically exact.
+
+    beta0 = torch.linalg.vector_norm(rhs, dim=1)
+    beta0_safe = beta0.clamp_min(breakdown_tol)
+
+    # Roots whose RHS is already zero need zero correction.
+    live = beta0 > breakdown_tol
+
+    if not torch.any(live):
+        return torch.zeros_like(eta_brn)
+
+    # ------------------------------------------------------------
+    # Lanczos basis
+    #
+    # A V_m = V_{m+1} Tbar_m
+    #
+    # MINRES then minimizes
+    #
+    #     || beta e1 - Tbar_m y ||
+    #
+    # and x_m = V_m y.
+    # ------------------------------------------------------------
+    V = torch.zeros((B, n, max_rank), dtype=eta.dtype, device=eta.device)
+
+    Tbar = torch.zeros((B, max_rank + 1, max_rank), dtype=eta.dtype, device=eta.device)
+
+    small_rhs = torch.zeros((B, max_rank + 1), dtype=eta.dtype, device=eta.device)
+    small_rhs[:, 0] = beta0
+
+    q = torch.zeros_like(rhs)
+    q[live] = rhs[live] / beta0[live].unsqueeze(-1)
+
+    q_prev = torch.zeros_like(rhs)
+    beta_prev = torch.zeros(B, dtype=eta.dtype, device=eta.device)
+
+    solution = torch.zeros_like(rhs)
+
+    relres = torch.zeros(B, dtype=eta.dtype, device=eta.device)
+    relres[live] = float("inf")
+
+    rank_used = 0
+
+    for k in range(max_rank):
+        if not torch.any(live):
+            break
+
+        iter_mask = live.clone()
+
+        # Current Lanczos vector
+        V[:, :, k] = q
+
+        # One expensive G_apply here.
+        z = A_apply(q)
+
+        # Dead/converged roots must stay dead.
+        z[~iter_mask] = 0.0
+
+        # Three-term Lanczos recurrence
+        if k > 0:
+            z = z - (beta_prev * iter_mask).unsqueeze(-1) * q_prev
+
+        alpha = torch.sum(q * z, dim=1)
+        alpha = torch.where(iter_mask, alpha, torch.zeros_like(alpha))
+
+        z = z - alpha.unsqueeze(-1) * q
+
+        # Remove tiny numerical component parallel to eta.
+        z = project(z)
+        z[~iter_mask] = 0.0
+
+        beta_next = torch.linalg.vector_norm(z, dim=1)
+        beta_next = torch.where(iter_mask, beta_next, torch.zeros_like(beta_next))
+
+        # Build the small symmetric Lanczos matrix.
+        if k > 0:
+            Tbar[:, k - 1, k] = torch.where(iter_mask, beta_prev, torch.zeros_like(beta_prev))
+
+        Tbar[:, k, k] = alpha
+        Tbar[:, k + 1, k] = beta_next
+
+        rank_used = k + 1
+
+        # --------------------------------------------------------
+        # MINRES step:
+        #
+        #     min_y || beta e1 - Tbar y ||
+        #
+        # The matrices are tiny (max_rank x max_rank), so a
+        # pseudoinverse is cheap and robust to per-root breakdown.
+        # --------------------------------------------------------
+        Tm = Tbar[:, : rank_used + 1, :rank_used]
+        gm = small_rhs[:, : rank_used + 1]
+
+        Tm_pinv = torch.linalg.pinv(Tm, rtol=100.0 * float(finfo.eps))
+
+        y = torch.bmm(Tm_pinv, gm.unsqueeze(-1)).squeeze(-1)
+
+        solution = torch.einsum("Bnm,Bm->Bn", V[:, :, :rank_used], y)
+
+        # Cheap MINRES residual estimate: no new G_apply.
+        small_residual = gm - torch.bmm(Tm, y.unsqueeze(-1)).squeeze(-1)
+
+        relres = torch.linalg.vector_norm(small_residual, dim=1) / beta0_safe
+
+        relres = torch.where(beta0 > breakdown_tol, relres, torch.zeros_like(relres))
+
+        converged = relres <= err_threshold
+
+        # Per-root Lanczos breakdown.
+        can_expand = beta_next > breakdown_tol
+
+        # Each root stops independently.
+        live_next = iter_mask & (~converged) & can_expand
+
+        q_next = torch.zeros_like(q)
+
+        q_next[live_next] = z[live_next] / beta_next[live_next].unsqueeze(-1)
+
+        q_prev = q
+        q = q_next
+
+        beta_prev = torch.where(live_next, beta_next, torch.zeros_like(beta_next))
+
+        live = live_next
+
+    if xl_params.get("verbose_krylov", False):
+        print(
+            f"Projected MINRES rank used: {rank_used}, "
+            f"max estimated relative residual: "
+            f"{torch.max(relres).item():.3e}"
+        )
+
+    # Numerical cleanup: enforce tangent-space result exactly.
+    solution = project(solution)
+
+    return solution.reshape(b, r, n)
+
+
+def compute_dxi2dt2_old_jacobian_gmres(
+    eta_brn: torch.Tensor,
+    xi_brn: torch.Tensor,
+    nu_br: torch.Tensor,
+    ea_ei_flat: torch.Tensor,
+    G_apply: Callable[[torch.Tensor], torch.Tensor],
+    nocc: int,
+    nvirt: int,
+    xl_params: Dict,
+    eps: float = 1e-12,
+    jvp_xi: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+    preconditioner: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+    return_info: bool = False,
+):
+    """Solve the original off-shell XL kernel equation with GMRES.
+
+    The old Jacobian formulation is
+
+        (I - J_xi) d = xi - eta,
+
+    where ``J_xi`` is the derivative of the electronic map ``xi(eta)``.
+    Unlike the projected MINRES equation, this retains the longitudinal
+    component required when ``xi != eta``.  The operator is nonsymmetric away
+    from self consistency, hence Arnoldi/GMRES rather than MINRES is used.
+
+    Each (molecule, root) block is an independent GMRES solve.  Every Arnoldi
+    iteration performs exactly one batched ``G_apply`` through ``jvp_xi``.
+    A supplied preconditioner is applied on the right, so GMRES minimizes the
+    true residual while using ``d = M^-1 y`` as its correction.
+    """
+    max_rank = int(xl_params["max_rank"])
+    err_threshold = float(xl_params.get("err_threshold", 1e-6))
+
+    if max_rank <= 0:
+        solution = torch.zeros_like(eta_brn)
+        info = {
+            "rank": 0,
+            "relative_residual": torch.ones(eta_brn.shape[:2], dtype=eta_brn.dtype, device=eta_brn.device),
+            "converged": torch.zeros(eta_brn.shape[:2], dtype=torch.bool, device=eta_brn.device),
+            "kernel_gain": torch.zeros(eta_brn.shape[:2], dtype=eta_brn.dtype, device=eta_brn.device),
+            "kernel_gain_scale": torch.ones(eta_brn.shape[:2], dtype=eta_brn.dtype, device=eta_brn.device),
+        }
+        return (solution, info) if return_info else solution
+
+    b, r, n = eta_brn.shape
+    B = b * r
+    dtype = eta_brn.dtype
+    device = eta_brn.device
+    finfo = torch.finfo(dtype)
+    breakdown_tol = max(float(eps), 100.0 * float(finfo.eps))
+
+    if jvp_xi is None:
+        jvp_xi = make_jvp_xi(ea_ei_flat, eta_brn, xi_brn, nu_br, G_apply, nocc, nvirt, eps=eps)
+
+    rhs = (xi_brn - eta_brn).reshape(B, n)
+    rhs_norm = torch.linalg.vector_norm(rhs, dim=1)
+    rhs_norm_safe = rhs_norm.clamp_min(breakdown_tol)
+    live = rhs_norm > breakdown_tol
+
+    if not torch.any(live):
+        solution = torch.zeros_like(eta_brn)
+        info = {
+            "rank": 0,
+            "relative_residual": torch.zeros((b, r), dtype=dtype, device=device),
+            "converged": torch.ones((b, r), dtype=torch.bool, device=device),
+            "kernel_gain": torch.zeros((b, r), dtype=dtype, device=device),
+            "kernel_gain_scale": torch.ones((b, r), dtype=dtype, device=device),
+        }
+        return (solution, info) if return_info else solution
+
+    # Arnoldi relation: A V_m = V_{m+1} Hbar_m, A = I - J_xi.
+    V = torch.zeros((B, n, max_rank + 1), dtype=dtype, device=device)
+    Hbar = torch.zeros((B, max_rank + 1, max_rank), dtype=dtype, device=device)
+    small_rhs = torch.zeros((B, max_rank + 1), dtype=dtype, device=device)
+    small_rhs[:, 0] = rhs_norm
+    V[live, :, 0] = rhs[live] / rhs_norm[live].unsqueeze(-1)
+
+    solution = torch.zeros((B, n), dtype=dtype, device=device)
+    relres = torch.zeros((B,), dtype=dtype, device=device)
+    relres[live] = float("inf")
+    rank_used = 0
+
+    for k in range(max_rank):
+        if not torch.any(live):
+            break
+
+        iter_mask = live.clone()
+        vk = V[:, :, k].reshape(b, r, n)
+        zk = preconditioner(vk) if preconditioner is not None else vk
+        w = (zk - jvp_xi(zk)).reshape(B, n)
+        w[~iter_mask] = 0.0
+
+        # Two-pass modified Gram--Schmidt controls loss of orthogonality while
+        # preserving the nonsymmetric Arnoldi relation used by GMRES.
+        for _ in range(2):
+            h = torch.einsum("Bni,Bn->Bi", V[:, :, : k + 1], w)
+            Hbar[:, : k + 1, k] += h
+            w = w - torch.einsum("Bni,Bi->Bn", V[:, :, : k + 1], h)
+
+        h_next = torch.linalg.vector_norm(w, dim=1)
+        h_next = torch.where(iter_mask, h_next, torch.zeros_like(h_next))
+        Hbar[:, k + 1, k] = h_next
+
+        can_expand = h_next > breakdown_tol
+        V[can_expand, :, k + 1] = w[can_expand] / h_next[can_expand].unsqueeze(-1)
+        rank_used = k + 1
+
+        Hm = Hbar[:, : rank_used + 1, :rank_used]
+        gm = small_rhs[:, : rank_used + 1]
+        y = torch.bmm(torch.linalg.pinv(Hm, rtol=100.0 * float(finfo.eps)), gm.unsqueeze(-1)).squeeze(-1)
+        solution = torch.einsum("Bni,Bi->Bn", V[:, :, :rank_used], y)
+
+        small_residual = gm - torch.bmm(Hm, y.unsqueeze(-1)).squeeze(-1)
+        relres = torch.linalg.vector_norm(small_residual, dim=1) / rhs_norm_safe
+        relres = torch.where(rhs_norm > breakdown_tol, relres, torch.zeros_like(relres))
+
+        converged = relres <= err_threshold
+        live = iter_mask & (~converged) & can_expand
+
+    if xl_params.get("verbose_krylov", False):
+        print(
+            f"Old-Jacobian GMRES rank used: {rank_used}, "
+            f"max estimated relative residual: {torch.max(relres).item():.3e}"
+        )
+
+    solution = solution.reshape(b, r, n)
+    if preconditioner is not None:
+        solution = preconditioner(solution)
+
+    # A nearly singular response map makes the exact inverse action much
+    # larger than the electronic residual.  That is mathematically valid, but
+    # can destabilize the finite-step XL oscillator far from the fixed point.
+    # Treat ``kernel_max_amplification`` as a spectral/trust-region
+    # regularizer: the unmodified value preserves the usual GMRES result,
+    # while a positive value bounds ||d|| / ||xi-eta|| per root.
+    correction_norm = torch.linalg.vector_norm(solution, dim=-1)
+    gain = correction_norm / rhs_norm.reshape(b, r).clamp_min(breakdown_tol)
+    gain_scale = torch.ones_like(gain)
+    max_amplification = xl_params.get("kernel_max_amplification")
+    if max_amplification is not None:
+        max_amplification = float(max_amplification)
+        if max_amplification <= 0.0:
+            raise ValueError("kernel_max_amplification must be positive when supplied.")
+        gain_scale = torch.clamp(max_amplification / gain.clamp_min(breakdown_tol), max=1.0)
+        solution = solution * gain_scale.unsqueeze(-1)
+
+    info = {
+        "rank": rank_used,
+        "relative_residual": relres.reshape(b, r),
+        "converged": (relres <= err_threshold).reshape(b, r),
+        "kernel_gain": gain,
+        "kernel_gain_scale": gain_scale,
+    }
+    return (solution, info) if return_info else solution

@@ -25,11 +25,9 @@ from .seqm_functions.rcis_grad_batch import rcis_grad_batch
 from .seqm_functions.rcis_new import calc_cis_energy_any_batch, rcis_any_batch
 from .seqm_functions.rpa import rpa
 from .seqm_functions.scf_loop import scf_loop
-from .seqm_functions.XLESMD import elec_energy_excited_xl
+from .seqm_functions.XLESMD import elec_energy_excited_xl, transport_mo_transition_amplitudes
+from .seqm_functions.XLESMD_coupled import elec_energy_excited_xl_coupled, normalize_coupled_constraint_mode
 from .seqm_functions.XLESMD_gradient import xlesmd_rcis_grad_batch
-
-# Retain the coupled solver while running the independent-state XL-ESMD path.
-# from .seqm_functions.XLESMD_coupled import elec_energy_excited_xl_coupled
 
 """
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3/PM6/PM6_SP
@@ -1358,25 +1356,67 @@ class Energy(torch.nn.Module):
 
         # If doing XL-ESMD, get XL-ESMD energy, transition density
         if self.xlesmd:
-            cis_transition_density = cis_amp
-            # Independent solve for every root.  The root dimension is batched,
-            # but no root--root coupling or orthogonalization is applied.
-            E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl(
-                molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
-            )
-            # Coupled multi-state alternative retained for further work:
-            # E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl_coupled(
-            #     molecule, cis_transition_density, w, e, xl_bomd_params=kwargs.get("xl_bomd_params", None)
-            # )
+            # XL-ESMD propagates eta in the MO occupied--virtual basis.  After
+            # SCF has supplied the MOs at this geometry, move the propagated
+            # eta from the previous MO basis into the current one.
+            mo_transport = kwargs.get("xlesmd_mo_transport")
+            if mo_transport is not None:
+                coords_prev, mos_prev, S_prev, polar_unitarize = mo_transport
+                cis_transition_density, _ = transport_mo_transition_amplitudes(
+                    molecule, cis_amp, coords_prev, mos_prev, S_prev, polar_unitarize=polar_unitarize
+                )
+            else:
+                cis_transition_density = cis_amp
+
+            xl_params = kwargs.get("xl_bomd_params", None)
+            requested_mode = "independent_linearized"
+            if xl_params is not None:
+                requested_mode = str(xl_params.get("constraint_mode", requested_mode))
+            coupled_mode = normalize_coupled_constraint_mode(requested_mode)
+
+            if coupled_mode is None:
+                E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl(
+                    molecule, cis_transition_density, w, e, xl_bomd_params=xl_params
+                )
+            else:
+                if do_analytical_gradient[0]:
+                    raise NotImplementedError(
+                        "Cases 2a/2b require the variational total-block force and do not support "
+                        "the experimental single-state analytical XL-ESMD gradient. Use force_mode='autodiff'."
+                    )
+                E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = (
+                    elec_energy_excited_xl_coupled(
+                        molecule, cis_transition_density, w, e, xl_bomd_params=xl_params
+                    )
+                )
 
             molecule.cis_energies = E_XL
-            active_idx = torch.clamp(active_states - 1, min=0)
-            Eexcited = E_XL.gather(1, active_idx.unsqueeze(1)).squeeze(1)
+            molecule.xlesmd_block_energy = coupled_mode is not None
+            if coupled_mode is None:
+                active_idx = torch.clamp(active_states - 1, min=0)
+                selected_energy = E_XL.gather(1, active_idx.unsqueeze(1)).squeeze(1)
+                Eexcited = torch.where(excited_mask, selected_energy, torch.zeros_like(selected_energy))
+            else:
+                # Raw 2a/2b describe one state subspace.  Only the trace of the
+                # shadow-energy block is gauge invariant and variational.
+                block_energy = E_XL.sum(dim=1)
+                Eexcited = torch.where(excited_mask, block_energy, torch.zeros_like(block_energy))
 
             if do_analytical_gradient[0]:
                 # with torch.no_grad():
 
                 def _gather_active_transition_density(amplitudes):
+                    if amplitudes.dim() == 3:
+                        # MO eta: select the active root, then construct its
+                        # AO transition density for the analytical gradient.
+                        idx = active_idx.view(-1, 1, 1).expand(-1, 1, amplitudes.shape[-1])
+                        eta_sel = amplitudes.gather(1, idx)
+                        nocc = int(molecule.nocc[0].item())
+                        norb = int(molecule.norb[0].item())
+                        Cocc = molecule.molecular_orbitals[:, :, :nocc]
+                        Cvirt = molecule.molecular_orbitals[:, :, nocc:norb]
+                        eta_sel = eta_sel.view(int(molecule.nmol), 1, nocc, norb - nocc)
+                        return torch.einsum("bmi,bria,bna->brmn", Cocc, eta_sel, Cvirt)
                     idx = active_idx.view(-1, 1, 1, 1).expand(
                         -1, 1, amplitudes.shape[-2], amplitudes.shape[-1]
                     )
@@ -1384,7 +1424,7 @@ class Energy(torch.nn.Module):
                     return gathered
 
                 # select the amplitudes for the active states
-                cis_amp_sel = _gather_active_transition_density(cis_amp)
+                cis_amp_sel = _gather_active_transition_density(cis_transition_density)
                 transiton_density_sel = _gather_active_transition_density(
                     molecule.transition_density_matrices
                 )

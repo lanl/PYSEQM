@@ -20,8 +20,10 @@ User Guide
    Initialization
    single_point_scf
    excited_states
+   cis_transition_density_cubes
    bomd
    Feature-XLBOMD
+   Feature-XLESMD
    excited_bomd
    nonadiabatic_dynamics
    geometry_optimization
