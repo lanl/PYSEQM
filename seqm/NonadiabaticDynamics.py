@@ -1711,6 +1711,11 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
             diagnostics["krylov_max_relative_residual"] = float(
                 solver_diagnostics["krylov_relative_residual"].amax().item()
             )
+        if "krylov_history" in solver_diagnostics:
+            diagnostics["krylov_history"] = {
+                key: value.detach().cpu().tolist()
+                for key, value in solver_diagnostics["krylov_history"].items()
+            }
         molecule.xlesmd_nac_diagnostics = diagnostics
         self.xlesmd_orthogonality_log.append(diagnostics)
 
@@ -1815,6 +1820,7 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
         S_prev = self._xlesmd_S_prev
         polar = bool(self.xl_bomd_params.get("polar_unitarize_mo_transport", True))
         transport = bool(self.xl_bomd_params.get("transport_mo_auxiliary", True))
+        initial_dxi2dt2 = getattr(molecule, "dxi2dt2", None) if transport else None
 
         old_state = molecule.active_state
         molecule.active_state = self._active_states + 1
@@ -1828,6 +1834,7 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
                 cis_amp=self._xl_ctx["es_amp"],
                 dm_prop=self.dmprop,
                 xlesmd_mo_transport=(coords_prev, mos_prev, S_prev, polar) if transport else None,
+                xlesmd_initial_dxi2dt2=initial_dxi2dt2,
                 *esdriver_args,
                 **kwargs,
             )

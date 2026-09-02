@@ -2,6 +2,7 @@ import torch
 
 from seqm.seqm_functions.XLESMD import (
     compute_dxi2dt2_old_jacobian_gmres,
+    compute_dxi2dt2_ordered_gmres,
     make_apply_precond_rank1,
     make_jvp_xi,
     make_jvp_xi_full_normalized,
@@ -343,6 +344,60 @@ def test_full_rank_gmres_matches_dense_inverse_action():
     operator = torch.stack(columns, dim=-1)
     dense = torch.linalg.solve(operator, (xi - eta).unsqueeze(-1)).squeeze(-1)
     torch.testing.assert_close(correction, dense, rtol=2e-8, atol=2e-9)
+
+
+def test_ordered_block_gmres_matches_dense_inverse_action():
+    D, _, _, exact, G, G_jvp = _problem(n=5, roots=3)
+    eta = exact + 0.01 * torch.randn_like(exact)
+    xi, multiplier = solve_for_amplitudes_ordered(eta, D, G)
+    jvp = make_jvp_xi_ordered(D, eta, multiplier, G_jvp, 1, D.shape[-1])
+    correction = compute_dxi2dt2_ordered_gmres(
+        eta, xi, jvp, {"max_rank": eta.numel(), "err_threshold": 1e-12}
+    )
+
+    columns = []
+    for col in range(eta.numel()):
+        basis = torch.zeros_like(eta).reshape(-1)
+        basis[col] = 1.0
+        basis = basis.reshape_as(eta)
+        columns.append((basis - jvp(basis)).reshape(1, -1))
+    operator = torch.stack(columns, dim=-1)
+    dense = torch.linalg.solve(operator, (xi - eta).reshape(1, -1, 1)).squeeze(-1).reshape_as(eta)
+    torch.testing.assert_close(correction, dense, rtol=2e-8, atol=2e-9)
+
+    warm_correction = compute_dxi2dt2_ordered_gmres(
+        eta, xi, jvp, {"max_rank": eta.numel(), "err_threshold": 1e-12}, initial_guess=0.25 * dense
+    )
+    torch.testing.assert_close(warm_correction, dense, rtol=2e-8, atol=2e-9)
+
+
+def test_ordered_block_gmres_tsvd_filters_small_projected_mode():
+    eta = torch.zeros((1, 1, 2), dtype=torch.float64)
+    xi = torch.tensor([[[1.0, 1.0]]], dtype=torch.float64)
+    diagonal = torch.tensor([[[1.0, 1.0e-4]]], dtype=torch.float64)
+    jvp = lambda v: v - diagonal * v
+
+    unfiltered = compute_dxi2dt2_ordered_gmres(
+        eta, xi, jvp, {"max_rank": 2, "err_threshold": 1.0e-12, "projected_svd_rtol": 1.0e-12}
+    )
+    filtered, info = compute_dxi2dt2_ordered_gmres(
+        eta,
+        xi,
+        jvp,
+        {
+            "max_rank": 2,
+            "err_threshold": 1.0e-12,
+            "projected_svd_rtol": 1.0e-3,
+            "record_krylov_history": True,
+        },
+        return_info=True,
+    )
+
+    torch.testing.assert_close(unfiltered, torch.tensor([[[1.0, 1.0e4]]], dtype=torch.float64))
+    torch.testing.assert_close(
+        filtered, torch.tensor([[[1.0, 0.0]]], dtype=torch.float64), atol=1.0e-8, rtol=0.0
+    )
+    assert info["history"]["sigma_min"][0, -1].item() < 1.0e-3
 
 
 def test_right_preconditioned_full_rank_gmres_matches_dense_inverse_action():

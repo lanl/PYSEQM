@@ -32,7 +32,7 @@ def _xl_parameters():
         "constraint_mode": "ordered_linearized",
         "max_rank": 3,
         "err_threshold": 1.0e-8,
-        "krylov_preconditioner": "rank1",
+        "krylov_preconditioner": "none",
     }
 
 
