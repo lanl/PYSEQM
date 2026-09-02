@@ -804,7 +804,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # ------------------------------------------------------------------
         if substeps is None:
             base = 8
-            nmax = 80
+            nmax = 500
             eta_nac = 0.25
 
             # Dimensionless NAC severity over the nuclear step.
@@ -1820,7 +1820,6 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
         S_prev = self._xlesmd_S_prev
         polar = bool(self.xl_bomd_params.get("polar_unitarize_mo_transport", True))
         transport = bool(self.xl_bomd_params.get("transport_mo_auxiliary", True))
-        initial_dxi2dt2 = getattr(molecule, "dxi2dt2", None) if transport else None
 
         old_state = molecule.active_state
         molecule.active_state = self._active_states + 1
@@ -1834,7 +1833,6 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
                 cis_amp=self._xl_ctx["es_amp"],
                 dm_prop=self.dmprop,
                 xlesmd_mo_transport=(coords_prev, mos_prev, S_prev, polar) if transport else None,
-                xlesmd_initial_dxi2dt2=initial_dxi2dt2,
                 *esdriver_args,
                 **kwargs,
             )

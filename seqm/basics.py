@@ -1346,21 +1346,11 @@ class Energy(torch.nn.Module):
             # SCF has supplied the MOs at this geometry, move the propagated
             # eta from the previous MO basis into the current one.
             mo_transport = kwargs.get("xlesmd_mo_transport")
-            initial_dxi2dt2 = kwargs.get("xlesmd_initial_dxi2dt2")
             if mo_transport is not None:
                 coords_prev, mos_prev, S_prev, polar_unitarize = mo_transport
                 cis_transition_density, _ = transport_mo_transition_amplitudes(
                     molecule, cis_amp, coords_prev, mos_prev, S_prev, polar_unitarize=polar_unitarize
                 )
-                if initial_dxi2dt2 is not None:
-                    initial_dxi2dt2, _ = transport_mo_transition_amplitudes(
-                        molecule,
-                        initial_dxi2dt2,
-                        coords_prev,
-                        mos_prev,
-                        S_prev,
-                        polar_unitarize=polar_unitarize,
-                    )
             else:
                 cis_transition_density = cis_amp
 
@@ -1372,12 +1362,7 @@ class Energy(torch.nn.Module):
 
             if coupled_mode is None:
                 E_XL, molecule.transition_density_matrices, molecule.cis_amplitudes = elec_energy_excited_xl(
-                    molecule,
-                    cis_transition_density,
-                    w,
-                    e,
-                    xl_bomd_params=xl_params,
-                    initial_dxi2dt2=initial_dxi2dt2,
+                    molecule, cis_transition_density, w, e, xl_bomd_params=xl_params
                 )
             else:
                 if do_analytical_gradient[0]:

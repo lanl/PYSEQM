@@ -91,7 +91,6 @@ def elec_energy_excited_xl(
     e_mo,
     xl_bomd_params: Optional[Dict] = None,
     sequential_lock: bool = False,
-    initial_dxi2dt2: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute excited-state electronic energy and amplitudes with XL-ESMD approach
@@ -211,12 +210,14 @@ def elec_energy_excited_xl(
                 else:
                     jvp_xi = make_jvp_xi(ea_ei_flat, eta_flat, xi_flat, omega, G_apply, nocc, nvirt)
 
-                preconditioner_name = str(xl_bomd_params.get("krylov_preconditioner", "none")).lower()
+                preconditioner_name = str(
+                    xl_bomd_params.get(
+                        "krylov_preconditioner",
+                        "rank1" if constraint_mode == "ordered_linearized" else "none",
+                    )
+                ).lower()
                 preconditioner = None
-                if constraint_mode == "ordered_linearized":
-                    if preconditioner_name != "none":
-                        raise ValueError("ordered_linearized uses unpreconditioned block GMRES.")
-                elif preconditioner_name == "none":
+                if preconditioner_name == "none":
                     pass
                 elif preconditioner_name == "diagonal":
                     tau = float(xl_bomd_params.get("preconditioner_tau", 1.0e-5))
@@ -246,14 +247,17 @@ def elec_energy_excited_xl(
                     raise ValueError("krylov_preconditioner must be 'none', 'diagonal', or 'rank1'.")
 
                 if constraint_mode == "ordered_linearized":
-                    if initial_dxi2dt2 is not None and initial_dxi2dt2.shape != eta_flat.shape:
-                        raise ValueError("initial_dxi2dt2 must have shape (batch, roots, occupied*virtual).")
-                    dxi2dt2_flat, krylov_info = compute_dxi2dt2_ordered_gmres(
-                        eta_flat,
-                        xi_flat,
-                        jvp_xi,
-                        xl_bomd_params,
-                        initial_guess=initial_dxi2dt2,
+                    dxi2dt2_flat, krylov_info = compute_dxi2dt2_old_jacobian_gmres(
+                        eta_brn=eta_flat,
+                        xi_brn=xi_flat,
+                        nu_br=omega,
+                        ea_ei_flat=ea_ei_flat,
+                        G_apply=G_apply,
+                        nocc=nocc,
+                        nvirt=nvirt,
+                        xl_params=xl_bomd_params,
+                        jvp_xi=jvp_xi,
+                        preconditioner=preconditioner,
                         return_info=True,
                     )
                 else:
@@ -1714,161 +1718,4 @@ def compute_dxi2dt2_old_jacobian_gmres(
         "kernel_gain": gain,
         "kernel_gain_scale": gain_scale,
     }
-    return (solution, info) if return_info else solution
-
-
-def _truncated_svd_solve(
-    matrix: torch.Tensor, rhs: torch.Tensor, rtol: float
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Solve a batched small least-squares problem with relative TSVD filtering."""
-    U, singular_values, Vh = torch.linalg.svd(matrix, full_matrices=False)
-    inverse = torch.where(
-        singular_values > rtol * singular_values[:, :1],
-        1.0 / singular_values.clamp_min(torch.finfo(matrix.dtype).tiny),
-        torch.zeros_like(singular_values),
-    )
-    solution = torch.bmm(
-        Vh.transpose(-1, -2), (inverse * torch.bmm(U.transpose(-1, -2), rhs).squeeze(-1)).unsqueeze(-1)
-    )
-    return solution, singular_values[:, -1]
-
-
-def compute_dxi2dt2_ordered_gmres(
-    eta: torch.Tensor,
-    xi: torch.Tensor,
-    jvp_xi: Callable[[torch.Tensor], torch.Tensor],
-    xl_params: Dict,
-    *,
-    eps: float = 1.0e-12,
-    initial_guess: Optional[torch.Tensor] = None,
-    return_info: bool = False,
-):
-    """Solve the ordered XL response equation as one coupled root block.
-
-    Ordered constraints make ``J_xi`` block lower triangular in the root
-    index.  Flattening each root independently discards this coupling, so this
-    Arnoldi iteration uses the Frobenius inner product over all roots and
-    excitations of each molecule.
-    """
-    if eta.ndim != 3 or xi.shape != eta.shape:
-        raise ValueError("eta and xi must have identical (batch, roots, excitations) shapes.")
-    max_rank = int(xl_params["max_rank"])
-    err_threshold = float(xl_params.get("err_threshold", 1.0e-6))
-    projected_svd_rtol = float(xl_params.get("projected_svd_rtol", 100.0 * float(torch.finfo(eta.dtype).eps)))
-    if projected_svd_rtol < 0.0:
-        raise ValueError("projected_svd_rtol must be nonnegative.")
-    record_history = bool(xl_params.get("record_krylov_history", False))
-
-    b, r, n = eta.shape
-    dtype = eta.dtype
-    device = eta.device
-    dimension = r * n
-    finfo = torch.finfo(dtype)
-    breakdown_tol = max(float(eps), 100.0 * float(finfo.eps))
-
-    if initial_guess is None:
-        initial_guess = torch.zeros_like(eta)
-    elif initial_guess.shape != eta.shape:
-        raise ValueError("initial_guess must have the same shape as eta.")
-
-    def apply_operator(v: torch.Tensor) -> torch.Tensor:
-        return v - jvp_xi(v)
-
-    rhs = xi - eta
-    rhs_flat = rhs.reshape(b, dimension)
-    rhs_norm = torch.linalg.vector_norm(rhs_flat, dim=1)
-    rhs_norm_safe = rhs_norm.clamp_min(breakdown_tol)
-    residual = rhs - apply_operator(initial_guess)
-    residual_flat = residual.reshape(b, dimension)
-    residual_norm = torch.linalg.vector_norm(residual_flat, dim=1)
-    live = residual_norm > breakdown_tol
-
-    if max_rank <= 0 or not torch.any(live):
-        solution = initial_guess.clone()
-        relative_residual = residual_norm / rhs_norm_safe
-        relative_residual = torch.where(
-            rhs_norm > breakdown_tol, relative_residual, torch.zeros_like(relative_residual)
-        )
-        info = {
-            "rank": 0,
-            "relative_residual": relative_residual,
-            "converged": relative_residual <= err_threshold,
-            "kernel_gain": torch.linalg.vector_norm(solution, dim=-1)
-            / torch.linalg.vector_norm(rhs, dim=-1).clamp_min(breakdown_tol),
-            "kernel_gain_scale": torch.ones((b, r), dtype=dtype, device=device),
-        }
-        return (solution, info) if return_info else solution
-
-    V = torch.zeros((b, dimension, max_rank + 1), dtype=dtype, device=device)
-    Hbar = torch.zeros((b, max_rank + 1, max_rank), dtype=dtype, device=device)
-    small_rhs = torch.zeros((b, max_rank + 1), dtype=dtype, device=device)
-    small_rhs[:, 0] = residual_norm
-    V[live, :, 0] = residual_flat[live] / residual_norm[live, None]
-
-    correction = torch.zeros((b, dimension), dtype=dtype, device=device)
-    relative_residual = torch.zeros((b,), dtype=dtype, device=device)
-    relative_residual[live] = float("inf")
-    rank_used = 0
-    history = {"sigma_min": [], "relative_residual": [], "correction_norm": [], "solution_over_rhs_norm": []}
-
-    for k in range(max_rank):
-        if not torch.any(live):
-            break
-        iter_mask = live.clone()
-        vk = V[:, :, k].reshape(b, r, n)
-        w = apply_operator(vk).reshape(b, dimension)
-        w[~iter_mask] = 0.0
-
-        for _ in range(2):
-            h = torch.einsum("bdi,bd->bi", V[:, :, : k + 1], w)
-            Hbar[:, : k + 1, k] += h
-            w = w - torch.einsum("bdi,bi->bd", V[:, :, : k + 1], h)
-
-        h_next = torch.linalg.vector_norm(w, dim=1)
-        h_next = torch.where(iter_mask, h_next, torch.zeros_like(h_next))
-        Hbar[:, k + 1, k] = h_next
-        can_expand = h_next > breakdown_tol
-        V[can_expand, :, k + 1] = w[can_expand] / h_next[can_expand, None]
-        rank_used = k + 1
-
-        Hm = Hbar[:, : rank_used + 1, :rank_used]
-        gm = small_rhs[:, : rank_used + 1]
-        y, sigma_min = _truncated_svd_solve(Hm, gm.unsqueeze(-1), projected_svd_rtol)
-        y = y.squeeze(-1)
-        correction = torch.einsum("bdi,bi->bd", V[:, :, :rank_used], y)
-        small_residual = gm - torch.bmm(Hm, y.unsqueeze(-1)).squeeze(-1)
-        relative_residual = torch.linalg.vector_norm(small_residual, dim=1) / rhs_norm_safe
-        relative_residual = torch.where(
-            rhs_norm > breakdown_tol, relative_residual, torch.zeros_like(relative_residual)
-        )
-        if record_history:
-            correction_block = correction.reshape(b, r, n)
-            solution_block = initial_guess + correction_block
-            history["sigma_min"].append(sigma_min)
-            history["relative_residual"].append(
-                torch.linalg.vector_norm(small_residual, dim=1) / residual_norm.clamp_min(breakdown_tol)
-            )
-            history["correction_norm"].append(
-                torch.linalg.vector_norm(correction_block.reshape(b, dimension), dim=1)
-            )
-            history["solution_over_rhs_norm"].append(
-                torch.linalg.vector_norm(solution_block.reshape(b, dimension), dim=1) / rhs_norm_safe
-            )
-        live = iter_mask & (relative_residual > err_threshold) & can_expand
-
-    correction = correction.reshape(b, r, n)
-    solution = initial_guess + correction
-
-    gain = torch.linalg.vector_norm(solution, dim=-1) / torch.linalg.vector_norm(rhs, dim=-1).clamp_min(
-        breakdown_tol
-    )
-    info = {
-        "rank": rank_used,
-        "relative_residual": relative_residual,
-        "converged": relative_residual <= err_threshold,
-        "kernel_gain": gain,
-        "kernel_gain_scale": torch.ones_like(gain),
-    }
-    if record_history:
-        info["history"] = {key: torch.stack(value, dim=1) for key, value in history.items()}
     return (solution, info) if return_info else solution
