@@ -1307,7 +1307,6 @@ def compute_dxi2dt2_projected_minres(
     """
     max_rank = int(xl_params["max_rank"])
     err_threshold = float(xl_params.get("err_threshold", 1e-6))
-
     if max_rank <= 0:
         return torch.zeros_like(eta_brn)
 
@@ -1540,6 +1539,9 @@ def compute_dxi2dt2_old_jacobian_gmres(
     """
     max_rank = int(xl_params["max_rank"])
     err_threshold = float(xl_params.get("err_threshold", 1e-6))
+    jacobian_regularization = float(xl_params.get("jacobian_regularization", 0.0))
+    if jacobian_regularization < 0.0:
+        raise ValueError("jacobian_regularization must be nonnegative.")
 
     if max_rank <= 0:
         solution = torch.zeros_like(eta_brn)
@@ -1597,7 +1599,7 @@ def compute_dxi2dt2_old_jacobian_gmres(
         iter_mask = live.clone()
         vk = V[:, :, k].reshape(b, r, n)
         zk = preconditioner(vk) if preconditioner is not None else vk
-        w = (zk - jvp_xi(zk)).reshape(B, n)
+        w = ((1.0 + jacobian_regularization) * zk - jvp_xi(zk)).reshape(B, n)
         w[~iter_mask] = 0.0
 
         # Two-pass modified Gram--Schmidt controls loss of orthogonality while

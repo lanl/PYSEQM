@@ -377,6 +377,28 @@ def test_right_preconditioned_full_rank_gmres_matches_dense_inverse_action():
     torch.testing.assert_close(correction, dense, rtol=2e-8, atol=2e-9)
 
 
+def test_jacobian_regularization_shifts_the_gmres_response_operator():
+    eta = torch.zeros((1, 1, 2), dtype=torch.float64)
+    xi = torch.ones_like(eta)
+    gaps = torch.ones((1, 1, 2), dtype=torch.float64)
+    multiplier = torch.zeros((1, 1), dtype=torch.float64)
+    jvp = lambda v: 0.5 * v
+
+    correction = compute_dxi2dt2_old_jacobian_gmres(
+        eta,
+        xi,
+        multiplier,
+        gaps,
+        lambda v: v,
+        1,
+        2,
+        {"max_rank": 1, "err_threshold": 1.0e-12, "jacobian_regularization": 0.25},
+        jvp_xi=jvp,
+    )
+
+    torch.testing.assert_close(correction, torch.full_like(correction, 1.0 / 0.75), rtol=1e-12, atol=1e-12)
+
+
 def test_amplitude_transport_preserves_ao_transition_density_under_gauge_rotation():
     torch.manual_seed(4)
     dtype = torch.float64

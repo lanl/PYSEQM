@@ -156,7 +156,7 @@ def test_xlesmd_surface_hopping_accepted_hop_switches_shadow_force(device, metha
     assert torch.isfinite(molecule.acc).all()
 
 
-def test_xlesmd_energy_order_relabels_auxiliary_history(device):
+def test_xlesmd_energy_order_relabels_auxiliary_history_without_remapping_fssh_rank(device):
     torch.set_default_dtype(torch.float64)
     parameters = _parameters()
     parameters["elements"] = [1, 6, 8]
@@ -176,10 +176,12 @@ def test_xlesmd_energy_order_relabels_auxiliary_history(device):
         transition_density_matrices=rows.unsqueeze(-1).clone(),
         dxi2dt2=(rows + 10.0).clone(),
         xlesmd_multipliers=torch.arange(9, dtype=torch.float64, device=device).reshape(1, 3, 3),
-        active_state=torch.tensor([2], dtype=torch.long, device=device),
+        active_state=torch.tensor([1], dtype=torch.long, device=device),
     )
     dynamics._xl_ctx = {"es_amp": (rows + 30.0).clone(), "es_amp_t": history.clone()}
-    dynamics._active_states = torch.tensor([1], dtype=torch.long, device=device)
+    # Root 0 moves to rank 2, outside this two-state FSSH manifold.  The
+    # active FSSH index must remain the S1 energy rank, not follow root 0.
+    dynamics._active_states = torch.tensor([0], dtype=torch.long, device=device)
     dynamics._nstates = 2
 
     dynamics._apply_xlesmd_energy_order(molecule, step=7)

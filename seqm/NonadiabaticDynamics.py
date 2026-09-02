@@ -1705,6 +1705,12 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
             "xi_max_offdiag_overlap": float(xi_error.masked_fill(diag_mask, 0.0).abs().amax().item()),
             "eta_max_gram_error": float(eta_error.abs().amax().item()),
         }
+        solver_diagnostics = getattr(molecule, "xlesmd_diagnostics", {})
+        if "krylov_rank" in solver_diagnostics:
+            diagnostics["krylov_rank"] = int(solver_diagnostics["krylov_rank"])
+            diagnostics["krylov_max_relative_residual"] = float(
+                solver_diagnostics["krylov_relative_residual"].amax().item()
+            )
         molecule.xlesmd_nac_diagnostics = diagnostics
         self.xlesmd_orthogonality_log.append(diagnostics)
 
@@ -1773,8 +1779,6 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
         if torch.equal(permutation, identity):
             return
 
-        inverse = torch.empty_like(permutation)
-        inverse.scatter_(1, permutation, identity)
         for name in ("cis_energies", "cis_amplitudes", "transition_density_matrices", "dxi2dt2"):
             values = getattr(molecule, name, None)
             if values is not None:
@@ -1792,14 +1796,10 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
             )
 
         self._xl_ctx["es_amp"] = self._permute_state_rows(self._xl_ctx["es_amp"], permutation)
-        self._xl_ctx["es_amp_t"] = self._permute_history_state_rows(
-            self._xl_ctx["es_amp_t"], permutation
-        )
-        active = inverse.gather(1, self._active_states.unsqueeze(1)).squeeze(1)
-        if torch.any(active >= self._nstates):
-            raise RuntimeError("Energy ordering moved the active XL root outside the FSSH state manifold.")
-        self._active_states = active
-        molecule.active_state = active + 1
+        self._xl_ctx["es_amp_t"] = self._permute_history_state_rows(self._xl_ctx["es_amp_t"], permutation)
+        # FSSH remains in the instantaneous energy-ordered manifold.  Keep its
+        # active energy rank while the complete XL root/history block is relabeled.
+        molecule.active_state = self._active_states + 1
         for mol in torch.nonzero(permutation.ne(identity).any(dim=1), as_tuple=False).squeeze(1).tolist():
             self.xlesmd_energy_order_events.append(
                 {"step": int(step), "molecule": mol, "permutation": permutation[mol].detach().cpu().tolist()}
