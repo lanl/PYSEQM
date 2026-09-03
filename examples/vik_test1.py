@@ -77,7 +77,8 @@ coordinates = torch.tensor(
 )
 # species, coordinates = read_xyz(["/Users/vishikh/onedrive/calculations/CNT_10.xyz"])
 # species, coordinates = read_xyz(['./examples/methane.xyz'])
-# species, coordinates = read_xyz(['./234ppe.xyz'])
+species, coordinates = read_xyz(['/Users/vishikh/Library/CloudStorage/OneDrive-LosAlamosNationalLaboratory/calculations/234ppe/234ppe.xyz'])
+
 species = torch.as_tensor(species, dtype=torch.int64, device=device)
 coordinates = torch.as_tensor(coordinates, device=device)
 
@@ -85,7 +86,7 @@ const = Constants(do_timing=True).to(device)
 active_state = 1
 
 seqm_parameters = {
-    "method": "OM3",  # AM1, MNDO, PM#
+    "method": "AM1",  # AM1, MNDO, PM#
     # "method": "AM1",  # AM1, MNDO, PM#
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [2],  # converger used for scf loop
@@ -93,15 +94,15 @@ seqm_parameters = {
     # [1], adaptive mixing
     # [2], adaptive mixing, then pulay
     # 'uhf' : True,
-    "excited_states": {"n_states": 4, "method": "cis"},
-    "active_state": 1,
+    "excited_states": {"n_states": 8, "method": "cis"},
+    # "active_state": 1,
     # 'scf_backward': 1,
     # "analytical_gradient": [True],
     # "analytical_gradient": [False],
-    "nonadiabatic": {
-        "compute_nac": True,
-        "pairs": ((1,2),),
-        }
+    # "nonadiabatic": {
+    #     "compute_nac": True,
+    #     "pairs": ((1,2),),
+    #     }
 }
 
 molecules = Molecule(const, seqm_parameters, coordinates, species).to(device)
@@ -119,5 +120,5 @@ print('\n Nuclear Energy (eV):\n', molecules.Enuc)
 print('\n Heat of Formation (ev):\n', molecules.Hf)
 # print('\n force:\n', molecules.force)
 print("Timing is \n",const.timing)
-print("NAC\n",molecules.nac[(0,1)])
+# print("NAC\n",molecules.nac[(0,1)])
 # print('\n Orbital energies (eV):\n', molecules.e_mo)

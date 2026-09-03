@@ -33,6 +33,7 @@ def make_dummy(nstates=2, timestep=1.0, substeps=4):
     nad._amp_phase[0, 0, 0] = 1.0
     nad._current_potential = None
     nad._hop_integral = None
+    nad._electronic_integrator = "rk4"
     nad._apc_window = 2
     nad._detect_crossings_flag = True
     # Minimal state/caches used by internal helpers.
@@ -42,6 +43,7 @@ def make_dummy(nstates=2, timestep=1.0, substeps=4):
     nad._trivial_zero_buffers = {}
     nad._trivial_swap_buffers = {}
     nad._hop_buffer = None
+    nad._electronic_buffers = {}
     nad._active_states = torch.zeros((1,), dtype=torch.long)
     nad.post_hop_holdoff = torch.zeros((1,), dtype=torch.long)
     nad.prev_state = torch.full((1,), -1, dtype=torch.long)
@@ -146,9 +148,25 @@ def test_hop_integral_accumulates_coupling():
     cache = {"energies": energies, "nac_dot": nac, "nac_vec": None}
     nad._propagate_electronic(cache, cache, substeps=10)
     assert nad._hop_integral is not None
-    assert torch.abs(nad._hop_integral[0, 0, 1]) > 0
-    assert torch.abs(nad._hop_integral[0, 1, 0]) > 0
-    assert torch.allclose(nad._hop_integral[0, 0, 1], -nad._hop_integral[0, 1, 0], atol=1.0e-12)
+    assert nad._hop_integral.shape == (1, 2)
+    # Only the active state row is needed to compute FSSH probabilities.
+    assert torch.abs(nad._hop_integral[0, 1]) > 0
+    assert torch.allclose(nad._hop_integral[0, 0], torch.tensor(0.0, dtype=nad._hop_integral.dtype))
+
+
+def test_unitary_preserves_norm_and_uses_active_row():
+    nad = make_dummy()
+    nad._electronic_integrator = "unitary"
+    energies = torch.tensor([[0.1, 0.2]], dtype=torch.float64)
+    nac = torch.tensor([[[0.0, 0.05], [-0.05, 0.0]]], dtype=torch.float64)
+    cache = {"energies": energies, "nac_dot": nac}
+
+    nad._propagate_electronic(cache, cache, substeps=4)
+
+    assert torch.allclose(nad.populations.sum(), torch.tensor(1.0, dtype=nad.populations.dtype), atol=1e-12)
+    assert nad._hop_integral.shape == (1, 2)
+    assert torch.abs(nad._hop_integral[0, 1]) > 0
+    assert torch.allclose(nad._amp_phase[..., 2], torch.zeros_like(nad._amp_phase[..., 2]))
 
 
 def test_nonadiabatic_compile_hook_registers_kernels(monkeypatch):
@@ -166,6 +184,7 @@ def test_nonadiabatic_compile_hook_registers_kernels(monkeypatch):
 
     nad = DummyNAD()
     nad._torch_compile_applied = False
+    nad._electronic_integrator = "rk4"
     nad._torch_compile_config = {"enabled": True, "options": {"mode": "reduce-overhead"}}
     molecule = SimpleNamespace(coordinates=torch.zeros((1, 1, 3)))
     nad._enable_torch_compile_if_requested(molecule)

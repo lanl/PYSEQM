@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Union
@@ -76,7 +77,8 @@ def _electronic_rhs(xr, yi, theta, nac_proj):
     return dx, dy
 
 
-def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: float, nsub: int):
+def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, active, rows, dt_total: float, nsub: int):
+    """Original rotating-frame RK4, with hop flux integrated over substeps."""
     de = e1 - e0
     dnd = nd_new - nd_old
 
@@ -91,6 +93,7 @@ def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: f
     x = amp[..., 0]
     y = amp[..., 1]
     th = amp[..., 2]
+    hop_int = torch.zeros_like(e0)
 
     for s in range(nsub):
         tau = s * inv_nsub
@@ -113,8 +116,17 @@ def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: f
 
         x3 = x + half_dt_sub * dx2
         y3 = y + half_dt_sub * dy2
-        th3 = th2
-        dx3, dy3 = _electronic_rhs(x3, y3, th3, nd2)
+        dx3, dy3 = _electronic_rhs(x3, y3, th2, nd2)
+
+        # Midpoint FSSH flux; averaging the two RK midpoint stages is cheap and
+        # much better than using only the final coefficients for the full step.
+        xm = 0.5 * (x2 + x3)
+        ym = 0.5 * (y2 + y3)
+        ct, st = torch.cos(th2), torch.sin(th2)
+        cr = xm * ct - ym * st
+        ci = xm * st + ym * ct
+        pair_re = cr[rows, active].unsqueeze(1) * cr + ci[rows, active].unsqueeze(1) * ci
+        hop_int.add_(pair_re * nd2[rows, active], alpha=2.0 * dt_sub)
 
         x4 = x + dt_sub * dx3
         y4 = y + dt_sub * dy3
@@ -126,15 +138,6 @@ def _electronic_propagation_kernel(amp, e0, e1, nd_old, nd_new, eye, dt_total: f
         th = th - e2s * dt_over_hbar
 
     th = torch.remainder(th + torch.pi, 2.0 * torch.pi) - torch.pi
-
-    ct = torch.cos(th)
-    st = torch.sin(th)
-    u_re = x * ct - y * st
-    u_im = x * st + y * ct
-    hop_int = u_re.unsqueeze(2) * u_re.unsqueeze(1) + u_im.unsqueeze(2) * u_im.unsqueeze(1)
-    hop_int = hop_int * nd_new * (2.0 * dt_total)
-    hop_int = hop_int * (1.0 - eye)
-
     return torch.stack((x, y, th), dim=-1), hop_int
 
 
@@ -221,7 +224,23 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._direct_nac_tdc = self._tdc_method == "nac_dot_v"
         self._dtnact = 5e-5  # small dt for finite-diff, NEXMD uses 0.002 au
         self.initial_state = initial_state
-        self._electronic_substeps: Optional[int] = None
+
+        self._electronic_integrator = str(na_cfg.get("electronic_integrator", "rk4")).strip().lower()
+        if self._electronic_integrator not in {"unitary", "rk4"}:
+            raise ValueError("nonadiabatic.electronic_integrator must be 'unitary' or 'rk4'.")
+        fixed_substeps = na_cfg.get("electronic_substeps")
+        self._electronic_substeps = None if fixed_substeps is None else int(fixed_substeps)
+        self._electronic_error_target = float(na_cfg.get("electronic_error_target", 1e-2))
+        self._electronic_substeps_max = int(na_cfg.get("electronic_substeps_max", 128))
+        self._rk4_substeps_base = int(na_cfg.get("rk4_substeps_base", 8))
+        self._rk4_substeps_max = int(na_cfg.get("rk4_substeps_max", 400))
+        if self._electronic_substeps is not None and self._electronic_substeps < 1:
+            raise ValueError("nonadiabatic.electronic_substeps must be positive.")
+        if self._electronic_error_target <= 0.0 or self._electronic_substeps_max < 1:
+            raise ValueError("Invalid electronic propagation tolerance/substep limit.")
+        if self._rk4_substeps_base < 1 or self._rk4_substeps_max < self._rk4_substeps_base:
+            raise ValueError("Invalid RK4 electronic substep limits.")
+
         self._nstates: Optional[int] = None
         self._amp_phase: Optional[torch.Tensor] = None  # (nmol, nstates, 3): x, y, theta
         self._current_potential: Optional[torch.Tensor] = None
@@ -240,6 +259,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         self._trivial_zero_buffers: Dict[tuple, torch.Tensor] = {}
         self._trivial_swap_buffers: Dict[tuple, torch.Tensor] = {}
         self._perm_cost_buffers: Dict[tuple, torch.Tensor] = {}
+        self._electronic_buffers: Dict[tuple, torch.Tensor] = {}
         self._coords_prev: Optional[torch.Tensor] = None
         self._mos_prev: Optional[torch.Tensor] = None
         self._packed_overlap_prev: Optional[torch.Tensor] = None
@@ -266,7 +286,12 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         was_applied = self._torch_compile_applied
         super()._enable_torch_compile_if_requested(molecule)
         cfg = self._torch_compile_config
-        if was_applied or not cfg["enabled"] or getattr(self, "k", None) is not None:
+        if (
+            was_applied
+            or not cfg["enabled"]
+            or getattr(self, "k", None) is not None
+            or self._electronic_integrator != "rk4"
+        ):
             return
         options = dict(cfg["options"])
         kernel_mode = options.pop("mode", None)
@@ -770,78 +795,155 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         return swap_to
 
+    def _unitary_substeps(self, e0, e1, d0, d1, dt_total: float) -> int:
+        """Batch-wide power-of-two step predictor from the leading Magnus commutator."""
+        b, n = e0.shape
+        device, dtype = e0.device, e0.dtype
+        key = (b, n, device, dtype)
+        buffers = self._electronic_buffers
+        w0 = self._get_tensor(buffers, ("w0",) + key, (b, n), device, dtype)
+        w1 = self._get_tensor(buffers, ("w1",) + key, (b, n), device, dtype)
+        re = self._get_tensor(buffers, ("comm_re",) + key, (b, n, n), device, dtype)
+        im = self._get_tensor(buffers, ("comm_im",) + key, (b, n, n), device, dtype)
+        tmp = self._get_tensor(buffers, ("comm_tmp",) + key, (b, n, n), device, dtype)
+
+        w0.copy_(e0).sub_(e0[:, :1]).div_(HBAR_EV_FS)
+        w1.copy_(e1).sub_(e1[:, :1]).div_(HBAR_EV_FS)
+
+        torch.bmm(d0, d1, out=re)
+        torch.bmm(d1, d0, out=tmp)
+        re.sub_(tmp)
+
+        # Im([A0,A1])_ij = D0_ij(w1_j-w1_i) + D1_ij(w0_i-w0_j)
+        torch.sub(w1.unsqueeze(1), w1.unsqueeze(2), out=im)
+        im.mul_(d0)
+        torch.sub(w0.unsqueeze(2), w0.unsqueeze(1), out=tmp)
+        tmp.mul_(d1)
+        im.add_(tmp)
+
+        # |Re|+|Im| is a cheap conservative proxy for the elementwise complex norm.
+        re.abs_().add_(im.abs_())
+        eta = float(re.amax().item()) * (dt_total * dt_total / 12.0)
+        nreq = max(1, math.ceil(math.sqrt(eta / self._electronic_error_target)))
+        nsub = 1 << (nreq - 1).bit_length()
+        return min(nsub, self._electronic_substeps_max)
+
+    def _propagate_unitary(self, amp, e0, e1, d0, d1, active, rows, dt_total: float, nsub: int):
+        """Midpoint exponential propagation using cached work buffers."""
+        b, n = e0.shape
+        device, dtype = e0.device, e0.dtype
+        cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        key = (b, n, device, dtype)
+        ckey = (b, n, device, cdtype)
+        buffers = self._electronic_buffers
+
+        c = self._get_tensor(buffers, ("c",) + ckey, (b, n), device, cdtype)
+        cm = self._get_tensor(buffers, ("cm",) + ckey, (b, n), device, cdtype)
+        z = self._get_tensor(buffers, ("z",) + ckey, (b, n, n), device, cdtype)
+        de = self._get_tensor(buffers, ("de",) + key, (b, n), device, dtype)
+        em = self._get_tensor(buffers, ("em",) + key, (b, n), device, dtype)
+        dd = self._get_tensor(buffers, ("dd",) + key, (b, n, n), device, dtype)
+        dm = self._get_tensor(buffers, ("dm",) + key, (b, n, n), device, dtype)
+        pair = self._get_tensor(buffers, ("pair",) + key, (b, n), device, dtype)
+        hop = self._get_tensor(buffers, ("hop",) + key, (b, n), device, dtype, fill_value=0)
+
+        # In unitary mode theta remains zero throughout the run; avoid trig/conversion work.
+        c.real.copy_(amp[..., 0])
+        c.imag.copy_(amp[..., 1])
+
+        inv = 1.0 / nsub
+        h = dt_total * inv
+        half_h = 0.5 * h
+        torch.sub(e1, e0, out=de).mul_(inv)
+        em.copy_(e0).add_(de, alpha=0.5)
+        torch.sub(d1, d0, out=dd).mul_(inv)
+        dm.copy_(d0).add_(dd, alpha=0.5)
+
+        for _ in range(nsub):
+            # z = (h/2) [-D - i(E-E_ref)/hbar], filled without diag_embed/temporaries.
+            z.real.copy_(dm).mul_(-half_h)
+            z.imag.zero_()
+            zdiag = torch.diagonal(z.imag, dim1=-2, dim2=-1)
+            zdiag.copy_(em).sub_(em[:, :1]).mul_(-half_h / HBAR_EV_FS)
+
+            uhalf = torch.matrix_exp(z)
+            torch.bmm(uhalf, c.unsqueeze(-1), out=cm.unsqueeze(-1))
+            torch.bmm(uhalf, cm.unsqueeze(-1), out=c.unsqueeze(-1))
+
+            pair.copy_(cm.real).mul_(cm.real[rows, active].unsqueeze(1))
+            pair.addcmul_(cm.imag, cm.imag[rows, active].unsqueeze(1))
+            hop.addcmul_(pair, dm[rows, active], value=2.0 * h)
+
+            em.add_(de)
+            dm.add_(dd)
+
+        amp[..., 0].copy_(c.real)
+        amp[..., 1].copy_(c.imag)
+        amp[..., 2].zero_()
+        return hop
+
     def _propagate_electronic(self, cache_old, cache_new, substeps=None):
         if self._amp_phase is None:
             raise RuntimeError("Electronic coefficients not initialized before propagation.")
-
         energies_old = cache_old.get("energies")
         energies_new = cache_new.get("energies")
         if not torch.is_tensor(energies_old) or not torch.is_tensor(energies_new):
             raise RuntimeError("Both cache_old['energies'] and cache_new['energies'] must be tensors.")
-
+        amp = self._amp_phase
         nd_new = cache_new.get("nac_dot")
         if not torch.is_tensor(nd_new):
             raise RuntimeError("cache_new['nac_dot'] is required for electronic propagation.")
-
-        nd_old = cache_old.get("nac_dot")
+        nd_old = cache_old.get("nac_dot", nd_new)
         if not torch.is_tensor(nd_old):
-            # First nuclear step only. Treat NAC as constant over the step.
             nd_old = nd_new
-
-        amp = self._amp_phase
-        device = amp.device
-        dtype = amp.dtype
-
-        dt_total = self.timestep
-
-        # excitation energies
-        e0 = energies_old
-        e1 = energies_new
-
-        # ------------------------------------------------------------------
+        dt_total = float(self.timestep)
         live = self._live_mask()
-        # Cheap adaptive nsub: default baseline, increase only for NAC spikes.
-        # ------------------------------------------------------------------
-        if substeps is None:
-            base = 8
-            nmax = 500
-            eta_nac = 0.25
 
-            # Dimensionless NAC severity over the nuclear step.
-            # chi = dt * max(max |D|, max |Delta D|)
-            # With dt = 0.1 fs and D = 100 fs^-1, chi = 10.
-            nd_old_max = nd_old if live is None else nd_old[live]
-            nd_new_max = nd_new if live is None else nd_new[live]
-            dmax = torch.maximum(torch.abs(nd_old_max), torch.abs(nd_new_max)).amax()
-            djump = torch.abs(nd_new_max - nd_old_max).amax()
-            chi = dt_total * torch.maximum(dmax, djump)
-
-            # Soft spike response:
-            #
-            # nsub = base                                if chi <= trigger
-            # nsub = base + ceil((chi-trigger)/eta_nac)  otherwise
-            extra = torch.ceil(torch.clamp((chi - 1.0) / eta_nac, min=0.0))
-            nsub = base + int(extra.to(torch.int64).item())
-            nsub = min(nsub, nmax)
-        else:
-            nsub = int(substeps)
-
-        eye = self._get_eye(self._nstates, device=device, dtype=dtype).unsqueeze(0)
-        # Inductor unrolls the Python RK4 loop. The common eight-substep graph
-        # is small and profitable, while larger adaptive nsub values produced
-        # very large, severely regressive graphs. Keep those cases eager.
-        if nsub == 8 and _electronic_propagation_dispatch is not None:
-            propagate = _electronic_propagation_dispatch
-        else:
-            propagate = _electronic_propagation_kernel
-        amp_new, hop_int = propagate(amp, e0, e1, nd_old, nd_new, eye, float(dt_total), nsub)
+        # Work on one uniform batch. Subsetting happens only after trajectories terminate.
         if live is None:
-            amp.copy_(amp_new)
-            self._hop_integral = hop_int
+            amp_work, e0, e1, d0, d1 = amp, energies_old, energies_new, nd_old, nd_new
+            active = self._active_states
         else:
-            amp[live] = amp_new[live]
-            hop_int[~live] = 0.0
-            self._hop_integral = hop_int
+            amp_work = amp[live]
+            e0, e1, d0, d1 = energies_old[live], energies_new[live], nd_old[live], nd_new[live]
+            active = self._active_states[live]
+        rows = self._get_arange(active.shape[0], device=amp.device)
+
+        if self._electronic_integrator == "unitary":
+            nsub = int(substeps) if substeps is not None else self._unitary_substeps(e0, e1, d0, d1, dt_total)
+            hop_work = self._propagate_unitary(amp_work, e0, e1, d0, d1, active, rows, dt_total, nsub)
+        else:
+            if substeps is None:
+                dmax = torch.maximum(d0.abs(), d1.abs()).amax()
+                djump = (d1 - d0).abs().amax()
+                chi = dt_total * torch.maximum(dmax, djump)
+                extra = int(torch.ceil(torch.clamp((chi - 1.0) / 0.25, min=0.0)).item())
+                nsub = min(self._rk4_substeps_base + extra, self._rk4_substeps_max)
+            else:
+                nsub = int(substeps)
+            propagate = (
+                _electronic_propagation_dispatch
+                if nsub == 8 and _electronic_propagation_dispatch is not None
+                else _electronic_propagation_kernel
+            )
+            amp_new, hop_work = propagate(amp_work, e0, e1, d0, d1, active, rows, dt_total, nsub)
+            amp_work.copy_(amp_new)
+
+        if live is None:
+            self._hop_integral = hop_work
+        else:
+            amp[live] = amp_work
+            hop_shape = (nd_new.shape[0], nd_new.shape[1])
+            hop = self._get_tensor(
+                self._electronic_buffers,
+                ("hop",) + hop_shape + (nd_new.device, nd_new.dtype),
+                hop_shape,
+                nd_new.device,
+                nd_new.dtype,
+                fill_value=0,
+            )
+            hop[live] = hop_work
+            self._hop_integral = hop
 
     def _init_termination_state(self, molecule):
         if not self._termination_enabled:
@@ -952,6 +1054,14 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         amp_phase = state.get("amp_phase")
         if torch.is_tensor(amp_phase):
             self._amp_phase = amp_phase.to(device)
+            if self._electronic_integrator == "unitary":
+                x, y, th = self._amp_phase.unbind(dim=-1)
+                ct, st = torch.cos(th), torch.sin(th)
+                real = x * ct - y * st
+                imag = x * st + y * ct
+                self._amp_phase[..., 0].copy_(real)
+                self._amp_phase[..., 1].copy_(imag)
+                self._amp_phase[..., 2].zero_()
         active_states = state.get("active_states")
         if torch.is_tensor(active_states):
             self._active_states = active_states.to(device)
@@ -1358,11 +1468,8 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
         arange = self._get_arange(nmol, device=device)
         i_state = active_states
         denom = torch.clamp(pop[arange, i_state], min=1e-10)
-        # FSSH: g_ij = max(0, - Δa_ii / a_ii) with Δa_ii ≈ ∫ 2 Re[c_i* c_j τ_ij] dt
-        g_rows = self._hop_integral[arange, i_state] / denom.unsqueeze(1)
-        g_rows = torch.clamp(g_rows, min=0.0)
-
-        # g_rows = torch.clamp(self._hop_integral[arange, i_state] / denom.unsqueeze(1), min=0.0)
+        # FSSH: g_ij = max(0, - Δa_ii / a_ii); _hop_integral already stores the active-state row.
+        g_rows = torch.clamp(self._hop_integral / denom.unsqueeze(1), min=0.0)
 
         # Guard against dt so large that Σ_j g_ij > 1
         g_sum = g_rows.sum(dim=1, keepdim=True)
@@ -1496,6 +1603,9 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
                 out = old.clone()
                 out.scatter_(dim=1, index=p.unsqueeze(-1).expand_as(old), src=old)
                 self._amp_phase[sel] = out
+                if self._hop_integral is not None:
+                    hop_old = self._hop_integral[sel].clone()
+                    self._hop_integral[sel].scatter_(1, p, hop_old)
 
                 # Active relabel if active participates in swap
                 ar = self._get_arange(nmol, device=device)
