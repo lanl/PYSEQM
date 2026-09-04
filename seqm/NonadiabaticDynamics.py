@@ -230,8 +230,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             raise ValueError("nonadiabatic.electronic_integrator must be 'unitary' or 'rk4'.")
         fixed_substeps = na_cfg.get("electronic_substeps")
         self._electronic_substeps = None if fixed_substeps is None else int(fixed_substeps)
-        self._electronic_error_target = float(na_cfg.get("electronic_error_target", 1e-2))
-        self._electronic_substeps_max = int(na_cfg.get("electronic_substeps_max", 128))
+        self._electronic_error_target = float(na_cfg.get("electronic_error_target", 1e-4))
+        self._electronic_substeps_max = int(na_cfg.get("electronic_substeps_max", 256))
         self._rk4_substeps_base = int(na_cfg.get("rk4_substeps_base", 8))
         self._rk4_substeps_max = int(na_cfg.get("rk4_substeps_max", 400))
         if self._electronic_substeps is not None and self._electronic_substeps < 1:
@@ -795,117 +795,121 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
 
         return swap_to
 
+    @torch.no_grad()
     def _unitary_substeps(self, e0, e1, d0, d1, dt_total: float) -> int:
-        """Batch-wide power-of-two step predictor from the leading Magnus commutator."""
+        """Cheap batch-wide power-of-two estimate for rotating-frame midpoint propagation."""
         b, n = e0.shape
         device, dtype = e0.device, e0.dtype
         key = (b, n, device, dtype)
         buffers = self._electronic_buffers
-        w0 = self._get_tensor(buffers, ("w0",) + key, (b, n), device, dtype)
-        w1 = self._get_tensor(buffers, ("w1",) + key, (b, n), device, dtype)
-        re = self._get_tensor(buffers, ("comm_re",) + key, (b, n, n), device, dtype)
-        im = self._get_tensor(buffers, ("comm_im",) + key, (b, n, n), device, dtype)
-        tmp = self._get_tensor(buffers, ("comm_tmp",) + key, (b, n, n), device, dtype)
+        a = self._get_tensor(buffers, ("pred_a",) + key, (b, n, n), device, dtype)
+        w = self._get_tensor(buffers, ("pred_w",) + key, (b, n, n), device, dtype)
+        t = self._get_tensor(buffers, ("pred_t",) + key, (b, n, n), device, dtype)
 
-        w0.copy_(e0).sub_(e0[:, :1]).div_(HBAR_EV_FS)
-        w1.copy_(e1).sub_(e1[:, :1]).div_(HBAR_EV_FS)
+        # Non-commuting change of the real antisymmetric coupling matrix.
+        torch.bmm(d0, d1, out=a)
+        torch.bmm(d1, d0, out=t)
+        a.sub_(t).abs_()
+        eta_comm = a.amax() * (dt_total * dt_total / 12.0)
 
-        torch.bmm(d0, d1, out=re)
-        torch.bmm(d1, d0, out=tmp)
-        re.sub_(tmp)
+        # Interaction-picture phase variation, weighted by the coupling itself.
+        torch.sub(e0.unsqueeze(2), e0.unsqueeze(1), out=w)
+        w.abs_()
+        torch.sub(e1.unsqueeze(2), e1.unsqueeze(1), out=t)
+        t.abs_()
+        torch.maximum(w, t, out=w)
+        w.mul_(dt_total / HBAR_EV_FS).square_()
 
-        # Im([A0,A1])_ij = D0_ij(w1_j-w1_i) + D1_ij(w0_i-w0_j)
-        torch.sub(w1.unsqueeze(1), w1.unsqueeze(2), out=im)
-        im.mul_(d0)
-        torch.sub(w0.unsqueeze(2), w0.unsqueeze(1), out=tmp)
-        tmp.mul_(d1)
-        im.add_(tmp)
+        a.copy_(d0).abs_()
+        t.copy_(d1).abs_()
+        torch.maximum(a, t, out=a)
+        w.mul_(a).mul_(dt_total / 24.0)
 
-        # |Re|+|Im| is a cheap conservative proxy for the elementwise complex norm.
-        re.abs_().add_(im.abs_())
-        eta = float(re.amax().item()) * (dt_total * dt_total / 12.0)
-        nreq = max(1, math.ceil(math.sqrt(eta / self._electronic_error_target)))
+        eta = float(torch.maximum(eta_comm, w.amax()).item())
+        nreq = max(4, math.ceil(math.sqrt(eta / self._electronic_error_target)))
         nsub = 1 << (nreq - 1).bit_length()
         return min(nsub, self._electronic_substeps_max)
 
     def _propagate_unitary(self, amp, e0, e1, d0, d1, active, rows, dt_total: float, nsub: int):
-        """Midpoint exponential propagation using cached work buffers."""
+        """Rotating-frame midpoint unitary propagation with a real antisymmetric exponential."""
         b, n = e0.shape
         device, dtype = e0.device, e0.dtype
-        cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
         key = (b, n, device, dtype)
-        ckey = (b, n, device, cdtype)
         buffers = self._electronic_buffers
 
-        c = self._get_tensor(buffers, ("c",) + ckey, (b, n), device, cdtype)
-        cm = self._get_tensor(buffers, ("cm",) + ckey, (b, n), device, cdtype)
-        z = self._get_tensor(buffers, ("z",) + ckey, (b, n, n), device, cdtype)
         de = self._get_tensor(buffers, ("de",) + key, (b, n), device, dtype)
-        em = self._get_tensor(buffers, ("em",) + key, (b, n), device, dtype)
+        e = self._get_tensor(buffers, ("e",) + key, (b, n), device, dtype)
         dd = self._get_tensor(buffers, ("dd",) + key, (b, n, n), device, dtype)
         dm = self._get_tensor(buffers, ("dm",) + key, (b, n, n), device, dtype)
+        z = self._get_tensor(buffers, ("z",) + key, (b, n, n), device, dtype)
+        thm = self._get_tensor(buffers, ("thm",) + key, (b, n), device, dtype)
+        ct = self._get_tensor(buffers, ("ct",) + key, (b, n), device, dtype)
+        st = self._get_tensor(buffers, ("st",) + key, (b, n), device, dtype)
+        tmp = self._get_tensor(buffers, ("tmp_ri",) + key, (b, n, 2), device, dtype)
+        mid = self._get_tensor(buffers, ("mid_ri",) + key, (b, n, 2), device, dtype)
         pair = self._get_tensor(buffers, ("pair",) + key, (b, n), device, dtype)
         hop = self._get_tensor(buffers, ("hop",) + key, (b, n), device, dtype, fill_value=0)
 
-        # In unitary mode theta remains zero throughout the run; avoid trig/conversion work.
-        c.real.copy_(amp[..., 0])
-        c.imag.copy_(amp[..., 1])
-
+        x, y, theta = amp.unbind(dim=-1)
         inv = 1.0 / nsub
         h = dt_total * inv
         half_h = 0.5 * h
+        inv_hbar = 1.0 / HBAR_EV_FS
+
         torch.sub(e1, e0, out=de).mul_(inv)
-        em.copy_(e0).add_(de, alpha=0.5)
+        e.copy_(e0)
         torch.sub(d1, d0, out=dd).mul_(inv)
         dm.copy_(d0).add_(dd, alpha=0.5)
 
+        tr, ti = tmp.unbind(dim=-1)
+        mr, mi = mid.unbind(dim=-1)
+
         for _ in range(nsub):
-            # z = (h/2) [-D - i(E-E_ref)/hbar], filled without diag_embed/temporaries.
-            z.real.copy_(dm).mul_(-half_h)
-            z.imag.zero_()
-            zdiag = torch.diagonal(z.imag, dim1=-2, dim2=-1)
-            zdiag.copy_(em).sub_(em[:, :1]).mul_(-half_h / HBAR_EV_FS)
+            # Exact diagonal-energy phase to the substep midpoint for linear E(t).
+            thm.copy_(theta).add_(e, alpha=-half_h * inv_hbar)
+            thm.add_(de, alpha=-0.25 * half_h * inv_hbar)
+            torch.cos(thm, out=ct)
+            torch.sin(thm, out=st)
 
-            uhalf = torch.matrix_exp(z)
-            torch.bmm(uhalf, c.unsqueeze(-1), out=cm.unsqueeze(-1))
-            torch.bmm(uhalf, cm.unsqueeze(-1), out=c.unsqueeze(-1))
+            # P_m a_n, kept as two real channels.
+            tr.copy_(x).mul_(ct).addcmul_(y, st, value=-1.0)
+            ti.copy_(x).mul_(st).addcmul_(y, ct)
 
-            pair.copy_(cm.real).mul_(cm.real[rows, active].unsqueeze(1))
-            pair.addcmul_(cm.imag, cm.imag[rows, active].unsqueeze(1))
+            # exp[-h D_m / 2] is real orthogonal because D_m is real antisymmetric.
+            z.copy_(dm).mul_(-half_h)
+            rhalf = torch.matrix_exp(z)
+            torch.bmm(rhalf, tmp, out=mid)
+
+            # Physical midpoint coefficients are exactly the rotated mid tensor.
+            pair.copy_(mr).mul_(mr[rows, active].unsqueeze(1))
+            pair.addcmul_(mi, mi[rows, active].unsqueeze(1))
             hop.addcmul_(pair, dm[rows, active], value=2.0 * h)
 
-            em.add_(de)
+            # Second identical half-step, then rotate back to interaction-picture amplitudes.
+            torch.bmm(rhalf, mid, out=tmp)
+            x.copy_(tr).mul_(ct).addcmul_(ti, st)
+            y.copy_(ti).mul_(ct).addcmul_(tr, st, value=-1.0)
+
+            theta.add_(e, alpha=-h * inv_hbar).add_(de, alpha=-0.5 * h * inv_hbar)
+            e.add_(de)
             dm.add_(dd)
 
-        amp[..., 0].copy_(c.real)
-        amp[..., 1].copy_(c.imag)
-        amp[..., 2].zero_()
+        theta.add_(torch.pi).remainder_(2.0 * torch.pi).sub_(torch.pi)
         return hop
 
     def _propagate_electronic(self, cache_old, cache_new, substeps=None):
-        if self._amp_phase is None:
-            raise RuntimeError("Electronic coefficients not initialized before propagation.")
-        energies_old = cache_old.get("energies")
-        energies_new = cache_new.get("energies")
-        if not torch.is_tensor(energies_old) or not torch.is_tensor(energies_new):
-            raise RuntimeError("Both cache_old['energies'] and cache_new['energies'] must be tensors.")
         amp = self._amp_phase
-        nd_new = cache_new.get("nac_dot")
-        if not torch.is_tensor(nd_new):
-            raise RuntimeError("cache_new['nac_dot'] is required for electronic propagation.")
-        nd_old = cache_old.get("nac_dot", nd_new)
-        if not torch.is_tensor(nd_old):
-            nd_old = nd_new
+        e0, e1 = cache_old["energies"], cache_new["energies"]
+        d1 = cache_new["nac_dot"]
+        d0 = cache_old.get("nac_dot", d1)
         dt_total = float(self.timestep)
         live = self._live_mask()
 
-        # Work on one uniform batch. Subsetting happens only after trajectories terminate.
         if live is None:
-            amp_work, e0, e1, d0, d1 = amp, energies_old, energies_new, nd_old, nd_new
-            active = self._active_states
+            amp_work, active = amp, self._active_states
         else:
             amp_work = amp[live]
-            e0, e1, d0, d1 = energies_old[live], energies_new[live], nd_old[live], nd_new[live]
+            e0, e1, d0, d1 = e0[live], e1[live], d0[live], d1[live]
             active = self._active_states[live]
         rows = self._get_arange(active.shape[0], device=amp.device)
 
@@ -933,13 +937,13 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             self._hop_integral = hop_work
         else:
             amp[live] = amp_work
-            hop_shape = (nd_new.shape[0], nd_new.shape[1])
+            hop_shape = tuple(cache_new["nac_dot"].shape[:2])
             hop = self._get_tensor(
                 self._electronic_buffers,
-                ("hop",) + hop_shape + (nd_new.device, nd_new.dtype),
+                ("hop_full",) + hop_shape + (amp.device, amp.dtype),
                 hop_shape,
-                nd_new.device,
-                nd_new.dtype,
+                amp.device,
+                amp.dtype,
                 fill_value=0,
             )
             hop[live] = hop_work
@@ -1054,14 +1058,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         amp_phase = state.get("amp_phase")
         if torch.is_tensor(amp_phase):
             self._amp_phase = amp_phase.to(device)
-            if self._electronic_integrator == "unitary":
-                x, y, th = self._amp_phase.unbind(dim=-1)
-                ct, st = torch.cos(th), torch.sin(th)
-                real = x * ct - y * st
-                imag = x * st + y * ct
-                self._amp_phase[..., 0].copy_(real)
-                self._amp_phase[..., 1].copy_(imag)
-                self._amp_phase[..., 2].zero_()
         active_states = state.get("active_states")
         if torch.is_tensor(active_states):
             self._active_states = active_states.to(device)

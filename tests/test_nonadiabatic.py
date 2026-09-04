@@ -166,7 +166,7 @@ def test_unitary_preserves_norm_and_uses_active_row():
     assert torch.allclose(nad.populations.sum(), torch.tensor(1.0, dtype=nad.populations.dtype), atol=1e-12)
     assert nad._hop_integral.shape == (1, 2)
     assert torch.abs(nad._hop_integral[0, 1]) > 0
-    assert torch.allclose(nad._amp_phase[..., 2], torch.zeros_like(nad._amp_phase[..., 2]))
+    assert torch.isfinite(nad._amp_phase[..., 2]).all()
 
 
 def test_nonadiabatic_compile_hook_registers_kernels(monkeypatch):
