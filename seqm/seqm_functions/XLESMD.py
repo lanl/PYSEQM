@@ -243,8 +243,23 @@ def elec_energy_excited_xl(
                     def preconditioner(v):
                         return -kernel_inverse(v.reshape(b * r, n)).reshape(b, r, n)
 
+                elif preconditioner_name == "ordered_lowrank":
+                    if constraint_mode != "ordered_linearized":
+                        raise ValueError(
+                            "ordered_lowrank is only available with constraint_mode='ordered_linearized'."
+                        )
+                    tau = float(xl_bomd_params.get("preconditioner_tau", 1.0e-5))
+                    kernel_inverse = make_apply_precond_ordered_lowrank(
+                        ea_ei_flat, eta_flat, omega, Gx_flat, tau=tau, gram_factors=ordered_gram_factors
+                    )
+
+                    def preconditioner(v):
+                        return -kernel_inverse(v)
+
                 else:
-                    raise ValueError("krylov_preconditioner must be 'none', 'diagonal', or 'rank1'.")
+                    raise ValueError(
+                        "krylov_preconditioner must be 'none', 'diagonal', 'rank1', or 'ordered_lowrank'."
+                    )
 
                 if constraint_mode == "ordered_linearized":
                     dxi2dt2_flat, krylov_info = compute_dxi2dt2_old_jacobian_gmres(
@@ -434,6 +449,79 @@ def make_apply_precond_rank1(
         z = dinv * v  # (B,n) = D^{-1} v
         qz = torch.sum(q * z, dim=1)  # (B)   = q^T D^{-1} v
         return z - w * (qz / denom).unsqueeze(-1)  # Sherman–Morrison
+
+    return apply_prec
+
+
+def make_apply_precond_ordered_lowrank(
+    ea_ei_flat: torch.Tensor,
+    eta: torch.Tensor,
+    multipliers: torch.Tensor,
+    G_eta: torch.Tensor,
+    tau: float = 1e-5,
+    *,
+    gram_factors: Optional[Tuple[torch.Tensor, ...]] = None,
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Approximate ``(J_xi - I)^-1`` for ordered constraints, omitting only ``G(v)``.
+
+    The gap term is lower triangular in root index and the complete multiplier
+    response is a rank ``roots * (roots + 1) / 2`` Woodbury update.
+    """
+    b, r, n = eta.shape
+    if multipliers.shape != (b, r, r) or G_eta.shape != eta.shape:
+        raise ValueError("Ordered preconditioner inputs have incompatible shapes.")
+    invD = 1.0 / ea_ei_flat[:, 0]
+    if gram_factors is None:
+        gram_factors = _ordered_gram_cholesky(eta, invD.unsqueeze(1))
+    starts = [j * (j + 1) // 2 for j in range(r)]
+    nlambda = r * (r + 1) // 2
+
+    def apply_b_inverse(v: torch.Tensor) -> torch.Tensor:
+        rows = []
+        for j in range(r):
+            value = v[:, j]
+            for i, previous in enumerate(rows):
+                value = value - (multipliers[:, j, i].unsqueeze(-1) * invD) * previous
+            diagonal = multipliers[:, j, j].unsqueeze(-1) * invD - 1.0 + tau
+            rows.append(value / diagonal)
+        return torch.stack(rows, dim=1)
+
+    def apply_u(beta: torch.Tensor) -> torch.Tensor:
+        result = torch.zeros_like(eta)
+        for j in range(r):
+            start = starts[j]
+            result[:, j] = invD * torch.einsum("bjn,bj->bn", eta[:, : j + 1], beta[:, start : start + j + 1])
+        return result
+
+    def apply_l(v: torch.Tensor) -> torch.Tensor:
+        result = torch.empty((b, nlambda), dtype=eta.dtype, device=eta.device)
+        for j in range(r):
+            H, V = eta[:, : j + 1], v[:, : j + 1]
+            lam = multipliers[:, j, : j + 1]
+            dS = torch.einsum("bjn,bkn->bjk", V, invD * H)
+            dS = dS + torch.einsum("bjn,bkn->bjk", H, invD * V)
+            dc = 0.5 * (torch.einsum("bjn,bn->bj", V, eta[:, j]) + torch.einsum("bjn,bn->bj", H, v[:, j]))
+            du = dc + torch.einsum("bjn,bn->bj", V, invD * G_eta[:, j])
+            start = starts[j]
+            result[:, start : start + j + 1] = torch.cholesky_solve(
+                (du - torch.einsum("bjk,bk->bj", dS, lam)).unsqueeze(-1), gram_factors[j]
+            ).squeeze(-1)
+        return result
+
+    # Form I + L B^-1 U once; its dimension is only the number of multipliers.
+    columns = []
+    for column in range(nlambda):
+        basis = torch.zeros((b, nlambda), dtype=eta.dtype, device=eta.device)
+        basis[:, column] = 1.0
+        columns.append(apply_l(apply_b_inverse(apply_u(basis))))
+    woodbury = torch.eye(nlambda, dtype=eta.dtype, device=eta.device).unsqueeze(0)
+    woodbury = woodbury + torch.stack(columns, dim=-1)
+    woodbury_inverse = torch.linalg.pinv(woodbury, rtol=100.0 * torch.finfo(eta.dtype).eps)
+
+    def apply_prec(v: torch.Tensor) -> torch.Tensor:
+        z = apply_b_inverse(v)
+        beta = torch.bmm(woodbury_inverse, apply_l(z).unsqueeze(-1)).squeeze(-1)
+        return z - apply_b_inverse(apply_u(beta))
 
     return apply_prec
 

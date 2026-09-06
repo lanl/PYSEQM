@@ -2,6 +2,7 @@ import torch
 
 from seqm.seqm_functions.XLESMD import (
     compute_dxi2dt2_old_jacobian_gmres,
+    make_apply_precond_ordered_lowrank,
     make_apply_precond_rank1,
     make_jvp_xi,
     make_jvp_xi_full_normalized,
@@ -316,6 +317,29 @@ def test_ordered_linearized_solver_fixed_point_constraints_and_jvp():
         lambda trial: solve_for_amplitudes_ordered(trial, D, G)[0], eta, direction
     )
     torch.testing.assert_close(analytic, finite_difference, rtol=5e-7, atol=5e-9)
+
+
+def test_ordered_lowrank_preconditioner_inverts_ordered_jacobian_without_kernel_response():
+    D, _, _, exact, G, _ = _problem(n=6, roots=3)
+    eta = exact + 0.01 * torch.randn_like(exact)
+    xi, multiplier = solve_for_amplitudes_ordered(eta, D, G_eta=G(eta))
+    preconditioner = make_apply_precond_ordered_lowrank(D, eta, multiplier, G(eta), tau=0.0)
+
+    def zero_kernel(v):
+        return torch.zeros_like(v)
+
+    jvp = make_jvp_xi_ordered(D, eta, multiplier, zero_kernel, 1, D.shape[-1], G_eta=G(eta))
+    n = D.shape[-1]
+    columns = []
+    for column in range(eta.shape[1] * n):
+        basis = torch.zeros_like(eta).reshape(1, -1)
+        basis[:, column] = 1.0
+        basis = basis.reshape_as(eta)
+        columns.append((jvp(basis) - basis).reshape(1, -1))
+    operator = torch.stack(columns, dim=-1)[0]
+    rhs = torch.randn_like(eta).reshape(1, -1)
+    expected = torch.linalg.solve(operator, rhs.unsqueeze(-1)).squeeze(-1).reshape_as(eta)
+    torch.testing.assert_close(preconditioner(rhs.reshape_as(eta)), expected, rtol=3e-10, atol=3e-11)
 
 
 def test_full_rank_gmres_matches_dense_inverse_action():
