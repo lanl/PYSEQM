@@ -401,6 +401,47 @@ def test_right_preconditioned_full_rank_gmres_matches_dense_inverse_action():
     torch.testing.assert_close(correction, dense, rtol=2e-8, atol=2e-9)
 
 
+def test_coupled_root_gmres_matches_ordered_dense_inverse_action():
+    D, _, _, exact, G, G_jvp = _problem(n=5, roots=3)
+    eta = exact + 0.01 * torch.randn_like(exact)
+    xi, multiplier = solve_for_amplitudes_ordered(eta, D, G_eta=G(eta))
+    jvp = make_jvp_xi_ordered(D, eta, multiplier, G_jvp, 1, D.shape[-1], G_eta=G(eta))
+    preconditioner_shapes = []
+
+    def identity_preconditioner(v):
+        preconditioner_shapes.append(v.shape)
+        return v
+
+    size = eta.shape[1] * eta.shape[2]
+    correction, info = compute_dxi2dt2_old_jacobian_gmres(
+        eta,
+        xi,
+        multiplier,
+        D,
+        G_jvp,
+        1,
+        D.shape[-1],
+        {"max_rank": size, "err_threshold": 1e-12, "krylov_root_mode": "coupled"},
+        jvp_xi=jvp,
+        preconditioner=identity_preconditioner,
+        return_info=True,
+    )
+
+    columns = []
+    for col in range(size):
+        basis = torch.zeros_like(eta).reshape(1, size)
+        basis[:, col] = 1.0
+        basis = basis.reshape_as(eta)
+        columns.append((basis - jvp(basis)).reshape(1, size))
+    operator = torch.stack(columns, dim=-1)
+    dense = torch.linalg.solve(operator, (xi - eta).reshape(1, size, 1)).reshape_as(eta)
+
+    assert all(shape == eta.shape for shape in preconditioner_shapes)
+    assert info["root_mode"] == "coupled"
+    assert info["relative_residual"].shape == (eta.shape[0],)
+    torch.testing.assert_close(correction, dense, rtol=3e-8, atol=3e-9)
+
+
 def test_jacobian_regularization_shifts_the_gmres_response_operator():
     eta = torch.zeros((1, 1, 2), dtype=torch.float64)
     xi = torch.ones_like(eta)

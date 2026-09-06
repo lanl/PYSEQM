@@ -261,34 +261,24 @@ def elec_energy_excited_xl(
                         "krylov_preconditioner must be 'none', 'diagonal', 'rank1', or 'ordered_lowrank'."
                     )
 
-                if constraint_mode == "ordered_linearized":
-                    dxi2dt2_flat, krylov_info = compute_dxi2dt2_old_jacobian_gmres(
-                        eta_brn=eta_flat,
-                        xi_brn=xi_flat,
-                        nu_br=omega,
-                        ea_ei_flat=ea_ei_flat,
-                        G_apply=G_apply,
-                        nocc=nocc,
-                        nvirt=nvirt,
-                        xl_params=xl_bomd_params,
-                        jvp_xi=jvp_xi,
-                        preconditioner=preconditioner,
-                        return_info=True,
-                    )
-                else:
-                    dxi2dt2_flat, krylov_info = compute_dxi2dt2_old_jacobian_gmres(
-                        eta_brn=eta_flat,
-                        xi_brn=xi_flat,
-                        nu_br=omega,
-                        ea_ei_flat=ea_ei_flat,
-                        G_apply=G_apply,
-                        nocc=nocc,
-                        nvirt=nvirt,
-                        xl_params=xl_bomd_params,
-                        jvp_xi=jvp_xi,
-                        preconditioner=preconditioner,
-                        return_info=True,
-                    )
+                krylov_params = dict(xl_bomd_params)
+                krylov_params.setdefault(
+                    "krylov_root_mode",
+                    "coupled" if constraint_mode == "ordered_linearized" else "independent",
+                )
+                dxi2dt2_flat, krylov_info = compute_dxi2dt2_old_jacobian_gmres(
+                    eta_brn=eta_flat,
+                    xi_brn=xi_flat,
+                    nu_br=omega,
+                    ea_ei_flat=ea_ei_flat,
+                    G_apply=G_apply,
+                    nocc=nocc,
+                    nvirt=nvirt,
+                    xl_params=krylov_params,
+                    jvp_xi=jvp_xi,
+                    preconditioner=preconditioner,
+                    return_info=True,
+                )
                 mol.Krylov_Error = krylov_info["relative_residual"]
                 # Convert to AO basis and store in mol for later use in BOMD
                 if MO_basis:
@@ -319,6 +309,7 @@ def elec_energy_excited_xl(
                 krylov_kernel_gain=krylov_info["kernel_gain"],
                 krylov_kernel_gain_scale=krylov_info["kernel_gain_scale"],
                 krylov_preconditioner=preconditioner_name,
+                krylov_root_mode=krylov_info["root_mode"],
             )
             if "history" in krylov_info:
                 diagnostics["krylov_history"] = krylov_info["history"]
@@ -1675,13 +1666,21 @@ def compute_dxi2dt2_old_jacobian_gmres(
     component required when ``xi != eta``.  The operator is nonsymmetric away
     from self consistency, hence Arnoldi/GMRES rather than MINRES is used.
 
-    Each (molecule, root) block is an independent GMRES solve.  Every Arnoldi
+    ``krylov_root_mode='independent'`` solves each root separately, while
+    ``'coupled'`` treats all roots of a molecule as one Krylov vector.  Every Arnoldi
     iteration performs exactly one batched ``G_apply`` through ``jvp_xi``.
     A supplied preconditioner is applied on the right, so GMRES minimizes the
     true residual while using ``d = M^-1 y`` as its correction.
     """
+    b, r, n = eta_brn.shape
+    dtype, device = eta_brn.dtype, eta_brn.device
     max_rank = int(xl_params["max_rank"])
     err_threshold = float(xl_params.get("err_threshold", 1e-6))
+    root_mode = str(xl_params.get("krylov_root_mode", "independent")).lower()
+    if root_mode not in {"independent", "coupled"}:
+        raise ValueError("krylov_root_mode must be 'independent' or 'coupled'.")
+    coupled = root_mode == "coupled"
+    info_shape = (b,) if coupled else (b, r)
     jacobian_regularization = float(xl_params.get("jacobian_regularization", 0.0))
     if jacobian_regularization < 0.0:
         raise ValueError("jacobian_regularization must be nonnegative.")
@@ -1690,24 +1689,22 @@ def compute_dxi2dt2_old_jacobian_gmres(
         solution = torch.zeros_like(eta_brn)
         info = {
             "rank": 0,
-            "relative_residual": torch.ones(eta_brn.shape[:2], dtype=eta_brn.dtype, device=eta_brn.device),
-            "converged": torch.zeros(eta_brn.shape[:2], dtype=torch.bool, device=eta_brn.device),
-            "kernel_gain": torch.zeros(eta_brn.shape[:2], dtype=eta_brn.dtype, device=eta_brn.device),
-            "kernel_gain_scale": torch.ones(eta_brn.shape[:2], dtype=eta_brn.dtype, device=eta_brn.device),
+            "relative_residual": torch.ones(info_shape, dtype=dtype, device=device),
+            "converged": torch.zeros(info_shape, dtype=torch.bool, device=device),
+            "kernel_gain": torch.zeros(info_shape, dtype=dtype, device=device),
+            "kernel_gain_scale": torch.ones(info_shape, dtype=dtype, device=device),
+            "root_mode": root_mode,
         }
         return (solution, info) if return_info else solution
 
-    b, r, n = eta_brn.shape
-    B = b * r
-    dtype = eta_brn.dtype
-    device = eta_brn.device
+    B, N = (b, r * n) if coupled else (b * r, n)
     finfo = torch.finfo(dtype)
     breakdown_tol = max(float(eps), 100.0 * float(finfo.eps))
 
     if jvp_xi is None:
         jvp_xi = make_jvp_xi(ea_ei_flat, eta_brn, xi_brn, nu_br, G_apply, nocc, nvirt, eps=eps)
 
-    rhs = (xi_brn - eta_brn).reshape(B, n)
+    rhs = (xi_brn - eta_brn).reshape(B, N)
     rhs_norm = torch.linalg.vector_norm(rhs, dim=1)
     rhs_norm_safe = rhs_norm.clamp_min(breakdown_tol)
     live = rhs_norm > breakdown_tol
@@ -1716,21 +1713,22 @@ def compute_dxi2dt2_old_jacobian_gmres(
         solution = torch.zeros_like(eta_brn)
         info = {
             "rank": 0,
-            "relative_residual": torch.zeros((b, r), dtype=dtype, device=device),
-            "converged": torch.ones((b, r), dtype=torch.bool, device=device),
-            "kernel_gain": torch.zeros((b, r), dtype=dtype, device=device),
-            "kernel_gain_scale": torch.ones((b, r), dtype=dtype, device=device),
+            "relative_residual": torch.zeros(info_shape, dtype=dtype, device=device),
+            "converged": torch.ones(info_shape, dtype=torch.bool, device=device),
+            "kernel_gain": torch.zeros(info_shape, dtype=dtype, device=device),
+            "kernel_gain_scale": torch.ones(info_shape, dtype=dtype, device=device),
+            "root_mode": root_mode,
         }
         return (solution, info) if return_info else solution
 
     # Arnoldi relation: A V_m = V_{m+1} Hbar_m, A = I - J_xi.
-    V = torch.zeros((B, n, max_rank + 1), dtype=dtype, device=device)
+    V = torch.zeros((B, N, max_rank + 1), dtype=dtype, device=device)
     Hbar = torch.zeros((B, max_rank + 1, max_rank), dtype=dtype, device=device)
     small_rhs = torch.zeros((B, max_rank + 1), dtype=dtype, device=device)
     small_rhs[:, 0] = rhs_norm
     V[live, :, 0] = rhs[live] / rhs_norm[live].unsqueeze(-1)
 
-    solution = torch.zeros((B, n), dtype=dtype, device=device)
+    solution = torch.zeros((B, N), dtype=dtype, device=device)
     relres = torch.zeros((B,), dtype=dtype, device=device)
     relres[live] = float("inf")
     rank_used = 0
@@ -1742,7 +1740,7 @@ def compute_dxi2dt2_old_jacobian_gmres(
         iter_mask = live.clone()
         vk = V[:, :, k].reshape(b, r, n)
         zk = preconditioner(vk) if preconditioner is not None else vk
-        w = ((1.0 + jacobian_regularization) * zk - jvp_xi(zk)).reshape(B, n)
+        w = ((1.0 + jacobian_regularization) * zk - jvp_xi(zk)).reshape(B, N)
         w[~iter_mask] = 0.0
 
         # Two-pass modified Gram--Schmidt controls loss of orthogonality while
@@ -1787,9 +1785,10 @@ def compute_dxi2dt2_old_jacobian_gmres(
     # can destabilize the finite-step XL oscillator far from the fixed point.
     # Treat ``kernel_max_amplification`` as a spectral/trust-region
     # regularizer: the unmodified value preserves the usual GMRES result,
-    # while a positive value bounds ||d|| / ||xi-eta|| per root.
-    correction_norm = torch.linalg.vector_norm(solution, dim=-1)
-    gain = correction_norm / rhs_norm.reshape(b, r).clamp_min(breakdown_tol)
+    # while a positive value bounds ||d|| / ||xi-eta|| per Krylov vector.
+    correction_norm = torch.linalg.vector_norm(solution.reshape(B, N), dim=-1)
+    gain = correction_norm / rhs_norm.clamp_min(breakdown_tol)
+    gain = gain.reshape(b) if coupled else gain.reshape(b, r)
     gain_scale = torch.ones_like(gain)
     max_amplification = xl_params.get("kernel_max_amplification")
     if max_amplification is not None:
@@ -1797,13 +1796,16 @@ def compute_dxi2dt2_old_jacobian_gmres(
         if max_amplification <= 0.0:
             raise ValueError("kernel_max_amplification must be positive when supplied.")
         gain_scale = torch.clamp(max_amplification / gain.clamp_min(breakdown_tol), max=1.0)
-        solution = solution * gain_scale.unsqueeze(-1)
+        solution = solution * (gain_scale[:, None, None] if coupled else gain_scale[..., None])
 
     info = {
         "rank": rank_used,
-        "relative_residual": relres.reshape(b, r),
-        "converged": (relres <= err_threshold).reshape(b, r),
+        "relative_residual": relres.reshape(b) if coupled else relres.reshape(b, r),
+        "converged": (relres <= err_threshold).reshape(b)
+        if coupled
+        else (relres <= err_threshold).reshape(b, r),
         "kernel_gain": gain,
         "kernel_gain_scale": gain_scale,
+        "root_mode": root_mode,
     }
     return (solution, info) if return_info else solution
