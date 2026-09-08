@@ -1,5 +1,7 @@
 import pytest
+import torch
 
+from seqm.dynamics.xlbomd import ForceXL
 from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
@@ -52,6 +54,25 @@ def _run_excited_force(device, species, coordinates, method, mode_overrides):
     esdriver(molecule)
 
     return molecule.force.detach().cpu().tolist()
+
+
+def test_xl_analytical_force_matches_autodiff(device, methane_molecule_data):
+    species, coordinates = methane_molecule_data
+    base = {"method": "AM1", "scf_eps": 1.0e-9, "scf_converger": [1], "torch_compile": False}
+
+    molecule = Molecule(Constants().to(device), base, coordinates.clone(), species).to(device)
+    Electronic_Structure(base).to(device)(molecule)
+    P = molecule.dm.detach().clone()
+    delta = 0.01 * torch.sin(torch.arange(P.numel(), dtype=P.dtype, device=device)).reshape_as(P)
+    P += 0.5 * (delta + delta.transpose(1, 2))
+
+    forces = []
+    for analytical in (False, True):
+        params = dict(base, analytical_gradient=[analytical])
+        molecule = Molecule(Constants().to(device), params, coordinates.clone(), species).to(device)
+        forces.append(ForceXL(params).to(device)(molecule, P.clone())[0])
+
+    assert_allclose(forces[1], forces[0], rtol=1.0e-7, atol=2.0e-8)
 
 
 @pytest.mark.parametrize("method", OMX_METHODS)

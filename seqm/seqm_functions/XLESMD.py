@@ -213,7 +213,7 @@ def elec_energy_excited_xl(
                 preconditioner_name = str(
                     xl_bomd_params.get(
                         "krylov_preconditioner",
-                        "rank1" if constraint_mode == "ordered_linearized" else "none",
+                        "ordered_lowrank" if constraint_mode == "ordered_linearized" else "none",
                     )
                 ).lower()
                 preconditioner = None

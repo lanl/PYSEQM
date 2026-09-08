@@ -2,12 +2,18 @@ import torch
 from torch import pow
 
 from .cal_par import additive_term_rho1, additive_term_rho2, dd_qq
-from .constants import a0, ev
+from .constants import a0, ev, overlap_cutoff
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .dispersion_am1_fs1 import dEdisp_dr
 from .energy import pair_nuclear_energy
 from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
-from .om2_hcore import build_omx_pair_context
+from .om2_hcore import (
+    build_omx_pair_context,
+    diatom_overlap_matrix_OM1,
+    diatom_resonance_matrix_OM1,
+    om1_local_resonance_terms,
+    select_om1_basis_payload,
+)
 from .two_elec_two_center_int import (
     _pair_rotation_matrix,
     local_sp_integral_matrix,
@@ -18,7 +24,6 @@ from .two_elec_two_center_int import (
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
 delta = 5e-6  # delta for finite difference calcs
-_VECTORIZED_SP_DERIVATIVES = True
 
 
 def _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_x):
@@ -36,8 +41,19 @@ def _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_
 
 
 # @profile
-def scf_analytic_grad(
+def scf_analytic_grad(P0, *args, **kwargs):
+    """Calculate the ordinary ground-state SCF gradient."""
+    return _analytic_grad(P0, contract_ao_derivatives_with_density, *args, **kwargs)
+
+
+def xl_scf_analytic_grad(D, P, *args, **kwargs):
+    """Calculate the XL-BOMD shadow-energy gradient."""
+    return _analytic_grad((D, P), contract_xl_ao_derivatives, *args, **kwargs)
+
+
+def _analytic_grad(
     P0,
+    contract,
     molecule,
     const,
     method,
@@ -73,9 +89,6 @@ def scf_analytic_grad(
     if method not in {"PM3", "AM1", "MNDO", "PM6_SP"}:
         raise Exception("Analytical gradients implented only for MNDO, AM1 and PM3 methods")
 
-    # torch.set_printoptions(precision=6)
-    # torch.set_printoptions(linewidth=110)
-
     # Xij (= Xj-Xi) is the vector from j to i in Angstroms
     # xij (= xj-xi) is the *unit* vector from j to i
     Xij = xij * rij.unsqueeze(1) * a0
@@ -87,14 +100,10 @@ def scf_analytic_grad(
     # I will use this tensor to store the gradient of the overlap matrix elements, and then that of the exchange integrals
     overlap_KAB_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
 
-    # overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij)
-    # We will use finite-differnce for the overlap derivative because analytical expression for derivatives of
-    # the overlap of slater orbitals is v complicated
+    # A centered finite difference is used because analytic Slater-overlap derivatives are complicated.
     zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int)
 
-    # Core-core repulsion derivatives
-    # First, derivative of g_AB
     tore = const.tore  # Charges
 
     # Two-center repulsion integral derivatives
@@ -104,14 +113,22 @@ def scf_analytic_grad(
         const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2, hsp, zetas, zetap, riXH, ri
     )
 
-    # Derivative of pair-nuclear Energy or E_core-core
-    # pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
-    # pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters=parnuc)
+    # Derivative of pair-nuclear energy.
     pair_grad = core_core_der(molecule, gam, w_x, method, parnuc)
     if molecule.seqm_parameters.get("dispersion", False) and method == "AM1":
-        pair_grad += dEdisp_dr(molecule)
-    return contract_ao_derivatives_with_density(
+        pair_grad.add_(dEdisp_dr(molecule))
+    return contract(
         P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad, mask, maskd, idxi, idxj
+    )
+
+
+def _density_blocks(P, nmol, molsize):
+    """View dense AO matrices as packed atom-pair 4x4 blocks."""
+    leading = P.shape[:-2]
+    return (
+        P.reshape(*leading, molsize, 4, molsize, 4)
+        .transpose(-3, -2)
+        .reshape(*leading[:-1], nmol * molsize * molsize, 4, 4)
     )
 
 
@@ -122,25 +139,12 @@ def contract_ao_derivatives_with_density(
     device = P0.device
     nmol = molecule.species.shape[0]
 
-    unrestricted = True if P0.dim() == 4 else False
-
-    # Assembly
+    unrestricted = P0.dim() == 4
     if unrestricted:
-        P = (
-            (P0[:, 0] + P0[:, 1])
-            .reshape((nmol, molsize, 4, molsize, 4))
-            .transpose(2, 3)
-            .reshape(nmol * molsize * molsize, 4, 4)
-        )
-
-        PAlpha_ = (
-            P0.transpose(0, 1)
-            .reshape((2, nmol, molsize, 4, molsize, 4))
-            .transpose(3, 4)
-            .reshape(2, nmol * molsize * molsize, 4, 4)
-        )
+        P = _density_blocks(P0[:, 0] + P0[:, 1], nmol, molsize)
+        PAlpha_ = _density_blocks(P0.transpose(0, 1), nmol, molsize)
     else:
-        P = P0.reshape(nmol, molsize, 4, molsize, 4).transpose(2, 3).reshape(nmol * molsize * molsize, 4, 4)
+        P = _density_blocks(P0, nmol, molsize)
 
     # The following logic to form the coulomb and exchange integrals by contracting the two-electron integrals with the density matrix has been cribbed from fock.py
 
@@ -154,7 +158,6 @@ def contract_ao_derivatives_with_density(
     # mask has the indices of the lower (or upper) triangle blocks of the density matrix. Hence, P[mask] gives
     # us access to P_mu_lambda where mu is on atom A, lambda is on atom B
     if unrestricted:
-        # sum_ = torch.empty(2,npairs,3,4,4,dtype=dtype,device=device)
         sum_ = overlap_KAB_x.unsqueeze(0).expand(2, *overlap_KAB_x.shape).clone()
         Pp = PAlpha_[:, mask].unsqueeze(2)
         for i in range(4):
@@ -164,16 +167,12 @@ def contract_ao_derivatives_with_density(
 
         pair_grad.add_((Pp * sum_).sum(dim=(0, 3, 4)))
         del sum_
-        # pair_grad.add_((P[mask].unsqueeze(1) * overlap_KAB_x).sum(dim=(2, 3)))
-
     else:
         Pp = P[mask].unsqueeze(1)
         for i in range(4):
             w_x_i = w_x[..., ind[i], :]
             for j in range(4):
-                # \sum_{nu \in A} \sum_{sigma \in B} P_{nu, sigma} * (mu nu, lambda, sigma)
-                overlap_KAB_x[..., i, j] -= 0.5 * torch.sum(Pp * (w_x_i[..., :, ind[j]]), dim=(2, 3))
-
+                overlap_KAB_x[..., i, j] -= 0.5 * torch.sum(Pp * w_x_i[..., :, ind[j]], dim=(2, 3))
         pair_grad.add_((Pp * overlap_KAB_x).sum(dim=(2, 3)))
 
     # Coulomb integrals -- only on the diagonal
@@ -188,52 +187,81 @@ def contract_ao_derivatives_with_density(
 
     idx0 = _cached_index(UPPER_IDX0_4, device)
     idx1 = _cached_index(UPPER_IDX1_4, device)
-    PA = (P[maskd[idxi]][..., idx0, idx1] * weight).unsqueeze(-1)  # Shape: (npairs, 10, 1)
-    PB = (P[maskd[idxj]][..., idx0, idx1] * weight).unsqueeze(-2)  # Shape: (npairs, 1, 10)
+    PA = (P[maskd[idxi]][..., idx0, idx1] * weight).unsqueeze(-1)
+    PB = (P[maskd[idxj]][..., idx0, idx1] * weight).unsqueeze(-2)
 
-    suma = torch.sum(PA.unsqueeze(1) * w_x, dim=2)  # Shape: (npairs, 3, 10)
+    overlap_KAB_x.zero_()
+    overlap_KAB_x[..., idx0, idx1] = torch.sum(PA.unsqueeze(1) * w_x, dim=2)
+    e2a_x.add_(overlap_KAB_x)
 
-    # Collect in sumA and sumB tensors
-    # reususe overlap_KAB_x here instead of creating new arrays
-    # I am going to be alliasing overlap_KAB_x to sumA and then further aliasing it to sumB
-    # This seems like bad practice because I'm not allocating new memory but using the same tensor for all operations.
-    # In the future, if this code is to be edited, be careful here
-    sumA = overlap_KAB_x
-    sumA.zero_()
-    sumA[..., idx0, idx1] = suma
-    e2a_x.add_(sumA)
+    overlap_KAB_x.zero_()
+    overlap_KAB_x[..., idx0, idx1] = torch.sum(PB.unsqueeze(1) * w_x, dim=3)
+    e1b_x.add_(overlap_KAB_x)
 
-    sumB = overlap_KAB_x
-    sumB.zero_()
-    sumb = torch.sum(PB.unsqueeze(1) * w_x, dim=3)  # Shape: (npairs, 3, 10)
-    sumB[..., idx0, idx1] = sumb
-    e1b_x.add_(sumB)
-
-    # Core-elecron interaction
     scale_emat = _cached_tensor(EMAT_SCALE_4, device, dtype)
     e1b_x *= scale_emat
     e2a_x *= scale_emat
-    # e1b_x.add_(e1b_x.triu(1).transpose(2, 3))
-    # e2a_x.add_(e2a_x.triu(1).transpose(2, 3))
     pair_grad.add_(
-        (P[maskd[idxj], None, :, :] * e2a_x).sum(dim=(2, 3))
-        + (P[maskd[idxi], None, :, :] * e1b_x).sum(dim=(2, 3))
+        (P[maskd[idxj], None] * e2a_x).sum(dim=(2, 3)) + (P[maskd[idxi], None] * e1b_x).sum(dim=(2, 3))
     )
-    # pair_grad.add_((P[maskd[idxj],None,:,:]*e2a_x.triu(1)).sum(dim=(2,3)) + (P[maskd[idxi],None,:,:]*e1b_x.triu(1)).sum(dim=(2,3)))
 
-    # Define the gradient tensor
-    grad = torch.zeros(nmol * molsize, 3, dtype=dtype, device=device)
+    return _assemble_pair_gradient(pair_grad, molecule, molsize, idxi, idxj)
 
-    # idxi/idxj are packed indices over real atoms; map them back to full atom indices.
-    real_atoms = torch.arange(nmol * molsize, device=device, dtype=torch.int64)[
-        molecule.species.reshape(-1) > 0
-    ]
+
+def contract_xl_ao_derivatives(
+    densities, molecule, molsize, overlap_x, e1b_x, e2a_x, w_x, pair_grad, mask, maskd, idxi, idxj
+):
+    """Contract AO derivatives for E_XL = Tr(DH) + 0.5 Tr((2D-P)G(P))."""
+    D, P = densities
+    nmol = D.shape[0]
+    D, P = _density_blocks(D, nmol, molsize), _density_blocks(P, nmol, molsize)
+    Q = 2.0 * D - P
+
+    # One-electron and symmetrized exchange terms.
+    pair_grad.add_((D[mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3)))
+    ind = _cached_index(K_ind_4, D.device)
+    for Pinner, Pouter in ((P, Q), (Q, P)):
+        Pp = Pinner[mask].unsqueeze(1)
+        overlap_x.zero_()
+        for i in range(4):
+            for j in range(4):
+                overlap_x[..., i, j] -= 0.25 * torch.sum(Pp * w_x[..., ind[i], :][..., :, ind[j]], dim=(2, 3))
+        pair_grad.add_((Pouter[mask].unsqueeze(1) * overlap_x).sum(dim=(2, 3)))
+
+    # Core-electron and symmetrized Coulomb terms.
+    scale = _cached_tensor(EMAT_SCALE_4, D.device, D.dtype)
+    e1b_x.mul_(scale)
+    e2a_x.mul_(scale)
+    pair_grad.add_(
+        (D[maskd[idxj], None] * e2a_x).sum(dim=(2, 3)) + (D[maskd[idxi], None] * e1b_x).sum(dim=(2, 3))
+    )
+    weight = (_cached_tensor(WEIGHT_10, D.device, D.dtype) * 0.25).reshape(-1, 10)
+    idx0 = _cached_index(UPPER_IDX0_4, D.device)
+    idx1 = _cached_index(UPPER_IDX1_4, D.device)
+    for Pinner, Pouter in ((P, Q), (Q, P)):
+        PA = (Pinner[maskd[idxi]][..., idx0, idx1] * weight).unsqueeze(-1)
+        PB = (Pinner[maskd[idxj]][..., idx0, idx1] * weight).unsqueeze(-2)
+
+        overlap_x.zero_()
+        overlap_x[..., idx0, idx1] = torch.sum(PA.unsqueeze(1) * w_x, dim=2)
+        overlap_x.mul_(scale)
+        pair_grad.add_((Pouter[maskd[idxj], None] * overlap_x).sum(dim=(2, 3)))
+
+        overlap_x.zero_()
+        overlap_x[..., idx0, idx1] = torch.sum(PB.unsqueeze(1) * w_x, dim=3)
+        overlap_x.mul_(scale)
+        pair_grad.add_((Pouter[maskd[idxi], None] * overlap_x).sum(dim=(2, 3)))
+
+    return _assemble_pair_gradient(pair_grad, molecule, molsize, idxi, idxj)
+
+
+def _assemble_pair_gradient(pair_grad, molecule, molsize, idxi, idxj):
+    nmol = molecule.species.shape[0]
+    grad = pair_grad.new_zeros(nmol * molsize, 3)
+    real_atoms = torch.arange(nmol * molsize, device=pair_grad.device)[molecule.species.reshape(-1) > 0]
     grad.index_add_(0, real_atoms[idxi], pair_grad)
     grad.index_add_(0, real_atoms[idxj], pair_grad, alpha=-1.0)
-
-    # print(f'Analytical SCF gradient is:\n{grad.view(nmol,molsize,3)}')
-    grad = grad.view(nmol, molsize, 3)
-    return grad
+    return grad.view(nmol, molsize, 3)
 
 
 # @profile
@@ -264,9 +292,6 @@ def scf_grad(
     The gradient is calculated in a pseudo-numerical fashion. The derivatives of the overlap, the core-core repulsions and the two-electron integrals in
     the atomic orbital basis are calculated using finite-differnce.
     """
-    # torch.set_printoptions(precision=6)
-    # torch.set_printoptions(linewidth=110)
-
     # Xij (= Xj-Xi) is the vector from j to i in Angstroms
     # xij (= xj-xi) is the *unit* vector from j to i
     Xij = xij * rij.unsqueeze(1) * a0
@@ -294,16 +319,14 @@ def scf_grad(
         )
 
     else:
-        # overlap_der(overlap_KAB_x,zetas,zetap,qn_int,ni,nj,rij,beta,idxi,idxj,Xij)
-        # We will use finite-differnce for the overlap derivative because analytical expression for derivatives of
-        # the overlap of slater orbitals is v complicated
+        # A centered finite difference is used for the Slater-overlap derivatives.
         zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
         overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int)
 
         e1b_x_new, e2a_x_new = w_derivative_numerical(molecule, Xij, w_x_new)
         pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
         if molecule.seqm_parameters.get("dispersion", False) and method == "AM1":
-            pair_grad += dEdisp_dr(molecule)
+            pair_grad.add_(dEdisp_dr(molecule))
 
     grad = contract_ao_derivatives_with_density(
         P0,
@@ -321,17 +344,9 @@ def scf_grad(
     )
 
     if method in {"OM2", "OM3"}:
-        grad += omx_orthogonalization_grad
+        grad.add_(omx_orthogonalization_grad)
 
     return grad
-
-
-from .om2_hcore import (
-    diatom_overlap_matrix_OM1,
-    diatom_resonance_matrix_OM1,
-    om1_local_resonance_terms,
-    select_om1_basis_payload,
-)
 
 
 def _build_omx_ortho_cache(molecule):
@@ -416,6 +431,20 @@ def omx_threebody_ortho_grad(
 repeat_tensor = lambda x: torch.cat([x, x])
 
 
+def _central_pair_geometry(Xij, coord):
+    """Return the +delta/-delta pair directions and Bohr distances."""
+    Xij[:, coord] -= delta
+    r_plus = torch.linalg.vector_norm(Xij, dim=1)
+    x_plus = Xij / r_plus[:, None]
+
+    Xij[:, coord] += 2.0 * delta
+    r_minus = torch.linalg.vector_norm(Xij, dim=1)
+    x_minus = Xij / r_minus[:, None]
+
+    Xij[:, coord] -= delta
+    return torch.cat((x_plus, x_minus)), torch.cat((r_plus, r_minus)) / a0
+
+
 def w_derivative_numerical(mol, Xij, w_x_new):
     npairs = Xij.shape[0]
     inv_2delta = 1.0 / (2.0 * delta)
@@ -423,30 +452,11 @@ def w_derivative_numerical(mol, Xij, w_x_new):
     e2a_x_new = torch.zeros_like(e1b_x_new)
     ni_ = repeat_tensor(mol.ni)
     nj_ = repeat_tensor(mol.nj)
-    Z_ = repeat_tensor(mol.Z)
     idxi_ = repeat_tensor(mol.idxi)
     idxj_ = repeat_tensor(mol.idxj)
-    zeta_s_ = repeat_tensor(mol.parameters["zeta_s"])
-    zeta_p_ = repeat_tensor(mol.parameters["zeta_p"])
-    g_ss_ = repeat_tensor(mol.parameters["g_ss"])
-    g_pp_ = repeat_tensor(mol.parameters["g_pp"])
-    g_p2_ = repeat_tensor(mol.parameters["g_p2"])
-    h_sp_ = repeat_tensor(mol.parameters["h_sp"])
-    rho_core_ = repeat_tensor(mol.parameters["rho_core"])
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
+        xij_, rij_ = _central_pair_geometry(Xij, coord)
 
         # TODO: works for only s,p orbitals
         w_, e1b_, e2a_, _, _, _, _ = TETCI(
@@ -457,26 +467,24 @@ def w_derivative_numerical(mol, Xij, w_x_new):
             nj_,
             xij_,
             rij_,
-            Z_,
-            zeta_s_,
-            zeta_p_,
+            mol.Z,
+            mol.parameters["zeta_s"],
+            mol.parameters["zeta_p"],
             None,
             None,
             None,
             None,
-            g_ss_,
-            g_pp_,
-            g_p2_,
-            h_sp_,
+            mol.parameters["g_ss"],
+            mol.parameters["g_pp"],
+            mol.parameters["g_p2"],
+            mol.parameters["h_sp"],
             None,
             None,
-            rho_core_,
+            mol.parameters["rho_core"],
             None,
             None,
             mol.method,
         )
-        Xij[:, coord] -= delta
-
         w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) * inv_2delta
         e1b_x_new[:, coord, ...] = (e1b_[:npairs] - e1b_[npairs:]) * inv_2delta
         e2a_x_new[:, coord, ...] = (e2a_[:npairs] - e2a_[npairs:]) * inv_2delta
@@ -511,8 +519,6 @@ def core_core_der_fd(mol, method, gam, parameters):
 
     rho0xi[A] = rho_core[idxi_][A]
     rho0xj[B] = rho_core[idxj_][B]
-    alp = repeat_tensor(mol.alp)
-    chi = repeat_tensor(mol.chi)
     gam_ = repeat_tensor(gam)
     inv_2delta = 1.0 / (2.0 * delta)
 
@@ -539,8 +545,8 @@ def core_core_der_fd(mol, method, gam, parameters):
             rij_,
             rho0xi,
             rho0xj,
-            alp,
-            chi,
+            mol.alp,
+            mol.chi,
             gam_,
             method=method,
             parameters=parameters,
@@ -552,8 +558,10 @@ def core_core_der_fd(mol, method, gam, parameters):
 
 
 def core_core_der(mol, gam, w_x, method, parameters):
-    if method == "PM6" or method == "PM6_SP" or method == "PM6_SP_STAR":
+    if method in {"PM6", "PM6_SP", "PM6_SP_STAR"}:
         return core_core_der_fd(mol, method, gam, parameters)
+    if method not in {"MNDO", "AM1", "PM3"}:
+        raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR")
     ni = mol.ni
     nj = mol.nj
     idxi = mol.idxi
@@ -568,16 +576,13 @@ def core_core_der(mol, gam, w_x, method, parameters):
     ZAZB = tore[ni] * tore[nj]
     # special case for N-H and O-H
     XH = ((ni == 7) | (ni == 8)) & (nj == 1)
-    t2 = torch.zeros_like(rij)
     tmp = torch.exp(-alpha[idxi] * rija)
-    t2[~XH] = tmp[~XH]
-    t2[XH] = tmp[XH] * rija[XH]
+    t2 = torch.where(XH, tmp * rija, tmp)
     t3 = torch.exp(-alpha[idxj] * rija)
     g = 1.0 + t2 + t3
 
     # For MNDO, core-core term is ZAZB*(SASA|SBSB)*g, where g=1+exp(-alpha_A*RAB)+exp(-alpha_B*RAB)
-    prefactor = alpha[idxi]
-    prefactor[XH] = prefactor[XH] * rija[XH] - 1.0
+    prefactor = torch.where(XH, alpha[idxi] * rija - 1.0, alpha[idxi])
     t3 = alpha[idxj] * t3
     coreTerm = ZAZB * gam / rija * (prefactor * tmp + t3)
     # The derivative of the core-core term is ZAZB*(SASA|SBSB)*dg/dx + ZAZB*g*d(SASA|SBSB)/dx
@@ -588,10 +593,6 @@ def core_core_der(mol, gam, w_x, method, parameters):
     if method == "MNDO":
         return pair_grad
 
-    # if method=='PM6':
-    #     # Here we don't have the MNDO term, so pair_grad has to be reinitialized
-    #     pair_grad.zero_()
-
     # For AM1 and PM3, in addition to the MNDO term we also have
     # two gaussian terms for PM3
     # 3~4 terms for AM1
@@ -600,25 +601,18 @@ def core_core_der(mol, gam, w_x, method, parameters):
     inv_rija = rija.reciprocal()
     inv_rija3 = torch.pow(inv_rija, 3)
     t4 = ZAZB * inv_rija
-    t5 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija[:, None] - M[idxi]) ** 2), dim=1)
-    t6 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija[:, None] - M[idxj]) ** 2), dim=1)
-    pair_grad.add_((ZAZB * inv_rija3 * (t5 + t6)).unsqueeze(1) * Xij)
-    t5_der = torch.sum(
-        K[idxi] * torch.exp(-L[idxi] * (rija[:, None] - M[idxi]) ** 2) * L[idxi] * (rija[:, None] - M[idxi]),
-        dim=1,
+
+    def gaussian_terms(index):
+        dr = rija[:, None] - M[index]
+        terms = K[index] * torch.exp(-L[index] * dr.square())
+        return terms.sum(1), (terms * L[index] * dr).sum(1)
+
+    t5, t5_der = gaussian_terms(idxi)
+    t6, t6_der = gaussian_terms(idxj)
+    pair_grad.add_(
+        (ZAZB * inv_rija3 * (t5 + t6) + 2.0 * t4 * inv_rija * (t5_der + t6_der)).unsqueeze(1) * Xij
     )
-    t6_der = torch.sum(
-        K[idxj] * torch.exp(-L[idxj] * (rija[:, None] - M[idxj]) ** 2) * L[idxj] * (rija[:, None] - M[idxj]),
-        dim=1,
-    )
-    pair_grad.add_((2.0 * t4 * inv_rija * (t5_der + t6_der)).unsqueeze(1) * Xij)
-    if method == "PM3" or method == "AM1":
-        return pair_grad
-    # Put PM6 specific grad here
-    # if method=='PM6':
-    #       return pair_grad
-    else:
-        raise ValueError("Supported Method: MNDO, AM1, PM3")
+    return pair_grad
 
 
 def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2, hsp, zetas, zetap, riXH, ri):
@@ -666,111 +660,45 @@ def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2,
         ri,
     )
 
-    # # Why is rij in bohr? It should be in angstrom right? Ans: OpenMopac website seems to suggest using bohr as well
-    # # for the 2-e integrals.
-
     # Core-elecron interaction
     e1b_x = torch.zeros((rij.shape[0], 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
     e2a_x = torch.zeros((rij.shape[0], 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
-    nonHH = ~HH
-    e1b_x[:, :, 0, 0] = -tore[nj].unsqueeze(1) * w_x[:, :, 0, 0]
-    e2a_x[:, :, 0, 0] = -tore[ni].unsqueeze(1) * w_x[:, :, 0, 0]
-    e1b_x[nonHH, :, 0, 1] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 1, 0]
-    e1b_x[nonHH, :, 1, 1] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 2, 0]
-    e1b_x[nonHH, :, 0, 2] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 3, 0]
-    e1b_x[nonHH, :, 1, 2] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 4, 0]
-    e1b_x[nonHH, :, 2, 2] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 5, 0]
-    e1b_x[nonHH, :, 0, 3] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 6, 0]
-    e1b_x[nonHH, :, 1, 3] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 7, 0]
-    e1b_x[nonHH, :, 2, 3] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 8, 0]
-    e1b_x[nonHH, :, 3, 3] = -tore[nj[nonHH]].unsqueeze(1) * w_x[nonHH, :, 9, 0]
+    idx0 = _cached_index(UPPER_IDX0_4, w_x.device)
+    idx1 = _cached_index(UPPER_IDX1_4, w_x.device)
 
-    e2a_x[XX, :, 0, 1] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 1]
-    e2a_x[XX, :, 1, 1] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 2]
-    e2a_x[XX, :, 0, 2] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 3]
-    e2a_x[XX, :, 1, 2] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 4]
-    e2a_x[XX, :, 2, 2] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 5]
-    e2a_x[XX, :, 0, 3] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 6]
-    e2a_x[XX, :, 1, 3] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 7]
-    e2a_x[XX, :, 2, 3] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 8]
-    e2a_x[XX, :, 3, 3] = -tore[ni[XX]].unsqueeze(1) * w_x[XX, :, 0, 9]
+    upper = -tore[nj, None, None] * w_x[..., :, 0]
+    upper[HH, :, 1:] = 0.0
+    e1b_x[..., idx0, idx1] = upper
+
+    upper = -tore[ni, None, None] * w_x[..., 0, :]
+    upper[~XX, :, 1:] = 0.0
+    e2a_x[..., idx0, idx1] = upper
 
     return e1b_x, e2a_x
 
 
-from .constants import overlap_cutoff
-
-
 def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int):
-    # overlap_pairs = rij <= overlap_cutoff
-    # di_plus = torch.zeros(Xij.shape[0], 4, 4, dtype=Xij.dtype, device=Xij.device)
-    # di_minus = torch.clone(di_plus)
-    # for coord in range(3):
-    #     # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-    #     Xij[:, coord] -= delta
-    #     rij_ = torch.norm(Xij, dim=1)
-    #     xij_ = Xij / rij_.unsqueeze(1)
-    #     rij_ = rij_ / a0
-    #     di_plus[overlap_pairs] = diatom_overlap_matrix(
-    #         ni[overlap_pairs],
-    #         nj[overlap_pairs],
-    #         xij_[overlap_pairs],
-    #         rij_[overlap_pairs],
-    #         zeta[idxi][overlap_pairs],
-    #         zeta[idxj][overlap_pairs],
-    #         qn_int,
-    #     )
-    #     Xij[:, coord] += 2.0 * delta
-    #     rij_ = torch.norm(Xij, dim=1)
-    #     xij_ = Xij / rij_.unsqueeze(1)
-    #     rij_ = rij_ / a0
-    #
-    #     di_minus[overlap_pairs] = diatom_overlap_matrix(
-    #         ni[overlap_pairs],
-    #         nj[overlap_pairs],
-    #         xij_[overlap_pairs],
-    #         rij_[overlap_pairs],
-    #         zeta[idxi][overlap_pairs],
-    #         zeta[idxj][overlap_pairs],
-    #         qn_int,
-    #     )
-    #     Xij[:, coord] -= delta
-    #     overlap_KAB_x[:, coord, :, :] = (di_plus - di_minus) / (2.0 * delta)
-    overlap_pairs = repeat_tensor(rij) <= overlap_cutoff
+    overlap_pairs = (rij <= overlap_cutoff).repeat(2)
     di_ = torch.zeros(Xij.shape[0] * 2, 4, 4, dtype=Xij.dtype, device=Xij.device)
     inv_2delta = 1.0 / (2.0 * delta)
     npairs = Xij.shape[0]
     ni_ = repeat_tensor(ni)
     nj_ = repeat_tensor(nj)
-    qn_int_ = repeat_tensor(qn_int)
-    zeta_ = repeat_tensor(zeta)
     idxi_ = repeat_tensor(idxi)
     idxj_ = repeat_tensor(idxj)
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
+        xij_, rij_ = _central_pair_geometry(Xij, coord)
 
         di_[overlap_pairs] = diatom_overlap_matrix_PM6_SP(
             ni_[overlap_pairs],
             nj_[overlap_pairs],
             xij_[overlap_pairs],
             rij_[overlap_pairs],
-            zeta_[idxi_][overlap_pairs],
-            zeta_[idxj_][overlap_pairs],
-            qn_int_,
+            zeta[idxi_][overlap_pairs],
+            zeta[idxj_][overlap_pairs],
+            qn_int,
         )
-        Xij[:, coord] -= delta
         overlap_KAB_x[:, coord, :, :] = (di_[:npairs] - di_[npairs:]) * inv_2delta
 
     overlap_KAB_x[..., 0, 0] *= (beta[idxi, 0] + beta[idxj, 0]).unsqueeze(1)
@@ -790,15 +718,13 @@ def der_TETCILF(
     XX = (ni > 1) & (nj > 1)
 
     # Hydrogen - Hydrogen
-    # aeeHH = (rho0a[HH]+rho0b[HH])**2
-    # # Dividing by a0^2 for gradient in eV/ang
+    # Dividing by a0^2 gives gradients in eV/Angstrom.
     term = -ev / (a0 * a0) / r0.unsqueeze(1) * Xij
     ee = -r0 * pow((r0**2 + (rho0a + rho0b) ** 2), -1.5)
     ee_x = term * ee.unsqueeze(1)
     riHH_x = ee_x[HH, :]
 
     # Heavy atom - Hydrogen
-    # aeeXH = (rho0a[XH]+rho0b[XH])**2
     rXH = r0[XH]
     daXH = da0[XH]
     qaXH = qa0[XH] * 2.0
@@ -1083,136 +1009,7 @@ def der_TETCILF(
     # The p orbitals rotate just like the coordinate frame, so the rotation matrix is easy to express
     # We now make the rotation matrix and its derivative for the p-orbitals
 
-    # rot = torch.zeros(r0.shape[0], 3, 3, device=device, dtype=dtype)
-    # rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
-    #
-    # rxy2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 1])
-    # # ryz2 = torch.square(Xij[:, 1]) + torch.square(Xij[:, 2])
-    # # rxz2 = torch.square(Xij[:, 0]) + torch.square(Xij[:, 2])
-    # axis_tolerance = 1e-12
-    # onerij = 1.0 / a0 / r0
-    #
-    # # Xalign = ryz2 < axis_tolerance
-    # # Yalign = rxz2 < axis_tolerance
-    # Zalign = rxy2 < axis_tolerance
-    # # Noalign = ~(Xalign | Yalign | Zalign)
-    # Noalign = ~(Zalign)
-    # # if torch.any(Zalign):
-    # #     print(f"Unfortunately z-axes align for {xij.shape[0]+ ~Noalign.sum() + 1}/{xij.shape[0]} pairs. This may cause some numerical instabilities in the derivative of two-electron integrals")
-    #
-    # xij_ = -xij[Noalign, ...]
-    # rot[Noalign, 0, :] = xij_
-    # onerxy = 1.0 / torch.sqrt(rxy2[Noalign])
-    # rxy_over_rab = (torch.sqrt(rxy2) / r0)[Noalign] / a0
-    # rab_over_rxy = a0 * r0[Noalign] * onerxy
-    # rab_over_rxy_sq = torch.square(rab_over_rxy)
-    #
-    # # The (1,0) element of the rotation matrix is -Y/sqrt(X^2+Y^2)*sign(X). If X (=xi-xj) is zero then there is a discontinuity in the sign function
-    # # and hence the derivative will not exist. So I'm printing a warning that there might be numerical errors here
-    # # Similaryly the (1,1) element of the rotation matrix is abs(X/sqrt(X^2+Y^2)). Again, the derivative of abs(X) will not exist when X=0, and hence this
-    # # will lead to errors.
-    #
-    # # if torch.any(xij_[:, 0] == 0):
-    # #     print(
-    # #         "WARNING: The x component of the pair distance is zero. This could lead to instabilities in the derivative of the rotation matrix becuase it is discontinuous at this point"
-    # #     )
-    #
-    # # As a quick-fix, I will add a small number (eps) when calculating sign(X) to avoid the aforementioned instability
-    # rot[Noalign, 1, 0] = -xij_[:, 1] * rab_over_rxy
-    # rot[Noalign, 1, 1] = xij_[:, 0] * rab_over_rxy
-    #
-    # rot[Noalign, 2, 0] = xij_[:, 0] * xij_[:, 2] * rab_over_rxy
-    # rot[Noalign, 2, 1] = xij_[:, 1] * xij_[:, 2] * rab_over_rxy
-    # rot[Noalign, 2, 2] = -rxy_over_rab
-    #
-    # # Derivative of the rotation matrix
-    # termX = xij_[:, 0] * onerij[Noalign]
-    # termY = xij_[:, 1] * onerij[Noalign]
-    # termZ = xij_[:, 2] * onerij[Noalign]
-    # # term = Xij[Noalign,:]*onerij.unsqueeze(1)
-    # rot_der[Noalign, 0, 0, 0] = onerij[Noalign] - xij_[:, 0] * termX
-    # rot_der[Noalign, 0, 0, 1] = -xij_[:, 0] * termY
-    # rot_der[Noalign, 0, 0, 2] = -xij_[:, 0] * termZ
-    #
-    # rot_der[Noalign, 1, 0, 0] = -xij_[:, 1] * termX
-    # rot_der[Noalign, 1, 0, 1] = onerij[Noalign] - xij_[:, 1] * termY
-    # rot_der[Noalign, 1, 0, 2] = -xij_[:, 1] * termZ
-    #
-    # rot_der[Noalign, 2, 0, 0] = -xij_[:, 2] * termX
-    # rot_der[Noalign, 2, 0, 1] = -xij_[:, 2] * termY
-    # rot_der[Noalign, 2, 0, 2] = onerij[Noalign] - xij_[:, 2] * termZ
-    #
-    # rot_der[Noalign, 0, 2, 2] = -xij_[:, 0] * onerxy - rot[Noalign, 2, 2] * termX
-    # rot_der[Noalign, 1, 2, 2] = -xij_[:, 1] * onerxy - rot[Noalign, 2, 2] * termY
-    # rot_der[Noalign, 2, 2, 2] = -rot[Noalign, 2, 2] * termZ
-    #
-    # rot_der[Noalign, 0, 1, 0] = -rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
-    # rot_der[Noalign, 1, 1, 0] = -torch.square(rot[Noalign, 1, 1]) * onerxy
-    # # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
-    # # tolerance = 1e-8
-    # # assert torch.allclose(rot_der[Noalign,0,1,0],-rot_der[Noalign,1,0,0]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # # assert torch.allclose(rot_der[Noalign,1,1,0],-rot_der[Noalign,1,0,1]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # # assert torch.all(torch.abs(-rot_der[Noalign,1,0,2]*rab_over_rxy+rot[Noalign,0,1]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-    #
-    # rot_der[Noalign, 0, 1, 1] = torch.square(rot[Noalign, 1, 0]) * onerxy
-    # rot_der[Noalign, 1, 1, 1] = rot[Noalign, 1, 1] * rot[Noalign, 1, 0] * onerxy
-    # # # Sanity check because openmopac (and hence NEXMD) do this differently. I want to make sure our expressions give the same result
-    # # tolerance = 1e-8
-    # # mopacs = rot_der[Noalign,0,0,0]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,0,2,2]*rab_over_rxy_sq
-    # # mine = rot_der[Noalign,0,1,1]
-    # # assert torch.allclose(mine,mopacs,atol=tolerance)
-    # # assert torch.allclose(rot_der[Noalign,1,1,1],rot_der[Noalign,0,0,1]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,1,2,2]*rab_over_rxy_sq,atol=tolerance)
-    # # assert torch.all(torch.abs(rot_der[Noalign,0,0,2]*rab_over_rxy-rot[Noalign,0,0]*rot_der[Noalign,2,2,2]*rab_over_rxy_sq)<tolerance)
-    #
-    # rot_der[Noalign, 0, 2, 0] = xij_[:, 2] * rot_der[Noalign, 0, 0, 0] * rab_over_rxy + xij_[:, 0] * rot_der[
-    #     Noalign, 2, 0, 0] * rab_over_rxy + xij_[:, 0] * xij_[:, 2] * rot_der[Noalign, 0, 2, 2] * rab_over_rxy_sq
-    # rot_der[Noalign, 1, 2, 0] = -torch.prod(xij_, dim=1) * (onerxy + rab_over_rxy_sq * onerxy)
-    # rot_der[Noalign, 2, 2, 0] = termX * rxy_over_rab
-    #
-    # rot_der[Noalign, 0, 2, 1] = rot_der[Noalign, 1, 2, 0]
-    # rot_der[Noalign, 1, 2, 1] = xij_[:, 2] * rot_der[Noalign, 1, 0, 1] * rab_over_rxy + xij_[:, 1] * rot_der[
-    #     Noalign, 2, 0, 1] * rab_over_rxy + xij_[:, 1] * xij_[:, 2] * rot_der[Noalign, 1, 2, 2] * rab_over_rxy_sq
-    # rot_der[Noalign, 2, 2, 1] = termY * rxy_over_rab
-    #
-    # rot[Zalign, 0, 2] = torch.sign(-xij[Zalign, 2])
-    # rot[Zalign, 1, 1] = rot[Zalign, 0, 2]
-    # rot[Zalign, 2, 0] = 1.0
-    # # rot_der[Zalign, 0, 0, 0] = onerij[Zalign]
-    # # rot_der[Zalign, 0, 2, 2] = -onerij[Zalign]
-    # # rot_der[Zalign, 1, 0, 1] = onerij[Zalign]
-    # # rot_der[Zalign, 1, 1, 2] = -rot[Zalign, 0, 2] * onerij[Zalign]
-    #
-    # # rot[Xalign, 0, 0] = torch.sign(-xij[Xalign, 0])
-    # # rot[Xalign, 1, 1] = rot[Xalign, 0, 0]
-    # # rot[Xalign, 2, 2] = 1.0
-    # # rot_der[Xalign, 1, 0, 1] = onerij[Xalign]
-    # # rot_der[Xalign, 1, 1, 0] = -onerij[Xalign]
-    # # rot_der[Xalign, 2, 0, 2] = onerij[Xalign]
-    # # rot_der[Xalign, 2, 2, 0] = -rot[Xalign, 0, 0] * onerij[Xalign]
-    #
-    # # rot[Yalign, 0, 1] = torch.sign(-xij[Yalign, 1])
-    # # rot[Yalign, 1, 0] = -rot[Yalign, 0, 1]
-    # # rot[Yalign, 2, 2] = 1.0
-    # # rot_der[Yalign, 0, 0, 0] = onerij[Yalign]
-    # # rot_der[Yalign, 0, 1, 1] = onerij[Yalign]
-    # # rot_der[Yalign, 2, 0, 2] = onerij[Yalign]
-    # # rot_der[Yalign, 2, 2, 1] = -rot[Yalign, 0, 1] * onerij[Yalign]
-
-    # v = -xij
-    # v.requires_grad_()
-    # rot = rotate_with_quaternion(v)
-    # rot_der = torch.zeros(r0.shape[0], 3, 3, 3, device=device, dtype=dtype)
-    # for j in range(3):
-    #     # build a batched “direction” d with 1’s in coordinate j
-    #     d = torch.zeros_like(v)
-    #     d[:, j] = 1.0
-    #
-    #     # jvp returns (r, dr) where dr = (∂r/∂v) ⋅ d, shape = (n,3,3)
-    #     _, dr = jvp(rotate_with_quaternion, (v,), (d,), create_graph=True)
-    #
-    #     # dr[i,a,b] == ∂r[i,a,b] / ∂v[i,j]
-    #     rot_der[:, j, :, :] = dr
-
+    # Quaternion rotations avoid the axis-alignment singularities of the older explicit construction.
     v = -xij
     rot, rot_der = rotate_with_quaternion(v, calculate_gradient=True)
 
@@ -1225,457 +1022,17 @@ def der_TETCILF(
     J_uv = (I - v.unsqueeze(-1) * v.unsqueeze(-2)) * inv_r0_a0
     rot_der = torch.einsum("nbij,nba->naij", rot_der, J_uv)  # (n,4,3)
 
-    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")
-    #
-    # print(f"rot der check zero: {torch.sum(rot_der[:,0,...]@rot.transpose(1,2)+rot@rot_der[:,0,...].transpose(1,2))}")
-    # print(f"rot der check zero: {torch.sum(rot_der[:,1,...]@rot.transpose(1,2)+rot@rot_der[:,1,...].transpose(1,2))}")
-    # print(f"rot der check zero: {torch.sum(rot_der[:,2,...]@rot.transpose(1,2)+rot@rot_der[:,2,...].transpose(1,2))}")
-
     rotXH = rot[XH, ...]
     rot = rot[XX, ...]
     rot_derXH = rot_der[XH, ...]
     rot_der = rot_der[XX, ...]
 
-    if _VECTORIZED_SP_DERIVATIVES:
-        wXH_x, w_x = _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_x)
-
-        w_x_final[HH, :, 0, 0] = riHH_x
-        w_x_final[XH, :, :, 0] = wXH_x
-        w_x_final[XX, ...] = w_x
-        return
-
-    w_x = torch.zeros(ri.shape[0], 3, 100, device=device, dtype=dtype)
-    wXH_x = torch.zeros(XH.sum(), 3, 10, device=device, dtype=dtype)
-
-    idx = -1
-    idxXH = 0
-    for kk in range(0, 4):
-        k = kk - 1
-        for ll in range(0, kk + 1):
-            l = ll - 1
-            for mm in range(0, 4):
-                m = mm - 1
-                for nn in range(0, mm + 1):
-                    n = nn - 1
-                    idx = idx + 1
-                    if kk == 0:
-                        if mm == 0:
-                            # (ss|ss)
-                            w_x[..., idx] = ri_x[..., 0]
-                            wXH_x[..., idxXH] = riXH_x[..., 0]
-                            idxXH = idxXH + 1
-                        elif nn == 0:
-                            # (ss|ps)
-                            w_x[..., idx] = (
-                                ri_x[..., 4] * rot[:, None, 0, m] + ri[:, None, 4] * rot_der[:, :, 0, m]
-                            )
-                        else:
-                            # (ss|pp)
-                            w_x[..., idx] = (
-                                ri_x[..., 10] * (rot[:, 0, m] * rot[:, 0, n]).unsqueeze(1)
-                                + ri[:, None, 10]
-                                * (
-                                    rot_der[:, :, 0, m] * rot[:, None, 0, n]
-                                    + rot[:, None, 0, m] * rot_der[:, :, 0, n]
-                                )
-                                + ri_x[..., 11]
-                                * (rot[:, 1, m] * rot[:, 1, n] + rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                + ri[:, None, 11]
-                                * (
-                                    rot_der[:, :, 1, m] * rot[:, None, 1, n]
-                                    + rot_der[:, :, 2, m] * rot[:, None, 2, n]
-                                    + rot[:, None, 1, m] * rot_der[:, :, 1, n]
-                                    + rot[:, None, 2, m] * rot_der[:, :, 2, n]
-                                )
-                            )
-
-                    elif ll == 0:
-                        if mm == 0:
-                            # (ps|ss)
-                            w_x[..., idx] = (
-                                ri_x[..., 1] * rot[:, None, 0, k] + ri[:, None, 1] * rot_der[:, :, 0, k]
-                            )
-                            wXH_x[..., idxXH] = (
-                                riXH_x[..., 1] * rotXH[:, None, 0, k]
-                                + riXH[:, None, 1] * rot_derXH[:, :, 0, k]
-                            )
-                            idxXH = idxXH + 1
-                        elif nn == 0:
-                            # (ps|ps)
-                            w_x[..., idx] = (
-                                ri_x[..., 5] * (rot[:, 0, k] * rot[:, 0, m]).unsqueeze(1)
-                                + ri[:, None, 5]
-                                * (
-                                    rot_der[:, :, 0, k] * rot[:, None, 0, m]
-                                    + rot[:, None, 0, k] * rot_der[:, :, 0, m]
-                                )
-                                + ri_x[..., 6]
-                                * (rot[:, 1, k] * rot[:, 1, m] + rot[:, 2, k] * rot[:, 2, m]).unsqueeze(1)
-                                + ri[:, None, 6]
-                                * (
-                                    rot_der[:, :, 1, k] * rot[:, None, 1, m]
-                                    + rot_der[:, :, 2, k] * rot[:, None, 2, m]
-                                    + rot[:, None, 1, k] * rot_der[:, :, 1, m]
-                                    + rot[:, None, 2, k] * rot_der[:, :, 2, m]
-                                )
-                            )
-                        else:
-                            # (ps|pp)
-                            w_x[..., idx] = (
-                                ri_x[..., 12] * (rot[:, 0, k] * rot[:, 0, n] * rot[:, 0, m]).unsqueeze(1)
-                                + ri[:, None, 12]
-                                * (
-                                    rot_der[:, :, 0, k] * (rot[:, 0, n] * rot[:, 0, m]).unsqueeze(1)
-                                    + rot_der[:, :, 0, n] * (rot[:, 0, k] * rot[:, 0, m]).unsqueeze(1)
-                                    + rot_der[:, :, 0, m] * (rot[:, 0, n] * rot[:, 0, k]).unsqueeze(1)
-                                )
-                                + ri_x[..., 13]
-                                * (
-                                    (rot[:, 1, m] * rot[:, 1, n] + rot[:, 2, m] * rot[:, 2, n]) * rot[:, 0, k]
-                                ).unsqueeze(1)
-                                + ri[:, None, 13]
-                                * (
-                                    (rot[:, 1, m] * rot[:, 1, n] + rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                    * rot_der[:, :, 0, k]
-                                    + (
-                                        rot_der[:, :, 1, m] * rot[:, None, 1, n]
-                                        + rot[:, None, 1, m] * rot_der[:, :, 1, n]
-                                        + rot_der[:, :, 2, m] * rot[:, None, 2, n]
-                                        + rot[:, None, 2, m] * rot_der[:, :, 2, n]
-                                    )
-                                    * rot[:, None, 0, k]
-                                )
-                                + ri_x[..., 14]
-                                * (
-                                    rot[:, 1, k] * (rot[:, 1, n] * rot[:, 0, m] + rot[:, 1, m] * rot[:, 0, n])
-                                    + rot[:, 2, k]
-                                    * (rot[:, 2, m] * rot[:, 0, n] + rot[:, 2, n] * rot[:, 0, m])
-                                ).unsqueeze(1)
-                                + ri[:, None, 14]
-                                * (
-                                    rot_der[:, :, 1, k]
-                                    * (rot[:, 1, n] * rot[:, 0, m] + rot[:, 1, m] * rot[:, 0, n]).unsqueeze(1)
-                                    + rot[:, None, 1, k]
-                                    * (
-                                        rot_der[:, :, 1, m] * rot[:, None, 0, n]
-                                        + rot[:, None, 1, m] * rot_der[:, :, 0, n]
-                                        + rot_der[:, :, 1, n] * rot[:, None, 0, m]
-                                        + rot[:, None, 1, n] * rot_der[:, :, 0, m]
-                                    )
-                                    + rot_der[:, :, 2, k]
-                                    * (rot[:, 2, n] * rot[:, 0, m] + rot[:, 2, m] * rot[:, 0, n]).unsqueeze(1)
-                                    + rot[:, None, 2, k]
-                                    * (
-                                        rot_der[:, :, 2, n] * rot[:, None, 0, m]
-                                        + rot[:, None, 2, n] * rot_der[:, :, 0, m]
-                                        + rot_der[:, :, 2, m] * rot[:, None, 0, n]
-                                        + rot[:, None, 2, m] * rot_der[:, :, 0, n]
-                                    )
-                                )
-                            )
-                            pass
-                    else:
-                        if mm == 0:
-                            # (pp|ss)
-                            w_x[..., idx] = (
-                                ri_x[..., 2] * (rot[:, 0, k] * rot[:, 0, l]).unsqueeze(1)
-                                + ri[:, None, 2]
-                                * (
-                                    rot_der[:, :, 0, k] * rot[:, None, 0, l]
-                                    + rot[:, None, 0, k] * rot_der[:, :, 0, l]
-                                )
-                                + ri_x[..., 3]
-                                * (rot[:, 1, k] * rot[:, 1, l] + rot[:, 2, k] * rot[:, 2, l]).unsqueeze(1)
-                                + ri[:, None, 3]
-                                * (
-                                    rot_der[:, :, 1, k] * rot[:, None, 1, l]
-                                    + rot_der[:, :, 2, k] * rot[:, None, 2, l]
-                                    + rot[:, None, 1, k] * rot_der[:, :, 1, l]
-                                    + rot[:, None, 2, k] * rot_der[:, :, 2, l]
-                                )
-                            )
-                            wXH_x[..., idxXH] = (
-                                riXH_x[..., 2] * (rotXH[:, 0, k] * rotXH[:, 0, l]).unsqueeze(1)
-                                + riXH[:, None, 2]
-                                * (
-                                    rot_derXH[:, :, 0, k] * rotXH[:, None, 0, l]
-                                    + rotXH[:, None, 0, k] * rot_derXH[:, :, 0, l]
-                                )
-                                + riXH_x[..., 3]
-                                * (
-                                    rotXH[:, 1, k] * rotXH[:, 1, l] + rotXH[:, 2, k] * rotXH[:, 2, l]
-                                ).unsqueeze(1)
-                                + riXH[:, None, 3]
-                                * (
-                                    rot_derXH[:, :, 1, k] * rotXH[:, None, 1, l]
-                                    + rot_derXH[:, :, 2, k] * rotXH[:, None, 2, l]
-                                    + rotXH[:, None, 1, k] * rot_derXH[:, :, 1, l]
-                                    + rotXH[:, None, 2, k] * rot_derXH[:, :, 2, l]
-                                )
-                            )
-                            idxXH = idxXH + 1
-                        elif nn == 0:
-                            # (pp|ps)
-                            w_x[..., idx] = (
-                                ri_x[..., 7] * (rot[:, 0, k] * rot[:, 0, l] * rot[:, 0, m]).unsqueeze(1)
-                                + ri[:, None, 7]
-                                * (
-                                    rot_der[:, :, 0, k] * (rot[:, 0, l] * rot[:, 0, m]).unsqueeze(1)
-                                    + rot_der[:, :, 0, l] * (rot[:, 0, k] * rot[:, 0, m]).unsqueeze(1)
-                                    + rot_der[:, :, 0, m] * (rot[:, 0, l] * rot[:, 0, k]).unsqueeze(1)
-                                )
-                                + ri_x[..., 8]
-                                * (
-                                    (rot[:, 1, k] * rot[:, 1, l] + rot[:, 2, k] * rot[:, 2, l]) * rot[:, 0, m]
-                                ).unsqueeze(1)
-                                + ri[:, None, 8]
-                                * (
-                                    (rot[:, 1, k] * rot[:, 1, l] + rot[:, 2, k] * rot[:, 2, l]).unsqueeze(1)
-                                    * rot_der[:, :, 0, m]
-                                    + (
-                                        rot_der[:, :, 1, k] * rot[:, None, 1, l]
-                                        + rot[:, None, 1, k] * rot_der[:, :, 1, l]
-                                        + rot_der[:, :, 2, k] * rot[:, None, 2, l]
-                                        + rot[:, None, 2, k] * rot_der[:, :, 2, l]
-                                    )
-                                    * rot[:, None, 0, m]
-                                )
-                                + ri_x[..., 9]
-                                * (
-                                    rot[:, 0, k] * (rot[:, 1, l] * rot[:, 1, m] + rot[:, 2, l] * rot[:, 2, m])
-                                    + rot[:, 0, l]
-                                    * (rot[:, 1, k] * rot[:, 1, m] + rot[:, 2, k] * rot[:, 2, m])
-                                ).unsqueeze(1)
-                                + ri[:, None, 9]
-                                * (
-                                    rot_der[:, :, 0, k]
-                                    * (rot[:, 1, l] * rot[:, 1, m] + rot[:, 2, l] * rot[:, 2, m]).unsqueeze(1)
-                                    + rot[:, None, 0, k]
-                                    * (
-                                        rot_der[:, :, 1, l] * rot[:, None, 1, m]
-                                        + rot[:, None, 2, l] * rot_der[:, :, 2, m]
-                                        + rot_der[:, :, 1, m] * rot[:, None, 1, l]
-                                        + rot[:, None, 2, m] * rot_der[:, :, 2, l]
-                                    )
-                                    + rot_der[:, :, 0, l]
-                                    * (rot[:, 1, k] * rot[:, 1, m] + rot[:, 2, k] * rot[:, 2, m]).unsqueeze(1)
-                                    + rot[:, None, 0, l]
-                                    * (
-                                        rot_der[:, :, 1, k] * rot[:, None, 1, m]
-                                        + rot[:, None, 2, k] * rot_der[:, :, 2, m]
-                                        + rot_der[:, :, 1, m] * rot[:, None, 1, k]
-                                        + rot[:, None, 2, m] * rot_der[:, :, 2, k]
-                                    )
-                                )
-                            )
-
-                        else:
-                            # (pp|pp)
-                            w_x[..., idx] = (
-                                ri_x[..., 16 - 1]
-                                * (rot[:, 0, k] * rot[:, 0, l] * rot[:, 0, m] * rot[:, 0, n]).unsqueeze(1)
-                                + ri[:, None, 16 - 1]
-                                * (
-                                    rot_der[:, :, 0, k]
-                                    * (rot[:, 0, l] * rot[:, 0, m] * rot[:, 0, n]).unsqueeze(1)
-                                    + rot_der[:, :, 0, l]
-                                    * (rot[:, 0, k] * rot[:, 0, m] * rot[:, 0, n]).unsqueeze(1)
-                                    + rot_der[:, :, 0, m]
-                                    * (rot[:, 0, k] * rot[:, 0, l] * rot[:, 0, n]).unsqueeze(1)
-                                    + (rot[:, 0, k] * rot[:, 0, l] * rot[:, 0, m]).unsqueeze(1)
-                                    * rot_der[:, :, 0, n]
-                                )
-                                + ri_x[..., 17 - 1]
-                                * (
-                                    (rot[:, 1, k] * rot[:, 1, l] + rot[:, 2, k] * rot[:, 2, l])
-                                    * rot[:, 0, m]
-                                    * rot[:, 0, n]
-                                ).unsqueeze(1)
-                                + ri[:, None, 17 - 1]
-                                * (
-                                    (
-                                        rot_der[:, :, 1, k] * rot[:, None, 1, l]
-                                        + rot[:, None, 1, k] * rot_der[:, :, 1, l]
-                                        + rot_der[:, :, 2, k] * rot[:, None, 2, l]
-                                        + rot[:, None, 2, k] * rot_der[:, :, 2, l]
-                                    )
-                                    * (rot[:, 0, m] * rot[:, 0, n]).unsqueeze(1)
-                                    + (rot[:, 1, k] * rot[:, 1, l] + rot[:, 2, k] * rot[:, 2, l]).unsqueeze(1)
-                                    * (
-                                        rot_der[:, :, 0, m] * rot[:, None, 0, n]
-                                        + rot[:, None, 0, m] * rot_der[:, :, 0, n]
-                                    )
-                                )
-                                + ri_x[..., 18 - 1]
-                                * (
-                                    rot[:, 0, k]
-                                    * rot[:, 0, l]
-                                    * (rot[:, 1, m] * rot[:, 1, n] + rot[:, 2, m] * rot[:, 2, n])
-                                ).unsqueeze(1)
-                                + ri[:, None, 18 - 1]
-                                * (
-                                    (
-                                        rot_der[:, :, 0, k] * rot[:, None, 0, l]
-                                        + rot[:, None, 0, k] * rot_der[:, :, 0, l]
-                                    )
-                                    * (rot[:, 1, m] * rot[:, 1, n] + rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                    + (rot[:, 0, k] * rot[:, 0, l]).unsqueeze(1)
-                                    * (
-                                        rot_der[:, :, 1, m] * rot[:, None, 1, n]
-                                        + rot[:, None, 1, m] * rot_der[:, :, 1, n]
-                                        + rot_der[:, :, 2, m] * rot[:, None, 2, n]
-                                        + rot[:, None, 2, m] * rot_der[:, :, 2, n]
-                                    )
-                                )
-                            )
-                            w_x[..., idx] += (
-                                ri_x[..., 19 - 1]
-                                * (
-                                    rot[:, 1, k] * rot[:, 1, l] * rot[:, 1, m] * rot[:, 1, n]
-                                    + rot[:, 2, k] * rot[:, 2, l] * rot[:, 2, m] * rot[:, 2, n]
-                                ).unsqueeze(1)
-                                + ri[:, None, 19 - 1]
-                                * (
-                                    rot_der[:, :, 1, k]
-                                    * (rot[:, 1, l] * rot[:, 1, m] * rot[:, 1, n]).unsqueeze(1)
-                                    + rot_der[:, :, 1, l]
-                                    * (rot[:, 1, k] * rot[:, 1, m] * rot[:, 1, n]).unsqueeze(1)
-                                    + rot_der[:, :, 1, m]
-                                    * (rot[:, 1, k] * rot[:, 1, l] * rot[:, 1, n]).unsqueeze(1)
-                                    + (rot[:, 1, k] * rot[:, 1, l] * rot[:, 1, m]).unsqueeze(1)
-                                    * rot_der[:, :, 1, n]
-                                    + rot_der[:, :, 2, k]
-                                    * (rot[:, 2, l] * rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                    + rot_der[:, :, 2, l]
-                                    * (rot[:, 2, k] * rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                    + rot_der[:, :, 2, m]
-                                    * (rot[:, 2, k] * rot[:, 2, l] * rot[:, 2, n]).unsqueeze(1)
-                                    + (rot[:, 2, k] * rot[:, 2, l] * rot[:, 2, m]).unsqueeze(1)
-                                    * rot_der[:, :, 2, n]
-                                )
-                                + ri_x[..., 20 - 1]
-                                * (
-                                    rot[:, 0, k]
-                                    * (
-                                        rot[:, 0, m]
-                                        * (rot[:, 1, l] * rot[:, 1, n] + rot[:, 2, l] * rot[:, 2, n])
-                                        + rot[:, 0, n]
-                                        * (rot[:, 1, l] * rot[:, 1, m] + rot[:, 2, l] * rot[:, 2, m])
-                                    )
-                                    + rot[:, 0, l]
-                                    * (
-                                        rot[:, 0, m]
-                                        * (rot[:, 1, k] * rot[:, 1, n] + rot[:, 2, k] * rot[:, 2, n])
-                                        + rot[:, 0, n]
-                                        * (rot[:, 1, k] * rot[:, 1, m] + rot[:, 2, k] * rot[:, 2, m])
-                                    )
-                                ).unsqueeze(1)
-                            )
-                            #      TO AVOID COMPILER DIFFICULTIES THIS IS DIVIDED
-                            temp1 = (
-                                rot_der[:, :, 0, k]
-                                * (
-                                    rot[:, 0, m] * (rot[:, 1, l] * rot[:, 1, n] + rot[:, 2, l] * rot[:, 2, n])
-                                    + rot[:, 0, n]
-                                    * (rot[:, 1, l] * rot[:, 1, m] + rot[:, 2, l] * rot[:, 2, m])
-                                ).unsqueeze(1)
-                                + rot_der[:, :, 0, l]
-                                * (
-                                    rot[:, 0, m] * (rot[:, 1, k] * rot[:, 1, n] + rot[:, 2, k] * rot[:, 2, n])
-                                    + rot[:, 0, n]
-                                    * (rot[:, 1, k] * rot[:, 1, m] + rot[:, 2, k] * rot[:, 2, m])
-                                ).unsqueeze(1)
-                                + rot[:, None, 0, k]
-                                * (
-                                    rot_der[:, :, 0, m]
-                                    * (rot[:, 1, l] * rot[:, 1, n] + rot[:, 2, l] * rot[:, 2, n]).unsqueeze(1)
-                                    + rot_der[:, :, 0, n]
-                                    * (rot[:, 1, l] * rot[:, 1, m] + rot[:, 2, l] * rot[:, 2, m]).unsqueeze(1)
-                                )
-                                + rot[:, None, 0, l]
-                                * (
-                                    rot_der[:, :, 0, m]
-                                    * (rot[:, 1, k] * rot[:, 1, n] + rot[:, 2, k] * rot[:, 2, n]).unsqueeze(1)
-                                    + rot_der[:, :, 0, n]
-                                    * (rot[:, 1, k] * rot[:, 1, m] + rot[:, 2, k] * rot[:, 2, m]).unsqueeze(1)
-                                )
-                            )
-                            temp2 = rot[:, None, 0, k] * (
-                                rot[:, None, 0, m]
-                                * (
-                                    rot_der[:, :, 1, l] * rot[:, None, 1, n]
-                                    + rot[:, None, 1, l] * rot_der[:, :, 1, n]
-                                    + rot_der[:, :, 2, l] * rot[:, None, 2, n]
-                                    + rot[:, None, 2, l] * rot_der[:, :, 2, n]
-                                )
-                                + rot[:, None, 0, n]
-                                * (
-                                    rot_der[:, :, 1, l] * rot[:, None, 1, m]
-                                    + rot[:, None, 1, l] * rot_der[:, :, 1, m]
-                                    + rot_der[:, :, 2, l] * rot[:, None, 2, m]
-                                    + rot[:, None, 2, l] * rot_der[:, :, 2, m]
-                                )
-                            ) + rot[:, None, 0, l] * (
-                                rot[:, None, 0, m]
-                                * (
-                                    rot_der[:, :, 1, k] * rot[:, None, 1, n]
-                                    + rot[:, None, 1, k] * rot_der[:, :, 1, n]
-                                    + rot_der[:, :, 2, k] * rot[:, None, 2, n]
-                                    + rot[:, None, 2, k] * rot_der[:, :, 2, n]
-                                )
-                                + rot[:, None, 0, n]
-                                * (
-                                    rot_der[:, :, 1, k] * rot[:, None, 1, m]
-                                    + rot[:, None, 1, k] * rot_der[:, :, 1, m]
-                                    + rot_der[:, :, 2, k] * rot[:, None, 2, m]
-                                    + rot[:, None, 2, k] * rot_der[:, :, 2, m]
-                                )
-                            )
-                            w_x[..., idx] += ri[:, None, 20 - 1] * (temp1 + temp2)
-                            w_x[..., idx] += ri_x[..., 21 - 1] * (
-                                rot[:, 1, k] * rot[:, 1, l] * rot[:, 2, m] * rot[:, 2, n]
-                                + rot[:, 2, k] * rot[:, 2, l] * rot[:, 1, m] * rot[:, 1, n]
-                            ).unsqueeze(1) + ri[:, None, 21 - 1] * (
-                                rot_der[:, :, 1, k]
-                                * (rot[:, 1, l] * rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                + rot_der[:, :, 1, l]
-                                * (rot[:, 1, k] * rot[:, 2, m] * rot[:, 2, n]).unsqueeze(1)
-                                + rot_der[:, :, 2, m]
-                                * (rot[:, 1, k] * rot[:, 1, l] * rot[:, 2, n]).unsqueeze(1)
-                                + (rot[:, 1, k] * rot[:, 1, l] * rot[:, 2, m]).unsqueeze(1)
-                                * rot_der[:, :, 2, n]
-                                + rot_der[:, :, 2, k]
-                                * (rot[:, 2, l] * rot[:, 1, m] * rot[:, 1, n]).unsqueeze(1)
-                                + rot_der[:, :, 2, l]
-                                * (rot[:, 2, k] * rot[:, 1, m] * rot[:, 1, n]).unsqueeze(1)
-                                + rot_der[:, :, 1, m]
-                                * (rot[:, 2, k] * rot[:, 2, l] * rot[:, 1, n]).unsqueeze(1)
-                                + (rot[:, 2, k] * rot[:, 2, l] * rot[:, 1, m]).unsqueeze(1)
-                                * rot_der[:, :, 1, n]
-                            )
-                            w_x[..., idx] += ri_x[..., 22 - 1] * (
-                                (rot[:, 1, k] * rot[:, 2, l] + rot[:, 2, k] * rot[:, 1, l])
-                                * (rot[:, 1, m] * rot[:, 2, n] + rot[:, 2, m] * rot[:, 1, n])
-                            ).unsqueeze(1) + ri[:, None, 22 - 1] * (
-                                (
-                                    rot_der[:, :, 1, k] * rot[:, None, 2, l]
-                                    + rot[:, None, 1, k] * rot_der[:, :, 2, l]
-                                    + rot_der[:, :, 2, k] * rot[:, None, 1, l]
-                                    + rot[:, None, 2, k] * rot_der[:, :, 1, l]
-                                )
-                                * (rot[:, 1, m] * rot[:, 2, n] + rot[:, 2, m] * rot[:, 1, n]).unsqueeze(1)
-                                + (rot[:, 1, k] * rot[:, 2, l] + rot[:, 2, k] * rot[:, 1, l]).unsqueeze(1)
-                                * (
-                                    rot_der[:, :, 1, m] * rot[:, None, 2, n]
-                                    + rot[:, None, 1, m] * rot_der[:, :, 2, n]
-                                    + rot_der[:, :, 2, m] * rot[:, None, 1, n]
-                                    + rot[:, None, 2, m] * rot_der[:, :, 1, n]
-                                )
-                            )
+    wXH_x, w_x = _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_x)
 
     w_x_final[HH, :, 0, 0] = riHH_x
     w_x_final[XH, :, :, 0] = wXH_x
-    w_x_final[XX, ...] = w_x.reshape(ri.shape[0], 3, 10, 10)
+    w_x_final[XX, ...] = w_x
+    return
 
 
 def _build_omx_ortho_fd_cache(molecule, Xij, ni, nj, idxi, idxj, method, dtype, device):
@@ -1694,22 +1051,10 @@ def _build_omx_ortho_fd_cache(molecule, Xij, ni, nj, idxi, idxj, method, dtype, 
     ortho_cache = _build_omx_ortho_cache(molecule)
 
     for coord in range(3):
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
+        xij_, rij_ = _central_pair_geometry(Xij, coord)
         ctx = build_omx_pair_context(
             molecule, method=method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
         )
-        Xij[:, coord] -= delta
 
         B_x[:, coord] = (ctx["pair_resonance"][:npairs] - ctx["pair_resonance"][npairs:]) * one_over_twodelta
         S_x[:, coord] = (ctx["pair_overlap"][:npairs] - ctx["pair_overlap"][npairs:]) * one_over_twodelta
@@ -1744,26 +1089,13 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
 
     for coord in range(3):
         # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
+        xij_, rij_ = _central_pair_geometry(Xij, coord)
 
         ctx = build_omx_pair_context(
             molecule, method=method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
         )
         pair = ctx["pair"]
         B_ = ctx["pair_resonance"]
-
-        Xij[:, coord] -= delta
 
         B_x[:, coord, :, :] = (B_[:npairs] - B_[npairs:]) * one_over_twodelta
 
@@ -1911,11 +1243,12 @@ def betor_grad_dense(
         q_ab = q_ab + (adjCOR_ab[:, :, None, :] * Cx0[:, None, :, :]).sum(-1)
         q_ba = q_ba + (adjCOR_ba[:, :, None, :] * (-Cx1[:, None, :, :])).sum(-1)
 
+    pair_grad = q_ab - q_ba
     if vel_eff is not None:
         # Fast path for TD-NAC: the caller only needs grad · vel, so skip the
         # dense [M, K, N, 3] gradient materialization and contract per-pair.
         v_ab = vel_eff[mol, a] - vel_eff[mol, b]
-        pair_val = ((q_ab - q_ba) * v_ab[:, None, :]).sum(dim=-1)
+        pair_val = (pair_grad * v_ab[:, None, :]).sum(dim=-1)
         grad = torch.zeros((M, K), dtype=dtype, device=device)
         grad.index_add_(0, mol, pair_val)
         return grad
@@ -1923,11 +1256,7 @@ def betor_grad_dense(
     grad = torch.zeros((M * N, K, 3), dtype=dtype, device=device)
     fa = mol * N + a
     fb = mol * N + b
-
-    grad.index_add_(0, fa, q_ab)
-    grad.index_add_(0, fb, -q_ab)
-
-    grad.index_add_(0, fb, q_ba)
-    grad.index_add_(0, fa, -q_ba)
+    grad.index_add_(0, fa, pair_grad)
+    grad.index_add_(0, fb, pair_grad, alpha=-1.0)
 
     return grad.reshape(M, N, K, 3).permute(0, 2, 1, 3)
