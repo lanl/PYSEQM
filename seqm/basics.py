@@ -587,7 +587,8 @@ class Hamiltonian(torch.nn.Module):
                 raise ValueError("Specify the number of excited states to calculate")
 
             excited_options["tolerance"] = excited_options.get("tolerance", 1e-6)
-            excited_options["method"] = excited_options.get("method", "cis").lower()
+            excited_method = excited_options.get("method", "cis").lower()
+            excited_options["method"] = "cis" if excited_method == "tda" else excited_method
 
             cis_tol = excited_options["tolerance"]
             if seqm_parameters["scf_eps"] > 1e-1 * cis_tol:
@@ -950,12 +951,36 @@ class Energy(torch.nn.Module):
         params["Kbeta"] = params.get("Kbeta", None)
 
     def forward(
-        self, molecule, learned_parameters=None, all_terms=False, P0=None, cis_amp=None, *args, **kwargs
+        self,
+        molecule,
+        learned_parameters=None,
+        all_terms=False,
+        P0=None,
+        cis_amp=None,
+        *args,
+        do_force=True,
+        analytical_gradient=None,
+        **kwargs,
     ):
         """
         get the energy terms
         """
         learned_parameters = {} if learned_parameters is None else learned_parameters
+        if analytical_gradient is None:
+            analytical_gradient = self.seqm_parameters.get("analytical_gradient", [False])
+        do_analytical_gradient = analytical_gradient if do_force else [False]
+        do_all_forces = (
+            do_force and bool(self.excited_states) and self.seqm_parameters.get("do_all_forces", False)
+        )
+        if do_all_forces and not do_analytical_gradient[0]:
+            raise ValueError("do_all_forces requires analytical gradients.")
+        if (
+            do_analytical_gradient[0]
+            and self.excited_states
+            and self.excited_states.get("orbital_window") is not None
+        ):
+            raise NotImplementedError("Analytical forces with orbital_window are not supported.")
+        molecule.analytical_gradient = None
         self._prepare_molecule_inputs(molecule, learned_parameters, *args, **kwargs)
         params = molecule.parameters
 
@@ -1032,14 +1057,13 @@ class Energy(torch.nn.Module):
         )
         Eelec = elec_energy(P, F, Hcore)
 
-        do_analytical_gradient = self.seqm_parameters.get("analytical_gradient", [False])
         active_states = active_state_tensor(
             molecule.active_state, int(molecule.nmol), molecule.coordinates.device
         )
         ground_mask = active_states == 0
         excited_mask = active_states > 0
         grad_ground = None
-        if do_analytical_gradient[0] and ground_mask.any():
+        if do_analytical_gradient[0] and (do_all_forces or ground_mask.any()):
             # None of the tensors will need gradients with backpropogation (unless I wnat to do second derivatives), so
             # we can save on memory since the compuational graph doesn't have to be stored.
             beta = molecule.parameters["beta"]
@@ -1130,7 +1154,7 @@ class Energy(torch.nn.Module):
                 for k in ("save_tdm_xlbomd", "save_tdm_output", "save_tdm")
             )
             needs_cis_grad = (
-                method in {"cis", "tda"}
+                method == "cis"
                 and bool(self.seqm_parameters.get("cis_backward", False))
                 and (
                     molecule.coordinates.requires_grad
@@ -1146,7 +1170,7 @@ class Energy(torch.nn.Module):
                 if all_same_mols:
                     if molecule.const.do_timing:
                         t0 = time.time()
-                    if method in {"cis", "tda"}:
+                    if method == "cis":
                         cis_result = rcis_batch(
                             molecule,
                             w,
@@ -1255,7 +1279,9 @@ class Energy(torch.nn.Module):
                     gathered = amplitudes.gather(1, idx).squeeze(1)
                     return gathered * excited_mask.unsqueeze(1)
 
-                if do_analytical_gradient[0]:
+                if not do_force or do_all_forces:
+                    Eexcited[excited_mask] = excitation_energies[excited_mask, active_idx[excited_mask]]
+                elif do_analytical_gradient[0]:
                     if not all_same_mols:
                         raise NotImplementedError
 
@@ -1302,12 +1328,8 @@ class Energy(torch.nn.Module):
                         cis_energy = calc_cis_energy_any_batch(molecule, w, e, amp_sel, rpa=is_rpa)
                     Eexcited[excited_mask] = cis_energy[excited_mask]
 
-            if self.seqm_parameters.get("do_all_forces", False):
+            if do_all_forces:
                 init_active_state = molecule.active_state
-                if not do_analytical_gradient[0]:
-                    raise Exception(
-                        "when asking for calculating all gradients of excited states ask for analytical gradients"
-                    )
                 if not all_same_mols:
                     raise NotImplementedError
 
@@ -1317,27 +1339,33 @@ class Energy(torch.nn.Module):
                 molecule.all_forces = empty(molecule.nmol, nroots + 1, molecule.molsize, 3)
                 molecule.all_cis_relaxed_diploles = empty(molecule.nmol, nroots, 3)
                 molecule.all_cis_unrelaxed_diploles = empty(molecule.nmol, nroots, 3)
-                molecule.all_forces[:, 0, ...] = -molecule.analytical_gradient
-                for i in range(1, nroots + 1):
-                    molecule.active_state = i
-                    molecule.all_forces[:, i, ...] = -rcis_grad_batch(
-                        molecule,
-                        w,
-                        e,
-                        riXH,
-                        ri,
-                        P,
-                        cis_tol,
-                        gam,
-                        self.method,
-                        parnuc,
-                        rpa=is_rpa,
-                        include_ground_state=True,
-                        calculate_dipole=True,
-                    )
-                    molecule.all_cis_relaxed_diploles[:, i - 1, ...] = molecule.cis_state_relaxed_dipole
-                    molecule.all_cis_unrelaxed_diploles[:, i - 1, ...] = molecule.cis_state_unrelaxed_dipole
-                molecule.active_state = init_active_state
+                molecule.all_forces[:, 0, ...] = -grad_ground
+                try:
+                    for i in range(1, nroots + 1):
+                        molecule.active_state = i
+                        molecule.all_forces[:, i, ...] = -rcis_grad_batch(
+                            molecule,
+                            w,
+                            e,
+                            riXH,
+                            ri,
+                            P,
+                            cis_tol,
+                            gam,
+                            self.method,
+                            parnuc,
+                            rpa=is_rpa,
+                            include_ground_state=True,
+                            calculate_dipole=True,
+                        )
+                        molecule.all_cis_relaxed_diploles[:, i - 1, ...] = molecule.cis_state_relaxed_dipole
+                        molecule.all_cis_unrelaxed_diploles[:, i - 1, ...] = (
+                            molecule.cis_state_unrelaxed_dipole
+                        )
+                finally:
+                    molecule.active_state = init_active_state
+                batch_idx = torch.arange(molecule.nmol, device=active_states.device)
+                molecule.analytical_gradient = -molecule.all_forces[batch_idx, active_states]
 
         # # Debug XL-ESMD
         # sample_noisy_R_energy(molecule, molecule.transition_density_matrices[:,molecule.active_state-1].unsqueeze(1), w, e)
@@ -1450,12 +1478,10 @@ class Force(torch.nn.Module):
         )
 
         # For excited states, back-prop forces work only if we have scf_backward == 1 or 2. We will have to fall back on analytical_gradient otherwise
-        if torch.any(active_states > 0) and do_force:
-            if self.seqm_parameters.get("scf_backward", 0) == 0:
-                do_analytical_gradient = [True]
-                self.seqm_parameters["analytical_gradient"] = do_analytical_gradient
+        if do_force and self.seqm_parameters.get("scf_backward", 0) == 0 and torch.any(active_states > 0):
+            do_analytical_gradient = [True]
 
-        use_analytical = do_analytical_gradient[0]
+        use_analytical = do_force and do_analytical_gradient[0]
         molecule.coordinates.requires_grad_(do_force and not use_analytical)
 
         Hf, Etot, Eelec, Enuc, Eiso, _, e_gap, e, D, charge, notconverged = self.energy(
@@ -1464,11 +1490,13 @@ class Force(torch.nn.Module):
             all_terms=True,
             P0=P0,
             cis_amp=cis_amp,
+            do_force=do_force,
+            analytical_gradient=do_analytical_gradient,
             *args,
             **kwargs,
         )
 
-        if self.seqm_parameters.get("normal modes", False):
+        if do_force and self.seqm_parameters.get("normal modes", False):
             if self.seqm_parameters.get("scf_backward", 0) != 2:
                 raise Exception(
                     "You have requested for normal mode calculation but scf_backward has not been set to 2 in your input seqm_parameters"
@@ -1481,21 +1509,7 @@ class Force(torch.nn.Module):
 
         if use_analytical:
             force = -molecule.analytical_gradient
-            return (
-                force.detach(),
-                D.detach(),
-                Hf.detach(),
-                Etot.detach(),
-                Eelec.detach(),
-                Enuc.detach(),
-                Eiso.detach(),
-                e,
-                e_gap,
-                charge,
-                notconverged,
-            )
-        # L = Etot.sum()
-        if do_force:
+        elif do_force:
             L = Hf.sum()
             if molecule.const.do_timing:
                 t0 = time.time()
@@ -1519,27 +1533,14 @@ class Force(torch.nn.Module):
                 molecule.coordinates.grad.zero_()
         else:
             force = Hf.new_empty(0)
-            return (
-                force.detach(),
-                D.detach(),
-                Hf.detach(),
-                Etot.detach(),
-                Eelec,
-                Enuc,
-                Eiso.detach(),
-                e,
-                e_gap,
-                charge,
-                notconverged,
-            )
 
         return (
             force.detach(),
             D.detach(),
             Hf.detach(),
             Etot.detach(),
-            Eelec.detach(),
-            Enuc.detach(),
+            Eelec.detach() if do_force else Eelec,
+            Enuc.detach() if do_force else Enuc,
             Eiso.detach(),
             e,
             e_gap,

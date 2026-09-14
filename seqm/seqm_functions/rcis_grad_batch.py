@@ -43,6 +43,8 @@ def rcis_grad_batch(
     amp: tensor of CIS amplitudes of shape [b,nov]. For each of the b molecules, the CIS amplitues of the
          state for which the gradient is required has to be selected and put together into the amp tensor
     """
+    if orbital_window is not None:
+        raise NotImplementedError("Analytical forces with orbital_window are not supported.")
     molsize = mol.molsize
     nHeavy, nHydro, _, _ = _uniform_molecule_dimensions(mol)
     cis_densities = make_cis_densities(
