@@ -69,16 +69,15 @@ def raise_max_iterations(
 
 
 def _uniform_molecule_dimensions(mol):
-    """Return immutable uniform-molecule dimensions without repeated CUDA syncs."""
+    """Cache uniform dimensions (or mixed status) until topology is reparsed."""
     cached = getattr(mol, "_rcis_uniform_dimensions", None)
-    if cached is not None:
-        return cached
-
-    dimensions = torch.stack((mol.nHeavy, mol.nHydro, mol.norb, mol.nocc), dim=1).cpu()
-    if dimensions.shape[0] > 1 and not torch.equal(dimensions, dimensions[:1].expand_as(dimensions)):
+    if cached is None:
+        dimensions = torch.stack((mol.nHeavy, mol.nHydro, mol.norb, mol.nocc), dim=1).cpu()
+        uniform = dimensions.shape[0] == 1 or torch.equal(dimensions, dimensions[:1].expand_as(dimensions))
+        cached = tuple(map(int, dimensions[0])) if uniform else False
+        mol._rcis_uniform_dimensions = cached
+    if cached is False:
         raise ValueError("All molecules in the batch must have the same number of orbitals and electrons")
-    cached = tuple(map(int, dimensions[0]))
-    mol._rcis_uniform_dimensions = cached
     return cached
 
 
@@ -117,13 +116,12 @@ def getMaxSubspacesize(
     dtype, device, nov, nroots, nmol=1, num_big_matrices=2, memory_fraction=0.4, retry_memory_fraction=0.65
 ):
     """Return the largest memory-safe Davidson subspace dimension."""
-    device = device.type
     bytes_per_element = torch.finfo(dtype).bits // 8
 
     def _candidate(fraction):
-        if device == "cpu":
+        if device.type == "cpu":
             available_memory = psutil.virtual_memory().available
-        elif device == "cuda":
+        elif device.type == "cuda":
             available_memory, _ = torch.cuda.mem_get_info(device)
         else:
             raise ValueError("Unsupported device. Use 'cpu' or 'cuda'.")
@@ -134,7 +132,7 @@ def getMaxSubspacesize(
     min_required_subspace = min(nov, 3 * nroots)
     if max_subspace_size >= min_required_subspace:
         return max_subspace_size
-    if device == "cuda":
+    if device.type == "cuda":
         torch.cuda.empty_cache()
         max_subspace_size = _candidate(memory_fraction)
     if max_subspace_size >= min_required_subspace:

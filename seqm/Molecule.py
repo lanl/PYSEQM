@@ -154,6 +154,8 @@ class Molecule(torch.nn.Module):
         self.cis_amplitudes: Optional[torch.Tensor] = None
         self.cis_energies: Optional[torch.Tensor] = None
         self.transition_density_matrices: Optional[torch.Tensor] = None
+        self._cis_zvector: Optional[torch.Tensor] = None
+        self._cis_zvector_state: Optional[torch.Tensor] = None
 
         self.all_forces: Optional[torch.Tensor] = None
         self.all_cis_relaxed_diploles: Optional[torch.Tensor] = None

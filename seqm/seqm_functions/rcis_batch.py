@@ -25,6 +25,7 @@ from .rcis_solver import make_rcis_response_builder, rcis_inputs, run_native_rci
 # from seqm.seqm_functions.pack import packone, unpackone
 
 _makeA_pi_batched_dispatch = None
+_is_compiling = getattr(getattr(torch, "compiler", None), "is_compiling", lambda: False)
 
 
 def enable_rcis_compile(mode=None, **options):
@@ -428,11 +429,7 @@ def _makeA_pi_batched_kernel(
         _, _, _, ind = _rcis_constant_tensors(dtype, device)
         sumK = torch.empty(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
         Pp = P_anti[:, :, mask]
-        for i in range(4):
-            for j in range(4):
-                sumK[..., i, j] = -0.5 * torch.sum(
-                    Pp * w[..., ind[i], :][..., :, ind[j]].unsqueeze(1), dim=(3, 4)
-                )
+        _contract_exchange_4x4(Pp, w, ind, sumK)
         F.index_add_(2, mask, sumK)
         F[:, :, mask_l] -= sumK.transpose(3, 4)
         del Pp
@@ -482,6 +479,20 @@ def makeA_pi_symm_batch(mol, P0, w, parameters=None):
     )
 
 
+def _contract_exchange_4x4(P, w, ind, out):
+    """Use four row contractions eagerly; Inductor fuses scalar outputs better."""
+    if _is_compiling():
+        for i in range(4):
+            for j in range(4):
+                out[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", P, w[..., ind[i], :][..., :, ind[j]])
+        return out
+
+    for i in range(4):
+        w_row = w[..., ind[i], :][..., :, ind]
+        out[..., i, :] = -0.5 * torch.einsum("nrpsS,npsjS->nrpj", P, w_row)
+    return out
+
+
 def _makeA_pi_symm_batch_impl(
     P0, w, mask, maskd, mask_l, idxi, idxj, gss, gsp, gpp, gp2, hsp, molsize: int, nmol: int
 ):
@@ -529,11 +540,7 @@ def _makeA_pi_symm_batch_impl(
     else:
         sumK = sumB
     Pp = P[:, :, mask]
-    # Keep the loop unless a fused contraction preserves peak memory; expanded
-    # root/pair/orbital intermediates can exceed the Davidson memory budget.
-    for i in range(4):
-        for j in range(4):
-            sumK[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", Pp, w[..., ind[i], :][..., :, ind[j]])
+    _contract_exchange_4x4(Pp, w, ind, sumK)
     F[:, :, mask] = sumK
     F[:, :, mask_l] = sumK.transpose(3, 4)
     del Pp
@@ -933,10 +940,33 @@ def make_cis_densities(
             ea_flat = ea_ei.reshape(nmol, nocc * nvirt)
             rhs0 = RHS / ea_flat
 
+            x0 = rhs0
+            use_cache = not rhs0.requires_grad
+            if use_cache:
+                cached_zvec = getattr(mol, "_cis_zvector", None)
+                zvec_state = getattr(mol, "_cis_zvector_state", None)
+                if (
+                    cached_zvec is None
+                    or cached_zvec.shape != rhs0.shape
+                    or cached_zvec.dtype != rhs0.dtype
+                    or cached_zvec.device != rhs0.device
+                    or zvec_state is None
+                    or zvec_state.shape != state_idx.shape
+                    or zvec_state.device != rhs0.device
+                ):
+                    cached_zvec = rhs0.new_zeros(rhs0.shape)
+                    zvec_state = torch.full((nmol,), -1, dtype=state_idx.dtype, device=rhs0.device)
+                    mol._cis_zvector = cached_zvec
+                    mol._cis_zvector_state = zvec_state
+                x0 = torch.where((zvec_state == state_idx).unsqueeze(1), cached_zvec, rhs0)
+
             def applyA(z):
                 return make_A_times_zvector_batched(mol, z, w, ea_ei, Cocc, Cvirt)
 
-            zvec = conjugate_gradient_batch(applyA, RHS, ea_flat, tol=zvec_tolerance, x0=rhs0)
+            zvec = conjugate_gradient_batch(applyA, RHS, ea_flat, tol=zvec_tolerance, x0=x0)
+            if use_cache:
+                mol._cis_zvector = zvec.detach()
+                mol._cis_zvector_state = state_idx.detach().clone()
 
             z_ao = torch.einsum("Nmi,Nia,Nna->Nmn", Cocc, zvec.view(nmol, nocc, nvirt), Cvirt)
             cis_densities["relaxed_difference_density"] = B + z_ao + z_ao.transpose(1, 2)

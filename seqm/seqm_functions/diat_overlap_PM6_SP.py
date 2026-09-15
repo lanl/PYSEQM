@@ -523,152 +523,41 @@ def aintgs(x0, jcall):
 
 
 def bintgs(x0, jcall):
-    """
-    B integrals for diatom_overlap_matrix
-    """
-    # jcall not used here, but may used later for more element types
-    # may ignore jcall, and just compute all the b1, b2, ..., b5 will be used
-    # as na>=nb, and in the set in diat2.f
-    # setc.sa = s2 =  zeta_b, setc.sb = s1 = zeta_a
-
-    # beta = 0.5*rab*(setc.sb-setc.sa)
-    # beta = 0.5*rab*(zeta_a - zeta_b)
-
-    ## |x|<=0.5, last = 6, goto 60
-    # else goto 40
-    # for convenience, may use goto90 for x<1.0e-6
+    """Evaluate the 13 B overlap integrals with stable piecewise formulas."""
+    del jcall  # Kept in the public signature for compatibility with SET.
     x = x0.reshape(-1, 1)
     absx = th.abs(x)
+    large = absx > 0.5
+    tiny = absx <= 1.0e-6
 
-    cond1 = absx > 0.5
+    # A safe placeholder prevents singular values and gradients in the branch
+    # that torch.where discards.
+    x_large = th.where(large, x, th.ones_like(x))
+    inv_x = x_large.reciprocal()
+    tx = th.exp(x_large) * inv_x
+    tmx = -th.exp(-x_large) * inv_x
 
-    # tx = th.exp(x)/x    # exp(x)/x  #not working with backward
-    # tx = th.where(cond1, th.exp(x)/x, th.tensor(0.0,dtype=dtype)) # not working with backward
-    x_cond1 = x[cond1]
-    inv_x_cond1 = x_cond1.reciprocal()
-    tx_cond1 = th.exp(x_cond1) * inv_x_cond1
+    large_values = []
+    previous = tx + tmx
+    large_values.append(previous)
+    for order in range(2, 14):
+        leading = (-tx if order % 2 == 0 else tx) + tmx
+        previous = leading + (order - 1) * previous * inv_x
+        large_values.append(previous)
 
-    # tmx = -th.exp(-x)/x # -exp(-x)/x #not working with backward
-    # tmx = th.where(cond1, -th.exp(-x)/x,  th.tensor(0.0,dtype=dtype)) #not working with backward
-    tmx_cond1 = -th.exp(-x_cond1) * inv_x_cond1
-    # b1(x=0)=2, b2(x=0)=0,b3(x=0)=2/3,b4(x=0)=0,b5(x=0)=2/5
+    x2 = x * x
+    x3 = x * x2
+    x4 = x2 * x2
+    x5 = x * x4
+    x6 = x2 * x4
+    values = []
+    for order, large_value in enumerate(large_values, start=1):
+        if order % 2:
+            default = 2.0 / order
+            series = default + x2 / (order + 2) + x4 / (12 * (order + 4)) + x6 / (360 * (order + 6))
+        else:
+            default = 0.0
+            series = -2.0 * x / (order + 1) - x3 / (3 * (order + 3)) - x5 / (60 * (order + 5))
+        values.append(th.where(large, large_value, th.where(tiny, default, series)))
 
-    # do some test to choose which one is faster
-    # b1 = th.where(cond1,  tx+tmx         , th.tensor(2.0))
-    # b2 = th.where(cond1, -tx+tmx+b1/x    , th.tensor(0.0))
-    # b3 = th.where(cond1,  tx+tmx+2.0*b2/x, th.tensor(2.0/3.0))
-    # b4 = th.where(cond1, -tx+tmx+3.0*b3/x, th.tensor(0.0))
-    # b5 = th.where(cond1,  tx+tmx+4.0*b4/x, th.tensor(2.0/5.0))
-    # b4 = th.where(cond1 & (jcall>=3), -tx+tmx+3.0*b3/x, th.tensor(0.0))
-    # b5 = th.where(cond1 & (jcall>=4),  tx+tmx+4.0*b4/x, th.tensor(2.0/5.0))
-
-    # do some test to choose which one is faster
-
-    # can't use this way th.where to do backpropagating
-    b1 = th.ones_like(x) * 2.0
-    b2 = th.zeros_like(x)
-    b3 = th.ones_like(x) * (2.0 / 3.0)
-    b4 = th.zeros_like(x)
-    b5 = th.ones_like(x) * (2.0 / 5.0)
-    b6 = th.zeros_like(x)
-    b7 = th.ones_like(x) * (2.0 / 7.0)
-    b8 = th.zeros_like(x)
-    b9 = th.ones_like(x) * (2.0 / 9.0)
-    b10 = th.zeros_like(x)
-    b11 = th.ones_like(x) * (2.0 / 11.0)
-    b12 = th.zeros_like(x)
-    b13 = th.ones_like(x) * (2.0 / 13.0)
-
-    b1_cond1 = tx_cond1 + tmx_cond1
-    b1[cond1] = b1_cond1
-
-    b2_cond1 = -tx_cond1 + tmx_cond1 + b1_cond1 * inv_x_cond1
-    b2[cond1] = b2_cond1
-
-    b3_cond1 = tx_cond1 + tmx_cond1 + 2.0 * b2_cond1 * inv_x_cond1
-    b3[cond1] = b3_cond1
-
-    b4_cond1 = -tx_cond1 + tmx_cond1 + 3.0 * b3_cond1 * inv_x_cond1
-    b4[cond1] = b4_cond1
-
-    b5_cond1 = tx_cond1 + tmx_cond1 + 4.0 * b4_cond1 * inv_x_cond1
-    b5[cond1] = b5_cond1
-
-    b6_cond1 = -tx_cond1 + tmx_cond1 + 5.0 * b5_cond1 * inv_x_cond1
-    b6[cond1] = b6_cond1
-
-    b7_cond1 = tx_cond1 + tmx_cond1 + 6.0 * b6_cond1 * inv_x_cond1
-    b7[cond1] = b7_cond1
-
-    b8_cond1 = -tx_cond1 + tmx_cond1 + 7.0 * b7_cond1 * inv_x_cond1
-    b8[cond1] = b8_cond1
-
-    b9_cond1 = tx_cond1 + tmx_cond1 + 8.0 * b8_cond1 * inv_x_cond1
-    b9[cond1] = b9_cond1
-
-    b10_cond1 = -tx_cond1 + tmx_cond1 + 9.0 * b9_cond1 * inv_x_cond1
-    b10[cond1] = b10_cond1
-
-    b11_cond1 = tx_cond1 + tmx_cond1 + 10.0 * b10_cond1 * inv_x_cond1
-    b11[cond1] = b11_cond1
-
-    b12_cond1 = -tx_cond1 + tmx_cond1 + 11.0 * b11_cond1 * inv_x_cond1
-    b12[cond1] = b12_cond1
-
-    b13_cond1 = tx_cond1 + tmx_cond1 + 12.0 * b12_cond1 * inv_x_cond1
-    b13[cond1] = b13_cond1
-
-    # b1 = th.where(cond1,  tx + tmx           , th.tensor(2.0, dtype=dtype))
-    # b2 = th.where(cond1, -tx + tmx +     b1/x, th.tensor(0.0, dtype=dtype))
-    # b3 = th.where(cond1,  tx + tmx + 2.0*b2/x, th.tensor(2.0/3.0, dtype=dtype))
-    # b4 = th.where(cond1, -tx + tmx + 3.0*b3/x, th.tensor(0.0, dtype=dtype))
-    # b5 = th.where(cond1,  tx + tmx + 4.0*b4/x, th.tensor(2.0/5.0, dtype=dtype))
-
-    # |x|<=0.5
-    cond2 = (absx <= 0.5) & (absx > 1.0e-6)
-    # b_{i+1}(x) = \sum_m (-x)^m * (2.0 * (m+i+1)%2 ) / m! / (m+i+1)
-    # i is even, i=0,2,4, m = 0,2,4,6
-    # b_{i+1} (x) = \sum_{m=0,2,4,6} x^m * 2.0/(m! * (m+i+1))
-    # factors
-    #      m =   0    2      4       6
-    # i=0        2  1/3   1/60  1/2520     2/(m!*(m+1))
-    # i=2      2/3  1/5   1/84  1/3240     2/(m!*(m+3))
-    # i=4      2/5  1/7   1/108  1/3960     2/(m!*(m+5))
-    # i=6      2/7  1/9   1/132  1/4680     2/(m!*(m+7))
-    # i=8      2/9  1/11  1/156  1/5400     2/(m!*(m+9))
-    # i=10     2/11 1/13  1/180  1/6120     2/(m!*(m+11))
-    # i=12     2/13 1/15  1/204  1/6840     2/(m!*(m+13))
-    x = x[cond2]
-    b1[cond2] = 2.0 + x**2 / 3.0 + x**4 / 60.0 + x**6 / 2520.0
-    b3[cond2] = 2.0 / 3.0 + x**2 / 5.0 + x**4 / 84.0 + x**6 / 3240.0
-    b5[cond2] = 2.0 / 5.0 + x**2 / 7.0 + x**4 / 108.0 + x**6 / 3960.0
-    b7[cond2] = 2.0 / 7.0 + x**2 / 9.0 + x**4 / 132.0 + x**6 / 4680.0
-    b9[cond2] = 2.0 / 9.0 + x**2 / 11.0 + x**4 / 156.0 + x**6 / 5400.0
-    b11[cond2] = 2.0 / 11.0 + x**2 / 13.0 + x**4 / 180.0 + x**6 / 6120.0
-    b13[cond2] = 2.0 / 13.0 + x**2 / 15.0 + x**4 / 204.0 + x**6 / 6840.0
-
-    # b5[cond2 & (jcall>=4)] = -x*2.0/7.0 - x**3/27.0 - x**5/660.0
-
-    # b_{i+1}(x) = \sum_m (-x)^m * (2.0 * (m+i+1)%2 ) / m! / (m+i+1)
-    # i is odd, i = 1,3, m= 1,3,5
-    # b_{i+1} (x) = \sum_{m=1,3,5} -x^m * 2.0/(m! * (m+i+1))
-    # factors
-    #      m =    1     3      5
-    # i=1       2/3  1/15  1/420  2/(m!*(m+2))
-    # i=3       2/5  1/21  1/540  2/(m!*(m+4))
-    # i=5       2/7  1/27  1/660  2/(m!*(m+6))
-    # i=7       2/9  1/33  1/780  2/(m!*(m+8))
-    # i=9       2/11 1/39  1/900  2/(m!*(m+10))
-    # i=11      2/13 1/45  1/1020  2/(m!*(m+12))
-
-    b2[cond2] = -2.0 / 3.0 * x - x**3 / 15.0 - x**5 / 420.0
-    b4[cond2] = -2.0 / 5.0 * x - x**3 / 21.0 - x**5 / 540.0
-    b6[cond2] = -2.0 / 7.0 * x - x**3 / 27.0 - x**5 / 660.0
-    b8[cond2] = -2.0 / 9.0 * x - x**3 / 33.0 - x**5 / 780.0
-    b10[cond2] = -2.0 / 11.0 * x - x**3 / 39.0 - x**5 / 900.0
-    b12[cond2] = -2.0 / 13.0 * x - x**3 / 45.0 - x**5 / 1020.0
-
-    # b4[cond2 & (jcall>=3)] = -2.0/5.0*x[cond2] - x[cond2]**3/21.0 - x[cond2]**5/540.0
-    # print(b1)
-    # print(b3)
-    return th.cat((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13), dim=1)
+    return th.cat(values, dim=1)

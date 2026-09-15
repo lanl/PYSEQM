@@ -16,6 +16,7 @@ from .seqm_functions.energy import (
     pair_nuclear_energy,
     total_energy,
 )
+from .seqm_functions.excited_state_utils import _uniform_molecule_dimensions
 from .seqm_functions.nac import calc_nac
 from .seqm_functions.normal_modes import normal_modes
 from .seqm_functions.omx_utils import OMX_METHODS, build_beta_tensor, get_orbital_zetas, prepare_parameters
@@ -335,6 +336,9 @@ class Parser(torch.nn.Module):
         charges: total charge for each molecule, shape (nmol,), 0 if None
         do_large_tensors: option to skip computation of idxi, idxj, ni, nj, rij, xij. For SEDACS only.
         """
+        # Composition and occupations are immutable between topology parses.
+        molecule._same_species = None
+        molecule._rcis_uniform_dimensions = None
         device = molecule.coordinates.device
 
         nmol, molsize = molecule.species.shape
@@ -1010,10 +1014,15 @@ class Energy(torch.nn.Module):
 
         if (self.excited_states or self.xlesmd) and not self.uhf:
             prev_mos = getattr(molecule, "molecular_orbitals", None)
-            all_same_mols = torch.equal(molecule.species, molecule.species[0].expand_as(molecule.species))
+            if molecule._same_species is None:
+                molecule._same_species = torch.equal(
+                    molecule.species, molecule.species[0].expand_as(molecule.species)
+                )
+            all_same_mols = molecule._same_species
             if all_same_mols:
+                nocc = _uniform_molecule_dimensions(molecule)[3]
                 molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals(
-                    molecular_orbitals, prev_mos, molecule.nocc[0].item(), e
+                    molecular_orbitals, prev_mos, nocc, e
                 )
             else:
                 molecule.molecular_orbitals, e = self._crossing_match_molecular_orbitals_grouped(
