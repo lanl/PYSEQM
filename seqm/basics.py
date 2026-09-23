@@ -1120,7 +1120,19 @@ class Energy(torch.nn.Module):
             )
 
         Eexcited = torch.zeros(int(molecule.nmol), dtype=Eelec.dtype, device=Eelec.device)
-        if self.excited_states:
+        # The augmented XL-CIS mode carries its own eta and full symmetric
+        # Lambda multiplier matrix.  Once XL-ESMD is active it must not spend
+        # a converged ordinary
+        # CIS solve to construct a separate xi(eta) restoring map; the
+        # augmented residual in XLESMD.py is its sole electronic restoring
+        # force.  Initialization still obtains the normal CIS seed before the
+        # XL flag is enabled by XL_ESMD.initialize.
+        xlesmd_augmented_eigenproblem = (
+            self.xlesmd
+            and str((kwargs.get("xl_bomd_params") or {}).get("constraint_mode", "")).strip().lower()
+            == "augmented_eigenproblem"
+        )
+        if self.excited_states and not xlesmd_augmented_eigenproblem:
             cis_tol = self.excited_states["tolerance"]
             method = self.excited_states["method"].lower()
             is_rpa = method == "rpa"
@@ -1410,27 +1422,55 @@ class Energy(torch.nn.Module):
                     return gathered
 
                 # select the amplitudes for the active states
-                cis_amp_sel = _gather_active_transition_density(cis_transition_density)
+                gradient_mode = str(xl_params.get("constraint_mode", "")).lower()
+                gradient_eta = (
+                    getattr(molecule, "xlesmd_eta_phys", cis_transition_density)
+                    if gradient_mode == "symmetric_linearized"
+                    else getattr(molecule, "xlesmd_augmented_xad", cis_transition_density)
+                    if gradient_mode == "augmented_eigenproblem"
+                    else cis_transition_density
+                )
+                cis_amp_sel = _gather_active_transition_density(gradient_eta)
                 transiton_density_sel = _gather_active_transition_density(
                     molecule.transition_density_matrices
                 )
 
-                molecule.analytical_gradient = xlesmd_rcis_grad_batch(
-                    cis_amp_sel,
-                    transiton_density_sel,
-                    molecule,
-                    w,
-                    e,
-                    riXH,
-                    ri,
-                    P,
-                    self.seqm_parameters["scf_eps"] * 100.0,
-                    gam,
-                    self.method,
-                    parnuc,
-                    include_ground_state=True,
-                    calculate_dipole=True,
-                )
+                if gradient_mode == "augmented_eigenproblem":
+                    # Physical readout is an ordinary orthonormal adiabatic
+                    # CIS state Xad.  Its analytical derivative uses the
+                    # regular CIS response path; eta/Lambda remain XL-only
+                    # restoring coordinates and do not enter this force.
+                    molecule.analytical_gradient = rcis_grad_batch(
+                        molecule,
+                        w,
+                        e,
+                        riXH,
+                        ri,
+                        P,
+                        self.seqm_parameters["scf_eps"] * 100.0,
+                        gam,
+                        self.method,
+                        parnuc,
+                        include_ground_state=True,
+                        calculate_dipole=True,
+                    )
+                else:
+                    molecule.analytical_gradient = xlesmd_rcis_grad_batch(
+                        cis_amp_sel,
+                        transiton_density_sel,
+                        molecule,
+                        w,
+                        e,
+                        riXH,
+                        ri,
+                        P,
+                        self.seqm_parameters["scf_eps"] * 100.0,
+                        gam,
+                        self.method,
+                        parnuc,
+                        include_ground_state=True,
+                        calculate_dipole=True,
+                    )
 
         if self.eig and not self.uhf and self.excited_states and best_guess_from_prev:
             molecule.old_mos = molecule.molecular_orbitals.detach().clone()

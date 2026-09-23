@@ -26,10 +26,10 @@ def _output():
     return {"molid": [], "print every": 0, "xyz": 0, "h5": {"data": 0, "nonadiabatic": 0}}
 
 
-def _xl_parameters():
+def _xl_parameters(constraint_mode="ordered_linearized"):
     return {
         "k": 6,
-        "constraint_mode": "ordered_linearized",
+        "constraint_mode": constraint_mode,
         "max_rank": 3,
         "err_threshold": 1.0e-8,
         "krylov_preconditioner": "none",
@@ -49,14 +49,18 @@ def _molecule(device, species, coordinates, parameters):
 
 
 @pytest.mark.parametrize("tdc_method", ["overlap", "hamiltonian_fd", "nac_dot_v"])
-def test_xlesmd_surface_hopping_one_step_is_finite(device, methanal_batch_data, tdc_method):
+@pytest.mark.parametrize(
+    "constraint_mode",
+    ["ordered_linearized", "symmetric_linearized", "symmetric_propagated_gauge", "augmented_eigenproblem"],
+)
+def test_xlesmd_surface_hopping_one_step_is_finite(device, methanal_batch_data, tdc_method, constraint_mode):
     torch.set_default_dtype(torch.float64)
     species, coordinates = methanal_batch_data
     parameters = _parameters(tdc_method)
     molecule = _molecule(device, species, coordinates, parameters)
     dynamics = XLESurfaceHoppingDynamics(
         seqm_parameters=parameters,
-        xl_bomd_params=_xl_parameters(),
+        xl_bomd_params=_xl_parameters(constraint_mode),
         timestep=0.05,
         Temp=0.0,
         initial_state=1,
@@ -72,6 +76,20 @@ def test_xlesmd_surface_hopping_one_step_is_finite(device, methanal_batch_data, 
     assert torch.isfinite(dynamics.populations).all()
     assert torch.isfinite(dynamics._cache_old["nac_dot"]).all()
     assert molecule.xlesmd_nac_diagnostics["xi_max_gram_error"] < 0.1
+    if constraint_mode == "symmetric_linearized":
+        assert torch.isfinite(molecule.xlesmd_eta_phys).all()
+        assert torch.allclose(
+            molecule.cis_energies, molecule.xlesmd_diagnostics["symmetric_shadow_eigenvalues"]
+        )
+    elif constraint_mode == "symmetric_propagated_gauge":
+        torch.testing.assert_close(molecule.cis_amplitudes, molecule.xlesmd_xi_gauge)
+    elif constraint_mode == "augmented_eigenproblem":
+        assert dynamics._xl_ctx["xlesmd_augmented_lambda"].shape[-2:] == (4, 4)
+        assert dynamics._xl_ctx["xlesmd_augmented_lambda_t"].shape[0] == dynamics.m
+        torch.testing.assert_close(
+            dynamics._xl_ctx["xlesmd_augmented_lambda"],
+            dynamics._xl_ctx["xlesmd_augmented_lambda"].transpose(-1, -2),
+        )
 
 
 def test_short_xlesmd_fssh_tracks_ordinary_cis_fssh(device, methanal_batch_data):
@@ -154,6 +172,74 @@ def test_xlesmd_surface_hopping_accepted_hop_switches_shadow_force(device, metha
     assert dynamics.hop_log[0].accepted
     assert torch.isfinite(molecule.force).all()
     assert torch.isfinite(molecule.acc).all()
+
+
+def test_augmented_xlesmd_surface_hopping_accepted_hop_preserves_lambda_state(
+    device, methanal_batch_data, monkeypatch
+):
+    torch.set_default_dtype(torch.float64)
+    species, coordinates = methanal_batch_data
+    parameters = _parameters("overlap")
+    molecule = _molecule(device, species, coordinates, parameters)
+    dynamics = XLESurfaceHoppingDynamics(
+        seqm_parameters=parameters,
+        xl_bomd_params=_xl_parameters("augmented_eigenproblem"),
+        timestep=0.05,
+        Temp=0.0,
+        initial_state=1,
+        output=_output(),
+    ).to(device)
+    dynamics.initialize(molecule, remove_com=None, learned_parameters={}, steps=1)
+
+    monkeypatch.setattr(dynamics, "_attempt_hop", lambda: torch.tensor([1], dtype=torch.long, device=device))
+    monkeypatch.setattr(dynamics, "_rescale_velocity_along_nac", lambda *args, **kwargs: True)
+    dynamics._do_integrator_step(0, molecule, {})
+
+    assert dynamics._active_states.tolist() == [1]
+    assert molecule.active_state.tolist() == [2]
+    assert dynamics.hop_log[0].accepted
+    torch.testing.assert_close(molecule.xlesmd_augmented_lambda, dynamics._xl_ctx["xlesmd_augmented_lambda"])
+    torch.testing.assert_close(
+        molecule.xlesmd_augmented_lambda, molecule.xlesmd_augmented_lambda.transpose(-1, -2)
+    )
+
+
+def test_augmented_xlesmd_energy_order_does_not_rotate_smooth_history(device):
+    torch.set_default_dtype(torch.float64)
+    parameters = _parameters()
+    parameters["elements"] = [1, 6, 8]
+    dynamics = XLESurfaceHoppingDynamics(
+        seqm_parameters=parameters,
+        xl_bomd_params=_xl_parameters("augmented_eigenproblem"),
+        timestep=0.05,
+        Temp=0.0,
+        initial_state=1,
+        output=_output(),
+    ).to(device)
+    eta = torch.tensor([[[10.0], [20.0], [30.0]]], device=device)
+    eta_t = torch.stack((eta + 100.0, eta + 200.0))
+    multiplier = torch.tensor([[[1.0, 0.2, 0.3], [0.2, 2.0, 0.4], [0.3, 0.4, 3.0]]], device=device)
+    multiplier_t = torch.stack((multiplier + 10.0, multiplier + 20.0))
+    molecule = SimpleNamespace(
+        cis_energies=torch.tensor([[3.0, 1.0, 2.0]], device=device),
+        cis_amplitudes=eta.clone(),
+        active_state=torch.tensor([1], dtype=torch.long, device=device),
+    )
+    dynamics._xl_ctx = {
+        "es_amp": eta.clone(),
+        "es_amp_t": eta_t.clone(),
+        "xlesmd_augmented_lambda": multiplier.clone(),
+        "xlesmd_augmented_lambda_t": multiplier_t.clone(),
+    }
+
+    dynamics._apply_xlesmd_energy_order(molecule, step=7)
+
+    torch.testing.assert_close(dynamics._xl_ctx["es_amp"], eta)
+    torch.testing.assert_close(dynamics._xl_ctx["es_amp_t"], eta_t)
+    torch.testing.assert_close(dynamics._xl_ctx["xlesmd_augmented_lambda"], multiplier)
+    torch.testing.assert_close(dynamics._xl_ctx["xlesmd_augmented_lambda_t"], multiplier_t)
+    torch.testing.assert_close(molecule.cis_energies, torch.tensor([[3.0, 1.0, 2.0]], device=device))
+    assert dynamics.xlesmd_energy_order_events == []
 
 
 def test_xlesmd_energy_order_relabels_auxiliary_history_without_remapping_fssh_rank(device):

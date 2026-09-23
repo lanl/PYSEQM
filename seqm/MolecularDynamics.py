@@ -1334,11 +1334,16 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "Pt": self._tensor_cpu(self._xl_ctx["Pt"]),
                 "es_amp_t": self._tensor_cpu(self._xl_ctx.get("es_amp_t")),
                 "xl_E_t": self._tensor_cpu(self._xl_ctx.get("xl_E_t")),
+                "xlesmd_augmented_lambda_t": self._tensor_cpu(self._xl_ctx.get("xlesmd_augmented_lambda_t")),
             }
             if isinstance(self, XL_ESMD) and torch.is_tensor(getattr(self, "_xlesmd_S_prev", None)):
                 ckpt["xlesmd_S_prev"] = self._tensor_cpu(self._xlesmd_S_prev)
             if isinstance(molecule.dP2dt2, torch.Tensor):
                 ckpt["dP2dt2"] = self._tensor_cpu(molecule.dP2dt2)
+            if isinstance(getattr(molecule, "xlesmd_augmented_deta2dt2", None), torch.Tensor):
+                ckpt["xlesmd_augmented_deta2dt2"] = self._tensor_cpu(molecule.xlesmd_augmented_deta2dt2)
+            if isinstance(getattr(molecule, "xlesmd_augmented_dlambda2dt2", None), torch.Tensor):
+                ckpt["xlesmd_augmented_dlambda2dt2"] = self._tensor_cpu(molecule.xlesmd_augmented_dlambda2dt2)
 
         self._save_checkpoint_and_report(ckpt, path)
 
@@ -1354,6 +1359,11 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         ckpt, molecule, device, reuse_P = Molecular_Dynamics_Basic._load_checkpoint_base(path, device=device)
         if "dP2dt2" in ckpt:
             molecule.dP2dt2 = ckpt["dP2dt2"].to(device)
+        if "xlesmd_augmented_deta2dt2" in ckpt:
+            molecule.xlesmd_augmented_deta2dt2 = ckpt["xlesmd_augmented_deta2dt2"].to(device)
+            molecule.dxi2dt2 = molecule.xlesmd_augmented_deta2dt2
+        if "xlesmd_augmented_dlambda2dt2" in ckpt:
+            molecule.xlesmd_augmented_dlambda2dt2 = ckpt["xlesmd_augmented_dlambda2dt2"].to(device)
 
         md_type = ckpt["MD_type"]
         md_classes = {
@@ -1381,6 +1391,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             xl = ckpt["xl_ctx"]
             Pt = xl["Pt"].to(device)
             es_amp_t = xl.get("es_amp_t")
+            augmented_lambda_t = xl.get("xlesmd_augmented_lambda_t")
             # xl_E_t = xl.get("xl_E_t")
             xl_m = ckpt["xl_bomd_params"]["k"] + 1
             cindx = (ckpt["step_done"] - 1) % xl_m  # subtract one because step_done is advanced by one step
@@ -1390,6 +1401,10 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             if isinstance(es_amp_t, torch.Tensor):
                 es_amp_t = es_amp_t.to(device)
                 es_amp = es_amp_t[(xl_m - 1 - cindx)].clone()
+            augmented_lambda = None
+            if isinstance(augmented_lambda_t, torch.Tensor):
+                augmented_lambda_t = augmented_lambda_t.to(device)
+                augmented_lambda = augmented_lambda_t[(xl_m - 1 - cindx)].clone()
             # if isinstance(xl_E_t, torch.Tensor):
             #     xl_E_t = xl_E_t.to(device)
             #     xl_E = xl_E_t[(xl_m - 1 - cindx)].clone()
@@ -1398,11 +1413,15 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
                 "Pt": Pt,
                 "es_amp": es_amp,
                 "es_amp_t": es_amp_t,
+                "xlesmd_augmented_lambda": augmented_lambda,
+                "xlesmd_augmented_lambda_t": augmented_lambda_t,
                 # "xl_E": xl_E,
                 # "xl_E_t": xl_E_t,
             }
             if md_type == "XL_ESMD" and isinstance(ckpt.get("xlesmd_S_prev"), torch.Tensor):
                 md._xlesmd_S_prev = ckpt["xlesmd_S_prev"].to(device)
+            if torch.is_tensor(augmented_lambda):
+                molecule.xlesmd_augmented_lambda = augmented_lambda
 
         Molecular_Dynamics_Basic._restore_rng(ckpt)
         md.run(molecule=molecule, steps=ckpt["steps"], reuse_P=reuse_P, remove_com=ckpt["remove_com"])
@@ -1925,12 +1944,27 @@ class XL_ESMD(XL_BOMD):
         super().__init__(damp, xl_bomd_params, *tuple(args), **kwargs)
         self.xlesmd_force_mode = force_mode
         self.xlesmd_scf_backward = self.seqm_parameters.get("scf_backward", 0)
+        self.xlesmd_krylov_log = []
 
     @staticmethod
     def _packed_current_ao_overlap(molecule):
         """Packed AO metric used as the previous-overlap cache for MO transport."""
         nheavy, nhydro, norb, _ = _uniform_molecule_dimensions(molecule)
         return packone_batch(overlap_matrix_current_geometry(molecule), 4 * nheavy, nhydro, norb)
+
+    def _uses_augmented_cis(self):
+        """Whether this instance owns the separate (eta, Lambda) XL-CIS state."""
+        return str(self.xl_bomd_params.get("constraint_mode", "")).strip().lower() == "augmented_eigenproblem"
+
+    def _propagate_augmented_multiplier(self, multiplier, multiplier_t, cindx, molecule):
+        """Apply the same damped-Verlet recurrence to the full Lambda block."""
+        acceleration = getattr(molecule, "xlesmd_augmented_dlambda2dt2", None)
+        if acceleration is None:
+            acceleration = torch.zeros_like(multiplier)
+        result = self.coeff_D * (multiplier + acceleration) + torch.sum(
+            self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1) * multiplier_t, dim=0
+        )
+        return 0.5 * (result + result.conj().transpose(-1, -2))
 
     def _propagate_excited_state(self, es_amp, es_amp_t, cindx, molecule):
         """Propagate excited state transition density matrices."""
@@ -1949,7 +1983,15 @@ class XL_ESMD(XL_BOMD):
         """Propagate occupied--virtual XL-ESMD amplitude blocks."""
         if getattr(molecule, "dxi2dt2", None) is None:
             c = 0.95
-            es_new = self.coeff_D * (c * molecule.cis_amplitudes + (1.0 - c) * es_amp) + torch.sum(
+            constraint_mode = str(self.xl_bomd_params.get("constraint_mode", "")).strip().lower()
+            # Symmetric modes keep their Verlet variables in the unrotated eta
+            # gauge frame, even when the ordinary symmetric mode exposes xi_phys.
+            reference = (
+                es_amp
+                if constraint_mode in {"symmetric_linearized", "symmetric_propagated_gauge"}
+                else molecule.cis_amplitudes
+            )
+            es_new = self.coeff_D * (c * reference + (1.0 - c) * es_amp) + torch.sum(
                 self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1) * es_amp_t, dim=0
             )
         else:
@@ -2051,6 +2093,14 @@ class XL_ESMD(XL_BOMD):
             # AO transition-density path retained for comparison:
             # es_amp = self._propagate_excited_state(es_amp, es_amp_t, cindx, molecule)
             es_amp_t[(self.m - 1 - cindx)] = es_amp
+            if self._uses_augmented_cis():
+                multiplier = self._xl_ctx["xlesmd_augmented_lambda"]
+                multiplier_t = self._xl_ctx["xlesmd_augmented_lambda_t"]
+                multiplier = self._propagate_augmented_multiplier(multiplier, multiplier_t, cindx, molecule)
+                multiplier_t[(self.m - 1 - cindx)] = multiplier
+                # The electronic call reads the newly propagated multiplier
+                # coordinates directly from the molecule, alongside cis_amp.
+                molecule.xlesmd_augmented_lambda = multiplier
             # xl_E = self._propagate_xl_E(xl_E, xl_E_t, cindx, molecule)
             # xl_E_t[(self.m - 1 - cindx)] = xl_E
 
@@ -2081,6 +2131,21 @@ class XL_ESMD(XL_BOMD):
             **kwargs,
         )
 
+        if self.xl_bomd_params.get("record_krylov_diagnostics", False):
+            diagnostics = getattr(molecule, "xlesmd_diagnostics", {})
+            if "krylov_rank" in diagnostics:
+                record = {
+                    "step": int(step) + 1,
+                    "krylov_rank": int(diagnostics.get("krylov_rank", 0)),
+                    "krylov_max_relative_residual": float(
+                        diagnostics.get("krylov_relative_residual", torch.zeros(1)).amax().item()
+                    ),
+                }
+                for key, value in diagnostics.items():
+                    if key.startswith("krylov_rotational_"):
+                        record[key] = value.detach().cpu().tolist() if torch.is_tensor(value) else value
+                self.xlesmd_krylov_log.append(record)
+
         # The driver has now constructed the MOs at R(n+1).  Transport every
         # history entry from the shared R(n) MO basis into that new basis so the
         # next XL recurrence combines amplitudes expressed in one coordinate system.
@@ -2102,6 +2167,12 @@ class XL_ESMD(XL_BOMD):
                 # must not alter the auxiliary recurrence unless we explicitly
                 # formulate a constrained XL integrator for every history slice.
                 self._xlesmd_S_prev = S_curr
+
+        if self._uses_augmented_cis():
+            # Readout uses Xad only; its diagonalization must never rotate the
+            # smooth-gauge eta or Lambda Verlet coordinates and histories.
+            self._xl_ctx["xlesmd_augmented_lambda"] = molecule.xlesmd_augmented_lambda
+            self._xl_ctx["xlesmd_augmented_lambda_t"] = multiplier_t
 
         with torch.no_grad():
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
@@ -2186,6 +2257,17 @@ class XL_ESMD(XL_BOMD):
                 self._xl_ctx["es_amp_t"] = (
                     initial_eta.unsqueeze(0).expand((self.m,) + initial_eta.shape).clone()
                 )
+                if self._uses_augmented_cis():
+                    multiplier = getattr(molecule, "xlesmd_augmented_lambda", None)
+                    if not (
+                        torch.is_tensor(multiplier)
+                        and multiplier.shape == initial_eta.shape[:2] + (initial_eta.shape[1],)
+                    ):
+                        multiplier = torch.diag_embed(molecule.cis_energies.detach().clone())
+                    self._xl_ctx["xlesmd_augmented_lambda"] = multiplier.clone()
+                    self._xl_ctx["xlesmd_augmented_lambda_t"] = (
+                        multiplier.unsqueeze(0).expand((self.m,) + multiplier.shape).clone()
+                    )
 
 
 """

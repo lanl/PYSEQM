@@ -1,7 +1,13 @@
 import h5py
 import pytest
 
-from seqm.MolecularDynamics import KSA_XL_BOMD, XL_BOMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
+from seqm.MolecularDynamics import (
+    KSA_XL_BOMD,
+    XL_BOMD,
+    XL_ESMD,
+    Molecular_Dynamics_Basic,
+    Molecular_Dynamics_Langevin,
+)
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
@@ -309,3 +315,37 @@ def test_md_checkpoint_resume_excited_xl_bomd(methanal_batch_data, device, tmp_p
         xl_bomd_params={"k": 6},
     )
     _compare_runs(continuous, resumed, steps)
+
+
+@pytest.mark.parametrize("method", OMX_METHODS)
+def test_md_checkpoint_resume_augmented_eigenproblem(methanal_batch_data, device, tmp_path, method):
+    """Restart preserves eta/Lambda histories and both restoring corrections."""
+    species, coordinates = methanal_batch_data
+    seqm_parameters = _seqm_parameters(method, excited=True)
+    params = {"k": 6, "constraint_mode": "augmented_eigenproblem", "max_rank": 4, "err_threshold": 1.0e-8}
+    continuous = _run_continuous(
+        XL_ESMD,
+        seqm_parameters,
+        device,
+        species[:1].clone(),
+        coordinates[:1].clone(),
+        str(tmp_path / "md_augmented_cont"),
+        [0],
+        4,
+        damp=None,
+        xl_bomd_params=params,
+    )
+    resumed = _run_checkpoint_resume(
+        XL_ESMD,
+        seqm_parameters,
+        device,
+        species[:1].clone(),
+        coordinates[:1].clone(),
+        str(tmp_path / "md_augmented_restart"),
+        [0],
+        4,
+        2,
+        damp=None,
+        xl_bomd_params=params,
+    )
+    _compare_runs(continuous, resumed, 4)

@@ -1711,12 +1711,15 @@ class SurfaceHoppingDynamics(NonadiabaticDynamicsBase):
 
 
 class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
-    """Simple FSSH driven by ordered multi-state XL-ESMD shadow surfaces.
+    """Simple FSSH driven by multi-state XL-ESMD shadow surfaces.
 
-    The ground-state density and the complete ordered CIS auxiliary block are
+    The ground-state density and electronic auxiliary coordinates are
     propagated with the same extended-Lagrangian recurrences used by
-    :class:`XL_ESMD`.  The existing FSSH electronic propagator, hop selection,
-    and NAC machinery then operate on the resulting shadow roots and energies.
+    :class:`XL_ESMD`.  For ``augmented_eigenproblem`` those coordinates are
+    the smooth-gauge ``(eta, Lambda)`` pair; FSSH sees only the orthonormal,
+    energy-ordered ``Xad`` readout.  The existing electronic propagator, hop
+    selection, and NAC machinery therefore operate on physical roots rather
+    than on the gauge-dependent XL coordinates.
 
     This first implementation deliberately treats the small non-orthogonality
     of the shadow roots as an approximation in both time-derivative and
@@ -1738,8 +1741,17 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
     def __init__(self, seqm_parameters: Dict, xl_bomd_params: Dict, *args, **kwargs):
         xl_params = dict(xl_bomd_params)
         constraint_mode = str(xl_params.get("constraint_mode", "ordered_linearized")).strip().lower()
-        if constraint_mode != "ordered_linearized":
-            raise ValueError("XL-FSSH currently requires constraint_mode='ordered_linearized'.")
+        if constraint_mode not in {
+            "ordered_linearized",
+            "symmetric_linearized",
+            "symmetric_propagated_gauge",
+            "augmented_eigenproblem",
+        }:
+            raise ValueError(
+                "XL-FSSH requires constraint_mode='ordered_linearized', "
+                "'symmetric_linearized', 'symmetric_propagated_gauge', or "
+                "'augmented_eigenproblem'."
+            )
         xl_params["constraint_mode"] = constraint_mode
 
         force_mode = str(xl_params.get("force_mode", "autodiff")).strip().lower()
@@ -1793,6 +1805,20 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
         self._xlesmd_learned_parameters = {}
         self._xl_ctx = None
 
+    def _uses_augmented_cis(self) -> bool:
+        """Whether FSSH owns the smooth-gauge full-(eta, Lambda) XL state."""
+        return str(self.xl_bomd_params.get("constraint_mode", "")).strip().lower() == "augmented_eigenproblem"
+
+    def _propagate_augmented_multiplier(self, multiplier, multiplier_t, cindx, molecule):
+        """Advance the full Hermitian Lambda block with the XL Verlet recurrence."""
+        acceleration = getattr(molecule, "xlesmd_augmented_dlambda2dt2", None)
+        if acceleration is None:
+            acceleration = torch.zeros_like(multiplier)
+        result = self.coeff_D * (multiplier + acceleration) + torch.sum(
+            self.coeff[cindx : (cindx + self.m)].reshape(-1, 1, 1, 1) * multiplier_t, dim=0
+        )
+        return 0.5 * (result + result.conj().transpose(-1, -2))
+
     @staticmethod
     def _packed_current_ao_overlap(molecule):
         return XL_ESMD._packed_current_ao_overlap(molecule)
@@ -1837,6 +1863,17 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
             Pt[self.m - 1 - cindx] = P
             es_amp = XL_ESMD._propagate_excited_amp(self, es_amp, es_amp_t, cindx, molecule)
             es_amp_t[self.m - 1 - cindx] = es_amp
+            if self._uses_augmented_cis():
+                multiplier = self._xl_ctx["xlesmd_augmented_lambda"]
+                multiplier_t = self._xl_ctx["xlesmd_augmented_lambda_t"]
+                multiplier = self._propagate_augmented_multiplier(multiplier, multiplier_t, cindx, molecule)
+                multiplier_t[self.m - 1 - cindx] = multiplier
+                # The electronic driver consumes the smooth-gauge Lambda;
+                # FSSH itself consumes only the resulting physical Xad.
+                molecule.xlesmd_augmented_lambda = multiplier
+                self._xl_ctx.update(
+                    xlesmd_augmented_lambda=multiplier, xlesmd_augmented_lambda_t=multiplier_t
+                )
             P2 = P @ P
             P0 = torch.baddbmm(P2, P2, P, beta=1.5, alpha=-0.5)
         self._xl_ctx.update(P=P, Pt=Pt, es_amp=es_amp, es_amp_t=es_amp_t)
@@ -1882,6 +1919,14 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
         """Relabel the XL state block and its history in ascending-energy order."""
         if not self.xlesmd_energy_order_tracking:
             return
+        if str(self.xl_bomd_params.get("constraint_mode", "")).lower() in {
+            "symmetric_propagated_gauge",
+            "augmented_eigenproblem",
+        }:
+            # These modes retain a smooth propagated gauge.  The augmented
+            # readout Xad is already energy ordered for FSSH; relabeling eta,
+            # Lambda, or their histories here would be incorrect.
+            return
 
         nroots = self._xl_ctx["es_amp"].shape[1]
         energies = molecule.cis_energies[:, :nroots]
@@ -1890,7 +1935,14 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
         if torch.equal(permutation, identity):
             return
 
-        for name in ("cis_energies", "cis_amplitudes", "transition_density_matrices", "dxi2dt2"):
+        for name in (
+            "cis_energies",
+            "cis_amplitudes",
+            "transition_density_matrices",
+            "dxi2dt2",
+            "xlesmd_eta_phys",
+            "xlesmd_xi_gauge",
+        ):
             values = getattr(molecule, name, None)
             if values is not None:
                 if not torch.is_tensor(values) or values.shape[1] != nroots:
@@ -2040,6 +2092,17 @@ class XLESurfaceHoppingDynamics(SurfaceHoppingDynamics):
                 "es_amp": initial_eta.clone(),
                 "es_amp_t": initial_eta.unsqueeze(0).expand((self.m,) + initial_eta.shape).clone(),
             }
+            if self._uses_augmented_cis():
+                multiplier = getattr(molecule, "xlesmd_augmented_lambda", None)
+                if not (
+                    torch.is_tensor(multiplier)
+                    and multiplier.shape == initial_eta.shape[:2] + (initial_eta.shape[1],)
+                ):
+                    multiplier = torch.diag_embed(molecule.cis_energies.detach().clone())
+                self._xl_ctx["xlesmd_augmented_lambda"] = multiplier.clone()
+                self._xl_ctx["xlesmd_augmented_lambda_t"] = (
+                    multiplier.unsqueeze(0).expand((self.m,) + multiplier.shape).clone()
+                )
             self._xlesmd_S_prev = self._packed_current_ao_overlap(molecule)
             molecule.acc = molecule.force * molecule.mass_inverse * CONSTANTS.ACC_SCALE
 

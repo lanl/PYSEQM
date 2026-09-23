@@ -50,17 +50,79 @@ def test_xlesmd_defaults_to_verified_autodiff_shadow_force():
     assert md_implicit.seqm_parameters["scf_backward"] == 1
 
 
+def test_augmented_eigenproblem_mode_propagates_eta_and_full_multiplier(device, methanal_batch_data):
+    torch.set_default_dtype(torch.float64)
+    species, coordinates = methanal_batch_data
+    parameters = _parameters(n_states=2)
+    molecule = Molecule(Constants().to(device), parameters, coordinates[:1].clone(), species[:1].clone()).to(
+        device
+    )
+    md = XL_ESMD(
+        xl_bomd_params={
+            "k": 6,
+            "constraint_mode": "augmented_eigenproblem",
+            "max_rank": 4,
+            "err_threshold": 1.0e-8,
+        },
+        Temp=300.0,
+        seqm_parameters=parameters,
+        timestep=0.1,
+        output={"molid": [], "print every": 0, "xyz": 0, "h5": {"data": 0}},
+    ).to(device)
+    md.initialize(molecule, remove_com=None, learned_parameters={}, steps=1)
+    assert molecule.xlesmd_diagnostics["constraint_mode"] == "augmented_eigenproblem"
+    assert molecule.xlesmd_augmented_lambda.shape == (1, 2, 2)
+    assert molecule.xlesmd_augmented_deta2dt2.shape == molecule.cis_amplitudes.shape
+    assert molecule.xlesmd_augmented_dlambda2dt2.shape == (1, 2, 2)
+    assert md._xl_ctx["xlesmd_augmented_lambda_t"].shape[0] == md.m
+    assert torch.isfinite(molecule.xlesmd_diagnostics["augmented_residual"]).all()
+    md._do_integrator_step(0, molecule, {})
+    assert torch.isfinite(md._xl_ctx["es_amp"]).all()
+    assert torch.isfinite(md._xl_ctx["xlesmd_augmented_lambda"]).all()
+
+
+def test_augmented_eigenproblem_analytic_force_matches_autodiff_at_cis_seed(device, methanal_batch_data):
+    torch.set_default_dtype(torch.float64)
+    species, coordinates = methanal_batch_data
+    common = {"k": 6, "constraint_mode": "augmented_eigenproblem", "max_rank": 4, "err_threshold": 1.0e-10}
+    output = {"molid": [], "print every": 0, "xyz": 0, "h5": {"data": 0}}
+    forces = []
+    for force_mode in ("autodiff", "experimental_analytic"):
+        parameters = _parameters(n_states=2)
+        molecule = Molecule(
+            Constants().to(device), parameters, coordinates[:1].clone(), species[:1].clone()
+        ).to(device)
+        md = XL_ESMD(
+            xl_bomd_params={**common, "force_mode": force_mode},
+            seqm_parameters=parameters,
+            timestep=0.1,
+            output=output,
+        ).to(device)
+        md.initialize(molecule, remove_com=None, learned_parameters={}, steps=1)
+        forces.append(molecule.force.detach().clone())
+    # The experimental analytical path and differentiable-SCF path use
+    # distinct SCF response implementations; this is a regression comparison
+    # for the same physical Xad readout rather than an identity test.
+    torch.testing.assert_close(forces[0], forces[1], rtol=6.0e-2, atol=3.0e-5)
+
+
 @pytest.mark.parametrize(
-    "constraint_mode", ["independent_linearized", "independent_exact", "ordered_linearized"]
+    "constraint_mode",
+    [
+        "independent_linearized",
+        "independent_exact",
+        "ordered_linearized",
+        "symmetric_linearized",
+        "symmetric_propagated_gauge",
+    ],
 )
-def test_experimental_analytical_gradient_is_retained_for_labelled_xlesmd_modes(
-    device, methanal_batch_data, constraint_mode
-):
-    """The selected-root analytical path remains usable for 1a, 1b, and ordered XL."""
+def test_labelled_xlesmd_modes_use_their_supported_force_path(device, methanal_batch_data, constraint_mode):
+    """All labelled modes retain their analytical force path."""
     torch.set_default_dtype(torch.float64)
     species_batch, coordinates_batch = methanal_batch_data
     parameters = _parameters(n_states=2)
     parameters["analytical_gradient"] = [False]
+    force_mode = "experimental_analytic"
     molecule = Molecule(
         Constants().to(device), parameters, coordinates_batch[:1].clone(), species_batch[:1].clone()
     ).to(device)
@@ -70,7 +132,7 @@ def test_experimental_analytical_gradient_is_retained_for_labelled_xlesmd_modes(
             "constraint_mode": constraint_mode,
             "max_rank": 3,
             "err_threshold": 1.0e-8,
-            "force_mode": "experimental_analytic",
+            "force_mode": force_mode,
         },
         Temp=300.0,
         seqm_parameters=parameters,
@@ -78,12 +140,27 @@ def test_experimental_analytical_gradient_is_retained_for_labelled_xlesmd_modes(
         output={"molid": [], "print every": 0, "xyz": 0, "h5": {"data": 0}},
     ).to(device)
 
-    assert md.xlesmd_force_mode == "experimental_analytic"
-    assert md.seqm_parameters["analytical_gradient"] == [True]
+    assert md.xlesmd_force_mode == force_mode
+    assert md.seqm_parameters["analytical_gradient"] == ([False] if force_mode == "autodiff" else [True])
     assert parameters["analytical_gradient"] == [False]
     md.initialize(molecule, remove_com=None, learned_parameters={}, steps=2)
 
     assert molecule.xlesmd_diagnostics["constraint_mode"] == constraint_mode
+    if constraint_mode == "symmetric_linearized":
+        assert molecule.xlesmd_diagnostics["krylov_preconditioner"] == "symmetric_lowrank"
+        assert molecule.xlesmd_diagnostics["krylov_root_mode"] == "coupled"
+        torch.testing.assert_close(
+            molecule.cis_energies, molecule.xlesmd_diagnostics["symmetric_shadow_eigenvalues"]
+        )
+        assert torch.isfinite(molecule.xlesmd_diagnostics["symmetric_constraint_residual"]).all()
+        assert torch.isfinite(molecule.xlesmd_diagnostics["symmetric_qtd_norm"]).all()
+    elif constraint_mode == "symmetric_propagated_gauge":
+        assert molecule.xlesmd_diagnostics["krylov_preconditioner"] == "symmetric_lowrank"
+        assert molecule.xlesmd_diagnostics["krylov_root_mode"] == "coupled"
+        torch.testing.assert_close(molecule.cis_amplitudes, molecule.xlesmd_xi_gauge)
+        assert "symmetric_shadow_eigenvalues" not in molecule.xlesmd_diagnostics
+        assert torch.isfinite(molecule.xlesmd_diagnostics["symmetric_constraint_residual"]).all()
+        assert torch.isfinite(molecule.xlesmd_diagnostics["symmetric_qtd_norm"]).all()
     assert torch.isfinite(molecule.force).all()
 
 
