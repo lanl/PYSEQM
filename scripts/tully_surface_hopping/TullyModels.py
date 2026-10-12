@@ -25,7 +25,7 @@ class TullyModel:
         E2 = 0.5 * (sumv + S)
 
         # gradients of splitting
-        dS = (delta * (dV11 - dV22) + 8.0 * V12 * dV12) / S
+        dS = (delta * (dV11 - dV22) + 4.0 * V12 * dV12) / S
         dE1 = 0.5 * (dV11 + dV22) - 0.5 * dS
         dE2 = 0.5 * (dV11 + dV22) + 0.5 * dS
 
@@ -165,7 +165,11 @@ def _tully_seqm_params() -> Dict:
         "scf_eps": 1.0e-8,
         "scf_converger": [1],
         "excited_states": {"n_states": _TULLY_NSTATES},
-        "nonadiabatic": {"tdc_method": "nac_dot_v", "detect_crossings": False},
+        "nonadiabatic": {
+            "tdc_method": "nac_dot_v",
+            "detect_crossings": False,
+            "trajectory_termination": {"enabled": False},
+        },
     }
 
 
@@ -204,6 +208,9 @@ class _TullyDynamicsMixin:
 
     def _setup_states(self, molecule):
         self._nstates = _TULLY_NSTATES
+        self._full_nac_pair_keys = [(i, j) for i in range(self._nstates) for j in range(i + 1, self._nstates)]
+        self._full_nac_pairs_1based = [(i + 1, j + 1) for i, j in self._full_nac_pair_keys]
+        self._full_nac_state_i, self._full_nac_state_j = zip(*self._full_nac_pair_keys)
         nmol = molecule.species.shape[0]
         device = molecule.coordinates.device
         self._ensure_active_states(nmol, device)
@@ -246,10 +253,11 @@ class _TullyDynamicsMixin:
         molecule.all_forces[:, 2, 0, 0] = -dE[:, 1]
         if self._active_states is None:
             self._active_states = torch.zeros((nmol,), dtype=torch.long, device=device)
-        exc_idx = int(self._active_states[0].item())
-        self._active_state = exc_idx
+        act = self._active_states.to(device=device)
+        self._active_state = int(act[0].item())
         molecule.active_state = self._active_states + 1
-        molecule.force = molecule.all_forces[:, exc_idx + 1]
+        idx = torch.arange(nmol, device=device)
+        molecule.force = molecule.all_forces[idx, act + 1]
         nac_vec = {(0, 1): torch.zeros((nmol, molsize, 3), dtype=dtype, device=device)}
         nac_vec[(0, 1)][:, 0, 0] = nac
         molecule.nac = nac_vec
@@ -302,12 +310,13 @@ class TullyFSSH(_TullyDynamicsMixin, SurfaceHoppingDynamics):
 
     def _recompute_active_force(self, molecule):
         state_energies = self._compute_electronic_structure(molecule, learned_parameters={})
-        exc_idx = (
-            int(self._active_states[0].item()) if self._active_states is not None else int(self._active_state)
-        )
-        self._active_state = exc_idx
-        molecule.force = molecule.all_forces[:, exc_idx + 1]
-        self._current_potential = state_energies[:, exc_idx]
+        device = molecule.coordinates.device
+        nmol = state_energies.shape[0]
+        act = self._active_states.to(device=device)
+        idx = torch.arange(nmol, device=device)
+        self._active_state = int(act[0].item())
+        molecule.force = molecule.all_forces[idx, act + 1]
+        self._current_potential = state_energies[idx, act]
         molecule.Etot = self._current_potential
 
     def _after_electronic_update(self, molecule, excitation_energies, step=None):

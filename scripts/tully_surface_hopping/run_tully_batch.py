@@ -325,11 +325,13 @@ def main():
     parser.add_argument("--method", default="fssh", choices=["fssh"])
     parser.add_argument("--velocities", nargs="+", type=float, default=None)
     parser.add_argument("--ntraj", type=int, default=2000, help="Trajectories per velocity (batched)")
-    parser.add_argument("--steps", type=int, default=12000, help="Steps per trajectory")
-    parser.add_argument("--timestep", type=float, default=0.025, help="Time step (fs)")
+    parser.add_argument("--steps", type=int, default=20000, help="Steps per trajectory")
+    parser.add_argument("--timestep", type=float, default=0.050, help="Time step (fs)")
     parser.add_argument("--mass", type=float, default=1.0971598, help="Mass in amu")
     parser.add_argument("--x0", type=float, default=-5.0, help="Initial position")
-    parser.add_argument("--outfile", default="tully_probs.png", help="Output plot filename")
+    parser.add_argument(
+        "--outfile", default=None, help="Output plot filename (default: tully<model>_probs.png)"
+    )
     parser.add_argument("--plot-density", action="store_true", help="Plot averaged density matrix elements.")
     parser.add_argument("--density-outfile", default="tully_density.png", help="Density matrix plot filename")
     parser.add_argument("--seed", type=int, default=12325, help="Random seed for hops")
@@ -342,6 +344,8 @@ def main():
 
     model_key = _model_key(args.model)
     model = get_model(args.model)
+    if args.outfile is None:
+        args.outfile = f"tully_model{model_key}_probs.png"
     if args.velocities is None:
         if model_key == "1":
             args.velocities = [
