@@ -78,6 +78,119 @@ Example optimization with geomeTRIC
     geomeTRIC_optimization(molecules)
 
 
+CIS minimum-energy crossing points
+----------------------------------
+``geomeTRIC_mecp`` locates a minimum-energy conical intersection (MECI)
+between two CIS excited states.  At a MECI the state-energy gap is zero and the
+mean-energy gradient has no component in the seam space.  The two directions
+removed from the seam gradient are the energy-difference gradient
+
+.. math::
+
+   \mathbf{g} = \nabla(E_2-E_1)
+
+and the interstate-gradient vector
+
+.. math::
+
+   \mathbf{h} = (E_2-E_1)\mathbf{d}_{12},
+
+where :math:`\mathbf{d}_{12}` is the derivative coupling returned by PYSEQM.
+
+Example
+~~~~~~~
+
+.. code-block:: python
+
+   from seqm.api import geomeTRIC_mecp
+
+   seqm_parameters["excited_states"] = {
+       "method": "cis",
+       "n_states": 2,
+       "tolerance": 1e-7,
+   }
+   molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
+   geomeTRIC_mecp(
+       molecule,
+       states=(1, 2),
+       method="composed_step", # or "penalty" / "gradient_projection"
+       gap_tolerance=5e-3,      # eV
+       seam_switch_gap=0.05,    # eV
+       maxiter=100,
+   )
+
+``states`` is 1-based and excludes S0, so ``(1, 2)`` means S1/S2. The final
+geometry is written to ``mecp.xyz`` and the trajectory to
+``mecp_opt_traj.xyz``. The trajectory contains every electronic-structure
+evaluation, including rejected trial steps, and records both state energies
+and their gap. ``molecule.mecp_state_energies`` and
+``molecule.mecp_energy_gap`` contain the values at the returned geometry.
+
+Methods
+~~~~~~~
+
+``method="composed_step"`` directly treats the MECI as a constrained
+optimization.  In geomeTRIC's independent internal-coordinate space it adds:
+
+* a minimum-norm normal step
+
+  .. math::
+
+     \Delta\mathbf{q}_{\mathrm{BP}}
+     = -\frac{\Delta E}{\mathbf{g}^{T}\mathbf{g}}\mathbf{g},
+
+  which solves the linearized degeneracy condition; and
+* a seam-space quasi-Newton step that minimizes the mean energy after projecting
+  out the orthonormalized :math:`\mathbf{g}` and :math:`\mathbf{h}` directions.
+
+The two steps are trust-limited separately and then combined.  This method does
+not invent a scalar objective, and convergence requires the requested energy
+gap, projected-gradient, and displacement thresholds.  ``seam_switch_gap``
+reserves most of the trust radius for reaching degeneracy while the gap is
+large.
+
+``method="gradient_projection"`` supplies the standard Bearpark--Robb--Schlegel
+search vector to geomeTRIC:
+
+.. math::
+
+   \mathbf{G}_{\mathrm{GP}} =
+   \mathbf{P}\nabla\bar E
+   + w(E_1-E_2)\frac{\nabla(E_1-E_2)}{\lVert\nabla(E_1-E_2)\rVert}.
+
+It usually takes fewer calculations, but this vector is not the derivative of
+the reported mean energy.  PYSEQM therefore integrates it only to provide
+geomeTRIC with consistent trust-radius bookkeeping.  ``gap_weight`` is the
+dimensionless :math:`w` above.
+
+``method="penalty"`` uses the conservative Levine--Coe--Martinez objective
+
+.. math::
+
+   L = \bar E + \sigma\frac{\Delta E^2}{\Delta E + \alpha}.
+
+It does not require derivative couplings and can use geomeTRIC's ordinary
+minimizer.  ``penalty_sigma`` defaults to 3.5 and ``penalty_alpha`` defaults to
+0.025 Hartree.  A finite :math:`\alpha` makes the objective smooth but generally
+leaves a finite optimized gap; restart with a smaller ``penalty_alpha`` if a
+tighter crossing is required.
+
+Requirements and practical choices
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Only one restricted, closed-shell molecule and crossings between two excited
+CIS states are supported.  ``gradient_projection`` and ``composed_step`` need
+the CIS derivative coupling;
+``penalty`` avoids that
+cost.  Start reasonably close to the crossing: these are local optimizations.
+
+The implementations follow the direct gradient of `Bearpark, Robb, and
+Schlegel <https://doi.org/10.1016/0009-2614(94)00433-1>`_, the composed-step
+seam optimization of `Sicilia et al. <https://doi.org/10.1021/ct7002435>`_,
+and the penalty objective of `Levine, Coe, and Martínez
+<https://doi.org/10.1021/jp0761618>`_.
+
+
 
 Built-in Steepest-Descent
 -------------------------

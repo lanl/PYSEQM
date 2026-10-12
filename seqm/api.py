@@ -12,7 +12,7 @@ from .io.xyz import read_xyz, read_xyz_trajectory, save_xyz
 from .MolecularDynamics import XL_BOMD, XL_ESMD, Molecular_Dynamics_Basic, Molecular_Dynamics_Langevin
 from .Molecule import Molecule
 from .NonadiabaticDynamics import NonadiabaticDynamicsBase, SurfaceHoppingDynamics
-from .optimization import geomeTRIC_optimization
+from .optimization import geomeTRIC_mecp, geomeTRIC_optimization
 from .seqm_functions.constants import Constants
 
 # Friendlier alias while keeping legacy name intact
@@ -33,6 +33,7 @@ __all__ = [
     "SurfaceHoppingDynamics",
     "active_state_tensor",
     "geomeTRIC_optimization",
+    "geomeTRIC_mecp",
     "geometric_optimization",
     "read_xyz",
     "read_xyz_trajectory",
