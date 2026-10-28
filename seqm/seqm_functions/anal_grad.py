@@ -332,6 +332,7 @@ from .om2_hcore import (
     om1_local_resonance_terms,
     select_om1_basis_payload,
 )
+from .omx_utils import omx_pair_params
 
 
 def _build_omx_ortho_cache(molecule):
@@ -340,7 +341,7 @@ def _build_omx_ortho_cache(molecule):
     dtype = molecule.coordinates.dtype
     nblocks = molecule.nmol * molecule.molsize * molecule.molsize
 
-    tables = molecule.parameters.get("_omx_tables")
+    pi, pj = omx_pair_params(molecule.parameters, molecule.idxi, molecule.idxj)
     basis_data = molecule.parameters.get("_omx_basis_data")
 
     basis_i = select_om1_basis_payload(basis_data, molecule.idxi)
@@ -350,7 +351,7 @@ def _build_omx_ortho_cache(molecule):
     rot_t = rot.transpose(1, 2)
     direction = rot_t[:, :, 0]
 
-    t_local = om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, tables)
+    t_local = om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, pi, pj)
 
     pair_resonance = diatom_resonance_matrix_OM1(molecule.xij, t_local, direction)
     pair_overlap = diatom_overlap_matrix_OM1(molecule.xij, molecule.rij, direction, basis_i, basis_j)
@@ -364,7 +365,7 @@ def _build_omx_ortho_cache(molecule):
 
     S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
     B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
-    return {"S5": S5, "B5": B5, "tables": tables}
+    return {"S5": S5, "B5": B5, "pi": pi, "pj": pj}
 
 
 def _density_to_ortho_blocks(P0, molecule, unrestricted=False):
@@ -388,12 +389,19 @@ def omx_threebody_ortho_grad(
 ):
     """Return the OMx orthogonalization correction without squeezing batch axes."""
     cache = _build_omx_ortho_cache(molecule) if ortho_cache is None else ortho_cache
-    tables = cache["tables"]
+    pi, pj = cache["pi"], cache["pj"]
     P_blocks = _density_to_ortho_blocks(P0, molecule, unrestricted=unrestricted)
     method = molecule.method
     if method == "OM3":
         grad = betor_grad_dense(
-            P_blocks, cache["S5"], cache["B5"], S_x, B_x, molecule, tables["gval1"], vel_eff=vel_eff
+            P_blocks,
+            cache["S5"],
+            cache["B5"],
+            S_x,
+            B_x,
+            molecule,
+            (pi["gval1"], pj["gval1"]),
+            vel_eff=vel_eff,
         )
     else:
         COR = molecule.om2_COR
@@ -404,9 +412,9 @@ def omx_threebody_ortho_grad(
             S_x,
             B_x,
             molecule,
-            tables["gval1"],
+            (pi["gval1"], pj["gval1"]),
             COR=COR,
-            gval2=tables["gval2"],
+            gval2=(pi["gval2"], pj["gval2"]),
             pair_core_semi_x=pair_core_semi_x,
             vel_eff=vel_eff,
         )
@@ -1840,7 +1848,7 @@ def betor_grad_dense(
     S2 = _flat(S5)
     B2 = _flat(B5)
 
-    ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
+    ft1 = 0.25 * (gval1[0] + gval1[1])
     G1 = -ft1[:, None, None, None] * W
 
     W1 = _dense_from_pairs(M, N, mol, a, b, G1)
@@ -1850,7 +1858,7 @@ def betor_grad_dense(
     adjB2 = torch.matmul(W1, S2[:, None])
 
     if COR is not None:
-        ft2 = 0.0625 * (gval2[molecule.ni] + gval2[molecule.nj])
+        ft2 = 0.0625 * (gval2[0] + gval2[1])
         G2 = ft2[:, None, None, None] * W
 
         W2 = _dense_from_pairs(M, N, mol, a, b, G2)

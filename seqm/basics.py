@@ -945,7 +945,6 @@ class Energy(torch.nn.Module):
         if molecule.method != "PM6":
             prepare_parameters(
                 params,
-                molecule.packpar,
                 molecule.method,
                 molecule.Z,
                 dtype=molecule.coordinates.dtype,

@@ -42,7 +42,7 @@ def _corgto_f012(x, boys_table):
     return f0, f1, f2
 
 
-def om1_gscale(rij, ri, ni, nj, g_ss):
+def om1_gscale(rij, ri, ni, nj, gi, gj):
     """
     Apply the OMx GSCALE KLOPMAN-OHNO scaling to the analytic pair integrals.
 
@@ -54,8 +54,8 @@ def om1_gscale(rij, ri, ni, nj, g_ss):
         Analytic pair-integral array in the REPGAU packing.
     ni, nj : (npairs,) int tensors
         Atomic numbers for the current pair.
-    g_ss : tensor
-        Element-indexed OM1 ``g_ss`` parameter table.
+    gi, gj : (npairs,) tensors
+        ``g_ss`` of the first and second atom of each pair.
 
     Returns
     -------
@@ -64,8 +64,8 @@ def om1_gscale(rij, ri, ni, nj, g_ss):
     fko : (npairs,) tensor
         Pairwise KLOPMAN-OHNO scaling factor.
     """
-    poi = 0.5 * ev / g_ss[ni]
-    poj = 0.5 * ev / g_ss[nj]
+    poi = 0.5 * ev / gi
+    poj = 0.5 * ev / gj
     semi = ev / torch.sqrt(rij * rij + (poi + poj).pow(2))
     fko = semi / ri[:, 0]
 
@@ -252,7 +252,7 @@ def om1_assemble_core(core_semi, pen, corpp=None, valpp=None):
     return out
 
 
-def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp, need_valpp1=True):
+def om1_valpot(ni, nj, core, s_local, t_local, pi, pj, need_valpp1=True):
     """
     Evaluate the OMx VALPOT second-order pseudopotential tensors.
 
@@ -269,8 +269,8 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp, need_valpp1=True):
         The leading dimension corresponds to Fortran indices 1..4.
     s_local, t_local : (npairs, 5) tensor
         Local overlap and resonance terms in BETOM shell order 1..5.
-    u_ss, u_pp : tensor
-        Element-indexed OM1 atomic one-center parameters.
+    pi, pj : dict of (npairs,) tensors
+        Pair-gathered ``U_ss`` and ``U_pp`` of the first and second atom.
 
     Returns
     -------
@@ -290,12 +290,12 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp, need_valpp1=True):
     is_xh = (iorbs == 4) & (jorbs == 1)
     is_xx = (iorbs == 4) & (jorbs == 4)
 
-    usi = u_ss[ni] + core[:, 0, 0]
-    usj = u_ss[nj] + core[:, 0, 1]
-    upi = u_pp[ni] + core[:, 2, 0]
-    uppi = u_pp[ni] + core[:, 3, 0]
-    upj = u_pp[nj] + core[:, 2, 1]
-    uppj = u_pp[nj] + core[:, 3, 1]
+    usi = pi["U_ss"] + core[:, 0, 0]
+    usj = pj["U_ss"] + core[:, 0, 1]
+    upi = pi["U_pp"] + core[:, 2, 0]
+    uppi = pi["U_pp"] + core[:, 3, 0]
+    upj = pj["U_pp"] + core[:, 2, 1]
+    uppj = pj["U_pp"] + core[:, 3, 1]
 
     s1, s2, s3, s4, s5 = [s_local[:, i] for i in range(5)]
     t1, t2, t3, t4, t5 = [t_local[:, i] for i in range(5)]
@@ -359,16 +359,16 @@ def om1_valpot(ni, nj, core, s_local, t_local, u_ss, u_pp, need_valpp1=True):
     return valpp, valpp1
 
 
-def om1_apply_valpot_scaling(ni, nj, valpp, valpp1, fval1, fval2):
+def om1_apply_valpot_scaling(ni, nj, valpp, valpp1, pi, pj):
     """
     Apply the OM1 COROM FVAL scaling to the raw VALPOT tensors.
     """
     iorbs = _om1_orbital_count(ni)
     jorbs = _om1_orbital_count(nj)
-    fsi = fval1[ni]
-    fsj = fval1[nj]
-    fpi = fval2[ni]
-    fpj = fval2[nj]
+    fsi = pi["fval1"]
+    fsj = pj["fval1"]
+    fpi = pi["fval2"]
+    fpj = pj["fval2"]
 
     heavy_i = iorbs >= 4
     heavy_j = jorbs >= 4

@@ -1,3 +1,4 @@
+import functools
 import os
 
 import torch
@@ -153,7 +154,12 @@ def build_omx_basis_tables(atomic_numbers, method, dtype, device):
     if unsupported:
         raise ValueError(f"OMx basis only supports H/C/N/O/F; got atomic numbers {unsupported}")
 
-    max_z = max(max(real_atomic_numbers), max(_OM1_BASIS_RAW))
+    return _static_basis_tables(method == "OM1", dtype, device)
+
+
+@functools.cache
+def _static_basis_tables(with_ppecp, dtype, device):
+    max_z = max(_OM1_BASIS_RAW)
     shell_type = torch.full((max_z + 1,), -1, dtype=torch.int64, device=device)
     exponents = torch.zeros((max_z + 1, 3), dtype=dtype, device=device)
     coeff_s = torch.zeros((max_z + 1, 3), dtype=dtype, device=device)
@@ -171,7 +177,7 @@ def build_omx_basis_tables(atomic_numbers, method, dtype, device):
         "coeff_s": coeff_s,
         "coeff_p": coeff_p,
         "boys_integrals": BoysInterpolationTable().to(device),
-        "ppecp": _build_om1_ppecp_tensor_tables(dtype=dtype, device=device) if method == "OM1" else None,
+        "ppecp": _build_om1_ppecp_tensor_tables(dtype=dtype, device=device) if with_ppecp else None,
     }
 
 

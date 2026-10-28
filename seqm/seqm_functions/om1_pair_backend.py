@@ -101,31 +101,13 @@ def _make_corpp_groups(ni, nj):
     }
 
 
-def _make_core_gto_cache(om2_tables):
-    if om2_tables is None or om2_tables.get("zscor", None) is None:
-        return None
-
-    z = om2_tables["zscor"]
-    dtype = z.dtype
-    device = z.device
-
-    core_exps = torch.tensor([2.227660584, 0.4057711562, 0.1098175104], dtype=dtype, device=device)
-    core_coeffs = torch.tensor([0.1543289673, 0.5353281423, 0.4446345422], dtype=dtype, device=device)
-
-    ec_table = core_exps.view(1, 3) * z.view(-1, 1).square()
-    cc_table = core_coeffs.view(1, 3) * (2.0 * ec_table / math.pi).pow(0.75)
-
-    return {"ec_table": ec_table, "cc_table": cc_table}
-
-
-def make_omx_fast_cache(basis_i, basis_j, basis_tables=None, om2_tables=None, ni=None, nj=None):
+def make_omx_fast_cache(basis_i, basis_j, ni=None, nj=None):
     """
     Balanced cache.
 
     Stores:
       - forward REPGAU p/q data for all pairs,
       - reversed xh data only for xh pairs,
-      - OM2 core-GTO element tables,
       - optional CORPP grouping.
 
     Rebuild when the pair list, basis, ni/nj, device, or dtype changes.
@@ -150,7 +132,7 @@ def make_omx_fast_cache(basis_i, basis_j, basis_tables=None, om2_tables=None, ni
         repgau_cache["p_ji_xh"] = None
         repgau_cache["q_ji_xh"] = None
 
-    cache = {"repgau": repgau_cache, "core_gto": _make_core_gto_cache(om2_tables)}
+    cache = {"repgau": repgau_cache}
 
     if ni is not None and nj is not None:
         cache["corpp"] = _make_corpp_groups(ni, nj)
@@ -506,7 +488,7 @@ def om1_repgau_local_batch(rij, basis_i, basis_j, basis_tables, pair_cache=None)
     dtype = rij.dtype
 
     if pair_cache is None:
-        pair_cache = make_omx_fast_cache(basis_i, basis_j, basis_tables)["repgau"]
+        pair_cache = make_omx_fast_cache(basis_i, basis_j)["repgau"]
 
     p_ij = pair_cache["p_ij"]
     q_ij = pair_cache["q_ij"]
@@ -539,12 +521,14 @@ def om1_repgau_local_batch(rij, basis_i, basis_j, basis_tables, pair_cache=None)
     return out
 
 
-def om1_local_pair_integrals_batch(ni, nj, rij, g_ss, tore, basis_i, basis_j, basis_tables, fast_cache=None):
+def om1_local_pair_integrals_batch(
+    ni, nj, rij, pi, pj, tore, basis_i, basis_j, basis_tables, fast_cache=None
+):
     pair_cache = None if fast_cache is None else fast_cache.get("repgau")
 
     ri = om1_repgau_local_batch(rij, basis_i, basis_j, basis_tables, pair_cache=pair_cache)
 
-    scaled_ri, fko = om1_gscale(rij, ri, ni, nj, g_ss)
+    scaled_ri, fko = om1_gscale(rij, ri, ni, nj, pi["g_ss"], pj["g_ss"])
     rept = om1_cordef(ri, ni, nj, tore)
     core_semi = fko[:, None, None] * rept
 
@@ -753,11 +737,9 @@ def _core_gto_constants(dtype, device):
     return cached
 
 
-def _spgto2_local_batch(basis_payload, zeta_b, rab, core_gto_cache=None, nb=None):
+def _spgto2_local_batch(basis_payload, zeta_b, rab):
     """
     Batched version of _spgto2_local.
-
-    If core_gto_cache and nb are provided, avoids rebuilding core GTO tables.
     """
     device = rab.device
     dtype = rab.dtype
@@ -769,13 +751,9 @@ def _spgto2_local_batch(basis_payload, zeta_b, rab, core_gto_cache=None, nb=None
 
     shell_heavy = shell_type > 0
 
-    if core_gto_cache is not None and nb is not None:
-        ec = core_gto_cache["ec_table"][nb]
-        cc = core_gto_cache["cc_table"][nb]
-    else:
-        core_exps, core_coeffs = _core_gto_constants(dtype, device)
-        ec = core_exps.view(1, 3) * zeta_b.view(-1, 1).square()
-        cc = core_coeffs.view(1, 3) * (2.0 * ec / math.pi).pow(0.75)
+    core_exps, core_coeffs = _core_gto_constants(dtype, device)
+    ec = core_exps.view(1, 3) * zeta_b.view(-1, 1).square()
+    cc = core_coeffs.view(1, 3) * (2.0 * ec / math.pi).pow(0.75)
 
     r = rab.view(-1, 1, 1)
     rab2 = r * r
@@ -794,107 +772,37 @@ def _spgto2_local_batch(basis_payload, zeta_b, rab, core_gto_cache=None, nb=None
     return s1, s2
 
 
-def om2_corpp2_local_batch(ni, nj, rij, om2_tables, basis_i, basis_j, fast_cache=None):
-    device = rij.device
-    dtype = rij.dtype
+def _corpp2_column(corpp, col, idx, hpos, rij, shell_basis, pa, pb):
+    if idx.numel() == 0:
+        return
+    r = rij[idx]
+    s1, s2 = _spgto2_local_batch(shell_basis, pb["zscor"][idx], r)
+    bscor, ascor, fscor = pb["bscor"][idx], pb["ascor"][idx], pb["fscor"][idx]
+    t1 = 0.5 * (pa["beta_s"][idx] + bscor) * torch.sqrt(r) * torch.exp(-(pa["alpha_s"][idx] + ascor) * r * r)
+    corpp[idx, 0, col] = -2.0 * s1 * t1 - s1 * s1 * fscor
+    if hpos.numel() == 0:
+        return
+    h, s1h, s2h, t1h, rh, fh = idx[hpos], s1[hpos], s2[hpos], t1[hpos], r[hpos], fscor[hpos]
+    t3 = (
+        0.5
+        * (pa["beta_p"][idx][hpos] + bscor[hpos])
+        * torch.sqrt(rh)
+        * torch.exp(-(pa["alpha_p"][idx][hpos] + ascor[hpos]) * rh * rh)
+    )
+    c1 = -(s1h * t3 + t1h * s2h) - s1h * s2h * fh
+    corpp[h, 1, col] = c1 if col == 0 else -c1
+    corpp[h, 2, col] = -(s2h * t3 + t3 * s2h) - s2h * s2h * fh
 
-    corpp = torch.zeros((ni.shape[0], 4, 2), dtype=dtype, device=device)
 
-    zscor = om2_tables["zscor"]
-    fscor = om2_tables["fscor"]
-    bscor = om2_tables["bscor"]
-    ascor = om2_tables["ascor"]
-
-    core_gto_cache = None if fast_cache is None else fast_cache.get("core_gto")
-    corpp_groups = None if fast_cache is None else fast_cache.get("corpp")
-
-    if corpp_groups is None:
-        corpp_groups = _make_corpp_groups(ni, nj)
-
-    # Column 0: atom i is shell center, atom j is ECP center.
-    idx0 = corpp_groups["idx0"]
-    idx0h_pos = corpp_groups["idx0h_pos"]
-
-    if idx0.numel() != 0:
-        na = ni[idx0]
-        nb = nj[idx0]
-        rij0 = rij[idx0]
-
-        shell_basis = _select_pair_data(basis_i, idx0)
-        s1, s2 = _spgto2_local_batch(shell_basis, zscor[nb], rij0, core_gto_cache=core_gto_cache, nb=nb)
-
-        bas = om2_tables["beta_s"][na]
-        aas = om2_tables["alpha_s"][na]
-        bbs = bscor[nb]
-        cbs = ascor[nb]
-
-        r2 = rij0 * rij0
-        sqr = torch.sqrt(rij0)
-        t1 = 0.5 * (bas + bbs) * sqr * torch.exp(-(aas + cbs) * r2)
-
-        corpp[idx0, 0, 0] = -2.0 * s1 * t1 - s1 * s1 * fscor[nb]
-
-        if idx0h_pos.numel() != 0:
-            hpos = idx0h_pos
-            idxh = idx0[hpos]
-
-            nah = na[hpos]
-            nbh = nb[hpos]
-            rijh = rij0[hpos]
-            s1h = s1[hpos]
-            s2h = s2[hpos]
-            t1h = t1[hpos]
-
-            bap = om2_tables["beta_p"][nah]
-            aap = om2_tables["alpha_p"][nah]
-
-            t3 = 0.5 * (bap + bbs[hpos]) * torch.sqrt(rijh) * torch.exp(-(aap + cbs[hpos]) * rijh * rijh)
-
-            corpp[idxh, 1, 0] = -(s1h * t3 + t1h * s2h) - s1h * s2h * fscor[nbh]
-            corpp[idxh, 2, 0] = -(s2h * t3 + t3 * s2h) - s2h * s2h * fscor[nbh]
-
-    # Column 1: atom j is shell center, atom i is ECP center.
-    idx1 = corpp_groups["idx1"]
-    idx1h_pos = corpp_groups["idx1h_pos"]
-
-    if idx1.numel() != 0:
-        na = nj[idx1]
-        nb = ni[idx1]
-        rij1 = rij[idx1]
-
-        shell_basis = _select_pair_data(basis_j, idx1)
-        s1, s2 = _spgto2_local_batch(shell_basis, zscor[nb], rij1, core_gto_cache=core_gto_cache, nb=nb)
-
-        bas = om2_tables["beta_s"][na]
-        aas = om2_tables["alpha_s"][na]
-        bbs = bscor[nb]
-        cbs = ascor[nb]
-
-        r2 = rij1 * rij1
-        sqr = torch.sqrt(rij1)
-        t1 = 0.5 * (bas + bbs) * sqr * torch.exp(-(aas + cbs) * r2)
-
-        corpp[idx1, 0, 1] = -2.0 * s1 * t1 - s1 * s1 * fscor[nb]
-
-        if idx1h_pos.numel() != 0:
-            hpos = idx1h_pos
-            idxh = idx1[hpos]
-
-            nah = na[hpos]
-            nbh = nb[hpos]
-            rijh = rij1[hpos]
-            s1h = s1[hpos]
-            s2h = s2[hpos]
-            t1h = t1[hpos]
-
-            bap = om2_tables["beta_p"][nah]
-            aap = om2_tables["alpha_p"][nah]
-
-            t3 = 0.5 * (bap + bbs[hpos]) * torch.sqrt(rijh) * torch.exp(-(aap + cbs[hpos]) * rijh * rijh)
-
-            corpp[idxh, 1, 1] = -(-(s1h * t3 + t1h * s2h) - s1h * s2h * fscor[nbh])
-            corpp[idxh, 2, 1] = -(s2h * t3 + t3 * s2h) - s2h * s2h * fscor[nbh]
-
+def om2_corpp2_local_batch(ni, nj, rij, pi, pj, basis_i, basis_j, fast_cache=None):
+    corpp = torch.zeros((ni.shape[0], 4, 2), dtype=rij.dtype, device=rij.device)
+    groups = (fast_cache or {}).get("corpp") or _make_corpp_groups(ni, nj)
+    _corpp2_column(
+        corpp, 0, groups["idx0"], groups["idx0h_pos"], rij, _select_pair_data(basis_i, groups["idx0"]), pi, pj
+    )
+    _corpp2_column(
+        corpp, 1, groups["idx1"], groups["idx1h_pos"], rij, _select_pair_data(basis_j, groups["idx1"]), pj, pi
+    )
     return corpp
 
 
@@ -903,98 +811,28 @@ def om2_corpp2_local_batch(ni, nj, rij, om2_tables, basis_i, basis_j, fast_cache
 # ---------------------------------------------------------------------
 
 
-def omx_local_pair_corrections(
-    method,
-    ni,
-    nj,
-    rij,
-    g_ss,
-    tore,
-    s_local,
-    t_local,
-    u_ss,
-    u_pp,
-    fval1,
-    fval2,
-    basis_tables,
-    basis_i,
-    basis_j,
-    om2_tables=None,
-    fast_cache=None,
-):
-    if fast_cache is None:
-        fast_cache = make_omx_fast_cache(basis_i, basis_j, basis_tables, om2_tables, ni=ni, nj=nj)
-
-    pair = om1_local_pair_integrals_batch(
-        ni, nj, rij, g_ss, tore, basis_i, basis_j, basis_tables, fast_cache=fast_cache
-    )
-
-    cort = om1_corgau(ni, nj, rij, tore, basis_tables, basis_i, basis_j)
-    pen = om1_penetration(cort, pair["rept"], pair["fko"])
-
-    need_valpp1 = method != "OM3"
-
-    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, u_ss, u_pp, need_valpp1)
-
-    if not need_valpp1:
-        valpp1 = torch.zeros_like(valpp_raw)
-
-    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, None if not need_valpp1 else valpp1, fval1, fval2)
-
-    if method == "OM1":
-        corpp = om1_ppecp_local(ni, nj, rij, basis_tables, basis_i, basis_j) * pair["fko"].view(-1, 1, 1)
-
-    elif method in {"OM2", "OM3"}:
-        if om2_tables is None:
-            raise ValueError(f"{method} pair corrections require om2_tables")
-
-        corpp = om2_corpp2_local_batch(ni, nj, rij, om2_tables, basis_i, basis_j, fast_cache=fast_cache)
-
-    else:
-        raise ValueError(f"Unsupported method: {method}")
-
-    core = om1_assemble_core(pair["core_semi"], pen, corpp, valpp)
-    core_no_corpp = om1_assemble_core(pair["core_semi"], pen, None, valpp)
-
-    return {
-        **pair,
-        "cort": cort,
-        "pen": pen,
-        "corpp": corpp,
-        "valpp_raw": valpp_raw,
-        "valpp1": valpp1,
-        "valpp": valpp,
-        "core": core,
-        "core_no_corpp": core_no_corpp,
-    }
-
-
 def omx_pair_hcore_terms(
     method,
     ni,
     nj,
     rij,
-    g_ss,
+    pi,
+    pj,
     tore,
     s_local,
     t_local,
-    u_ss,
-    u_pp,
-    fval1,
-    fval2,
     rot,
     rot_t,
     basis_tables,
     basis_i,
     basis_j,
-    om2_tables=None,
     fast_cache=None,
 ):
     if fast_cache is None:
-        fast_cache = make_omx_fast_cache(basis_i, basis_j, basis_tables, om2_tables, ni=ni, nj=nj)
+        fast_cache = make_omx_fast_cache(basis_i, basis_j, ni=ni, nj=nj)
 
     pair = om1_local_pair_integrals_batch(
-        ni, nj, rij, g_ss, tore, basis_i, basis_j, basis_tables, fast_cache=fast_cache
+        ni, nj, rij, pi, pj, tore, basis_i, basis_j, basis_tables, fast_cache=fast_cache
     )
 
     cort = om1_corgau(ni, nj, rij, tore, basis_tables, basis_i, basis_j)
@@ -1002,21 +840,18 @@ def omx_pair_hcore_terms(
 
     need_valpp1 = method != "OM3"
 
-    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, u_ss, u_pp, need_valpp1)
+    valpp_raw, valpp1 = om1_valpot(ni, nj, pair["core_semi"], s_local, t_local, pi, pj, need_valpp1)
 
     if not need_valpp1:
         valpp1 = torch.zeros_like(valpp_raw)
 
-    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, None if not need_valpp1 else valpp1, fval1, fval2)
+    valpp = om1_apply_valpot_scaling(ni, nj, valpp_raw, None if not need_valpp1 else valpp1, pi, pj)
 
     if method == "OM1":
         corpp = om1_ppecp_local(ni, nj, rij, basis_tables, basis_i, basis_j) * pair["fko"].view(-1, 1, 1)
 
     elif method in {"OM2", "OM3"}:
-        if om2_tables is None:
-            raise ValueError(f"{method} batched pair corrections require om2_tables")
-
-        corpp = om2_corpp2_local_batch(ni, nj, rij, om2_tables, basis_i, basis_j, fast_cache=fast_cache)
+        corpp = om2_corpp2_local_batch(ni, nj, rij, pi, pj, basis_i, basis_j, fast_cache=fast_cache)
 
     else:
         raise ValueError(f"Unsupported method: {method}")

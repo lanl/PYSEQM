@@ -8,6 +8,7 @@ from .om1_overlap import (
 )
 from .om1_pair_backend import omx_pair_hcore_terms
 from .omx_basis import select_om1_basis_payload
+from .omx_utils import omx_pair_params
 from .two_elec_two_center_int import rotate_with_quaternion
 
 _OMX_HCORE_CONFIG = {
@@ -17,7 +18,7 @@ _OMX_HCORE_CONFIG = {
 }
 
 
-def _build_cor_table(molecule, pair_core_semi, tables):
+def _build_cor_table(molecule, pair_core_semi, pi, pj):
     nmol, molsize = molecule.species.shape
     dtype = molecule.coordinates.dtype
     device = molecule.coordinates.device
@@ -30,14 +31,13 @@ def _build_cor_table(molecule, pair_core_semi, tables):
     row_i = atom_i * 4
     row_j = atom_j * 4
 
-    cor[mol, row_i + 0, atom_j] = tables["U_ss"][molecule.ni] + pair_core_semi[:, 0, 0]
-    cor[mol, row_j + 0, atom_i] = tables["U_ss"][molecule.nj] + pair_core_semi[:, 0, 1]
+    cor[mol, row_i + 0, atom_j] = pi["U_ss"] + pair_core_semi[:, 0, 0]
+    cor[mol, row_j + 0, atom_i] = pj["U_ss"] + pair_core_semi[:, 0, 1]
 
     heavy_i = molecule.ni > 1
     if heavy_i.any():
         temp_i = (
-            tables["U_pp"][molecule.ni[heavy_i]]
-            + (pair_core_semi[heavy_i, 2, 0] + 2.0 * pair_core_semi[heavy_i, 3, 0]) / 3.0
+            pi["U_pp"][heavy_i] + (pair_core_semi[heavy_i, 2, 0] + 2.0 * pair_core_semi[heavy_i, 3, 0]) / 3.0
         )
         cor[mol[heavy_i], row_i[heavy_i] + 1, atom_j[heavy_i]] = temp_i
         cor[mol[heavy_i], row_i[heavy_i] + 2, atom_j[heavy_i]] = temp_i
@@ -46,8 +46,7 @@ def _build_cor_table(molecule, pair_core_semi, tables):
     heavy_j = molecule.nj > 1
     if heavy_j.any():
         temp_j = (
-            tables["U_pp"][molecule.nj[heavy_j]]
-            + (pair_core_semi[heavy_j, 2, 1] + 2.0 * pair_core_semi[heavy_j, 3, 1]) / 3.0
+            pj["U_pp"][heavy_j] + (pair_core_semi[heavy_j, 2, 1] + 2.0 * pair_core_semi[heavy_j, 3, 1]) / 3.0
         )
         cor[mol[heavy_j], row_j[heavy_j] + 1, atom_i[heavy_j]] = temp_j
         cor[mol[heavy_j], row_j[heavy_j] + 2, atom_i[heavy_j]] = temp_j
@@ -57,18 +56,9 @@ def _build_cor_table(molecule, pair_core_semi, tables):
 
 
 def build_omx_pair_context(molecule, method, idxi, idxj, ni, nj, xij, rij):
-    # if method not in _OMX_HCORE_CONFIG:
-    #     raise ValueError(f"Unsupported OMx method: {method}")
-
-    tables = molecule.parameters.get("_omx_tables")
-    # if tables is None:
-    #     raise RuntimeError("OMx parameter tables have not been cached on the molecule")
+    pi, pj = omx_pair_params(molecule.parameters, idxi, idxj)
     basis_tables = molecule.parameters.get("_omx_basis")
-    # if basis_tables is None:
-    #     raise RuntimeError("OMx basis tables have not been cached on the molecule")
     basis_data = molecule.parameters.get("_omx_basis_data")
-    # if basis_data is None:
-    #     raise RuntimeError("OMx gathered basis data have not been cached on the molecule")
 
     basis_i = select_om1_basis_payload(basis_data, idxi)
     basis_j = select_om1_basis_payload(basis_data, idxj)
@@ -78,26 +68,22 @@ def build_omx_pair_context(molecule, method, idxi, idxj, ni, nj, xij, rij):
     direction = rot_t[:, :, 0]
 
     s_local = om1_local_overlap_terms(rij, basis_i, basis_j)
-    t_local = om1_local_resonance_terms(ni, nj, rij, tables)
+    t_local = om1_local_resonance_terms(ni, nj, rij, pi, pj)
     pair = omx_pair_hcore_terms(
         method,
         ni,
         nj,
         rij,
-        tables["g_ss"],
+        pi,
+        pj,
         molecule.const.tore,
         s_local,
         t_local,
-        tables["U_ss"],
-        tables["U_pp"],
-        tables["fval1"],
-        tables["fval2"],
         rot,
         rot_t,
         basis_tables,
         basis_i,
         basis_j,
-        om2_tables=tables,
     )
 
     pair_resonance = diatom_resonance_matrix_OM1(xij, t_local, direction)
@@ -107,17 +93,17 @@ def build_omx_pair_context(molecule, method, idxi, idxj, ni, nj, xij, rij):
     return context
 
 
-def _apply_omx_orthogonalization(molecule, H_blocks, S_blocks, B_blocks, tables, pair_core_semi, use_cor):
+def _apply_omx_orthogonalization(molecule, H_blocks, S_blocks, B_blocks, pi, pj, pair_core_semi, use_cor):
     S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
     B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
     COR = None
     gval2 = None
     if use_cor:
-        gval2 = tables["gval2"]
-        COR = _build_cor_table(molecule, pair_core_semi, tables)
+        gval2 = (pi["gval2"], pj["gval2"])
+        COR = _build_cor_table(molecule, pair_core_semi, pi, pj)
         # Save COR to use for gradients
         molecule.om2_COR = COR
-    _add_betor_cor_dense_(H_blocks, S5, B5, molecule, tables["gval1"], COR, gval2)
+    _add_betor_cor_dense_(H_blocks, S5, B5, molecule, (pi["gval1"], pj["gval1"]), COR, gval2)
 
 
 def _shell4_to_flat44(X):
@@ -178,7 +164,7 @@ def _add_betor_cor_dense_(out_blocks, S5, B5, molecule, gval1, COR, gval2):
 
     T1 = _flat44_to_blocks(T1_flat, N)
 
-    ft1 = 0.25 * (gval1[molecule.ni] + gval1[molecule.nj])
+    ft1 = 0.25 * (gval1[0] + gval1[1])
     hsrc = -ft1[:, None, None] * T1[mol, ai, aj]
 
     if COR is None:
@@ -223,7 +209,7 @@ def _add_betor_cor_dense_(out_blocks, S5, B5, molecule, gval1, COR, gval2):
 
     T2 = _flat44_to_blocks(T2_flat, N)
 
-    ft2 = 0.0625 * (gval2[molecule.ni] + gval2[molecule.nj])
+    ft2 = 0.0625 * (gval2[0] + gval2[1])
     hsrc = hsrc + ft2[:, None, None] * T2[mol, ai, aj]
 
     out_blocks.index_add_(0, mask, hsrc)
@@ -244,7 +230,7 @@ def build_omx_hcore(molecule):
     context = build_omx_pair_context(
         molecule, method, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij
     )
-    tables = molecule.parameters.get("_omx_tables")
+    pi, pj = omx_pair_params(molecule.parameters, molecule.idxi, molecule.idxj)
     pair_data = context["pair"]
 
     for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
@@ -269,6 +255,6 @@ def build_omx_hcore(molecule):
     B_blocks[molecule.mask_l] = pair_resonance.transpose(-1, -2)
 
     _apply_omx_orthogonalization(
-        molecule, H_blocks, S_blocks, B_blocks, tables, pair_data.get("core_semi"), use_cor
+        molecule, H_blocks, S_blocks, B_blocks, pi, pj, pair_data.get("core_semi"), use_cor
     )
     return H_blocks, pair_data["w"], pair_data["fko"], None, None, None

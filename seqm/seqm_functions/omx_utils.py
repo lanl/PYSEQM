@@ -3,6 +3,10 @@ import torch
 from .omx_basis import build_om1_basis_payload, build_omx_basis_tables
 
 OMX_METHODS = {"OM1", "OM2", "OM3"}
+OMX_PAIR_PARAMS = (
+    "g_ss", "U_ss", "U_pp", "fval1", "fval2", "gval1", "gval2", "zscor", "fscor", "bscor", "ascor",
+    "beta_s", "beta_p", "beta_pi", "beta_sh", "beta_ph", "alpha_s", "alpha_p", "alpha_pi", "alpha_s_h", "alpha_p_h",
+)  # fmt: skip
 
 
 def get_orbital_zeta_tensor(parameters, method, include_d=False):
@@ -28,57 +32,24 @@ def build_beta_tensor(parameters, method):
     return torch.stack([parameters[field] for field in fields], dim=1)
 
 
-def build_omx_parameter_tables(packpar, parameters, atomic_numbers=None):
-    """
-    Build element-indexed OMx parameter tables from the packed parameter module.
-
-    The resulting dictionary is typically cached on molecule.parameters under
-    "_omx_tables" so OMx hcore code can reuse it without rebuilding it.
-    """
-    if not hasattr(packpar, "p") or not hasattr(packpar, "required_list"):
-        return {}
-
-    tables = {}
-    for idx, name in enumerate(packpar.required_list):
-        tables[name] = packpar.p[:, idx]
-
-    nelem = packpar.p.shape[0]
-    for name, values in parameters.items():
-        if name in tables or not torch.is_tensor(values) or values.dim() != 1:
-            continue
-        if (
-            name in packpar.learned_list
-            and atomic_numbers is not None
-            and values.shape == atomic_numbers.shape
-        ):
-            # Learned parameters arrive per atom, but the OMx code indexes element tables with ni/nj.
-            # Scatter them into an element-indexed table (mean over atoms of the same element, which is
-            # exact whenever the value depends only on the element, as in a static parameter fit).
-            idx = atomic_numbers.long()
-            total = torch.zeros(nelem, dtype=values.dtype, device=values.device).index_add(0, idx, values)
-            count = torch.zeros(nelem, dtype=values.dtype, device=values.device).index_add(
-                0, idx, torch.ones_like(values)
-            )
-            values = total / count.clamp(min=1)
-        tables[name] = values
-    return tables
+def omx_pair_params(parameters, idxi, idxj):
+    names = [name for name in OMX_PAIR_PARAMS if name in parameters]
+    return {name: parameters[name][idxi] for name in names}, {name: parameters[name][idxj] for name in names}
 
 
-def prepare_parameters(parameters, packpar, method, atomic_numbers, *, dtype, device):
+def prepare_parameters(parameters, method, atomic_numbers, *, dtype, device):
     """
     Apply the OMx-specific derived-parameter setup in one place.
     """
     if method in OMX_METHODS:
         zeros_zeta = torch.zeros_like(parameters["zeta"])
         parameters["_omx_basis"] = build_omx_basis_tables(atomic_numbers, method, dtype=dtype, device=device)
-        parameters["_omx_tables"] = build_omx_parameter_tables(packpar, parameters, atomic_numbers)
         parameters["_omx_basis_data"] = build_om1_basis_payload(
             atomic_numbers, parameters["zeta"], parameters["_omx_basis"]
         )
     else:
         zeros_zeta = torch.zeros_like(parameters["zeta_s"])
         parameters.pop("_omx_basis", None)
-        parameters.pop("_omx_tables", None)
         parameters.pop("_omx_basis_data", None)
     zeros_uss = torch.zeros_like(parameters["U_ss"])
     parameters["zeta_d"] = zeros_zeta

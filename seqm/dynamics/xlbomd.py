@@ -123,7 +123,6 @@ class EnergyXL(torch.nn.Module):
         if molecule.method != "PM6":
             prepare_parameters(
                 molecule.parameters,
-                molecule.packpar,
                 molecule.method,
                 molecule.Z,
                 dtype=molecule.coordinates.dtype,

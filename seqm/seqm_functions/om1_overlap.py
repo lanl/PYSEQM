@@ -96,7 +96,7 @@ def diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j, terms=None)
     return di
 
 
-def om1_local_resonance_terms(ni, nj, rij, parameters):
+def om1_local_resonance_terms(ni, nj, rij, pi, pj):
     """
     Return the local OM1 resonance terms in the Fortran BETOM ordering:
     [ss, s-p_sigma, p_sigma-s, p_sigma-p_sigma, p_pi-p_pi].
@@ -105,42 +105,31 @@ def om1_local_resonance_terms(ni, nj, rij, parameters):
     device = rij.device
     n = rij.shape[0]
 
-    beta_s = parameters["beta_s"]
-    beta_p = parameters["beta_p"]
-    beta_pi = parameters["beta_pi"]
-    beta_sh = parameters["beta_sh"]
-    beta_ph = parameters["beta_ph"]
-    alpha_s = parameters["alpha_s"]
-    alpha_p = parameters["alpha_p"]
-    alpha_pi = parameters["alpha_pi"]
-    alpha_s_h = parameters["alpha_s_h"]
-    alpha_p_h = parameters["alpha_p_h"]
-
     heavy_i = ni > 2
     heavy_j = nj > 2
 
-    bas = beta_s[ni].clone()
-    bbs = beta_s[nj].clone()
-    aas = alpha_s[ni].clone()
-    cbs = alpha_s[nj].clone()
+    bas = pi["beta_s"].clone()
+    bbs = pj["beta_s"]
+    aas = pi["alpha_s"].clone()
+    cbs = pj["alpha_s"]
 
-    bap = beta_p[ni]
-    bai = beta_pi[ni]
-    aap = alpha_p[ni]
-    aai = alpha_pi[ni]
-    bbp = beta_p[nj]
-    bbi = beta_pi[nj]
-    abp = alpha_p[nj]
-    abi = alpha_pi[nj]
+    bap = pi["beta_p"]
+    bai = pi["beta_pi"]
+    aap = pi["alpha_p"]
+    aai = pi["alpha_pi"]
+    bbp = pj["beta_p"]
+    bbi = pj["beta_pi"]
+    abp = pj["alpha_p"]
+    abi = pj["alpha_pi"]
 
     hx_i = heavy_i & (nj <= 2) & (ni < 86)
     if hx_i.any():
-        bas[hx_i] = beta_sh[ni[hx_i]]
+        bas[hx_i] = pi["beta_sh"][hx_i]
         bap = bap.clone()
         aap = aap.clone()
-        aas[hx_i] = alpha_s_h[ni[hx_i]]
-        bap[hx_i] = beta_ph[ni[hx_i]]
-        aap[hx_i] = alpha_p_h[ni[hx_i]]
+        aas[hx_i] = pi["alpha_s_h"][hx_i]
+        bap[hx_i] = pi["beta_ph"][hx_i]
+        aap[hx_i] = pi["alpha_p_h"][hx_i]
 
     sqrt_r = torch.sqrt(rij)
     r2 = rij * rij

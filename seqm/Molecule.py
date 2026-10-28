@@ -95,7 +95,6 @@ class Molecule(torch.nn.Module):
         if self.method != "PM6":
             prepare_parameters(
                 self.parameters,
-                self.packpar,
                 self.method,
                 self.Z,
                 dtype=self.coordinates.dtype,
