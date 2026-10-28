@@ -28,7 +28,7 @@ def build_beta_tensor(parameters, method):
     return torch.stack([parameters[field] for field in fields], dim=1)
 
 
-def build_omx_parameter_tables(packpar, parameters):
+def build_omx_parameter_tables(packpar, parameters, atomic_numbers=None):
     """
     Build element-indexed OMx parameter tables from the packed parameter module.
 
@@ -42,9 +42,24 @@ def build_omx_parameter_tables(packpar, parameters):
     for idx, name in enumerate(packpar.required_list):
         tables[name] = packpar.p[:, idx]
 
+    nelem = packpar.p.shape[0]
     for name, values in parameters.items():
         if name in tables or not torch.is_tensor(values) or values.dim() != 1:
             continue
+        if (
+            name in packpar.learned_list
+            and atomic_numbers is not None
+            and values.shape == atomic_numbers.shape
+        ):
+            # Learned parameters arrive per atom, but the OMx code indexes element tables with ni/nj.
+            # Scatter them into an element-indexed table (mean over atoms of the same element, which is
+            # exact whenever the value depends only on the element, as in a static parameter fit).
+            idx = atomic_numbers.long()
+            total = torch.zeros(nelem, dtype=values.dtype, device=values.device).index_add(0, idx, values)
+            count = torch.zeros(nelem, dtype=values.dtype, device=values.device).index_add(
+                0, idx, torch.ones_like(values)
+            )
+            values = total / count.clamp(min=1)
         tables[name] = values
     return tables
 
@@ -56,7 +71,7 @@ def prepare_parameters(parameters, packpar, method, atomic_numbers, *, dtype, de
     if method in OMX_METHODS:
         zeros_zeta = torch.zeros_like(parameters["zeta"])
         parameters["_omx_basis"] = build_omx_basis_tables(atomic_numbers, method, dtype=dtype, device=device)
-        parameters["_omx_tables"] = build_omx_parameter_tables(packpar, parameters)
+        parameters["_omx_tables"] = build_omx_parameter_tables(packpar, parameters, atomic_numbers)
         parameters["_omx_basis_data"] = build_om1_basis_payload(
             atomic_numbers, parameters["zeta"], parameters["_omx_basis"]
         )

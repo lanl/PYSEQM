@@ -363,7 +363,6 @@ def om1_apply_valpot_scaling(ni, nj, valpp, valpp1, fval1, fval2):
     """
     Apply the OM1 COROM FVAL scaling to the raw VALPOT tensors.
     """
-    scaled = valpp.clone()
     iorbs = _om1_orbital_count(ni)
     jorbs = _om1_orbital_count(nj)
     fsi = fval1[ni]
@@ -375,27 +374,26 @@ def om1_apply_valpot_scaling(ni, nj, valpp, valpp1, fval1, fval2):
     heavy_j = jorbs >= 4
     both_heavy = heavy_i & heavy_j
 
-    scaled[:, 0, 0] = scaled[:, 0, 0] * fsi
-    scaled[:, 0, 1] = scaled[:, 0, 1] * fsj
-    scaled[heavy_i, 1, 0] = scaled[heavy_i, 1, 0] * fsi[heavy_i]
-    scaled[heavy_i, 2, 0] = scaled[heavy_i, 2, 0] * fsi[heavy_i]
-    scaled[heavy_j, 1, 1] = scaled[heavy_j, 1, 1] * fsj[heavy_j]
-    scaled[heavy_j, 2, 1] = scaled[heavy_j, 2, 1] * fsj[heavy_j]
-    scaled[both_heavy, 3, 0] = scaled[both_heavy, 3, 0] * fsi[both_heavy]
-    scaled[both_heavy, 3, 1] = scaled[both_heavy, 3, 1] * fsj[both_heavy]
+    # Build the scale factors out of place so that fval1/fval2 stay differentiable
+    # (in-place slice updates would overwrite tensors that autograd saved for backward).
+    def factors(fa, fb):
+        f = torch.zeros_like(valpp)
+        f[:, 0, 0] = fa
+        f[:, 0, 1] = fb
+        f[heavy_i, 1, 0] = fa[heavy_i]
+        f[heavy_i, 2, 0] = fa[heavy_i]
+        f[heavy_j, 1, 1] = fb[heavy_j]
+        f[heavy_j, 2, 1] = fb[heavy_j]
+        f[both_heavy, 3, 0] = fa[both_heavy]
+        f[both_heavy, 3, 1] = fb[both_heavy]
+        return f
 
+    # Entries that are not rescaled keep their raw value (factor 1) and get no valpp1 term.
+    touched = factors(torch.ones_like(fsi), torch.ones_like(fsj)) != 0
+    scaled = valpp * torch.where(touched, factors(fsi, fsj), torch.ones_like(valpp))
     if valpp1 is None:
         return scaled
-
-    scaled[:, 0, 0] += valpp1[:, 0, 0] * fpi * 0.25
-    scaled[:, 0, 1] += valpp1[:, 0, 1] * fpj * 0.25
-    scaled[heavy_i, 1, 0] += valpp1[heavy_i, 1, 0] * fpi[heavy_i] * 0.25
-    scaled[heavy_i, 2, 0] += valpp1[heavy_i, 2, 0] * fpi[heavy_i] * 0.25
-    scaled[heavy_j, 1, 1] += valpp1[heavy_j, 1, 1] * fpj[heavy_j] * 0.25
-    scaled[heavy_j, 2, 1] += valpp1[heavy_j, 2, 1] * fpj[heavy_j] * 0.25
-    scaled[both_heavy, 3, 0] += valpp1[both_heavy, 3, 0] * fpi[both_heavy] * 0.25
-    scaled[both_heavy, 3, 1] += valpp1[both_heavy, 3, 1] * fpj[both_heavy] * 0.25
-    return scaled
+    return scaled + 0.25 * valpp1 * factors(fpi, fpj)
 
 
 CUTZS = 0.0

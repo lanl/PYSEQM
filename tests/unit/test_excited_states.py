@@ -232,12 +232,13 @@ def test_om2_transition_dipoles_match_mndo_ethene_twist(device):
 
         assert molecule.transition_dipole is not None
         assert molecule.oscillator_strength is not None
-        assert_allclose(
-            molecule.transition_dipole.detach().cpu().tolist(),
-            expected_transition_dipole.detach().cpu().tolist(),
-            rtol=1e-5,
-            atol=1e-5,
-        )
+        # The phase of each excited state is arbitrary: compare each transition-dipole vector up to an
+        # overall sign (the whole vector flips together).
+        actual = molecule.transition_dipole.detach().cpu()
+        expected = expected_transition_dipole.detach().cpu()
+        phase = torch.sign((actual * expected).sum(dim=-1, keepdim=True))
+        phase[phase == 0] = 1.0
+        assert_allclose((phase * actual).tolist(), expected.tolist(), rtol=1e-5, atol=1e-5)
         assert_allclose(
             molecule.oscillator_strength.detach().cpu().tolist(),
             expected_oscillator_strength.detach().cpu().tolist(),
