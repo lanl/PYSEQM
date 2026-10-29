@@ -528,7 +528,6 @@ def bintgs(x0, jcall):
     x = x0.reshape(-1, 1)
     absx = th.abs(x)
     large = absx > 0.5
-    tiny = absx <= 1.0e-6
 
     # A safe placeholder prevents singular values and gradients in the branch
     # that torch.where discards.
@@ -553,11 +552,9 @@ def bintgs(x0, jcall):
     values = []
     for order, large_value in enumerate(large_values, start=1):
         if order % 2:
-            default = 2.0 / order
-            series = default + x2 / (order + 2) + x4 / (12 * (order + 4)) + x6 / (360 * (order + 6))
+            series = 2.0 / order + x2 / (order + 2) + x4 / (12 * (order + 4)) + x6 / (360 * (order + 6))
         else:
-            default = 0.0
             series = -2.0 * x / (order + 1) - x3 / (3 * (order + 3)) - x5 / (60 * (order + 5))
-        values.append(th.where(large, large_value, th.where(tiny, default, series)))
+        values.append(th.where(large, large_value, series))
 
     return th.cat(values, dim=1)
