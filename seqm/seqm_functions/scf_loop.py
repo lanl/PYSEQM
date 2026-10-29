@@ -1532,12 +1532,15 @@ class SCF(torch.autograd.Function):
         grads, gvind = {}, []
         gv = [] if SCF_IMPLICIT_BACKWARD else [Pin]
         # Build the list gv = [Pin, θ₁=M, θ₂=w, θ₃=W, θ₄=gss, …]
-        for i, st in enumerate([M, w, W, gss, gpp, gsp, gp2, hsp]):
+        leaves, inputs = {}, dict(M=M, w=w, W=W, gss=gss, gpp=gpp, gsp=gsp, gp2=gp2, hsp=hsp)
+        for i, (name, st) in enumerate(inputs.items()):
             if st.requires_grad:
-                gv.append(st)
+                leaves[name] = st.detach().requires_grad_(True)
+                gv.append(leaves[name])
                 gvind.append(i + 1)
             else:
                 grads[i + 1] = None
+        problem = replace(problem, **leaves)
         unrestricted = problem.unrestricted
         with torch.enable_grad():
             Pin.requires_grad_(True)

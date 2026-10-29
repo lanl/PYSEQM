@@ -255,7 +255,8 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     
     rho_1[isX] = rho1(hsp[isX],dd[isX])
     rho_2[isX] = rho2(hpp[isX],qq[isX])
-    rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
+    if themethod == "PM6":
+        rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
     ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
 
     w, e1b, e2a, riXH, ri = \

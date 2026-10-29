@@ -176,10 +176,10 @@ class additive_term_rho1(torch.autograd.Function):
         """
         rho1, D1 = ctx.saved_tensors
         tmp = (D1**2 + rho1**2) ** (1.5)
-        # dhsp/drho1 * grad_rho1
-        # change from atomic unit to eV for dhsp
-        dhsp = 0.25 * (rho1 / tmp - 1.0 / rho1**2) * grad_output * ev
-        dD1 = (tmp / rho1**2 / D1 - rho1 / D1) * grad_output
+        dh_drho1 = 0.25 * (rho1 / tmp - 1.0 / rho1**2)
+        dh_dD1 = 0.25 * D1 / tmp
+        dhsp = grad_output / (dh_drho1 * ev)
+        dD1 = -dh_dD1 / dh_drho1 * grad_output
         del tmp
         return (dhsp, dD1)
 
@@ -269,9 +269,10 @@ class additive_term_rho2(torch.autograd.Function):
         tmp1 = 1.0 / (D2**2 + rho2**2) ** 1.5
         tmp2 = 1.0 / (2.0 * D2**2 + rho2**2) ** 1.5
         dhppdrho2 = -0.125 / rho2**2 + rho2 * (tmp1 / 4.0 - tmp2 / 8.0)
-        dhpp_ev = dhppdrho2 * grad_output * ev
-        dD2 = -dhppdrho2 / (D2 / 4.0 * (tmp1 - tmp2)) * grad_output
-        del tmp1, tmp2, dhppdrho2
+        dhppdD2 = D2 * (tmp1 / 4.0 - tmp2 / 4.0)
+        dhpp_ev = grad_output / (dhppdrho2 * ev)
+        dD2 = -dhppdD2 / dhppdrho2 * grad_output
+        del tmp1, tmp2, dhppdrho2, dhppdD2
         return (dhpp_ev, dD2)
 
 
