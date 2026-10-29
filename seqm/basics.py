@@ -1505,9 +1505,11 @@ class Force(torch.nn.Module):
         )
 
         if do_force and self.seqm_parameters.get("normal modes", False):
-            if self.seqm_parameters.get("scf_backward", 0) != 2:
+            # scf_backward=1 works but wastes ~half its adjoint solves for a ground-state Hessian: the
+            # SCF-path term of the gradient is zero (E is variational in P) yet still gets differentiated.
+            if self.seqm_parameters.get("scf_backward", 0) not in (1, 2):
                 raise Exception(
-                    "You have requested for normal mode calculation but scf_backward has not been set to 2 in your input seqm_parameters"
+                    "You have requested for normal mode calculation but scf_backward has not been set to 1 or 2 in your input seqm_parameters"
                 )
             normal_modes(molecule, Hf)
 

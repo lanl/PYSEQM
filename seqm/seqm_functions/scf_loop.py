@@ -32,17 +32,8 @@ MAX_ITER = 1000
 RAISE_ERROR_IF_SCF_FORWARD_FAILS = False
 # if true, raise error rather than ignore those non-convered molecules
 
-SCF_BACKWARD_MAX_ITER = 10
-MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE = 5
-RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
-# if true, raise error rather than truncate gradient
-# (set the gradient on non-converged molecules as 0.0)
-
-# use memory-efficient evaluation of gradients in implicit autodiff
-SCF_IMPLICIT_BACKWARD = True
-# SCF_IMPLICIT_BACKWARD = False
-# tolerance, max no. iteration, and history size for Anderson acceleration
-# in solving fixed point problem in SCF_IMPLICIT_BACKWARD
+# Adjoint linear-response options are defined near fixed_point_anderson().
+# Implicit SCF differentiation is always used for scf_backward=1.
 
 
 # number of iterations in canon_dm_prt.py (m)
@@ -1220,104 +1211,212 @@ def scf_forward3(problem, P, configuration, backward=False, verbose=False):
             return P, notconverged
 
 
-SCF_BACKWARD_ANDERSON_MAXITER = 200  # sufficient for all test cases
-SCF_BACKWARD_ANDERSON_HISTSIZE = 3  # seems reasonable, but TODO!
-SCF_BACKWARD_LAMBDA_MIN = 1e-6  # floor for λ
-SCF_BACKWARD_BETA0 = 0.20  # mixing for the first 3 steps
-SCF_BACKWARD_BETA = 0.95  # mixing afterwards
+SCF_BACKWARD_ANDERSON_MAXITER = 200
+SCF_BACKWARD_ANDERSON_HISTSIZE = 8
+SCF_BACKWARD_ANDERSON_REG = 1e-10
+SCF_BACKWARD_ANDERSON_COND_MAX = 1e10
+SCF_BACKWARD_ANDERSON_BETA = 1.0
+
+_SCF_DIFF_NAMES = ("M", "w", "W", "gss", "gpp", "gsp", "gp2", "hsp")
 
 
+def _scf_density_map(P, problem, configuration):
+    """Physical, *unmixed* SCF map. No DIIS/SP2/Anderson history.
+
+    Must be the same stationary density equation as the forward SCF.
+    Change the density builder here for any finite-temperature SCF modes.
+    """
+    F = build_fock(problem, configuration, P)
+    if configuration.method == "PM6":
+        out = sym_eig_trunc1d(F, problem.nSuperHeavy, problem.nHeavy, problem.nHydro, problem.nOccMO)[1]
+    else:
+        out = sym_eig_trunc1(F, problem.nHeavy, problem.nHydro, problem.nOccMO)[1]
+    return out / 2.0 if problem.unrestricted else out
+
+
+def _scf_problem_with_inputs(problem, tensors):
+    return replace(problem, **dict(zip(_SCF_DIFF_NAMES, tensors)))
+
+
+@torch.no_grad()
 def fixed_point_anderson(
     fp_fun,
     u0,
     tol,
-    lam=1e-3,
-    beta0=SCF_BACKWARD_BETA0,
-    beta=SCF_BACKWARD_BETA,
-    lam_min=SCF_BACKWARD_LAMBDA_MIN,
+    *,
+    history=SCF_BACKWARD_ANDERSON_HISTSIZE,
+    maxiter=SCF_BACKWARD_ANDERSON_MAXITER,
+    beta=SCF_BACKWARD_ANDERSON_BETA,
+    regularization=SCF_BACKWARD_ANDERSON_REG,
+    condition_max=SCF_BACKWARD_ANDERSON_COND_MAX,
 ):
+    """Solve an affine fixed point using batched Anderson/DIIS.
+
+    The input ``u0`` is also the affine RHS, so stopping is relative to
+    ||RHS|| *per molecule*. The caller must pass fp_fun(u)=RHS+J(u).
+    Solver iterations are deliberately not differentiated.
+
+    Each molecule has a circular history. A numerically ill-conditioned
+    DIIS Gram matrix resets *that molecule's* history to a Picard step.
+    No silent return of unconverged adjoints.
     """
-    Anderson acceleration for fixed point solver adapted from
-    http://implicit-layers-tutorial.org/deep_equilibrium_models
+    if history < 1 or maxiter < 1:
+        raise ValueError("Anderson history and maxiter must be >= 1")
+    n_batch = u0.shape[0]
+    n_var = u0[0].numel()
+    m = min(int(history), n_var)
+    x = u0.detach().reshape(n_batch, -1).clone()
+    rhs_norm = torch.linalg.vector_norm(x, dim=-1).clamp_min(torch.finfo(x.dtype).tiny)
+    X = torch.zeros(n_batch, m, n_var, device=x.device, dtype=x.dtype)
+    F = torch.zeros_like(X)
+    counts = torch.zeros(n_batch, dtype=torch.long, device=x.device)
+    slots = torch.zeros_like(counts)
+    rows = torch.arange(n_batch, device=x.device)
+    cols = torch.arange(m, device=x.device)
+    eye = torch.eye(m, device=x.device, dtype=x.dtype).unsqueeze(0)
+    active = torch.ones(n_batch, device=x.device, dtype=torch.bool)
 
-    Parameters
-    ----------
-    fp_fun : callable
-        function defining fixed point solution, i.e., ``fp_fun(u) = u``
-    u0 : array-/Tensor-like
-        initial guess for fixed point
-    lam : float
-        regularization for solving linear system
-    beta : float
-        mixing parameter
-    tol : float
-        convergence tolerance
+    for _ in range(maxiter):
+        fx = fp_fun(x.reshape_as(u0)).reshape(n_batch, -1).detach()
+        if not torch.isfinite(fx).all():
+            raise RuntimeError("Nonfinite value in implicit SCF adjoint iteration")
+        residual = fx - x
+        relres = torch.linalg.vector_norm(residual, dim=-1) / rhs_norm
+        reached = active & (relres <= float(tol))
+        active = active & ~reached
+        if not active.any():
+            return x.reshape_as(u0)
 
-    Returns
-    -------
-    u_conv : array-/Tensor-like
-        fixed point solution satisfying ``fp_fun(u_conv) = u_conv``
+        idx = rows[active]
+        X[idx, slots[idx]] = x[idx]
+        F[idx, slots[idx]] = fx[idx]
+        counts[idx] = torch.clamp(counts[idx] + 1, max=m)
+        slots[idx] = (slots[idx] + 1) % m
 
+        valid = cols.unsqueeze(0) < counts.unsqueeze(1)
+        R = (F - X) * valid.unsqueeze(-1)
+        # Scale the residuals, but not the physical linear equation.
+        scale = R.abs().amax(dim=(1, 2)).clamp_min(torch.finfo(x.dtype).tiny)
+        R = R / scale[:, None, None]
+        gram = R @ R.transpose(-1, -2)
+        # Invalid history slots become identity rows/columns.
+        gram = gram + torch.diag_embed((~valid).to(x.dtype))
+        dscale = (gram.diagonal(dim1=-2, dim2=-1) * valid.to(x.dtype)).sum(dim=1) / counts.clamp_min(1)
+        H = gram + regularization * dscale[:, None, None] * eye
+
+        # Monitor conditioning as in Pulay DIIS, *per molecule*.
+        eig = torch.linalg.eigvalsh(H)
+        cond = eig[:, -1].abs() / eig[:, 0].abs().clamp_min(torch.finfo(x.dtype).tiny)
+        bad = active & ((cond > condition_max) | (eig[:, 0] <= 0) | ~torch.isfinite(cond))
+        H = torch.where(bad[:, None, None], eye, H)
+        rhs = valid.to(dtype=x.dtype)
+        coeff = torch.linalg.solve(H, rhs.unsqueeze(-1)).squeeze(-1)
+        denom = coeff.sum(dim=-1, keepdim=True)
+        coeff = coeff / torch.where(denom.abs() > 1e-20, denom, torch.ones_like(denom))
+        bad = bad | (
+            active
+            & (
+                (denom[:, 0].abs() <= 1e-20)
+                | ~torch.isfinite(coeff).all(dim=-1)
+                | (coeff.abs().sum(dim=-1) > 1e3)
+            )
+        )
+        blend = beta * F + (1.0 - beta) * X
+        mixed = torch.einsum("bm,bmn->bn", coeff, blend)
+        xnext = torch.where(bad[:, None], fx, mixed)
+        x = torch.where(active[:, None], xnext, x)
+        if bad.any():
+            X[bad] = 0
+            F[bad] = 0
+            counts[bad] = 0
+            slots[bad] = 0
+
+    fx = fp_fun(x.reshape_as(u0)).reshape(n_batch, -1).detach()
+    relres = torch.linalg.vector_norm(fx - x, dim=-1) / rhs_norm
+    if (relres > float(tol)).any() or not torch.isfinite(relres).all():
+        raise RuntimeError(
+            f"SCF adjoint Anderson failed for {(relres > float(tol)).sum().item()}"
+            f"/{n_batch} molecules; max relative residual={relres.max().item():.3e}"
+        )
+    return x.reshape_as(u0)
+
+
+def _solve_adjoint_from_map(v, f, z, configuration):
+    """u=(I-g_P.T)^-1 v given the density map output f=g(z); returns a graph-free result."""
+
+    def j_transpose(u):
+        return agrad(f, z, grad_outputs=u, retain_graph=True)[0]
+
+    # The exact derivative is independent of the choice of iteration.
+    return fixed_point_anderson(
+        lambda w: v.detach() + j_transpose(w), v.detach(), configuration.backward_eps
+    ).detach()
+
+
+def _solve_adjoint(v, x, problem, configuration, theta):
+    with torch.enable_grad():
+        z = x.detach().requires_grad_(True)
+        p = _scf_problem_with_inputs(problem, [t.detach() for t in theta])
+        f = _scf_density_map(z, p, configuration)
+        return _solve_adjoint_from_map(v, f, z, configuration)
+
+
+class AdjointSolve(torch.autograd.Function):
+    """u=(I-g_P.T)^-1 v, with exact reverse derivative of the linear solve.
+
+    Only used when a second derivative is requested (create_graph=True).
+    Supports double backward of the outer implicit SCF operation. It does not
+    differentiate Anderson iterations and does not support third derivatives.
+    ``keep`` is a per-molecule bool mask; unconverged molecules get a zero adjoint.
     """
-    # handle UHF/RHF
-    if u0.dim() == 4:
-        nmol, nsp, norb, morb = u0.shape
-    else:
-        nmol, norb, morb = u0.shape
-        nsp = 1
-    # init history of solver
-    m = SCF_BACKWARD_ANDERSON_HISTSIZE
-    X = torch.zeros((nmol, m, nsp * norb * morb), dtype=u0.dtype, device=u0.device)
-    F = torch.zeros((nmol, m, nsp * norb * morb), dtype=u0.dtype, device=u0.device)
-    X[:, 0], F[:, 0] = u0.view(nmol, -1), fp_fun(u0).view(nmol, -1)
-    X[:, 1], F[:, 1] = F[:, 0], fp_fun(F[:, 0].view_as(u0)).view(nmol, -1)
-    # set up linear system
-    H = torch.zeros((nmol, m + 1, m + 1), dtype=u0.dtype, device=u0.device)
-    H[:, 0, 1:] = H[:, 1:, 0] = 1
-    y = torch.zeros((nmol, m + 1, 1), dtype=u0.dtype, device=u0.device)
-    y[:, 0] = 1
-    cond, resid = False, 100.0
-    # solve iteratively
-    max_iters = SCF_BACKWARD_ANDERSON_MAXITER
-    for k in range(2, max_iters):
-        n = min(k, m)
-        G = F[:, :n] - X[:, :n]
-        GTG = torch.bmm(G, G.transpose(1, 2))
-        E_n = torch.eye(n, dtype=u0.dtype, device=u0.device)
-        H[:, 1 : n + 1, 1 : n + 1] = GTG + lam * E_n[None]
-        alpha = torch.linalg.solve(H[:, : n + 1, : n + 1], y[:, : n + 1])[:, 1 : n + 1, 0]
-        beta_k = beta if k > 10 else beta0
-        Xold = (1 - beta_k) * (alpha[:, None] @ X[:, :n])[:, 0]
-        X[:, k % m] = beta_k * (alpha[:, None] @ F[:, :n])[:, 0] + Xold
-        F[:, k % m] = fp_fun(X[:, k % m].view_as(u0)).view(nmol, -1)
-        resid1 = (F[:, k % m] - X[:, k % m]).norm()
-        resid = resid1 / (1e-5 + F[:, k % m].norm())
-        cond = resid.item() < tol  # SCF_BACKWARD_ANDERSON_TOLERANCE
-        if cond:
-            break  # solver converged
-        # λ exponential decay (once we are in the basin)
-        lam = max(lam * 0.5, lam_min)
-    if not cond:
-        msg = "Anderson solver in SCF backward did not converge for some molecule(s)"
-        if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
-            raise ValueError(msg)
-        print(msg)
-    u_conv = X[:, k % m].view_as(u0)
-    # print(f"Anderson took {k} iterations")
-    return u_conv
 
+    @staticmethod
+    def forward(ctx, v, x, problem, configuration, keep, *theta):
+        u = _solve_adjoint(v, x, problem, configuration, theta)
+        ctx.problem = problem
+        ctx.configuration = configuration
+        ctx.save_for_backward(u, x, keep, *theta)
+        return u
 
-def fixed_point_picard(fp_fun, u0, tol, maxiter=SCF_BACKWARD_ANDERSON_MAXITER):
-    u = u0.clone()
-    for k in range(maxiter):
-        u_new = fp_fun(u)
-        # relative residual
-        resid = (u_new - u).norm() / (1e-6 + u_new.norm())
-        if resid < tol:
-            # print(f"Picard convered in {k} iters")
-            return u_new
-        u = u_new
-    raise RuntimeError(f"Picard did not converge in {maxiter} steps (resid={resid:.2e})")
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx, grad_u):
+        u, x, keep, *theta = ctx.saved_tensors
+        if grad_u is None:
+            return (None,) * (5 + len(theta))
+        grad_u = grad_u * keep.view(-1, *([1] * (grad_u.dim() - 1)))
+
+        # Differentiation of (I-J.T) u=v:
+        #   (I-J) t = grad_u,
+        #   grad_v=t, grad_(x,theta)=d_(x,theta)[u.T J t]
+        with torch.enable_grad():
+            z = x.detach().requires_grad_(True)
+            partials = [p.detach().requires_grad_(p.requires_grad) for p in theta]
+            p = _scf_problem_with_inputs(ctx.problem, partials)
+            f = _scf_density_map(z, p, ctx.configuration)
+
+            # J t via double VJP, so torch.func.jvp is not required.
+            w = torch.zeros_like(f, requires_grad=True)
+            jtw = agrad(f, z, grad_outputs=w, create_graph=True)[0]
+
+            def j_forward(t):
+                return agrad(jtw, w, grad_outputs=t, retain_graph=True)[0]
+
+            t = fixed_point_anderson(
+                lambda q: grad_u.detach() + j_forward(q), grad_u.detach(), ctx.configuration.backward_eps
+            ).detach()
+
+            jtu = agrad(f, z, grad_outputs=u.detach(), create_graph=True)[0]
+            sensitivity = (jtu * t).sum()
+            idx = [i for i, p in enumerate(partials) if p.requires_grad]
+            needed = [z] + [partials[i] for i in idx]
+            values = agrad(sensitivity, needed, allow_unused=True)
+            grad_x = values[0]
+            grad_theta = [None] * len(theta)
+            for i, g in zip(idx, values[1:]):
+                grad_theta[i] = g
+
+        return (t, grad_x, None, None, None, *grad_theta)
 
 
 def _solve_scf(problem, configuration, P, *, backward=False, verbose=True):
@@ -1414,248 +1513,89 @@ def final_orbital_analysis(problem, configuration, F, eig, scf_backward):
 
 
 class SCF(torch.autograd.Function):
-    """
-    A custom autograd Function that wraps scf loop
+    """SCF forward + implicit density-response derivatives up to second order.
 
-    Because density matrix P* is solved for self-consistently in SCF, P* satisfies:
-        P* = g(P*; θ)
-    where θ = (M, w, gss, gpp, gsp, gp2, hsp,...) are the semiempirical parameters.
-
-    Forward:
-      - Runs an SCF loop to convergence:
-          P_{new} = g(P_old; θ)
-      - Takes inputs θ
-      - Returns the converged density P* and a mask indicating any molecules that failed.
-
-    Backward:
-      We receive `grad_P = ∂L/∂P*` from upstream.  We must produce `∂L/∂θ` for each
-      parameter tensors θ = M, w, W, gss, gpp, gsp, gp2, hsp, etc.
-
-      By the chain rule,
-          ∂L/∂θ = (∂L/∂P*) · (∂P*/∂θ) = vᵀ·J (vector-Jacobian product)
-
-      Hence we need the jacobian (∂P*/∂θ).
-      Implicit differentiation of P* = g(P*;θ) gives
-          (I − ∂g/∂P) · (∂P*/∂θ) = ∂g/∂θ,
-      so formally
-          ∂P*/∂θ = [I − ∂g/∂P]⁻¹ · ∂g/∂θ.
-
-      We never formally invert F = [I − ∂g/∂P]. Let B = ∂g/∂θ
-      We need to calculate the vector-Jacobian product:
-      vᵀ · J = vᵀ· F⁻¹ · B = zᵀ · B,
-      where zᵀ = vᵀ· F⁻¹. So we only need to solve for z.
-
-      1. if SCF_IMPLICIT_BACKWARD is False, we expand the inverse via the
-      Neumann series (valid when spectral radius(∂g/∂P)<1):
-          [I − A]⁻¹ = I + A + A² + ⋯ ,  A = ∂g/∂P.
-
-      Concretely, we unroll:
-          G₀ = ∂L/∂P*,
-          G_{k+1} = (∂g/∂P)ᵀ · G_k,
-      and accumulate
-          ∂L/∂θ = Σ_k G_kᵀ · (∂g/∂θ).
-
-      2. if SCF_IMPLICIT_BACKWARD is True, we do Implicit‐adjoint solve
-      We have
-        zᵀ = vᵀ· F⁻¹ = vᵀ· [I-A]⁻¹
-        or zᵀ = vᵀ + zᵀ · A or z = v + Aᵀ · z
-
-      Instead of unrolling a Neumann series for (I−A)⁻¹,
-      we solve the affine equation for z: z = v + Aᵀ · z  directly in fixed_point_picard
-
-      However if fixed_point_picard does not converge we can accelerate the convergence
-      using Anderson acceleration, which is the same as DIIS. This is done like so:
-        1. Initialize z⁽⁰⁾ = 0.
-        2. For k = 0,1,2,… until convergence:
-           a) f(z⁽ᵏ⁾) = v + Aᵀ · z⁽ᵏ⁾    # vector‐Jacobian product via autograd
-           b) r⁽ᵏ⁾ = f(z⁽ᵏ⁾) − z⁽ᵏ⁾        # residual
-           c) Keep the last m pairs {(z⁽ᵏ⁻ʲ⁾, r⁽ᵏ⁻ʲ⁾)} for j=0…m−1
-           d) Solve the small least‐squares problem
-                 min_{α_j, ∑α_j=1} ‖∑_j α_j r⁽ᵏ⁻ʲ⁾‖
-           e) update
-                 z⁽ᵏ⁺¹⁾ = ∑_j α_j f(z⁽ᵏ⁻ʲ⁾)
-        3. Stop when ‖z⁽ᵏ⁺¹⁾ − z⁽ᵏ⁾‖ < tol.
-
-      Once converged, the final z approximates (I − Aᵀ)⁻¹ g_P.
-      With some testing it seems that using Anderson acceleration is slower than directly solving for z!
-      I have commented out the call to fixed_point_anderson for now
-
-      We then compute all parameter gradients in one shot:
-          grads = torch.autograd.grad(Pout, gv, grad_outputs=u)
-      so that each grads[i] = z · (∂g/∂θ_i) = ∂L/∂θ_i.
-
-      Notes:
-        - We wrap the Anderson solve in torch.no_grad(), so this path does not
-          support double‐backward (second derivatives).
-        - Anderson acceleration seems to converges in fewer iterations than
-          Neumann‐series unrolling.
+    The forward solver and the Anderson *linear* solver are never unrolled
+    through autograd. AdjointSolve provides a differentiable adjoint solution.
     """
 
     @staticmethod
     def forward(ctx, problem, M, w, W, gss, gpp, gsp, gp2, hsp, P, configuration):
-        P, notconverged = _solve_scf(problem, configuration, P, verbose=configuration.verbose)
-
+        # Forward mixing/DIIS updates P in place; do not modify the caller's
+        # initial density or the saved previous-step density in MD.
+        Pconv, notconverged = _solve_scf(
+            problem, configuration, P.detach().clone(), verbose=configuration.verbose
+        )
         ctx.problem = problem
         ctx.configuration = configuration
-        ctx.save_for_backward(P, M, w, W, gss, gpp, gsp, gp2, hsp, notconverged)
-
-        return P, notconverged
+        # Save the *returned* density, not a detached intermediate.
+        ctx.save_for_backward(Pconv, M, w, W, gss, gpp, gsp, gp2, hsp, notconverged)
+        return Pconv, notconverged
 
     @staticmethod
-    def backward(ctx, grad_P, grad1):
-        """
-        Compute ∂L/∂θ given grad_P = ∂L/∂P*.
-        We must return one tensor ∂L/∂θ (or None) for each of the forward inputs θ
+    def backward(ctx, grad_P, grad_mask):
+        x, *rest = ctx.saved_tensors
+        theta, notconverged = rest[:-1], rest[-1]
+        if grad_P is None:
+            return (None,) * 11
 
+        # Same behaviour as before: unconverged molecules get zero gradients.
+        keep = ~notconverged.detach()
+        if not bool(keep.all()):
+            print("SCF for/back-ward : %d/%d not converged" % (int((~keep).sum()), keep.numel()))
+            grad_P = grad_P * keep.view(-1, *([1] * (grad_P.dim() - 1)))
 
-        CURRENTLY DOES NOT SUPPORT DOUBLE-BACKWARD!
-        (irrelevant for dE^2/dx^2 or dy/dparam, if y is no derivative itself like forces)
-        FOR CORRECT SECOND DERIVATIVES OF DENSITY MATRIX, USE DIRECT BACKPROP.
-        """
-        # TODO: clean up when fully switching to implicit autodiff
-        (Pin, M, w, W, gss, gpp, gsp, gp2, hsp, notconverged) = ctx.saved_tensors
         problem = ctx.problem
-        nmol = problem.nmol
         configuration = ctx.configuration
-        themethod = configuration.method
-        nHydro, nHeavy, nSuperHeavy, nOccMO = (
-            problem.nHydro,
-            problem.nHeavy,
-            problem.nSuperHeavy,
-            problem.nOccMO,
-        )
-
-        if themethod == "PM6":
-            molsize = Pin.shape[1] // 9
-        else:
-            molsize = Pin.shape[-1] // 4
-        grads, gvind = {}, []
-        gv = [] if SCF_IMPLICIT_BACKWARD else [Pin]
-        # Build the list gv = [Pin, θ₁=M, θ₂=w, θ₃=W, θ₄=gss, …]
-        leaves, inputs = {}, dict(M=M, w=w, W=W, gss=gss, gpp=gpp, gsp=gsp, gp2=gp2, hsp=hsp)
-        for i, (name, st) in enumerate(inputs.items()):
-            if st.requires_grad:
-                leaves[name] = st.detach().requires_grad_(True)
-                gv.append(leaves[name])
-                gvind.append(i + 1)
-            else:
-                grads[i + 1] = None
-        problem = replace(problem, **leaves)
-        unrestricted = problem.unrestricted
+        second_order = torch.is_grad_enabled()  # outer grad(..., create_graph=True)
+        if second_order and configuration.converger[0] == 3:
+            raise NotImplementedError(
+                "Higher derivatives for finite-temperature KSA require a "
+                "physical Fermi_Q density map and its second derivatives."
+            )
         with torch.enable_grad():
-            Pin.requires_grad_(True)
-            F = build_fock(problem, configuration, Pin)
-            if themethod == "PM6":
-                Pout = sym_eig_trunc1d(F, nSuperHeavy, nHeavy, nHydro, nOccMO)[1]
-            else:
-                Pout = sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1]
-            if unrestricted:
-                Pout = Pout / 2
-
-        backward_eps = torch.as_tensor(configuration.backward_eps, dtype=Pin.dtype, device=Pin.device)
-        converged = ~notconverged.detach()  # scf forward converged
-        diverged = None  # scf backward diverged
-
-        # Depending on flag, choose implicit vs Neumann‐series backward
-        if SCF_IMPLICIT_BACKWARD:
-            ## THIS DOES NOT SUPPORT DOUBLE BACKWARD. MAY AS WELL STOP AUTOGRAD TAPE
-            ## TODO: INCLUDING THIS PART IN GRAPH CAUSES MEMORY LEAK.
-            ##       RESOLVE THIS WHEN IMPLEMENTING DOUBLE-BACKWARD!
-            with torch.no_grad():
-
-                def affine_eq(u):
-                    return (
-                        grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
-                    )  # agrad is torch.autograd.grad
-
-                u_init = torch.zeros_like(Pin)
-                u = fixed_point_anderson(affine_eq, u_init, backward_eps * 10)
-                u = fixed_point_picard(affine_eq, u, backward_eps)
-                # u = fixed_point_picard(affine_eq, u_init,backward_eps)
-                # def A_matvec(u): return u - agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
-                # u = conjugate_gradient_batch(A_matvec,grad_P,tol=backward_eps*100)
-
-                gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
-                for t, i in enumerate(gvind):
-                    grads[i] = gradients[t]
-        else:
-            # — Neumann‐series unrolling —
-            gradients = [(grad_P,)]
-            for k in range(SCF_BACKWARD_MAX_ITER + 1):
-                grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-                gradients.append(agrad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True))
-                grad0_max = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-                if converged.any():
-                    err = torch.max(grad0_max[converged])
+            # Independent variables for *partial* derivatives of g. In
+            # second-order mode they carry the original values' graph to
+            # obtain mixed derivatives while keeping partials independent.
+            z = x.detach().requires_grad_(True)
+            zeval = z + (x - x.detach()) if second_order else z
+            eval_theta = []
+            needed = []
+            needed_indices = []
+            for i, p in enumerate(theta):
+                if p.requires_grad:
+                    q = p.detach().requires_grad_(True)
+                    qe = q + (p - p.detach()) if second_order else q
+                    needed.append(q)
+                    needed_indices.append(i)
                 else:
-                    err = torch.tensor(0.0, device=grad_P.device)
-                if debug:
-                    t = grad0_max[converged] > backward_eps
-                    print("backward scf: ", k, err.item(), t.sum().item())
+                    q, qe = None, p
+                eval_theta.append(qe)
 
-                if err < backward_eps:
-                    break
-                diverged = (grad0_max > grad0_max_prev) * (grad0_max >= 1.0)
-                if diverged.any() and k >= MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE:
-                    print(
-                        "SCF backward diverges for %d molecules, stop after %d iterations"
-                        % (diverged.sum().item(), MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE)
-                    )
-                    break
-            ln = len(gradients)
-            # Accumulate ∂L/∂θ = Σ_k G_kᵀ · (∂g/∂θ)
-            for t, i in enumerate(gvind):
-                grads[i] = torch.sum(torch.stack([gradients[l][t + 1] for l in range(1, ln)]), dim=0)
+            local_problem = _scf_problem_with_inputs(problem, eval_theta)
+            f = _scf_density_map(zeval, local_problem, configuration)
+            if second_order:
+                u = AdjointSolve.apply(grad_P, x, problem, configuration, keep, *theta)
+            else:
+                u = _solve_adjoint_from_map(grad_P, f, z, configuration)
+            # This is g_theta.T u, not a total derivative of g(theta).
+            partial_grads = (
+                agrad(
+                    f,
+                    needed,
+                    grad_outputs=u,
+                    create_graph=second_order,
+                    retain_graph=second_order,
+                    allow_unused=True,
+                )
+                if needed
+                else ()
+            )
 
-            with torch.no_grad():
-                # one way is to check grad0.abs().max if they are smaller than backward_eps
-                # another way is to compare grad0.abs().max with previous grad0.abs().max, if
-                #      they are increasing, they are diverging
-                notconverged1 = (grad0_max > backward_eps) + (~torch.isfinite(grad0_max))
-                if notconverged.any():
-                    print("SCF forward       : %d/%d not converged" % (notconverged.sum().item(), nmol))
-                if notconverged1.any():
-                    print("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(), nmol))
-                    if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
-                        raise ValueError("SCF backward doesn't converged for some molecules")
-                notconverged = notconverged + notconverged1
-
-        with torch.no_grad():
-            if notconverged.any():
-                print("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(), nmol))
-                cond = notconverged.detach()
-                # M, w, gss, gpp, gsp, gp2, hsp
-                # M shape(nmol*molsizes*molsize, 4, 4)
-                if torch.is_tensor(grads[1]):
-                    if themethod == "PM6":
-                        grads[1] = grads[1].reshape(nmol, molsize * molsize, 9, 9)
-                        grads[1][cond] = 0.0
-                        grads[1] = grads[1].reshape(nmol * molsize * molsize, 9, 9)
-                    else:
-                        grads[1] = grads[1].reshape(nmol, molsize * molsize, 4, 4)
-                        grads[1][cond] = 0.0
-                        grads[1] = grads[1].reshape(nmol * molsize * molsize, 4, 4)
-                # w shape (npairs, 10, 10)
-                if torch.is_tensor(grads[2]):
-                    grads[2][cond[problem.pair_molid]] = 0.0
-                # gss, gpp, gsp, gp2, hsp shape (natoms,)
-                for i in range(3, 8):
-                    if torch.is_tensor(grads[i]):
-                        grads[i][cond[problem.atom_molid]] = 0.0
-
-        return (
-            None,
-            grads[1],
-            grads[2],
-            grads[3],
-            grads[4],
-            grads[5],
-            grads[6],
-            grads[7],
-            grads[8],
-            None,
-            None,
-        )
+        result = [None] * 8
+        for i, g in zip(needed_indices, partial_grads):
+            result[i] = g
+        return (None, *result, None, None)
 
 
 class SCF0(SCF):
