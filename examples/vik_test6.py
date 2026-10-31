@@ -21,7 +21,7 @@ elements = [0] + sorted(set(species.reshape(-1).tolist()))
 
 seqm_parameters = {
     "method": "AM1",  # AM1, MNDO, PM#
-    "dispersion": True,
+    "dispersion": "FS1",
     "scf_eps": 1.0e-8,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
     "scf_converger": [1],  # converger used for scf loop
     # 'excited_states': {'n_states':5},

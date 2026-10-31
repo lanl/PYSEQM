@@ -4,7 +4,7 @@ from torch import pow
 from .cal_par import additive_term_rho1, additive_term_rho2, dd_qq
 from .constants import a0, ev
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
-from .dispersion_am1_fs1 import dEdisp_dr
+from .dispersion import dispersion_pair_grad
 from .energy import pair_nuclear_energy
 from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 from .om2_hcore import build_omx_pair_context
@@ -108,8 +108,7 @@ def scf_analytic_grad(
     # pair_grad = torch.zeros((npairs,3),dtype=dtype, device=device)
     # pair_grad = core_core_der(alpha, rij, Xij, ZAZB, ni, nj, idxi, idxj, gam, w_x, method, parameters=parnuc)
     pair_grad = core_core_der(molecule, gam, w_x, method, parnuc)
-    if molecule.seqm_parameters.get("dispersion", False) and method == "AM1":
-        pair_grad += dEdisp_dr(molecule)
+    pair_grad += dispersion_pair_grad(molecule)
     return contract_ao_derivatives_with_density(
         P0, molecule, molsize, overlap_KAB_x, e1b_x, e2a_x, w_x, pair_grad, mask, maskd, idxi, idxj
     )
@@ -302,9 +301,8 @@ def scf_grad(
 
         e1b_x_new, e2a_x_new = w_derivative_numerical(molecule, Xij, w_x_new)
         pair_grad = core_core_der(molecule, gam, w_x_new, method, parnuc)
-        if molecule.seqm_parameters.get("dispersion", False) and method == "AM1":
-            pair_grad += dEdisp_dr(molecule)
 
+    pair_grad += dispersion_pair_grad(molecule)
     grad = contract_ao_derivatives_with_density(
         P0,
         molecule,

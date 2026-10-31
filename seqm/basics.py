@@ -8,7 +8,7 @@ from .dynamics.nac_utils import resolve_nac_config
 from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
 from .seqm_functions.constants import ev
 from .seqm_functions.dipole import calc_ground_dipole
-from .seqm_functions.dispersion_am1_fs1 import dispersion_am1_fs1
+from .seqm_functions.dispersion import dispersion_energy, dispersion_kind
 from .seqm_functions.energy import (
     elec_energy,
     elec_energy_isolated_atom,
@@ -660,6 +660,7 @@ class Energy(torch.nn.Module):
         super().__init__()
         self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters["method"]
+        dispersion_kind(seqm_parameters)  # fail early on an unavailable correction
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
         self.hamiltonian = Hamiltonian(seqm_parameters)
@@ -1449,8 +1450,7 @@ class Energy(torch.nn.Module):
                 hsp=molecule.parameters["h_sp"],
             )
             Etot += Eexcited
-            if self.seqm_parameters.get("dispersion", False) and self.method == "AM1":
-                Etot += dispersion_am1_fs1(molecule, P)
+            Etot += dispersion_energy(molecule, P)
             Hf, Eiso_sum = heat_formation(
                 molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag=self.Hf_flag
             )

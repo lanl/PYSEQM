@@ -264,6 +264,47 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
     - If ``True`` (default), the Fock matrix is diagonalized to obtain molecular orbitals.  
     - If ``False``, only the converged density matrix is computed.
 
+**dispersion**  (`str` or `False`)
+    Adds an empirical dispersion correction to the energy and forces. Names are case-insensitive.
+
+    :default: ``False`` (no correction)
+    :accepted values: ``'FS1'``, ``'D2'``, ``'D2-Elstner'``, ``'D3'``, ``'D3T'``
+
+    .. list-table::
+       :header-rows: 1
+       :widths: 15 15 70
+
+       * - Value
+         - Methods
+         - Correction
+       * - ``'FS1'``
+         - AM1
+         - AM1-FS1 (Foster and Sohlberg, *J. Chem. Theory Comput.* **6**, 2153 (2010)).
+       * - ``'D2'``
+         - OM2, OM3
+         - Grimme D2 with the damping function of Yang (*J. Chem. Phys.* **116**, 515 (2002)).
+       * - ``'D2-Elstner'``
+         - OM2, OM3
+         - Grimme D2 with the damping function of Elstner (*J. Chem. Phys.* **114**, 5149 (2001)).
+       * - ``'D3'``
+         - OM2, OM3
+         - Grimme D3 with Becke-Johnson damping and no three-body term.
+       * - ``'D3T'``
+         - OM2, OM3
+         - ``'D3'`` plus the three-body (Axilrod-Teller-Muto) term.
+
+    The OM2 and OM3 corrections reproduce those of MNDO2020. Ground-state and CIS excited-state energies and forces
+    include the correction.
+    Requesting a correction that is not available for the chosen ``method`` raises an error.
+
+    .. code-block:: python
+
+        seqm_parameters = {'method': 'OM2', 'dispersion': 'D3', ...}
+
+    .. note::
+       ``'D3T'`` costs more than ``'D3'`` for large molecules because the three-body term scales cubically with the
+       number of atoms.
+
 Orthogonalization-Corrected OMx Methods
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -271,7 +312,7 @@ OM1, OM2, and OM3 are the orthogonalization-corrected methods in PYSEQM.
 They use the same ``seqm_parameters`` structure as the other SEQM methods.
 
 - Supported elements: H, C, N, O, F.
-- OMx forces currently use finite-difference gradients only.
+- OM2 and OM3 support the D2 and D3 dispersion corrections through the ``dispersion`` key (see :ref:`seqm-parameters`).
 
 See :doc:`single_point_scf`, :doc:`bomd`, :doc:`geometry_optimization`, and
 :doc:`nonadiabatic_dynamics` for workflow-specific notes.

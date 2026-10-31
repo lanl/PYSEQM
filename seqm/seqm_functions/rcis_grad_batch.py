@@ -19,7 +19,7 @@ from seqm.seqm_functions.fock import (
 from seqm.seqm_functions.rcis_batch import _uniform_molecule_dimensions, make_cis_densities, unpackone_batch
 
 from .constants import a0, ev
-from .dispersion_am1_fs1 import dEdisp_dr
+from .dispersion import dispersion_pair_grad
 from .omx_utils import get_orbital_zetas
 
 
@@ -146,10 +146,10 @@ def rcis_grad_batch(
 
         if include_ground_state:
             pair_grad = core_core_der(mol, gam, w_x, method, parnuc)
-            if mol.seqm_parameters.get("dispersion", False) and method == "AM1":
-                pair_grad += dEdisp_dr(mol)
     if not include_ground_state:
         pair_grad = torch.zeros_like(Xij)
+    else:
+        pair_grad += dispersion_pair_grad(mol)
 
     ind = _cached_index(K_ind_4, device)
     weight = _cached_tensor(WEIGHT_10, device, dtype).reshape((-1, 10))
