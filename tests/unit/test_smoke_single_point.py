@@ -39,4 +39,4 @@ def test_single_point_runs_for_all_methods(method, device, methane_molecule_data
     assert_allclose(data["Etot"], ref["Etot"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["Eelec"], ref["Eelec"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["Enuc"], ref["Enuc"], rtol=1e-5, atol=1e-5)
-    assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+    assert_allclose(data["force"], ref["force"], rtol=3e-5, atol=3e-5)

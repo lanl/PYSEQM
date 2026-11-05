@@ -44,6 +44,9 @@ CONVERGENCE_DM_ERROR_FACTOR = 2.0
 CONVERGENCE_DM_ELEMENT_FACTOR = 15.0
 CONVERGENCE_DIIS_FACTOR = 50.0
 
+# Upper bound on the adaptive-mixing extrapolation factor
+FAC_MAX = 10.0
+
 
 @dataclass(frozen=True)
 class SCFConfiguration:
@@ -444,7 +447,7 @@ def compute_fac(Pnew_diag, P_diag, Pold_diag):
     return FAC
 
 
-def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted):
+def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted, D_prev=None):
     # We treat each molecule separately (different active sizes)
     is_third = scf_iteration % 3 == 0
     # DAMP per Fortran
@@ -457,10 +460,20 @@ def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted):
     occ_number = 1.0 if unrestricted else 2.0
     if is_third:
         with torch.no_grad():
-            FAC = compute_fac(diag_cur, diag_prev, diag_old2)
+            if D_prev is None:
+                FAC = compute_fac(diag_cur, diag_prev, diag_old2)
+            else:
+                # signed full-matrix factor (Fortran BORDER.f): r = <Dold,Dnew>/<Dold,Dold>, FAC = r/(1-r)
+                dnew = P_cur - P_prev
+                num = (D_prev * dnew).sum(dim=(1, 2))
+                den = (D_prev * D_prev).sum(dim=(1, 2))
+                r = num / den.clamp_min(1e-30)  # only guards 0/0; masked by `ok` below
+                ok = (den > 0) & (r.abs() < 1.0)
+                # r in (-1, 0) gives FAC in (-0.5, 0); cap the amplifying side at 10
+                # (the bound the diagonal-only formula effectively had)
+                FAC = torch.where(ok, (r / (1.0 - r)).clamp(max=FAC_MAX), torch.zeros_like(r))
 
         # Off-diagonal extrapolation: Pmix = Pcur + FAC * (Pcur - Pprev)
-        # TODO: unrestricted
         f_b = FAC.view(-1, 1, 1)  # [B,1,1]
         Pmix = (1.0 + f_b) * P_cur - (f_b * P_prev)
     else:
@@ -528,6 +541,8 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
 
     # Workspace for diagonal of P from two steps before
     Pold2_diag = torch.zeros(P.shape[:-1], dtype=P.dtype, device=P.device)
+    # previous step's residual Pnew_{k-1} - P_{k-2}, for the signed extrapolation factor
+    Dprev = torch.zeros_like(P)
 
     # nbas = P.shape[-1]
     # Sqrt of the size of F
@@ -553,9 +568,25 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
         nz = notconverged.nonzero(as_tuple=False).squeeze(-1)
         P_prev = P[nz]  # [B, nbas, nbas]
         P_cur = Pnew[nz]  # [B, nbas, nbas]
+        # the extrapolation factor is only evaluated every third iteration
+        Dprev_nz = Dprev[nz] if k % 3 == 0 else None
         if unrestricted:
-            Pmix_0, diag_prev_0 = adaptive_mix(k, P_prev[:, 0], P_cur[:, 0], Pold2_diag[nz, 0], unrestricted)
-            Pmix_1, diag_prev_1 = adaptive_mix(k, P_prev[:, 1], P_cur[:, 1], Pold2_diag[nz, 1], unrestricted)
+            Pmix_0, diag_prev_0 = adaptive_mix(
+                k,
+                P_prev[:, 0],
+                P_cur[:, 0],
+                Pold2_diag[nz, 0],
+                unrestricted,
+                Dprev_nz[:, 0] if Dprev_nz is not None else None,
+            )
+            Pmix_1, diag_prev_1 = adaptive_mix(
+                k,
+                P_prev[:, 1],
+                P_cur[:, 1],
+                Pold2_diag[nz, 1],
+                unrestricted,
+                Dprev_nz[:, 1] if Dprev_nz is not None else None,
+            )
             if backward:
                 # Build full-batch P via masked where (keeps autograd graph intact)
                 Pold = P + 0.0
@@ -571,8 +602,12 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
             # Update old2 only for notconverged rows
             Pold2_diag[notconverged, 0] = diag_prev_0
             Pold2_diag[notconverged, 1] = diag_prev_1
+            # store P_k - P_{k-1} per spin channel for the next step's factor
+            with torch.no_grad():
+                Dprev[notconverged, 0] = (P_cur[:, 0] - P_prev[:, 0]).detach()
+                Dprev[notconverged, 1] = (P_cur[:, 1] - P_prev[:, 1]).detach()
         else:
-            Pmix, diag_prev = adaptive_mix(k, P_prev, P_cur, Pold2_diag[nz], unrestricted)
+            Pmix, diag_prev = adaptive_mix(k, P_prev, P_cur, Pold2_diag[nz], unrestricted, Dprev[nz])
             if backward:
                 # Build full-batch P via masked where (keeps autograd graph intact)
                 Pold = P + 0.0
@@ -586,6 +621,9 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
 
             # Update old2 only for notconverged rows
             Pold2_diag[notconverged] = diag_prev
+            # store P_k - P_{k-1} for the next step's factor (after the call above used the old value)
+            with torch.no_grad():
+                Dprev[notconverged] = (P_cur - P_prev).detach()
 
         # Rebuild Fock with mixed density
         F = build_fock(problem, configuration, P)

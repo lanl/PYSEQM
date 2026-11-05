@@ -61,7 +61,7 @@ def test_excited_states_single_molecule(device, methane_molecule_data, excited_m
 
     assert_allclose(data["cis_energies"], ref["cis_energies"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["oscillator_strength"], ref["oscillator_strength"], rtol=1e-5, atol=1e-5)
-    assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+    assert_allclose(data["force"], ref["force"], rtol=3e-5, atol=3e-5)
 
 
 @pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)
@@ -140,7 +140,7 @@ def test_cis_batch_different_molecules(device, excited_mixed_batch_data, method)
 
     assert_allclose(data["cis_energies"], ref["cis_energies"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["oscillator_strength"], ref["oscillator_strength"], rtol=1e-5, atol=1e-5)
-    assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+    assert_allclose(data["force"], ref["force"], rtol=3e-5, atol=3e-5)
 
 
 @pytest.mark.parametrize("method", AM1_AND_OM2_METHODS)

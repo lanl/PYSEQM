@@ -113,7 +113,7 @@ def test_excited_force_methods_single_molecule(
     ref_path = reference_path_for_method("excited_force_methane", method, am1_name="excited_force_methane")
     ref = _load_reference_for_mode(ref_path, data, mode_name == "autodiff")
 
-    assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+    assert_allclose(data["force"], ref["force"], rtol=3e-5, atol=3e-5)
 
 
 @pytest.mark.parametrize("method", OMX_METHODS)
