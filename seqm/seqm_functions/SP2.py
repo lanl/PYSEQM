@@ -1,85 +1,76 @@
+import warnings
+
 import torch
 
 # SP2 convergence thresholds for different precisions
 SP2_EPS_FLOAT32 = 1.0e-2  # float32 is harder to converge, use relaxed threshold
 SP2_EPS_FLOAT64_MAX = 1.0e-3
 SP2_EPS_FLOAT64_MIN = 1.0e-7
+SP2_MAX_ITER = 100
 
 
-def SP2(a, nocc, eps=1.0e-4, factor=2.0):
-    # print(a.shape)
-    # a: batch of fock matrixes, don't need to be truncated
-    # noccd: number of occupied MO
-    # return a0: denisty matrixes wich commute with a
-    # factor = 1.0 or 2.0, return a0, tr(a0)= factor*nocc
-    device = a.device
+def SP2(a, nocc, eps=1.0e-4, factor=2.0, max_iter=SP2_MAX_ITER):
+    """
+    Density matrices from batched Fock matrices `a` without diagonalization (no autograd support).
+    a: (N, D, D) Fock matrices, don't need to be truncated
+    nocc: (N,) number of occupied MOs
+    factor: 1.0 or 2.0, return factor*X with tr = factor*nocc
+    The result is a polynomial in `a`, so it commutes with `a`.
+    """
     dtype = a.dtype
-    flag = dtype == torch.float32
-    if flag:
-        # float32, harder to converge to a smaller eps, for this one set eps=1.0e-2, and break when no more improvement
-        # use critiria to check there is no more improvement
-        if eps < SP2_EPS_FLOAT32:
-            eps = SP2_EPS_FLOAT32
-    else:
-        # float64, if use above critiria, the error will keep going down and take lots of iteration to reach no more improvement
-        # so put eps as a small one like 1.0e-4, to recude the number of iterations
-        # use critiria to check the err of current and last iterations both <= eps
-        if eps > SP2_EPS_FLOAT64_MAX:
-            eps = SP2_EPS_FLOAT64_MAX
-        elif eps < SP2_EPS_FLOAT64_MIN:
-            eps = SP2_EPS_FLOAT64_MIN
-    noccd = nocc.type(dtype)
-
+    single = dtype == torch.float32
+    # float32: hard to converge to a small eps, use eps >= 1e-2 and stop when the error no longer improves
+    # float64: the error keeps decreasing for many iterations, so use a small eps (<= 1e-3)
+    # and stop when the errors of the current and last iterations are both <= eps
+    eps = max(eps, SP2_EPS_FLOAT32) if single else min(max(eps, SP2_EPS_FLOAT64_MIN), SP2_EPS_FLOAT64_MAX)
+    noccd = nocc.to(dtype)
     N, D, _ = a.shape
-    # Gershgorin circle theorem estimate
-    ###maximal and minimal eigenvalues
+
+    # Gershgorin circle theorem estimate of the extreme eigenvalues
     aii = a.diagonal(dim1=1, dim2=2)
-    ri = torch.sum(torch.abs(a), dim=2) - torch.abs(aii)
-    h1 = torch.min(aii - ri, dim=1)[0]
-    hN = torch.max(aii + ri, dim=1)[0]
-    # scale a
-    a0 = (
-        torch.eye(D, dtype=dtype, device=device).unsqueeze(0).expand(N, D, D) * hN.reshape(-1, 1, 1) - a
-    ) / (hN - h1).reshape(-1, 1, 1)
+    ri = a.abs().sum(2) - aii.abs()
+    h1 = (aii - ri).amin(1)
+    hN = (aii + ri).amax(1)
+    # scale so spectrum is in [0, 1], occupied (low energy) states near 1
+    X = (torch.diag_embed(hN.unsqueeze(1).expand(N, D)) - a) / (hN - h1).reshape(-1, 1, 1)
 
-    # error from current iteration
-    errm0 = torch.abs(torch.sum(a0.diagonal(dim1=1, dim2=2), dim=1) - noccd)
-    errm1 = errm0.clone()  # error from last iteration
-    errm2 = errm1.clone()  # error from last to second iteration
+    # converged molecules are written to `out` and dropped from the active batch;
+    # idx maps active rows back to their position in the input batch
+    out = torch.empty_like(a)
+    idx = torch.arange(N, device=a.device)
+    tr = X.diagonal(dim1=1, dim2=2).sum(1)
+    # trace errors of the current, last, and second-to-last iterations
+    e0 = (tr - noccd).abs()
+    e1, e2 = e0, e0
 
-    notconverged = torch.ones(N, dtype=torch.bool, device=device)
-    a2 = torch.zeros_like(a)
-    cond = torch.zeros_like(notconverged)
-    k = 0
-    while notconverged.any():
-        a2[notconverged] = a0[notconverged].matmul(a0[notconverged])  # batch supported
-
-        tr_a2 = torch.sum(a2[notconverged].diagonal(dim1=1, dim2=2), dim=1)
-        cond[notconverged] = torch.abs(tr_a2 - noccd[notconverged]) < torch.abs(
-            2.0 * torch.sum(a0[notconverged].diagonal(dim1=1, dim2=2), dim=1) - tr_a2 - noccd[notconverged]
-        )
-        cond1 = notconverged * cond
-        cond2 = notconverged * (~cond)
-        a0[cond1] = a2[cond1]
-        a0[cond2] = 2.0 * a0[cond2] - a2[cond2]
-        errm2[notconverged] = errm1[notconverged]
-        errm1[notconverged] = errm0[notconverged]
-        errm0[notconverged] = torch.abs(
-            torch.sum(a0[notconverged].diagonal(dim1=1, dim2=2), dim=1) - noccd[notconverged]
-        )
-        k += 1
-        # """
-        # print('SP2', k,' '.join([str(x) for x in errm0.tolist()]))
-        # print(' '.join([str(x) for x in torch.symeig(a0)[0][0].tolist()]))
-        # """
-        if flag:
-            # float32, harder to converge to a smaller eps, for this one set eps=1.0e-2, and break when no more improvement
-            notconverged[notconverged.clone()] = ~(
-                (errm0[notconverged] < eps) * (errm0[notconverged] >= errm2[notconverged])
+    for _ in range(max_iter):
+        X2 = X @ X
+        tr2 = X2.diagonal(dim1=1, dim2=2).sum(1)
+        # pick X^2 or 2X - X^2, whichever brings the trace closer to nocc
+        low = (tr2 - noccd).abs() < (2.0 * tr - tr2 - noccd).abs()
+        X = torch.where(low.reshape(-1, 1, 1), X2, 2.0 * X - X2)
+        tr = torch.where(low, tr2, 2.0 * tr - tr2)
+        e2, e1, e0 = e1, e0, (tr - noccd).abs()
+        # NaN comparisons are all False and would otherwise loop forever
+        if not torch.isfinite(e0).all():
+            raise RuntimeError("SP2 produced non-finite values")
+        done = (e0 < eps) & (e0 >= e2) if single else (e0 < eps) & (e1 < eps)
+        if done.all():
+            out[idx] = X
+            return factor * out
+        if done.any():
+            out[idx[done]] = X[done]
+            keep = ~done
+            idx, X, tr, noccd, e0, e1, e2 = (
+                idx[keep],
+                X[keep],
+                tr[keep],
+                noccd[keep],
+                e0[keep],
+                e1[keep],
+                e2[keep],
             )
-        else:
-            # float64, if use above critiria, the error will keep going down and take lots of iteration to reach no more improvement
-            # so put eps as a small one like 1.0e-4, to recude the number of iterations
-            notconverged[notconverged.clone()] = ~((errm0[notconverged] < eps) * (errm1[notconverged] < eps))
 
-    return factor * a0
+    warnings.warn(f"SP2 did not converge in {max_iter} iterations (max trace error {e0.max().item():.2e})")
+    out[idx] = X
+    return factor * out

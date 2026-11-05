@@ -35,3 +35,18 @@ def test_batch_single_point(device, batch_molecule_data, method):
 
     assert_allclose(data["Etot"], ref["Etot"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["force"], ref["force"], rtol=1e-4, atol=1e-4)
+
+
+@pytest.mark.parametrize("converger", [[0, 0.2], [1], [2]])
+def test_batch_single_point_sp2_matches_diagonalization(device, batch_molecule_data, converger):
+    species, coordinates = batch_molecule_data
+    const = Constants().to(device)
+    results = {}
+    for sp2 in ([False], [True, 1.0e-7]):
+        seqm_parameters = {"method": "AM1", "scf_eps": 1.0e-8, "scf_converger": converger, "sp2": sp2}
+        molecule = Molecule(const, seqm_parameters, coordinates, species).to(device)
+        Electronic_Structure(seqm_parameters).to(device)(molecule)
+        results[sp2[0]] = (molecule.Etot.detach().cpu(), molecule.force.detach().cpu())
+
+    assert_allclose(results[True][0], results[False][0], rtol=1e-6, atol=1e-6)
+    assert_allclose(results[True][1], results[False][1], rtol=1e-5, atol=1e-5)
