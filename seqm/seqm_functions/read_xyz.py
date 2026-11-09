@@ -138,7 +138,7 @@ def read_xyz_trajectory(
             idxs = np.where(idxs < 0, idxs + total, idxs)
         order_out = idxs.tolist()  # keep order + duplicates
     else:
-        need_total = (num is not None) or (start < 0) or (stop is not None and stop < 0)
+        need_total = (num is not None) or (start < 0) or (stop is None) or (stop < 0)
         total = count_frames() if need_total else None
         if total == 0:
             zS = np.zeros((0, 0), int)
@@ -219,7 +219,7 @@ def read_xyz_trajectory(
                         )
 
                     if sort:
-                        order = sp.argsort(kind="stable")[::-1]
+                        order = np.argsort(-sp, kind="stable")
                         species_fixed = sp[order]
                         co = co[order]
                     else:
