@@ -243,3 +243,32 @@ def test_nonadiabatic_checkpoint_restores_internal_state(methanal_batch_data, de
     assert torch.allclose(restored_molecule.velocities[1], torch.zeros_like(restored_molecule.velocities[1]))
     assert torch.allclose(restored_molecule.acc[1], torch.zeros_like(restored_molecule.acc[1]))
     assert torch.equal(restored_molecule.active_state, custom_active + 1)
+
+
+@pytest.mark.parametrize("tdc_method", ["hamiltonian_fd", "overlap"])
+def test_nonadiabatic_checkpoint_resume_tdc_methods(methanal_batch_data, device, tmp_path, tdc_method):
+    species, coordinates = methanal_batch_data
+    seqm_parameters = _seqm_parameters("AM1", excited=True)
+    seqm_parameters["nonadiabatic"] = {"tdc_method": tdc_method}
+
+    steps, split, molid = 4, 2, [0, 1]
+    continuous = _run_continuous(
+        dict(seqm_parameters),
+        device,
+        species.clone(),
+        coordinates.clone(),
+        str(tmp_path / "tdc_cont"),
+        molid,
+        steps,
+    )
+    resumed = _run_checkpoint_resume(
+        dict(seqm_parameters),
+        device,
+        species.clone(),
+        coordinates.clone(),
+        str(tmp_path / "tdc_ckpt"),
+        molid,
+        steps,
+        split,
+    )
+    _compare_runs(continuous, resumed, steps)

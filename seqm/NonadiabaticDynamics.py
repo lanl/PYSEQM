@@ -1012,7 +1012,8 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         need_current_cis_amp = self._cache_prev_cis_amp or not torch.is_tensor(init_nac_dot)
         if need_current_cis_amp:
             current_cis_amp = self._current_cis_amplitudes(molecule)
-        if not torch.is_tensor(init_nac_dot):
+        if not torch.is_tensor(init_nac_dot) or self._tdc_method == "overlap":
+            # overlap TDC needs its previous-step buffers even when resuming with a stored nac_dot
             if self._tdc_method == "overlap":
                 if molecule.nocc.dim() != 1:
                     raise NotImplementedError("Overlap TDC currently supports restricted closed-shell only.")
