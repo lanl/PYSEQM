@@ -262,6 +262,10 @@ def _run_composed(
                 self._ci_coordinates()
                 self.Havg = self.H.copy()
                 self.Iteration -= 1
+                if self.trust <= self.params.tmin:
+                    self.state = OPT_STATE.FAILED
+                    return
+                self.trust = max(self.params.tmin, self.trust / 2)
                 self.state = OPT_STATE.SKIP_EVALUATION
                 return
 
