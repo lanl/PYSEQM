@@ -1186,6 +1186,9 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         if getattr(self, "k", None) is not None:
             reuse_P = True
 
+        if "scale_vel" in kwargs and bool(kwargs.get("control_energy_shift", False)):
+            raise ValueError("Cannot scale velocities and fix energy shift simultaneously.")
+
         self.initialize(
             molecule,
             remove_com=remove_com,
@@ -1209,8 +1212,6 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
             )
 
         do_energy_shift = bool(kwargs.get("control_energy_shift", False))
-        if do_scale_vel and do_energy_shift:
-            raise ValueError("Cannot scale velocities and fix energy shift simultaneously.")
 
         E0 = None
         checkpoint_every = self.output_config.checkpoint_every
