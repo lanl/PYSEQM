@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import torch
 
@@ -206,6 +207,11 @@ def _run_uniform_davidson(
             vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
             if vend[i] - vstart[i] == 0:
                 done[i] = True
+                if resid_norm[i].max() > root_tol:
+                    warnings.warn(
+                        f"CIS Davidson: no new independent vectors for molecule {int(i)}; "
+                        f"accepting roots with residual {resid_norm[i].max().item():.3e} > root_tol {root_tol:.1e}."
+                    )
                 amplitude_store[i] = amplitudes[i]
                 n_iters[i] = davidson_iter
 
@@ -216,6 +222,8 @@ def _run_uniform_davidson(
             break
         if davidson_iter > max_iter:
             break
+
+    amplitude_store[~done] = float("nan")  # roots that hit max_iter never wrote amplitudes
 
     if mol.verbose:
         print(f"Number of davidson iterations: {n_iters}, number of subspace collapses: {n_collapses}")
