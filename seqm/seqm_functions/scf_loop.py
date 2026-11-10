@@ -44,6 +44,9 @@ CONVERGENCE_DM_ERROR_FACTOR = 2.0
 CONVERGENCE_DM_ELEMENT_FACTOR = 15.0
 CONVERGENCE_DIIS_FACTOR = 50.0
 
+# Pulay DIIS history of a molecule is discarded when its error-matrix condition number exceeds this
+DIIS_RESET_COND = 1e10
+
 # Upper bound on the adaptive-mixing extrapolation factor
 FAC_MAX = 10.0
 
@@ -268,6 +271,10 @@ def make_density_builder(method, sp2, molsize, backward, scf_converger, openshel
     return inner
 
 
+elec_energy = torch.no_grad()(elec_energy)
+
+
+@torch.no_grad()
 def measure_convergence(
     Pold,
     P,
@@ -372,8 +379,8 @@ def scf_forward0(problem, P, configuration, backward=False, verbose=True):
             Pnew[notconverged] = Pnew[notconverged] / 2
 
         if backward:
-            Pold = P.clone()
-            P = torch.lerp(Pnew, P, alpha)  # alpha * P + (1.0 - alpha) * Pnew
+            Pold = P.detach()
+            P = torch.where(notconverged.view(-1, *[1] * (P.dim() - 1)), torch.lerp(Pnew, P, alpha), P)
         else:
             Pold[notconverged] = P[notconverged]
             P[notconverged] = alpha * P[notconverged] + one_minus_alpha * Pnew[notconverged]
@@ -436,18 +443,7 @@ def scf_forward0(problem, P, configuration, backward=False, verbose=True):
     return P, notconverged
 
 
-def compute_fac(Pnew_diag, P_diag, Pold_diag):
-    diff1 = Pnew_diag - P_diag
-    diff2 = Pnew_diag - 2.0 * P_diag + Pold_diag
-    num = diff1.square().sum(dim=1)
-    den = diff2.square().sum(dim=1)
-    valid = (den > 0) & (num < 100.0 * den)
-    FAC = torch.zeros_like(num)
-    FAC[valid] = torch.sqrt(num[valid] / den[valid])
-    return FAC
-
-
-def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted, D_prev=None):
+def adaptive_mix(scf_iteration, P_prev, P_cur, unrestricted, D_prev=None):
     # We treat each molecule separately (different active sizes)
     is_third = scf_iteration % 3 == 0
     # DAMP per Fortran
@@ -455,23 +451,18 @@ def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted, D_prev=
 
     diag_prev = torch.diagonal(P_prev, dim1=1, dim2=2)  # [B, nbas]
     diag_cur = torch.diagonal(P_cur, dim1=1, dim2=2)  # [B, nbas]
-    diag_old2 = Pold2_diag  # [B, nbas]
 
     occ_number = 1.0 if unrestricted else 2.0
     if is_third:
         with torch.no_grad():
-            if D_prev is None:
-                FAC = compute_fac(diag_cur, diag_prev, diag_old2)
-            else:
-                # signed full-matrix factor (Fortran BORDER.f): r = <Dold,Dnew>/<Dold,Dold>, FAC = r/(1-r)
-                dnew = P_cur - P_prev
-                num = (D_prev * dnew).sum(dim=(1, 2))
-                den = (D_prev * D_prev).sum(dim=(1, 2))
-                r = num / den.clamp_min(1e-30)  # only guards 0/0; masked by `ok` below
-                ok = (den > 0) & (r.abs() < 1.0)
-                # r in (-1, 0) gives FAC in (-0.5, 0); cap the amplifying side at 10
-                # (the bound the diagonal-only formula effectively had)
-                FAC = torch.where(ok, (r / (1.0 - r)).clamp(max=FAC_MAX), torch.zeros_like(r))
+            # signed full-matrix factor (Fortran BORDER.f): r = <Dold,Dnew>/<Dold,Dold>, FAC = r/(1-r)
+            dnew = P_cur - P_prev
+            num = (D_prev * dnew).sum(dim=(1, 2))
+            den = (D_prev * D_prev).sum(dim=(1, 2))
+            r = num / den.clamp_min(1e-30)  # only guards 0/0; masked by `ok` below
+            ok = (den > 0) & (r.abs() < 1.0)
+            # r in (-1, 0) gives FAC in (-0.5, 0); cap the amplifying side at FAC_MAX
+            FAC = torch.where(ok, (r / (1.0 - r)).clamp(max=FAC_MAX), torch.zeros_like(r))
 
         # Off-diagonal extrapolation: Pmix = Pcur + FAC * (Pcur - Pprev)
         f_b = FAC.view(-1, 1, 1)  # [B,1,1]
@@ -480,7 +471,6 @@ def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted, D_prev=
         FAC = torch.zeros(P_cur.shape[0], dtype=P_cur.dtype, device=P_cur.device)
         Pmix = P_cur
 
-    # Diagonal capped/extrapolated vs old2
     delta = diag_cur - diag_prev
 
     # piecewise: cap if |delta|>DAMP, else prev + FAC*delta
@@ -516,7 +506,7 @@ def adaptive_mix(scf_iteration, P_prev, P_cur, Pold2_diag, unrestricted, D_prev=
     # Pmix[:, ar, ar] = di
     diag_view = torch.diagonal(Pmix, dim1=1, dim2=2)
     diag_view.copy_(di)  # in-place write
-    return Pmix, diag_prev
+    return Pmix
 
 
 # adaptive mixing
@@ -539,8 +529,6 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
 
-    # Workspace for diagonal of P from two steps before
-    Pold2_diag = torch.zeros(P.shape[:-1], dtype=P.dtype, device=P.device)
     # previous step's residual Pnew_{k-1} - P_{k-2}, for the signed extrapolation factor
     Dprev = torch.zeros_like(P)
 
@@ -571,25 +559,15 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
         # the extrapolation factor is only evaluated every third iteration
         Dprev_nz = Dprev[nz] if k % 3 == 0 else None
         if unrestricted:
-            Pmix_0, diag_prev_0 = adaptive_mix(
-                k,
-                P_prev[:, 0],
-                P_cur[:, 0],
-                Pold2_diag[nz, 0],
-                unrestricted,
-                Dprev_nz[:, 0] if Dprev_nz is not None else None,
+            Pmix_0 = adaptive_mix(
+                k, P_prev[:, 0], P_cur[:, 0], unrestricted, Dprev_nz[:, 0] if Dprev_nz is not None else None
             )
-            Pmix_1, diag_prev_1 = adaptive_mix(
-                k,
-                P_prev[:, 1],
-                P_cur[:, 1],
-                Pold2_diag[nz, 1],
-                unrestricted,
-                Dprev_nz[:, 1] if Dprev_nz is not None else None,
+            Pmix_1 = adaptive_mix(
+                k, P_prev[:, 1], P_cur[:, 1], unrestricted, Dprev_nz[:, 1] if Dprev_nz is not None else None
             )
             if backward:
                 # Build full-batch P via masked where (keeps autograd graph intact)
-                Pold = P + 0.0
+                Pold = P.detach()
                 P = P.clone()
                 P[notconverged, 0] = Pmix_0
                 P[notconverged, 1] = Pmix_1
@@ -599,18 +577,15 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
                 P[notconverged, 0] = Pmix_0
                 P[notconverged, 1] = Pmix_1
             del Pmix_0, Pmix_1
-            # Update old2 only for notconverged rows
-            Pold2_diag[notconverged, 0] = diag_prev_0
-            Pold2_diag[notconverged, 1] = diag_prev_1
             # store P_k - P_{k-1} per spin channel for the next step's factor
             with torch.no_grad():
                 Dprev[notconverged, 0] = (P_cur[:, 0] - P_prev[:, 0]).detach()
                 Dprev[notconverged, 1] = (P_cur[:, 1] - P_prev[:, 1]).detach()
         else:
-            Pmix, diag_prev = adaptive_mix(k, P_prev, P_cur, Pold2_diag[nz], unrestricted, Dprev[nz])
+            Pmix = adaptive_mix(k, P_prev, P_cur, unrestricted, Dprev_nz)
             if backward:
                 # Build full-batch P via masked where (keeps autograd graph intact)
-                Pold = P + 0.0
+                Pold = P.detach()
                 P = P.clone()
                 P[notconverged] = Pmix
             else:
@@ -619,8 +594,6 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
                 P[notconverged] = Pmix
             del Pmix
 
-            # Update old2 only for notconverged rows
-            Pold2_diag[notconverged] = diag_prev
             # store P_k - P_{k-1} for the next step's factor (after the call above used the old value)
             with torch.no_grad():
                 Dprev[notconverged] = (P_cur - P_prev).detach()
@@ -697,16 +670,6 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     nmol, molsize, themethod, eps = problem.nmol, problem.molsize, configuration.method, configuration.eps
     dtype = M.dtype
     device = M.device
-    # procedure
-    # nDirect1 steps of directly taking new density
-    # nAdapt steps of adaptive mixing (start preparing for pulay)
-    # nFock-nAdapt steps of directly taking new density
-    # pulay
-
-    nDirect1 = 0
-    alpha_direct = 0.7
-
-    nAdapt = 0
     num_orbitals = 9 if themethod == "PM6" else 4
     nbas = molsize * num_orbitals
     notconverged = torch.ones(nmol, dtype=torch.bool, device=M.device)
@@ -729,151 +692,7 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     )
 
     Nnot = nmol
-    for i in range(nDirect1):
-        if Nnot > 0:
-            Pnew[notconverged] = make_Pnew(
-                F[notconverged],
-                nSuperHeavy[notconverged],
-                nHeavy[notconverged],
-                nHydro[notconverged],
-                nOccMO[notconverged],
-            )
-            if backward:
-                Pold = P.clone()
-                P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
-            else:
-                Pold[notconverged] = P[notconverged]
-                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
-
-            F = build_fock(problem, configuration, P)
-
-            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-
-            notconverged, max_dm_err, max_dm_element_err = measure_convergence(
-                Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps
-            )
-
-            Eelec[notconverged] = Eelec_new[notconverged]
-
-            Nnot = int(notconverged.sum())
-            if debug:
-                print(
-                    "scf direct step  : {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k,
-                        torch.argmax(err),
-                        torch.max(err),
-                        torch.argmax(dm_err),
-                        max_dm_err,
-                        torch.argmax(dm_element_err),
-                        max_dm_element_err,
-                    ),
-                    " | N not converged:",
-                    Nnot,
-                )
-            k = k + 1
-        else:
-            if verbose:
-                print(
-                    "scf direct step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k,
-                        torch.argmax(abs(err)),
-                        Eelec_new[torch.argmax(abs(err))],
-                        torch.argmax(abs(err)),
-                        err[torch.argmax(abs(err))],
-                        torch.argmax(dm_err),
-                        max_dm_err,
-                        torch.argmax(dm_element_err),
-                        max_dm_element_err,
-                    ),
-                    " | N not converged:",
-                    Nnot,
-                )
-            return P, notconverged
-
-    """
-    cFock = cFock + 1 if cFock < nFock else nFock
-    #store fock matrix
-    FOCK[...,counter,:,:] = F
-    FPPF[...,counter,:,:] = (F.matmul(P) - P.matmul(F)).triu()
-    # in mopac7 interp.f pulay subroutine, only lower triangle of FPPF is used to construct EMAT
-    #only compute lower triangle as Emat are symmetric
-    EMAT[...,counter,:cFock] = torch.sum(FPPF[..., counter:(counter+1),:,:]*FPPF[...,:cFock,:,:], dim=(2,3))
-    """
-    for i in range(nAdapt):
-        if Nnot > 0:
-            Pnew[notconverged] = make_Pnew(
-                F[notconverged],
-                nSuperHeavy[notconverged],
-                nHeavy[notconverged],
-                nHydro[notconverged],
-                nOccMO[notconverged],
-            )
-
-            # fac = sqrt( \sum_i (P_ii^(k) - P_ii^(k-1))**2 / \sum_i (P_ii^(k) - 2*P_ii^(k-1) + P_ii^(k-2))**2 )
-            with torch.no_grad():
-                Dn = Pnew[notconverged].diagonal(dim1=1, dim2=2)
-                D = P[notconverged].diagonal(dim1=1, dim2=2)
-                Do = Pold[notconverged].diagonal(dim1=1, dim2=2)
-                num = (Dn - D).pow(2).sum(1, keepdim=True)
-                den = (Dn - 2.0 * D + Do).pow(2).sum(1, keepdim=True)
-                fac = torch.sqrt(num / den).view(-1, 1, 1)
-                if backward:
-                    fac_register = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
-                    fac_register[notconverged] = fac
-
-            if backward:
-                Pold = P.clone()
-                P = (1.0 + fac_register) * Pnew - fac_register * P
-            else:
-                Pold[notconverged] = P[notconverged]
-                P[notconverged] = (1.0 + fac) * Pnew[notconverged] - fac * P[notconverged]
-
-            F = build_fock(problem, configuration, P)
-            Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-
-            notconverged, max_dm_err, max_dm_element_err = measure_convergence(
-                Pold, P, notconverged, matrix_size_sqrt, dm_err, dm_element_err, Eelec_new, err, Eelec, eps
-            )
-
-            Eelec[notconverged] = Eelec_new[notconverged]
-
-            Nnot = int(notconverged.sum())
-            if debug:
-                print(
-                    "scf adaptive step: {:>3d} | MAX \u0394E[{:>4d}]: {:>12.7f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k,
-                        torch.argmax(err),
-                        torch.max(err),
-                        torch.argmax(dm_err),
-                        max_dm_err,
-                        torch.argmax(dm_element_err),
-                        max_dm_element_err,
-                    ),
-                    " | N not converged:",
-                    Nnot,
-                )
-
-            k = k + 1
-        else:
-            if verbose:
-                print(
-                    "scf adaptive step  : {:>3d} | E[{:>4d}]: {:>12.8f} | MAX \u0394E[{:>4d}]: {:>12.8f} | MAX \u0394DM[{:>4d}]: {:>12.7f} | MAX \u0394DM_ij[{:>4d}]: {:>10.7f}".format(
-                        k,
-                        torch.argmax(abs(err)),
-                        Eelec_new[torch.argmax(abs(err))],
-                        torch.argmax(abs(err)),
-                        err[torch.argmax(abs(err))],
-                        torch.argmax(dm_err),
-                        max_dm_err,
-                        torch.argmax(dm_element_err),
-                        max_dm_element_err,
-                    ),
-                    " | N not converged:",
-                    Nnot,
-                )
-            return P, notconverged
-    # del Pold, Pnew
-
+    max_dm_err = max_dm_element_err = None
     # number of maximal fock matrixes used
     nFock = 10
 
@@ -909,13 +728,15 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     # store last n=nFock number of Fock matrixes
     FOCK = torch.zeros(nmol, nFock, nbas, nbas, dtype=dtype, device=device)
     # start prepare for pulay algorithm
-    counter = -1  # index of stored FPPF for current iteration: 0, 1, ..., cFock-1
-    cFock = 0  # in current iteraction, number of fock matrixes stored, cFock <= nFock
+    counter = -1  # slot written this iteration, shared by the batch
+    cFock = 0  # slots written so far, <= nFock
+    nvalid = torch.zeros(nmol, dtype=torch.long, device=device)  # per-molecule usable history length
+    slots = torch.arange(nFock, device=device)
+    eye = torch.eye(nFock + 1, dtype=dtype, device=device)
     # Pulay algorithm needs at least two previous stored density and Fock matrixes to start
     alpha_direct = 0.5
     diis_error = torch.empty_like(Eelec).fill_(torch.finfo(dtype).max)
 
-    reset_diis = False
     if dtype == torch.float64:
         eval_eps = 1e-13
         clamp_eps = 1e-15
@@ -945,9 +766,11 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
                 )
             return P, notconverged
 
-        cFock = cFock + 1 if cFock < nFock else nFock
-        # store fock matrix
+        cFock = min(cFock + 1, nFock)
         counter = (counter + 1) % nFock
+        nvalid.add_(1).clamp_(max=nFock)
+        mix = alpha_direct * (nvalid < 2).to(dtype)  # direct mixing until two residuals are stored
+        # store fock matrix
         FOCK[notconverged, counter, :, :] = F[notconverged]
         with torch.no_grad():
             F_nc = F[notconverged]  # (N_act, nbas, nbas)
@@ -965,28 +788,36 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
                 FPPF_packed[notconverged, :cFock, :].transpose(1, 2),
             )  #  result: (N_act, 1, cFock)
             EMAT[notconverged, counter, :cFock] = prod[:, 0, :]
+            EMAT[notconverged, :cFock, counter] = prod[:, 0, :]
 
         if cFock >= 2:
             with torch.no_grad():
-                EVEC = EMAT[notconverged, : (cFock + 1), : (cFock + 1)]
+                valid = (counter - slots) % nFock < nvalid[notconverged, None]  # (N_act, nFock)
+                valid = torch.cat((valid, valid.new_ones(valid.shape[0], 1)), dim=1)  # border is always valid
+                EVEC = EMAT[notconverged]
                 # EVEC += EVEC.tril(-1).transpose(1,2) # no need to symmetrize because torch.linalg.eigh uses only the lower triangle
                 denom = EVEC[:, counter, counter].clamp(clamp_eps)
-                EVEC[:, :cFock, :cFock] /= denom.view(-1, 1, 1)
+                EVEC[:, :nFock, :nFock] /= denom.view(-1, 1, 1)
+                EVEC = torch.where(valid[:, :, None] & valid[:, None, :], EVEC, eye)
 
                 # Calculate the pseudo-inverse to get the DIIS mixing coeffients
                 L, Q = torch.linalg.eigh(EVEC)
                 absvals = L.abs()
-                # calculate the condition-number to see if EVEC is ill-conditioned and hence DIIS needs to be reset
+                # reset the history only of molecules whose EVEC is ill-conditioned
                 cond = torch.amax(absvals, dim=-1) / torch.amin(absvals, dim=-1)  # .clamp(min=1e-15)
-                reset_diis = torch.any(cond > 1e7)
+                nvalid[notconverged] *= cond <= DIIS_RESET_COND
                 valid_eigs = absvals > eval_eps
                 inv_eig = torch.zeros_like(L)
                 inv_eig[valid_eigs] = L[valid_eigs].reciprocal()
                 coeff = -torch.einsum("bki,bi,bi->bk", Q[:, :cFock, :], inv_eig, Q[:, -1, :])  # (b', cFock)
+                # one stored Fock matrix: keep it unchanged
+                coeff = torch.where(
+                    (mix[notconverged] > 0)[:, None],
+                    (slots[:cFock] == counter).to(dtype),
+                    coeff * valid[:, :cFock],
+                )
 
-            F[notconverged] = torch.sum(
-                FOCK[notconverged, :cFock, :, :] * coeff.unsqueeze(-1).unsqueeze(-1), dim=1
-            )
+            F[notconverged] = torch.sum(FOCK[notconverged, :cFock] * coeff[:, :, None, None], dim=1)
 
         Pnew[notconverged] = make_Pnew(
             F[notconverged],
@@ -997,17 +828,13 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
         )
 
         if backward:
-            Pold = P.clone()
-            if cFock < 2:
-                P = alpha_direct * P + (1.0 - alpha_direct) * Pnew
-            else:
-                P = Pnew.clone()
+            Pold = P.detach()
+            a = mix.view(-1, 1, 1)
+            P = torch.where(notconverged.view(-1, 1, 1), a * P + (1.0 - a) * Pnew, P)
         else:
             Pold[notconverged] = P[notconverged]
-            if cFock < 2:
-                P[notconverged] = alpha_direct * P[notconverged] + (1.0 - alpha_direct) * Pnew[notconverged]
-            else:
-                P[notconverged] = Pnew[notconverged]
+            a = mix[notconverged].view(-1, 1, 1)
+            P[notconverged] = a * P[notconverged] + (1.0 - a) * Pnew[notconverged]
 
         F = build_fock(problem, configuration, P)
 
@@ -1044,21 +871,6 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
                 " | N not converged:",
                 Nnot,
             )
-
-        if reset_diis:
-            reset_diis = False
-            if debug:
-                print(f"Resetting DIIS at k = {k + 1}, cFock is {cFock}, counter is {counter}")
-            counter = -1
-            cFock = 0
-            FPPF_packed.zero_()
-            EMAT = (
-                (torch.eye(nFock + 1, nFock + 1, dtype=dtype, device=device) - 1.0)
-                .expand(nmol, nFock + 1, nFock + 1)
-                .tril()
-                .clone()
-            )
-            FOCK.zero_()
 
     return P, notconverged
 
