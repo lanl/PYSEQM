@@ -81,27 +81,74 @@ def _uniform_molecule_dimensions(mol):
     return cached
 
 
+ORTH_STEP_FLOOR = 0.01  # smallest Davidson correction worth a basis vector, as a fraction of root_tol
+_ORTH_GRAM_FLOOR = 1e3
+_ORTH_DGKS_ETA = 0.7
+
+
+def _orthonormal_rows(W, tol):
+    """Orthonormal basis for the row span of ``W`` from directions with singular value > ``tol``, largest first."""
+    eigenvalues, eigenvectors = torch.linalg.eigh(W @ W.T)
+    floor = _ORTH_GRAM_FLOOR * torch.finfo(W.dtype).eps * eigenvalues[-1]
+    # The Gram matrix squares the condition number, so it only resolves singular values above ~sqrt(floor)
+    if bool((eigenvalues[0] > floor) | (tol * tol > floor)):
+        keep = (eigenvalues > tol * tol).flip(0)
+        eigenvalues, eigenvectors = eigenvalues.flip(0)[keep], eigenvectors.flip(1)[:, keep]
+        Q = (eigenvectors / eigenvalues.sqrt()).T @ W
+        L, info = torch.linalg.cholesky_ex(Q @ Q.T)
+        if int(info) == 0:
+            return torch.linalg.solve_triangular(L, Q, upper=False)
+    Qt, R = torch.linalg.qr(W.T)
+    U, S, _ = torch.linalg.svd(R)
+    return (Qt @ U[:, S > tol]).T
+
+
 def orthogonalize_to_current_subspace(V, newsubspace, vend, tol):
-    """Append an orthonormal basis for corrections surviving projection."""
+    """Append an orthonormal basis for the corrections that add a new direction to ``V[:vend]``; return the new size.
 
+    Rows are normalized first, so rank is decided by the sine of each row's angle to ``V[:vend]`` and does not depend
+    on the caller's scaling. ``tol`` is absolute: a correction whose norm times that sine is below it gets no vector.
+    """
     V_old = V[:vend]
-    W = newsubspace - (newsubspace @ V_old.T) @ V_old
+    eps = torch.finfo(V.dtype).eps
+    rel_tol = 1e3 * eps * max(vend, 1) ** 0.5
+    orth_atol = 10 * eps * V.shape[1] ** 0.5
+
+    norm0 = torch.linalg.vector_norm(newsubspace, dim=1)
+    finite = torch.isfinite(norm0) & (norm0 > 0)
+    if not bool(finite.any()):
+        return vend
+    norm0 = norm0[finite]
+    W = newsubspace[finite] / norm0.unsqueeze(1)
+
+    # Each projection streams the whole basis, so re-project only rows that lost much of their norm. If the second
+    # pass still shrinks a row a lot, it was rounding noise in span(V).
     W = W - (W @ V_old.T) @ V_old
-    W = W[torch.linalg.vector_norm(W, dim=1) > tol]
-    if W.shape[0] == 0:
-        return vend
+    sine = torch.linalg.vector_norm(W, dim=1)
+    again = (sine < _ORTH_DGKS_ETA) & (sine > rel_tol)
+    dependent = torch.zeros_like(again)
+    if bool(again.any()):
+        W2 = W[again]
+        W2 = W2 - (W2 @ V_old.T) @ V_old
+        sine2 = torch.linalg.vector_norm(W2, dim=1)
+        dependent[again] = sine2 < _ORTH_DGKS_ETA * sine[again]
+        W[again], sine[again] = W2, sine2
+    step = norm0 * sine
 
-    _, singular_values, right_vectors = torch.linalg.svd(W, full_matrices=False)
-    Q_new = right_vectors[singular_values > tol]
-    if Q_new.shape[0] == 0:
+    keep = (sine > rel_tol) & ~dependent & (step > tol)
+    if not bool(keep.any()):
         return vend
+    W, sine, step = W[keep], sine[keep], step[keep]
 
-    orth_atol = 1e-13 if Q_new.dtype == torch.float64 else 1e-6
-    if (Q_new @ V_old.T).abs().max() > orth_atol:
-        Q_new -= (Q_new @ V_old.T) @ V_old
-        Q_new -= (Q_new @ V_old.T) @ V_old
-        _, singular_values, right_vectors = torch.linalg.svd(Q_new, full_matrices=False)
-        Q_new = right_vectors[singular_values > tol]
+    # Dividing by sine amplifies a row's rounding error by 1/sine
+    intra_tol = torch.maximum(rel_tol / sine.min(), tol / step.max())
+    Q_new = _orthonormal_rows(W / sine.unsqueeze(1), intra_tol)
+
+    # Orthonormalizing amplified the leftover overlap with V; one more projection removes it
+    if vend > 0 and Q_new.shape[0] > 0:
+        overlap = Q_new @ V_old.T
+        if overlap.abs().max() > orth_atol:
+            Q_new = _orthonormal_rows(Q_new - overlap @ V_old, 0.5)
 
     n_new = Q_new.shape[0]
     if vend + n_new > V.shape[0]:

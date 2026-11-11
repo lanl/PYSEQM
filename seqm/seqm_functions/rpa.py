@@ -1,8 +1,7 @@
-import math
-
 import torch
 
 from .excited_state_utils import (
+    ORTH_STEP_FLOOR,
     _uniform_molecule_dimensions,
     gather_new_subspace,
     getMaxSubspacesize,
@@ -63,7 +62,7 @@ def rpa(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=None):
         V[:, :nstart, :] = init_amplitude_guess
 
     max_iter = int(mol.seqm_parameters.get("excited_states", {}).get("max_iter", 200))
-    vector_tol = root_tol * 0.01 * math.sqrt(nov)  # Vectors whose norm is smaller than this will be discarded
+    vector_tol = ORTH_STEP_FLOOR * root_tol
     davidson_iter = 0
     vstart = torch.zeros(nmol, dtype=torch.long, device=device)
     vend = torch.full((nmol,), nstart, dtype=torch.long, device=device)

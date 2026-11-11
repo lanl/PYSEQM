@@ -16,6 +16,7 @@ from seqm.seqm_functions.pack import packone, unpackone
 from .constants import a0
 from .dipole import calc_dipole_matrix
 from .excited_state_utils import (
+    ORTH_STEP_FLOOR,
     gather_new_subspace,
     get_occ_virt,
     getMaxSubspacesize,
@@ -66,9 +67,7 @@ def _run_mixed_davidson(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=Non
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     HV = torch.clone(V)
 
-    vector_tol = (
-        root_tol * 0.01 * torch.sqrt(nov_batch)
-    )  # Vectors whose norm is smaller than this will be discarded
+    vector_tol = ORTH_STEP_FLOOR * root_tol
 
     if init_amplitude_guess is None:
         occ_idx = torch.arange(nocc, device=device).view(1, -1, 1)
@@ -173,7 +172,7 @@ def _run_mixed_davidson(mol, w, e_mo, nroots, root_tol, init_amplitude_guess=Non
             )
 
             vstart[i] = vend[i]
-            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol[i])
+            vend[i] = orthogonalize_to_current_subspace(V[i], newsubspace, vend[i], vector_tol)
             if vend[i] - vstart[i] == 0:
                 done[i] = True
                 amplitude_store[i] = amplitudes[i]

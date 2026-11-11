@@ -9,6 +9,7 @@ from seqm.utils.torch_compile import optional_compile_function
 from .constants import a0
 from .dipole import calc_dipole_matrix
 from .excited_state_utils import (
+    ORTH_STEP_FLOOR,
     _uniform_molecule_dimensions,
     gather_new_subspace,
     get_occ_virt,
@@ -92,7 +93,7 @@ def _run_uniform_davidson(
     V = torch.zeros(nmol, maxSubspacesize, nov, device=device, dtype=dtype)
     HV = torch.clone(V)
 
-    vector_tol = root_tol * 0.01 * math.sqrt(nov)  # Vectors whose norm is smaller than this will be discarded
+    vector_tol = ORTH_STEP_FLOOR * root_tol
 
     if init_amplitude_guess is None:
         nstart, nroots = make_guess(approxH, nroots, maxSubspacesize, V, nmol, nov)
@@ -140,6 +141,8 @@ def _run_uniform_davidson(
     n_iters = torch.zeros_like(vstart)
     chunk_plan_cache = {}
     roots_not_converged = torch.zeros(nmol, nroots, dtype=torch.bool, device=device)
+    H_cache = torch.zeros(nmol, maxSubspacesize, maxSubspacesize, dtype=dtype, device=device)
+    rebuild_H = torch.ones(nmol, dtype=torch.bool, device=device)
 
     while davidson_iter <= max_iter:  # Davidson loop
         V_batched, batch_idx, abs_idx, mask = gather_new_subspace(V, vstart, vend, done)
@@ -154,8 +157,14 @@ def _run_uniform_davidson(
 
         vend_max = int(torch.max(vend).item())
         active_mask = ~done
-        H = torch.empty(nmol, vend_max, vend_max, dtype=dtype, device=device)
-        H[active_mask] = torch.einsum("bno,bro->bnr", V[active_mask, :vend_max], HV[active_mask, :vend_max])
+        # Only the rows added this iteration are new, so update just those rows and columns of the cached H
+        for i in torch.nonzero(active_mask).squeeze(1).tolist():
+            # vstart is advanced past a collapse, so a collapsed molecule needs the explicit rebuild flag
+            start, stop = (0 if rebuild_H[i] else int(vstart[i])), int(vend[i])
+            H_cache[i, :stop, start:stop] = V[i, :stop] @ HV[i, start:stop].T
+            H_cache[i, start:stop, :stop] = V[i, start:stop] @ HV[i, :stop].T
+        rebuild_H.zero_()
+        H = H_cache[:, :vend_max, :vend_max]
 
         davidson_iter = davidson_iter + 1
         n_iters[~done] = davidson_iter
@@ -192,6 +201,7 @@ def _run_uniform_davidson(
             vstart[collapse_mask] = 0
             vend[collapse_mask] = nroots
             n_collapses[collapse_mask] += 1
+            rebuild_H[collapse_mask] = True
 
         # Orthogonalize the residual vectors for molecules
         orthogonalize_mask = (~done) & (~mol_converged)  # & (~collapse_condition)
@@ -421,46 +431,71 @@ def _makeA_pi_batched_kernel(
     nmol: int,
     allSymmetric: bool = False,
 ):
+    # Exchange is linear in the density, so F[I,J] = K(B_IJ) and F[J,I] = K(B_JI^T)^T need no symmetric split.
     device = P0.device
     dtype = P0.dtype
-    nnewRoots = P0.shape[1]
-    F = _makeA_pi_symm_batch_impl(
-        P0, w, mask, maskd, mask_l, idxi, idxj, gss, gsp, gpp, gp2, hsp, molsize, nmol
-    )
+    nroots = P0.shape[1]
+    npairs = w.shape[1]
+    tri_i, tri_j, weight, ind = _rcis_constant_tensors(dtype, device)
+
+    Pb = P0.reshape(nmol, nroots, molsize, 4, molsize, 4).permute(0, 1, 2, 4, 3, 5)
+    row, col = mask // molsize, mask % molsize
+    row_l, col_l = mask_l // molsize, mask_l % molsize
+    diag = torch.arange(molsize, device=device)
+    B_ij = Pb[:, :, row, col]
+    B_ji_T = Pb[:, :, col, row].transpose(-1, -2)
+    Bd = Pb[:, :, diag, diag]
+    Pd = 0.5 * (Bd + Bd.transpose(-1, -2))
+
+    Fdiag = torch.zeros(nmol, nroots, molsize, 4, 4, dtype=dtype, device=device)
+    PA = Pd[:, :, idxi][..., tri_i, tri_j] * weight
+    sumA = torch.zeros(nmol, nroots, npairs, 4, 4, dtype=dtype, device=device)
+    sumA[..., tri_i, tri_j] = torch.einsum("nrps,npsS->nrpS", PA, w)
+    Fdiag.index_add_(2, idxj, sumA)
+    PB = Pd[:, :, idxj][..., tri_i, tri_j] * weight
+    sumB = torch.zeros(nmol, nroots, npairs, 4, 4, dtype=dtype, device=device)
+    sumB[..., tri_i, tri_j] = torch.einsum("nrpS,npsS->nrps", PB, w)
+    Fdiag.index_add_(2, idxi, sumB)
+    del PA, PB, sumA, sumB
+
+    w16 = None if _is_compiling() else _exchange_w16(w, ind)
+    if allSymmetric:
+        K = torch.empty(nmol, nroots, npairs, 4, 4, dtype=dtype, device=device)
+        _contract_exchange_4x4(0.5 * (B_ij + B_ji_T), w, ind, K, w16)
+        K_ij = K_ji_T = K
+    else:
+        K = torch.empty(nmol, 2 * nroots, npairs, 4, 4, dtype=dtype, device=device)
+        _contract_exchange_4x4(torch.cat((B_ij, B_ji_T), dim=1), w, ind, K, w16)
+        K_ij, K_ji_T = K[:, :nroots], K[:, nroots:]
+
+    Pptot = Pd[..., 1, 1] + Pd[..., 2, 2] + Pd[..., 3, 3]
+    Fdiag[..., 0, 0] += 0.5 * Pd[..., 0, 0] * gss.unsqueeze(1) + Pptot * (gsp - 0.5 * hsp).unsqueeze(1)
+    for i in range(1, 4):
+        Fdiag[..., i, i] += (
+            Pd[..., 0, 0] * (gsp - 0.5 * hsp).unsqueeze(1)
+            + 0.5 * Pd[..., i, i] * gpp.unsqueeze(1)
+            + (Pptot - Pd[..., i, i]) * (1.25 * gp2 - 0.25 * gpp).unsqueeze(1)
+        )
+        Fdiag[..., 0, i] += Pd[..., 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
+    for i, j in [(1, 2), (1, 3), (2, 3)]:
+        Fdiag[..., i, j] += Pd[..., i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
+    Fdiag = Fdiag + Fdiag.triu(1).transpose(3, 4)
 
     if not allSymmetric:
-        P0_blocks = P0.reshape(nmol, nnewRoots, molsize, 4, molsize, 4).transpose(3, 4)
-        P_anti = 0.5 * (P0_blocks - P0_blocks.transpose(2, 3).transpose(4, 5))
-        P_anti = P_anti.reshape(nmol, nnewRoots, molsize * molsize, 4, 4)
-        del P0_blocks, P0
-
-        _, _, _, ind = _rcis_constant_tensors(dtype, device)
-        sumK = torch.empty(nmol, nnewRoots, w.shape[1], 4, 4, dtype=dtype, device=device)
-        Pp = P_anti[:, :, mask]
-        _contract_exchange_4x4(Pp, w, ind, sumK)
-        F.index_add_(2, mask, sumK)
-        F[:, :, mask_l] -= sumK.transpose(3, 4)
-        del Pp
-        del sumK
-
-        F2e1c = torch.zeros(nmol, nnewRoots, maskd.shape[0], 4, 4, device=device, dtype=dtype)
+        Pa = 0.5 * (Bd - Bd.transpose(-1, -2))
+        F2e1c = torch.zeros_like(Fdiag)
         for i in range(1, 4):
-            F2e1c[..., 0, i] = P_anti[..., maskd, 0, i] * (0.5 * hsp - 0.5 * gsp).unsqueeze(1)
+            F2e1c[..., 0, i] = Pa[..., 0, i] * (0.5 * hsp - 0.5 * gsp).unsqueeze(1)
         for i, j in [(1, 2), (1, 3), (2, 3)]:
-            F2e1c[..., i, j] = P_anti[..., maskd, i, j] * (0.25 * gpp - 0.75 * gp2).unsqueeze(1)
+            F2e1c[..., i, j] = Pa[..., i, j] * (0.25 * gpp - 0.75 * gp2).unsqueeze(1)
+        Fdiag = Fdiag + (F2e1c - F2e1c.triu(1).transpose(3, 4))
 
-        F2e1c.add_(F2e1c.triu(1).transpose(3, 4), alpha=-1.0)
-        F[:, :, maskd] += F2e1c
-        del P_anti
-        del F2e1c
-
-    F0 = (
-        F.reshape(nmol, nnewRoots, molsize, molsize, 4, 4)
-        .transpose(3, 4)
-        .reshape(nmol * nnewRoots, 4 * molsize, 4 * molsize)
-    )
-    del F
-    return F0
+    F = torch.zeros(nmol, nroots, molsize, 4, molsize, 4, dtype=dtype, device=device)
+    Fv = F.permute(0, 1, 2, 4, 3, 5)
+    Fv[:, :, row, col] = K_ij
+    Fv[:, :, row_l, col_l] = K_ji_T.transpose(-1, -2)
+    Fv[:, :, diag, diag] = Fdiag
+    return F.reshape(nmol * nroots, 4 * molsize, 4 * molsize)
 
 
 def makeA_pi_symm_batch(mol, P0, w, parameters=None):
@@ -487,17 +522,31 @@ def makeA_pi_symm_batch(mol, P0, w, parameters=None):
     )
 
 
-def _contract_exchange_4x4(P, w, ind, out):
-    """Use four row contractions eagerly; Inductor fuses scalar outputs better."""
+def _exchange_w16(w, ind):
+    """``W16[p, 4*s+S, 4*i+j] = w[p, ind[i, s], ind[j, S]]``: the exchange per pair is a 16-vector times this."""
+    n, p = w.shape[:2]
+    row = ind.t()[:, None, :, None].expand(4, 4, 4, 4).reshape(16, 16)
+    col = ind.t()[None, :, None, :].expand(4, 4, 4, 4).reshape(16, 16)
+    return w[:, :, row, col].reshape(n * p, 16, 16)
+
+
+def _contract_exchange_4x4(P, w, ind, out, w16=None):
+    """K[r,p,i,j] = -0.5 * sum_{s,S} P[r,p,s,S] w[p, ind[i,s], ind[j,S]].
+
+    Eager mode uses one batched matmul over pairs; Inductor fuses the scalar-output form better.
+    """
     if _is_compiling():
         for i in range(4):
             for j in range(4):
                 out[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", P, w[..., ind[i], :][..., :, ind[j]])
         return out
 
-    for i in range(4):
-        w_row = w[..., ind[i], :][..., :, ind]
-        out[..., i, :] = -0.5 * torch.einsum("nrpsS,npsjS->nrpj", P, w_row)
+    if w16 is None:
+        w16 = _exchange_w16(w, ind)
+    nmol, nroots, npairs = P.shape[:3]
+    x = P.reshape(nmol, nroots, npairs, 16).permute(0, 2, 1, 3).reshape(nmol * npairs, nroots, 16)
+    y = torch.bmm(x, w16).mul_(-0.5)
+    out.copy_(y.reshape(nmol, npairs, nroots, 4, 4).permute(0, 2, 1, 3, 4))
     return out
 
 
