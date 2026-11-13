@@ -97,7 +97,9 @@ def _orthonormal_rows(W, tol):
         Q = (eigenvectors / eigenvalues.sqrt()).T @ W
         L, info = torch.linalg.cholesky_ex(Q @ Q.T)
         if int(info) == 0:
-            return torch.linalg.solve_triangular(L, Q, upper=False)
+            # triangular solve with a short, wide right-hand side is very slow on CUDA; invert L and matmul
+            eye = torch.eye(L.shape[0], dtype=L.dtype, device=L.device)
+            return torch.linalg.solve_triangular(L, eye, upper=False) @ Q
     Qt, R = torch.linalg.qr(W.T)
     U, S, _ = torch.linalg.svd(R)
     return (Qt @ U[:, S > tol]).T
