@@ -2,7 +2,22 @@ import math
 
 import torch as th
 
+from seqm.utils.torch_compile import optional_compile_function
+
 from .two_elec_two_center_int import rotate_with_quaternion
+
+_set_dispatch = None
+
+
+def enable_overlap_compile(mode=None, **options):
+    """Compile the A and B overlap integrals; the mask-driven overlap assembly around them stays eager."""
+    global _set_dispatch
+
+    compile_options = dict(options)
+    compile_options.setdefault("dynamic", True)  # the number of pairs changes between calls
+    if mode is not None:
+        compile_options["mode"] = mode
+    _set_dispatch = optional_compile_function(_SET_kernel, compile_options=compile_options, label="overlap.SET")
 
 
 def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
@@ -454,6 +469,10 @@ def SET(rij, jcall, z1, z2):
     """
     get the A integrals and B integrals for diatom_overlap_matrix
     """
+    return (_set_dispatch or _SET_kernel)(rij, jcall, z1, z2)
+
+
+def _SET_kernel(rij, jcall, z1, z2):
     # alpha, beta below is used in aintgs and bintgs, not the parameters for AM1/MNDO/PM3
     # rij: distance between atom i and j in atomic unit
     alpha = 0.5 * rij * (z1[..., :] + z2[..., :])
@@ -522,12 +541,40 @@ def aintgs(x0, jcall):
     return th.cat((a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13), dim=1)
 
 
+_B_SERIES_CUTOFF = 1.8  # the Taylor series is used for |x| up to this, the upward recurrence beyond it
+_B_SERIES_TERMS = 8  # terms in x^2: ~1e-10 accurate at the cutoff
+_B_NORDER = 13
+_b_series_cache = {}
+
+
+def _b_series_tables(dtype, device):
+    """Taylor coefficients of B_k in u = x^2 and the odd-k mask.
+
+    B_k(-x) = (-1)^k B_k(x), so B_k = sum_j C[j, k] u^j, times x for odd k. With m = 2j (even k) or 2j + 1 (odd k),
+    C[j, k] = 2 (-1)^m / (m! (k + m + 1)).
+    """
+    key = (dtype, device)
+    if key not in _b_series_cache:
+        C = th.zeros(_B_SERIES_TERMS, _B_NORDER, dtype=th.float64)
+        for k in range(_B_NORDER):
+            for j in range(_B_SERIES_TERMS):
+                m = 2 * j + k % 2
+                C[j, k] = 2.0 * (-1) ** m / (math.factorial(m) * (k + m + 1))
+        odd = th.arange(_B_NORDER, dtype=th.float64) % 2
+        _b_series_cache[key] = (C.to(dtype=dtype, device=device), odd.to(dtype=dtype, device=device))
+    return _b_series_cache[key]
+
+
 def bintgs(x0, jcall):
-    """Evaluate the 13 B overlap integrals with stable piecewise formulas."""
+    """Evaluate the 13 B overlap integrals, B_k(x) = int_{-1}^{1} t^k exp(-x t) dt, k = 0..12.
+
+    The upward recurrence in k magnifies rounding error by about (k-1)/|x| at each order, which is too much for small
+    |x|, so there B_k comes from its Taylor series instead. The result is accurate to ~1e-10 for every k, and the
+    columns the overlap routines read (k <= 6) are mostly better.
+    """
     del jcall  # Kept in the public signature for compatibility with SET.
     x = x0.reshape(-1, 1)
-    absx = th.abs(x)
-    large = absx > 0.5
+    large = th.abs(x) > _B_SERIES_CUTOFF
 
     # A safe placeholder prevents singular values and gradients in the branch
     # that torch.where discards.
@@ -544,17 +591,12 @@ def bintgs(x0, jcall):
         previous = leading + (order - 1) * previous * inv_x
         large_values.append(previous)
 
-    x2 = x * x
-    x3 = x * x2
-    x4 = x2 * x2
-    x5 = x * x4
-    x6 = x2 * x4
-    values = []
-    for order, large_value in enumerate(large_values, start=1):
-        if order % 2:
-            series = 2.0 / order + x2 / (order + 2) + x4 / (12 * (order + 4)) + x6 / (360 * (order + 6))
-        else:
-            series = -2.0 * x / (order + 1) - x3 / (3 * (order + 3)) - x5 / (60 * (order + 5))
-        values.append(th.where(large, large_value, series))
+    x_small = th.where(large, th.zeros_like(x), x)
+    u = x_small * x_small
+    coeff, odd = _b_series_tables(x.dtype, x.device)
+    series = coeff[-1].expand(x.shape[0], _B_NORDER)
+    for j in range(_B_SERIES_TERMS - 2, -1, -1):
+        series = series * u + coeff[j]
+    series = series * (1.0 + odd * (x_small - 1.0))
 
-    return th.cat(values, dim=1)
+    return th.where(large, th.cat(large_values, dim=1), series)

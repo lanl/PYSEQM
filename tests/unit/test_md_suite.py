@@ -270,7 +270,7 @@ def test_md_torch_compile_requires_explicit_opt_in(monkeypatch):
 
 
 def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, device, methane_molecule_data):
-    from seqm.seqm_functions import rcis_batch
+    from seqm.seqm_functions import diat_overlap_PM6_SP, rcis_batch
 
     calls = []
 
@@ -279,7 +279,8 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
         return fn
 
     monkeypatch.setattr(torch, "compile", fake_compile)
-    monkeypatch.setattr(rcis_batch, "_makeA_pi_batched_dispatch", None)
+    monkeypatch.setattr(rcis_batch, "_makeA_diag_dispatch", None)
+    monkeypatch.setattr(diat_overlap_PM6_SP, "_set_dispatch", None)
 
     species, coordinates = methane_molecule_data
     seqm_parameters = _seqm_parameters("AM1", excited=True)
@@ -300,9 +301,10 @@ def test_md_torch_compile_registers_repeated_kernels(monkeypatch, tmp_path, devi
     _run_md(md, molecule, steps=1)
 
     compiled_names = {name for name, _ in calls}
-    assert compiled_names == {"_makeA_pi_batched_kernel"}
+    assert compiled_names == {"_makeA_diag_blocks", "_SET_kernel"}
     assert all(kwargs["mode"] == "reduce-overhead" for _, kwargs in calls)
-    assert rcis_batch._makeA_pi_batched_dispatch.fn is rcis_batch._makeA_pi_batched_kernel
+    assert rcis_batch._makeA_diag_dispatch.fn is rcis_batch._makeA_diag_blocks
+    assert diat_overlap_PM6_SP._set_dispatch.fn is diat_overlap_PM6_SP._SET_kernel
 
 
 @pytest.mark.parametrize("method", LANGEVIN_METHODS)

@@ -1,6 +1,7 @@
 import os
 import time
 
+import numpy as np
 import torch
 
 from .dynamics.active_state import active_state_tensor
@@ -744,25 +745,29 @@ class Energy(torch.nn.Module):
         dev = new_mos.device
 
         def greedy_unique_perm(S_abs):  # S_abs: [k,r,r]
-            perms = []
-            r = S_abs.shape[1]
-            for Sbi in S_abs:
-                pref = torch.argsort(Sbi, dim=1, descending=True)
-                if r > 1:
-                    top2 = torch.gather(Sbi, 1, pref[:, :2])
-                    row_priority = top2[:, 0] - top2[:, 1]
-                else:
-                    row_priority = Sbi[:, 0]
+            # Rows take their highest-overlap unused column, most decisive rows first. Each pick depends on the
+            # previous ones, so the loop is sequential and runs on the CPU, where that is cheap.
+            k, r, _ = S_abs.shape
+            pref = torch.argsort(S_abs, dim=2, descending=True)
+            if r > 1:
+                top2 = torch.gather(S_abs, 2, pref[:, :, :2])
+                row_priority = top2[..., 0] - top2[..., 1]
+            else:
+                row_priority = S_abs[..., 0]
+            order = torch.argsort(row_priority, dim=1, descending=True)
+            pref_cpu, order_cpu = pref.cpu().numpy(), order.cpu().numpy()
 
-                perm = torch.empty(r, dtype=torch.long, device=dev)
-                used = torch.zeros(r, dtype=torch.bool, device=dev)
-                for row in torch.argsort(row_priority, descending=True).tolist():
-                    candidates = pref[row]
-                    col = candidates[~used[candidates]][0]
-                    perm[row] = col
-                    used[col] = True
-                perms.append(perm)
-            return torch.stack(perms)
+            perm = np.empty((k, r), dtype=np.int64)
+            for i in range(k):
+                used = bytearray(r)
+                for row in order_cpu[i]:
+                    candidates = pref_cpu[i, row]
+                    j = 0
+                    while used[candidates[j]]:
+                        j += 1
+                    perm[i, row] = candidates[j]
+                    used[candidates[j]] = 1
+            return torch.from_numpy(perm).to(S_abs.device)
 
         def apply_perm(C, p):  # C: [b,nbas,r], p: [b,r]
             return C.gather(2, p[:, None, :].expand(-1, C.size(1), -1))

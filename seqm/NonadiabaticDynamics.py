@@ -44,6 +44,21 @@ def enable_electronic_propagation_compile(mode=None, **options):
     )
 
 
+# An orbital whose overlap with its previous-step counterpart is below 0.75 only invalidates the overlap TDC if its
+# mean squared CIS amplitude exceeds this
+_MO_SWAP_WEIGHT_TOL = 1.0e-3
+
+
+def _bad_weighted_mo_overlap(S, amp_view, qmin: float, wmax: float, axis: int):
+    """Per molecule: whether an orbital with diagonal overlap < qmin carries CIS weight > wmax.
+
+    amp_view: (nmol, nstates, nocc, nvirt); axis: 2 for the occupied overlap S, 3 for the virtual one.
+    """
+    q = torch.diagonal(S.abs(), dim1=1, dim2=2)
+    weight = (amp_view**2).sum(dim=5 - axis).mean(dim=1)
+    return ((q < qmin) & (weight > wmax)).any(dim=1)
+
+
 def _mo_term_virtual(C_view, dSvv, nmol: int, nov: int):
     Cd = torch.matmul(C_view, dSvv.transpose(1, 2).unsqueeze(1))
     Cf = C_view.reshape(nmol, C_view.shape[1], nov)
@@ -591,7 +606,10 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             S_mo = Cc.transpose(1, 2) @ (S_ao @ Cp)
             Soo, Svv = S_mo[:, :nocc, :nocc], S_mo[:, nocc:, nocc:]
 
-            bad_mo_overlap = bad_diag_overlap(Soo, 0.75) | bad_diag_overlap(Svv, 0.75)
+            amp_view = curr[2] if curr[0] == "cis" else curr[2][0]
+            bad_mo_overlap = _bad_weighted_mo_overlap(
+                Soo, amp_view, 0.75, _MO_SWAP_WEIGHT_TOL, 2
+            ) | _bad_weighted_mo_overlap(Svv, amp_view, 0.75, _MO_SWAP_WEIGHT_TOL, 3)
             if bad_mo_overlap.any():
                 return None
 
@@ -1282,7 +1300,6 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
                     learned_parameters,
                     vel_old,
                     acc_old,
-                    include_response_terms=True,
                     validate=True,
                 )
                 with torch.no_grad():
