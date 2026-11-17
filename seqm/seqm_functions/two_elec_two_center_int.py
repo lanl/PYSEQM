@@ -803,124 +803,56 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     x-axis (1,0,0)
     '''
     n, device, dtype = v.shape[0], v.device, v.dtype
-    # Reference x-axis
-    k = torch.zeros_like(v)
-    k[:,0] = 1.0
+    vx, vy, vz = v[..., 0], v[..., 1], v[..., 2]
 
-    # Compute the quaternion components
-    # u = torch.cross(v, k, dim=-1)              # axis = v × k
-    u = torch.zeros_like(v)
-    u[:,1] = v[:,2]
-    u[:,2] = -v[:,1]
-    w_ = 1.0 + v[..., 0]                         # scalar part
+    # 1 + v_x, written without cancellation for v_x < 0
+    tr2 = vy * vy + vz * vz
+    neg = vx < 0
+    w = torch.where(neg, tr2 / (1.0 - vx), 1.0 + vx)
 
-    # Raw quaternion (u_x, u_y, u_z, w_)
-    q_raw = torch.cat((u, w_.unsqueeze(-1)), dim=-1)
+    # v = -k: the quaternion is zero; a 180 degree flip about z gives A = 2, B = C = 0
+    at_antipode = w == 0
+    w_safe = torch.where(at_antipode, torch.ones_like(w), w)
+    A = torch.where(at_antipode, torch.full_like(w, 2.0), vy * vy / w_safe)
+    B = vz * vz / w_safe
+    C = vy * vz / w_safe
 
-    # Handle the antipodal case (v ≈ -k) by picking a 180° flip about z-axis
-    if w_.dtype==torch.float32:
-            eps = 5.0e-4
-    elif w_.dtype==torch.float64:
-            eps = 1.0e-7
-    else:
-        raise RuntimeError("Set dtype to float64 or float32")
-    mask = torch.abs(w_) < eps
-    # base_q = v.new_tensor([0.0, 0.0, 1.0, 0.0])
-    # q_raw = torch.where(mask.unsqueeze(-1), base_q, q_raw)
-    q_raw[mask] = torch.tensor([0.0, 0.0, 1.0, 0.0],device=device,dtype=dtype)#.unsqueeze(0)
-
-    # Normalize quaternion
-    N = torch.norm(q_raw, dim=-1, keepdim=True)
-    q = q_raw / N 
-
-    # Unpack quaternion components
-    qx, qy, qz, qw = q.unbind(-1)
-
-    # Build the 3×3 rotation matrix, ignore qx since it is always zero
     rot = torch.empty((n, 3, 3), device=device, dtype=dtype)
-    rot[..., 0, 0] = 1 - 2 * (qy*qy + qz*qz)
-    rot[..., 0, 1] = -2 * (qz*qw)
-    rot[..., 0, 2] = 2 * (qy*qw)
-    rot[..., 1, 0] = 2 * (qz*qw)
-    rot[..., 1, 1] = 1 - 2 * (qz*qz)
-    rot[..., 1, 2] = 2 * (qy*qz)
-    rot[..., 2, 0] = -2 * (qy*qw)
-    rot[..., 2, 1] = 2 * (qy*qz)
-    rot[..., 2, 2] = 1 - 2 * (qy*qy)
-
-    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")
+    rot[..., 0, 0] = vx
+    rot[..., 0, 1] = vy
+    rot[..., 0, 2] = vz
+    rot[..., 1, 0] = -vy
+    rot[..., 1, 1] = 1 - A
+    rot[..., 1, 2] = -C
+    rot[..., 2, 0] = -vz
+    rot[..., 2, 1] = -C
+    rot[..., 2, 2] = 1 - B
 
     if not calculate_gradient:
         return rot
 
-    # q_raw is (u_x,u_y,u_z,w) = (0,v_z,-v_y,1+v_x)
-    # ∂q_raw/∂v  is constant except zeroed on mask:
-    #   ∂u_x/∂v = 0,  ∂u_y/∂v = [0,0,1],  ∂u_z/∂v = [0,-1,0],  ∂w/∂v = [1,0,0]
-    dq_raw_dv = torch.zeros((n, 4, 3), device=device, dtype=dtype)
-    dq_raw_dv[:, 1, 2] = 1.0   # ∂u_y/∂v_z
-    dq_raw_dv[:, 2, 1] = -1.0  # ∂u_z/∂v_y
-    dq_raw_dv[:, 3, 0] = 1.0   # ∂w/∂v_x
-    # zero out masked rows
-    dq_raw_dv = dq_raw_dv * (~mask).unsqueeze(-1).unsqueeze(-1)
+    # ∂w/∂v
+    dw = torch.zeros((n, 3), device=device, dtype=dtype)
+    dw[:, 0] = torch.where(neg, tr2 / (1.0 - vx) ** 2, torch.ones_like(vx))
+    dw[:, 1] = torch.where(neg, 2 * vy / (1.0 - vx), torch.zeros_like(vx))
+    dw[:, 2] = torch.where(neg, 2 * vz / (1.0 - vx), torch.zeros_like(vx))
 
-    # dN/dv_j = (1/N) ∑_i q_raw_i * ∂q_raw_i/∂v_j
-    dN_dv = (q_raw.unsqueeze(-1) * dq_raw_dv).sum(dim=1, keepdim=False) / N
+    # ∂A/∂v, ∂B/∂v, ∂C/∂v
+    eye = torch.eye(3, device=device, dtype=dtype)
+    dA = (2 * vy[:, None] * eye[1] - A[:, None] * dw) / w_safe[:, None]
+    dB = (2 * vz[:, None] * eye[2] - B[:, None] * dw) / w_safe[:, None]
+    dC = (vz[:, None] * eye[1] + vy[:, None] * eye[2] - C[:, None] * dw) / w_safe[:, None]
 
-    # dq/dv from quotient rule: ∂(q_raw_i/N)/∂v_j
-    dq_dv = (dq_raw_dv * N.unsqueeze(-1) - 
-             q_raw.unsqueeze(-1) * dN_dv.unsqueeze(1)) / (N.unsqueeze(-1)**2)
-
-    dr_dq = torch.zeros((n, 3, 3, 4), device=device, dtype=dtype)
-
-    # R[0,0] = 1 – 2(y²+z²)
-    dr_dq[:, 0, 0, 1] = -4 * qy
-    dr_dq[:, 0, 0, 2] = -4 * qz
-
-    # R[0,1] = 2(xy – z w)
-    dr_dq[:, 0, 1, 0] =  2 * qy
-    # dr_dq[:, 0, 1, 1] =  2 * qx
-    dr_dq[:, 0, 1, 2] = -2 * qw
-    dr_dq[:, 0, 1, 3] = -2 * qz
-
-    # R[0,2] = 2(xz + y w)
-    dr_dq[:, 0, 2, 0] = 2 * qz
-    dr_dq[:, 0, 2, 1] = 2 * qw
-    # dr_dq[:, 0, 2, 2] = 2 * qx
-    dr_dq[:, 0, 2, 3] = 2 * qy
-
-    # R[1,0] = 2(xy + z w)
-    dr_dq[:, 1, 0, 0] = 2 * qy
-    # dr_dq[:, 1, 0, 1] = 2 * qx
-    dr_dq[:, 1, 0, 2] = 2 * qw
-    dr_dq[:, 1, 0, 3] = 2 * qz
-
-    # R[1,1] = 1 – 2(x²+z²)
-    # dr_dq[:, 1, 1, 0] = -4 * qx
-    dr_dq[:, 1, 1, 2] = -4 * qz
-
-    # R[1,2] = 2(yz – x w)
-    dr_dq[:, 1, 2, 0] = -2 * qw
-    dr_dq[:, 1, 2, 1] = 2 * qz
-    dr_dq[:, 1, 2, 2] = 2 * qy
-    # dr_dq[:, 1, 2, 3] = -2 * qx
-
-    # R[2,0] = 2(xz – y w)
-    dr_dq[:, 2, 0, 0] = 2 * qz
-    dr_dq[:, 2, 0, 1] = -2 * qw
-    # dr_dq[:, 2, 0, 2] = 2 * qx
-    dr_dq[:, 2, 0, 3] = -2 * qy
-
-    # R[2,1] = 2(yz + x w)
-    dr_dq[:, 2, 1, 0] = 2 * qw
-    dr_dq[:, 2, 1, 1] = 2 * qz
-    dr_dq[:, 2, 1, 2] = 2 * qy
-    # dr_dq[:, 2, 1, 3] = 2 * qx
-
-    # R[2,2] = 1 – 2(x²+y²)
-    # dr_dq[:, 2, 2, 0] = -4 * qx
-    dr_dq[:, 2, 2, 1] = -4 * qy
-
-    # --- 5) chain‐rule: ∂R/∂v = ∂R/∂q ⋅ ∂q/∂v  → shape (n,3,3,3) ---
-    dRdv = torch.einsum('nijd,ndk->nkij', dr_dq, dq_dv)
+    # dRdv[n, b, i, j] = ∂rot[n, i, j] / ∂v[n, b]
+    dRdv = torch.zeros((n, 3, 3, 3), device=device, dtype=dtype)
+    dRdv[:, :, 0, 0] = eye[0]
+    dRdv[:, :, 0, 1] = eye[1]
+    dRdv[:, :, 0, 2] = eye[2]
+    dRdv[:, :, 1, 0] = -eye[1].expand(n, 3)
+    dRdv[:, :, 1, 1] = -dA
+    dRdv[:, :, 1, 2] = -dC
+    dRdv[:, :, 2, 0] = -eye[2].expand(n, 3)
+    dRdv[:, :, 2, 1] = -dC
+    dRdv[:, :, 2, 2] = -dB
 
     return rot, dRdv
