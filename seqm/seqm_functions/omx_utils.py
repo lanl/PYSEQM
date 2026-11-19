@@ -32,6 +32,17 @@ def build_beta_tensor(parameters, method):
     return torch.stack([parameters[field] for field in fields], dim=1)
 
 
+def blocks_to_dense(X):
+    """[..., N, N, 4, 4] atom-pair AO blocks -> [..., 4N, 4N] dense matrix (rows (atom_i, a), cols (atom_k, c))."""
+    N = X.shape[-4]
+    return X.transpose(-3, -2).reshape(*X.shape[:-4], 4 * N, 4 * N)
+
+
+def dense_to_blocks(T, N):
+    """Inverse of ``blocks_to_dense``."""
+    return T.reshape(*T.shape[:-2], N, 4, N, 4).transpose(-3, -2)
+
+
 def omx_pair_params(parameters, idxi, idxj):
     names = [name for name in OMX_PAIR_PARAMS if name in parameters]
     return {name: parameters[name][idxi] for name in names}, {name: parameters[name][idxj] for name in names}

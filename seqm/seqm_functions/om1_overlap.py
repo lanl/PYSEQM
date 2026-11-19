@@ -9,35 +9,20 @@ def om1_local_overlap_terms(rij, basis_i, basis_j):
     """
     Return the local OM1 Gaussian overlap terms in the Fortran SPOVER/BETOM ordering:
     [ss, s-p_sigma, p_sigma-s, p_sigma-p_sigma, p_pi-p_pi].
-    """
-    dtype = rij.dtype
-    device = rij.device
 
-    shell_i, exp_i, cs_i, cp_i = (
-        basis_i["shell_type"],
-        basis_i["exponents"],
-        basis_i["coeff_s"],
-        basis_i["coeff_p"],
-    )
-    shell_j, exp_j, cs_j, cp_j = (
-        basis_j["shell_type"],
-        basis_j["exponents"],
-        basis_j["coeff_s"],
-        basis_j["coeff_p"],
-    )
+    H atoms carry zero p coefficients, so the p-containing terms vanish for them without masking.
+    """
+    exp_i, cs_i, cp_i = basis_i["exponents"], basis_i["coeff_s"], basis_i["coeff_p"]
+    exp_j, cs_j, cp_j = basis_j["exponents"], basis_j["coeff_s"], basis_j["coeff_p"]
 
     a = exp_i.unsqueeze(2)
     b = exp_j.unsqueeze(1)
-    g = a + b
-    inv_g = 1.0 / g
+    inv_g = 1.0 / (a + b)
     rab = rij.view(-1, 1, 1)
-    rab_sq = rab * rab
-    xqq = a * b * rab_sq * inv_g
-    active = xqq <= _XQQ_CUTOFF
+    xqq = a * b * rab * rab * inv_g
 
     pie = math.pi * inv_g
-    s00 = pie * torch.sqrt(pie) * torch.exp(-xqq)
-    s00 = torch.where(active, s00, torch.zeros_like(s00))
+    s00 = torch.where(xqq <= _XQQ_CUTOFF, pie * torch.sqrt(pie) * torch.exp(-xqq), torch.zeros_like(xqq))
 
     abz = -rab
     s03 = a * abz * s00 * inv_g
@@ -45,28 +30,19 @@ def om1_local_overlap_terms(rij, basis_i, basis_j):
     s11 = 0.5 * s00 * inv_g
     s33 = s00 * (0.5 * inv_g - a * b * abz * abz * inv_g * inv_g)
 
-    out = torch.zeros((rij.shape[0], 5), dtype=dtype, device=device)
+    def contract(ci, cj, s):
+        return torch.sum(ci.unsqueeze(2) * cj.unsqueeze(1) * s, dim=(1, 2))
 
-    ss_weight = cs_i.unsqueeze(2) * cs_j.unsqueeze(1)
-    out[:, 0] = torch.sum(ss_weight * s00, dim=(1, 2))
-
-    sp_mask = shell_j == 1
-    if sp_mask.any():
-        sp_weight = cs_i[sp_mask].unsqueeze(2) * cp_j[sp_mask].unsqueeze(1)
-        out[sp_mask, 1] = torch.sum(sp_weight * s03[sp_mask], dim=(1, 2))
-
-    ps_mask = shell_i == 1
-    if ps_mask.any():
-        ps_weight = cp_i[ps_mask].unsqueeze(2) * cs_j[ps_mask].unsqueeze(1)
-        out[ps_mask, 2] = torch.sum(ps_weight * s30[ps_mask], dim=(1, 2))
-
-    pp_mask = (shell_i == 1) & (shell_j == 1)
-    if pp_mask.any():
-        pp_weight = cp_i[pp_mask].unsqueeze(2) * cp_j[pp_mask].unsqueeze(1)
-        out[pp_mask, 3] = torch.sum(pp_weight * s33[pp_mask], dim=(1, 2))
-        out[pp_mask, 4] = torch.sum(pp_weight * s11[pp_mask], dim=(1, 2))
-
-    return out
+    return torch.stack(
+        [
+            contract(cs_i, cs_j, s00),
+            contract(cs_i, cp_j, s03),
+            contract(cp_i, cs_j, s30),
+            contract(cp_i, cp_j, s33),
+            contract(cp_i, cp_j, s11),
+        ],
+        dim=1,
+    )
 
 
 def diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j, terms=None):
@@ -96,81 +72,52 @@ def diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j, terms=None)
     return di
 
 
+_EXP_CUTOFF = 50.0
+
+
+def _resonance_term(avg_beta, alpha_sum, r2, sqrt_r, sign):
+    """sign * avg_beta * sqrt(r) * exp(-alpha_sum * r^2), zero beyond the exponent cutoff."""
+    arg = alpha_sum * r2
+    return torch.where(arg < _EXP_CUTOFF, sign * avg_beta * sqrt_r * torch.exp(-arg), torch.zeros_like(arg))
+
+
 def om1_local_resonance_terms(ni, nj, rij, pi, pj):
     """
     Return the local OM1 resonance terms in the Fortran BETOM ordering:
     [ss, s-p_sigma, p_sigma-s, p_sigma-p_sigma, p_pi-p_pi].
     """
-    dtype = rij.dtype
-    device = rij.device
-    n = rij.shape[0]
-
     heavy_i = ni > 2
     heavy_j = nj > 2
 
-    bas = pi["beta_s"].clone()
-    bbs = pj["beta_s"]
-    aas = pi["alpha_s"].clone()
-    cbs = pj["alpha_s"]
-
-    bap = pi["beta_p"]
-    bai = pi["beta_pi"]
-    aap = pi["alpha_p"]
-    aai = pi["alpha_pi"]
-    bbp = pj["beta_p"]
-    bbi = pj["beta_pi"]
-    abp = pj["alpha_p"]
-    abi = pj["alpha_pi"]
-
+    # A heavy atom bonded to H uses its separate "H" resonance parameters.
     hx_i = heavy_i & (nj <= 2) & (ni < 86)
-    if hx_i.any():
-        bas[hx_i] = pi["beta_sh"][hx_i]
-        bap = bap.clone()
-        aap = aap.clone()
-        aas[hx_i] = pi["alpha_s_h"][hx_i]
-        bap[hx_i] = pi["beta_ph"][hx_i]
-        aap[hx_i] = pi["alpha_p_h"][hx_i]
+    bas = torch.where(hx_i, pi["beta_sh"], pi["beta_s"])
+    aas = torch.where(hx_i, pi["alpha_s_h"], pi["alpha_s"])
+    bap = torch.where(hx_i, pi["beta_ph"], pi["beta_p"])
+    aap = torch.where(hx_i, pi["alpha_p_h"], pi["alpha_p"])
 
-    sqrt_r = torch.sqrt(rij)
     r2 = rij * rij
+    sqrt_r = torch.sqrt(rij)
+    zero = torch.zeros_like(rij)
 
-    out = torch.zeros((n, 5), dtype=dtype, device=device)
+    ss = _resonance_term(0.5 * (bas + pj["beta_s"]), aas + pj["alpha_s"], r2, sqrt_r, 1.0)
+    sp = _resonance_term(0.5 * (bas + pj["beta_p"]), aas + pj["alpha_p"], r2, sqrt_r, -1.0)
+    ps = _resonance_term(0.5 * (bap + pj["beta_s"]), aap + pj["alpha_s"], r2, sqrt_r, 1.0)
+    pp_sigma = _resonance_term(0.5 * (bap + pj["beta_p"]), aap + pj["alpha_p"], r2, sqrt_r, -1.0)
+    pp_pi = _resonance_term(
+        0.5 * (pi["beta_pi"] + pj["beta_pi"]), pi["alpha_pi"] + pj["alpha_pi"], r2, sqrt_r, 1.0
+    )
 
-    exp1 = (aas + cbs) * r2
-    ok1 = exp1 < 50.0
-    out[ok1, 0] = 0.5 * (bas[ok1] + bbs[ok1]) * sqrt_r[ok1] * torch.exp(-exp1[ok1])
-
-    mask_jp = heavy_j
-    if mask_jp.any():
-        exp2 = (aas[mask_jp] + abp[mask_jp]) * r2[mask_jp]
-        ok2 = exp2 < 50.0
-        vals = torch.zeros_like(exp2)
-        vals[ok2] = -sqrt_r[mask_jp][ok2] * torch.exp(-exp2[ok2])
-        out[mask_jp, 1] = 0.5 * (bas[mask_jp] + bbp[mask_jp]) * vals
-
-    mask_ip = heavy_i
-    if mask_ip.any():
-        exp3 = (aap[mask_ip] + cbs[mask_ip]) * r2[mask_ip]
-        ok3 = exp3 < 50.0
-        vals = torch.zeros_like(exp3)
-        vals[ok3] = sqrt_r[mask_ip][ok3] * torch.exp(-exp3[ok3])
-        out[mask_ip, 2] = 0.5 * (bap[mask_ip] + bbs[mask_ip]) * vals
-
-    mask_pp = heavy_i & heavy_j
-    if mask_pp.any():
-        exp4 = (aap[mask_pp] + abp[mask_pp]) * r2[mask_pp]
-        ok4 = exp4 < 50.0
-        vals4 = torch.zeros_like(exp4)
-        vals4[ok4] = -sqrt_r[mask_pp][ok4] * torch.exp(-exp4[ok4])
-        out[mask_pp, 3] = 0.5 * (bap[mask_pp] + bbp[mask_pp]) * vals4
-
-        exp5 = (aai[mask_pp] + abi[mask_pp]) * r2[mask_pp]
-        ok5 = exp5 < 50.0
-        vals5 = torch.zeros_like(exp5)
-        vals5[ok5] = sqrt_r[mask_pp][ok5] * torch.exp(-exp5[ok5])
-        out[mask_pp, 4] = 0.5 * (bai[mask_pp] + bbi[mask_pp]) * vals5
-
-    return out
+    return torch.stack(
+        [
+            ss,
+            torch.where(heavy_j, sp, zero),
+            torch.where(heavy_i, ps, zero),
+            torch.where(heavy_i & heavy_j, pp_sigma, zero),
+            torch.where(heavy_i & heavy_j, pp_pi, zero),
+        ],
+        dim=1,
+    )
 
 
 def diatom_resonance_matrix_OM1(xij, terms, direction):

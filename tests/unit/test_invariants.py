@@ -37,6 +37,28 @@ def test_omx_boys_table_matches_exact_boys_function():
     np.testing.assert_allclose(table, exact, rtol=1e-8)
 
 
+@pytest.mark.parametrize("method", ["OM1", "OM2"])
+def test_distant_nonpolar_molecules_are_additive(device, methane_molecule_data, method):
+    """Two methanes 36 A apart have twice the energy of one: exercises the far-field integral and PPECP paths."""
+    species, coordinates = methane_molecule_data
+    const = Constants().to(device)
+    parameters = {"method": method, "scf_eps": 1.0e-9, "scf_converger": [1]}
+
+    def energy(species, coordinates):
+        molecule = Molecule(const, parameters, coordinates, species).to(device)
+        Electronic_Structure(parameters).to(device)(molecule)
+        return molecule.Etot.item()
+
+    shift = torch.tensor([30.0, 17.0, 11.0], dtype=coordinates.dtype, device=device)
+    dimer_species = torch.cat([species[:, :1], species[:, :1], species[:, 1:], species[:, 1:]], dim=1)
+    dimer_coordinates = torch.cat(
+        [coordinates[:, :1], coordinates[:, :1] + shift, coordinates[:, 1:], coordinates[:, 1:] + shift],
+        dim=1,
+    )
+
+    assert abs(energy(dimer_species, dimer_coordinates) - 2 * energy(species, coordinates)) < 1.0e-5
+
+
 @pytest.mark.parametrize("method", OMX_METHODS)
 def test_rotation_invariance_ground_state(device, methane_molecule_data, method):
     species, coordinates = methane_molecule_data
