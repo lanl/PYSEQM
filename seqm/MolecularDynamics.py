@@ -15,6 +15,7 @@ import torch
 from seqm.basics import Force
 from seqm.dynamics.active_state import active_state_tensor
 from seqm.ElectronicStructure import Electronic_Structure as esdriver
+from seqm.seqm_functions.diat_overlap_PM6_SP import enable_overlap_compile
 from seqm.seqm_functions.fock import enable_fock_compile
 from seqm.seqm_functions.omx_utils import OMX_METHODS
 from seqm.seqm_functions.rcis_batch import enable_rcis_compile
@@ -1000,6 +1001,7 @@ class Molecular_Dynamics_Basic(torch.nn.Module):
         kernel_mode = kernel_options.pop("mode", None)
         excited = bool(self.seqm_parameters.get("excited_states"))
 
+        enable_overlap_compile(mode=kernel_mode, **kernel_options)
         if excited:
             enable_rcis_compile(mode=kernel_mode, **kernel_options)
         elif method not in OMX_METHODS and int(molecule.nmol) == 1:

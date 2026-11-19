@@ -382,7 +382,7 @@ def test_rcis_adjoint_mixed_batch_is_finite(device, excited_mixed_batch_data):
 
     energies, amplitudes = _run_mixed_with_inputs(molecule, inputs, nroots=4, root_tol=1.0e-7)
     torch.testing.assert_close(energies, native_energies)
-    torch.testing.assert_close(amplitudes, native_amplitudes)
+    torch.testing.assert_close(_canonicalize(amplitudes), _canonicalize(native_amplitudes))
 
     loss = energies[2, 2] + 0.1 * (amplitudes[0, 0, 0] + amplitudes[2, 2, 0])
     gradients = torch.autograd.grad(loss, (inputs[2], inputs[4]), allow_unused=False)

@@ -26,20 +26,20 @@ from .rcis_solver import make_rcis_response_builder, rcis_inputs, run_native_rci
 
 # from seqm.seqm_functions.pack import packone, unpackone
 
-_makeA_pi_batched_dispatch = None
-_is_compiling = getattr(getattr(torch, "compiler", None), "is_compiling", lambda: False)
+_makeA_diag_dispatch = None
 
 
 def enable_rcis_compile(mode=None, **options):
-    """Compile the profitable CIS Davidson two-electron contraction."""
-    global _makeA_pi_batched_dispatch
+    """Compile the diagonal-block part of the CIS two-electron contraction; the exchange stays a cuBLAS bmm."""
+    global _makeA_diag_dispatch
 
     compile_options = dict(options)
+    compile_options.setdefault("dynamic", True)  # the number of roots changes between calls
     if mode is not None:
         compile_options["mode"] = mode
 
-    _makeA_pi_batched_dispatch = optional_compile_function(
-        _makeA_pi_batched_kernel, compile_options=compile_options, label="rcis.makeA_pi_batched"
+    _makeA_diag_dispatch = optional_compile_function(
+        _makeA_diag_blocks, compile_options=compile_options, label="rcis.makeA_diag_blocks"
     )
 
 
@@ -387,13 +387,12 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False, parameters=None):
     molsize = int(mol.molsize)
     nHeavy, nHydro, norb, _ = _uniform_molecule_dimensions(mol)
 
-    dispatch = _makeA_pi_batched_dispatch or _makeA_pi_batched_kernel
     params = mol.parameters if parameters is None else parameters
     nnewRoots = P_xi.shape[1]
     P0 = unpackone_batch(P_xi.reshape(nmol * nnewRoots, norb, norb), 4 * nHeavy, nHydro, molsize * 4).view(
         nmol, nnewRoots, 4 * molsize, 4 * molsize
     )
-    F0 = dispatch(
+    F0 = _makeA_pi_batched_kernel(
         P0,
         w_.view(nmol, npairs_per_mol, 10, 10),
         mol.mask[:npairs_per_mol],
@@ -412,6 +411,43 @@ def makeA_pi_batched(mol, P_xi, w_, allSymmetric=False, parameters=None):
     )
     F0 = packone_batch(F0, 4 * nHeavy, nHydro, norb).view(nmol, nnewRoots, norb, norb)
     return F0.view(nmol, nnewRoots, norb, norb)
+
+
+def _makeA_diag_blocks(Bd, w, idxi, idxj, gss, gsp, gpp, gp2, hsp, tri_i, tri_j, weight, allSymmetric: bool):
+    """Diagonal 4x4 blocks of the two-electron Fock action (Coulomb from every pair plus one-center terms)."""
+    nmol, nroots, molsize = Bd.shape[:3]
+    Pd = 0.5 * (Bd + Bd.transpose(-1, -2))
+
+    P10 = Pd[..., tri_i, tri_j] * weight
+    sumA = (P10[:, :, idxi].unsqueeze(-1) * w.unsqueeze(1)).sum(-2)
+    sumB = (P10[:, :, idxj].unsqueeze(-2) * w.unsqueeze(1)).sum(-1)
+    F10 = torch.zeros(nmol, nroots, molsize, 10, dtype=w.dtype, device=w.device)
+    F10 = F10.index_add(2, idxj, sumA).index_add(2, idxi, sumB)
+    Fdiag = torch.zeros(nmol, nroots, molsize, 4, 4, dtype=w.dtype, device=w.device)
+    Fdiag[..., tri_i, tri_j] = F10
+
+    Pptot = Pd[..., 1, 1] + Pd[..., 2, 2] + Pd[..., 3, 3]
+    Fdiag[..., 0, 0] += 0.5 * Pd[..., 0, 0] * gss.unsqueeze(1) + Pptot * (gsp - 0.5 * hsp).unsqueeze(1)
+    for i in range(1, 4):
+        Fdiag[..., i, i] += (
+            Pd[..., 0, 0] * (gsp - 0.5 * hsp).unsqueeze(1)
+            + 0.5 * Pd[..., i, i] * gpp.unsqueeze(1)
+            + (Pptot - Pd[..., i, i]) * (1.25 * gp2 - 0.25 * gpp).unsqueeze(1)
+        )
+        Fdiag[..., 0, i] += Pd[..., 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
+    for i, j in [(1, 2), (1, 3), (2, 3)]:
+        Fdiag[..., i, j] += Pd[..., i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
+    Fdiag = Fdiag + Fdiag.triu(1).transpose(3, 4)
+
+    if not allSymmetric:
+        Pa = 0.5 * (Bd - Bd.transpose(-1, -2))
+        F2e1c = torch.zeros_like(Fdiag)
+        for i in range(1, 4):
+            F2e1c[..., 0, i] = Pa[..., 0, i] * (0.5 * hsp - 0.5 * gsp).unsqueeze(1)
+        for i, j in [(1, 2), (1, 3), (2, 3)]:
+            F2e1c[..., i, j] = Pa[..., i, j] * (0.25 * gpp - 0.75 * gp2).unsqueeze(1)
+        Fdiag = Fdiag + (F2e1c - F2e1c.triu(1).transpose(3, 4))
+    return Fdiag
 
 
 def _makeA_pi_batched_kernel(
@@ -445,20 +481,8 @@ def _makeA_pi_batched_kernel(
     B_ij = Pb[:, :, row, col]
     B_ji_T = Pb[:, :, col, row].transpose(-1, -2)
     Bd = Pb[:, :, diag, diag]
-    Pd = 0.5 * (Bd + Bd.transpose(-1, -2))
 
-    Fdiag = torch.zeros(nmol, nroots, molsize, 4, 4, dtype=dtype, device=device)
-    PA = Pd[:, :, idxi][..., tri_i, tri_j] * weight
-    sumA = torch.zeros(nmol, nroots, npairs, 4, 4, dtype=dtype, device=device)
-    sumA[..., tri_i, tri_j] = torch.einsum("nrps,npsS->nrpS", PA, w)
-    Fdiag.index_add_(2, idxj, sumA)
-    PB = Pd[:, :, idxj][..., tri_i, tri_j] * weight
-    sumB = torch.zeros(nmol, nroots, npairs, 4, 4, dtype=dtype, device=device)
-    sumB[..., tri_i, tri_j] = torch.einsum("nrpS,npsS->nrps", PB, w)
-    Fdiag.index_add_(2, idxi, sumB)
-    del PA, PB, sumA, sumB
-
-    w16 = None if _is_compiling() else _exchange_w16(w, ind)
+    w16 = _exchange_w16(w, ind)
     if allSymmetric:
         K = torch.empty(nmol, nroots, npairs, 4, 4, dtype=dtype, device=device)
         _contract_exchange_4x4(0.5 * (B_ij + B_ji_T), w, ind, K, w16)
@@ -468,27 +492,8 @@ def _makeA_pi_batched_kernel(
         _contract_exchange_4x4(torch.cat((B_ij, B_ji_T), dim=1), w, ind, K, w16)
         K_ij, K_ji_T = K[:, :nroots], K[:, nroots:]
 
-    Pptot = Pd[..., 1, 1] + Pd[..., 2, 2] + Pd[..., 3, 3]
-    Fdiag[..., 0, 0] += 0.5 * Pd[..., 0, 0] * gss.unsqueeze(1) + Pptot * (gsp - 0.5 * hsp).unsqueeze(1)
-    for i in range(1, 4):
-        Fdiag[..., i, i] += (
-            Pd[..., 0, 0] * (gsp - 0.5 * hsp).unsqueeze(1)
-            + 0.5 * Pd[..., i, i] * gpp.unsqueeze(1)
-            + (Pptot - Pd[..., i, i]) * (1.25 * gp2 - 0.25 * gpp).unsqueeze(1)
-        )
-        Fdiag[..., 0, i] += Pd[..., 0, i] * (1.5 * hsp - 0.5 * gsp).unsqueeze(1)
-    for i, j in [(1, 2), (1, 3), (2, 3)]:
-        Fdiag[..., i, j] += Pd[..., i, j] * (0.75 * gpp - 1.25 * gp2).unsqueeze(1)
-    Fdiag = Fdiag + Fdiag.triu(1).transpose(3, 4)
-
-    if not allSymmetric:
-        Pa = 0.5 * (Bd - Bd.transpose(-1, -2))
-        F2e1c = torch.zeros_like(Fdiag)
-        for i in range(1, 4):
-            F2e1c[..., 0, i] = Pa[..., 0, i] * (0.5 * hsp - 0.5 * gsp).unsqueeze(1)
-        for i, j in [(1, 2), (1, 3), (2, 3)]:
-            F2e1c[..., i, j] = Pa[..., i, j] * (0.25 * gpp - 0.75 * gp2).unsqueeze(1)
-        Fdiag = Fdiag + (F2e1c - F2e1c.triu(1).transpose(3, 4))
+    diag_blocks = _makeA_diag_dispatch or _makeA_diag_blocks
+    Fdiag = diag_blocks(Bd, w, idxi, idxj, gss, gsp, gpp, gp2, hsp, tri_i, tri_j, weight, allSymmetric)
 
     F = torch.zeros(nmol, nroots, molsize, 4, molsize, 4, dtype=dtype, device=device)
     Fv = F.permute(0, 1, 2, 4, 3, 5)
@@ -531,16 +536,7 @@ def _exchange_w16(w, ind):
 
 
 def _contract_exchange_4x4(P, w, ind, out, w16=None):
-    """K[r,p,i,j] = -0.5 * sum_{s,S} P[r,p,s,S] w[p, ind[i,s], ind[j,S]].
-
-    Eager mode uses one batched matmul over pairs; Inductor fuses the scalar-output form better.
-    """
-    if _is_compiling():
-        for i in range(4):
-            for j in range(4):
-                out[..., i, j] = -0.5 * torch.einsum("nrpsS,npsS->nrp", P, w[..., ind[i], :][..., :, ind[j]])
-        return out
-
+    """K[r,p,i,j] = -0.5 * sum_{s,S} P[r,p,s,S] w[p, ind[i,s], ind[j,S]], as one batched matmul over pairs."""
     if w16 is None:
         w16 = _exchange_w16(w, ind)
     nmol, nroots, npairs = P.shape[:3]
