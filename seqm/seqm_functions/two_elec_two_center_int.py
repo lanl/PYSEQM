@@ -281,6 +281,35 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     
     return w, e1b, e2a,rho0aTMP,rho0bTMP, riXH, ri
 
+def two_elec_two_center_local_sp(const, idxi, idxj, ni, nj, rij, Z, zetas, zetap, gss, gpp, gp2, hsp, themethod):
+    """
+    Local-frame s/p two-center integrals of every pair, which depend on the pair distance only:
+    ``wHH`` (H-H), ``riXH`` (heavy-H) and ``ri`` (heavy-heavy) as returned by the local-frame routine. This is
+    the s/p part of ``two_elec_two_center_int``; ``rotate_sp_local`` turns them into molecular-frame integrals.
+    """
+    dd, qq, rho_0, rho_1, rho_2 = sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp)
+
+    wHH, riXH, ri, _, _, _ = TETCILF(
+        ni, nj, rij, const.tore,
+        dd[idxi], dd[idxj], qq[idxi], qq[idxj], rho_0[idxi], rho_0[idxj],
+        rho_1[idxi], rho_1[idxj], rho_2[idxi], rho_2[idxj], themethod,
+    )
+    return {"wHH": wHH, "riXH": riXH, "ri": ri}
+
+
+def rotate_sp_local(local, tore, ni, nj, xij):
+    """Rotate ``two_elec_two_center_local_sp`` integrals to the molecular frame: ``w`` (10x10), ``e1b``, ``e2a``."""
+    e1b, e2a, wXH, w = w_withquaternion(None, tore, ni, nj, xij, local["riXH"], local["ri"], local["wHH"])
+    HH = (ni == 1) & (nj == 1)
+    XH = (ni > 1) & (nj == 1)
+    XX = (ni > 1) & (nj > 1)
+    wc = torch.zeros(ni.shape[0], 10, 10, dtype=w.dtype, device=w.device)
+    wc[HH, 0, 0] = local["wHH"]
+    wc[XH, :, 0] = wXH
+    wc[XX] = w.reshape((-1, 10, 10))
+    return {"w": wc, "e1b": e1b, "e2a": e2a}
+
+
 #rotate: rotate the two electron two center integrals from local frame to molecule frame
 def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
     """
@@ -777,15 +806,58 @@ def local_xh_integral_vector(riXH):
     return local
 
 
+# The 10 unique AO products (ab) of one atom, in the order of _SP_PAIR_FIRST/_SECOND, regrouped by tensor rank:
+# [ss] [px s, py s, pz s] [px px, py px, py py, pz px, pz py, pz pz]. A rotation preserves the rank, so the
+# 10x10 rotation of the two-center integrals is block diagonal (1 + 3 + 6). Batched matrix products of that
+# size are ~30x cheaper per matrix on CPU below 8x8 than at 10x10, so the blocks are multiplied separately.
+_RANK_ORDER = torch.tensor([0, 1, 3, 6, 2, 4, 5, 7, 8, 9], dtype=torch.long)
+_RANK_INVERSE = torch.argsort(_RANK_ORDER)
+_RANK_BLOCKS = (slice(0, 1), slice(1, 4), slice(4, 10))
+
+
+def block_sandwich(A, W, B):
+    """
+    ``A @ W @ B^T`` over the last two dimensions (10x10), for ``A`` and ``B`` that are block diagonal in the
+    (ss | ps | pp) ranks of the standard AO-pair order, such as the pair rotation matrices and their
+    derivatives. Leading dimensions broadcast.
+    """
+    perm = _RANK_ORDER.to(W.device)
+    inverse = _RANK_INVERSE.to(W.device)
+
+    def diagonal_blocks(M):
+        Mg = M[..., perm[:, None], perm[None, :]]
+        return [Mg[..., a, a].contiguous() for a in _RANK_BLOCKS]
+
+    Ab = diagonal_blocks(A)
+    Bb = Ab if B is A else diagonal_blocks(B)
+    Wg = W[..., perm[:, None], perm[None, :]]
+
+    rows = []
+    for a, Aa in zip(_RANK_BLOCKS, Ab):
+        row = [(Aa @ Wg[..., a, b]) @ Bj.transpose(-1, -2) for b, Bj in zip(_RANK_BLOCKS, Bb)]
+        rows.append(torch.cat(row, dim=-1))
+    return torch.cat(rows, dim=-2)[..., inverse[:, None], inverse[None, :]]
+
+
+def block_matvec(A, v):
+    """``A @ v`` over the last dimensions for a block-diagonal 10x10 ``A`` and a vector ``v`` of length 10."""
+    perm = _RANK_ORDER.to(v.device)
+    inverse = _RANK_INVERSE.to(v.device)
+    Ag = A[..., perm[:, None], perm[None, :]]
+    vg = v[..., perm]
+    out = [(Ag[..., a, a] @ vg[..., a].unsqueeze(-1)).squeeze(-1) for a in _RANK_BLOCKS]
+    return torch.cat(out, dim=-1)[..., inverse]
+
+
 def _rotate_sp_integrals_kernel(xij_xh, xij_xx, riXH, ri):
     local = local_sp_integral_matrix(ri)
     local_xh = local_xh_integral_vector(riXH)
 
     transform = _pair_rotation_matrix(rotate_with_quaternion(-xij_xx))
-    w = transform @ local @ transform.transpose(1, 2)
+    w = block_sandwich(transform, local, transform)
 
     transform_xh = _pair_rotation_matrix(rotate_with_quaternion(-xij_xh))
-    wXH = (transform_xh @ local_xh.unsqueeze(-1)).squeeze(-1)
+    wXH = block_matvec(transform_xh, local_xh)
     return wXH, w.reshape(-1, 100)
 
 

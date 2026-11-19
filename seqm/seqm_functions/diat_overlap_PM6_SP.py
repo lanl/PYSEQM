@@ -9,9 +9,16 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     """
     compute the overlap matrix for each pair
     """
-    # t0 =time.time()
-    dtype = xij.dtype
-    device = xij.device
+    return diatom_overlap_rotate(diatom_overlap_local_terms(ni, nj, rij, zeta_a, zeta_b, qn_int), xij)
+
+
+def diatom_overlap_local_terms(ni, nj, rij, zeta_a, zeta_b, qn_int):
+    """
+    Local-frame overlaps (S111, S211, S121, S221, S222), shape (npairs, 5). They depend on the pair
+    distance only; ``diatom_overlap_rotate`` turns them into the 4x4 overlap block for a pair direction.
+    """
+    dtype = rij.dtype
+    device = rij.device
     # xij unit vector points from i to j: xij = (xj-xi)/|xi-xj|, shape (npairs, 3)
     # rij : distance between atom i and j in atomic units, shape (npairs,)
     # ni, nj, atomic number of atom i and j, shape (npairs,)
@@ -20,7 +27,7 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     # z = z2-z1
     # for first atom index == second atom index, (same atom)
     # x = x1, y = y1, z = z1
-    npairs = xij.shape[0]
+    npairs = rij.shape[0]
     # zeta_a, zeta_b: zeta_s and zeta_p for atom pair a-b, shape(npairs, 2)
     # output di: overlap matrix between AOs from atom i an j, shape (npairs, 4,4)
     # 0,1,2,3: sigma, px, py, pz
@@ -341,39 +348,15 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
 
     ###up to here
 
-    #
-    # form di
-    # check di_index.txt
-    di = th.zeros((npairs, 4, 4), dtype=dtype, device=device)
-
-    # diat coe
-    # c : computed in coe, with shape (75)
-    # c0 : used in diat, shape (3,5,5)
-    # index relation
-    # c with index 56, 41, 26, 53, 38, 50, 37, 20
-    #  c, c0
-    # 37, 1 3 3  1.0
-    # 20, 2 2 2  ca
-    # 35, 2 2 3  sa*sb
-    # 50, 2 2 4  sa*cb
-    # 23, 2 3 2  0.0
-    # 38, 2 3 3  cb
-    # 53, 2 3 4  -sb
-    # 26, 2 4 2  -sa
-    # 41, 2 4 3  ca*sb
-    # 56, 2 4 4  ca*cb
-
-    ## c[37] = 1.0
-    ## c[23] = 0.0
-    # all not listed are 0.0
-
-    # check di_index.txt for details
     del A111, B111, A211, B211, A121, B121, A22, B22
+    return th.stack([S111, S211, S121, S221, S222], dim=1)
 
-    # sasb = sa*sb
-    # sacb = sa*cb
-    # casb = ca*sb
-    # cacb = ca*cb
+
+def diatom_overlap_rotate(terms, xij):
+    """4x4 overlap block (s, px, py, pz) of every pair from its local terms and unit direction ``xij``."""
+    S111, S211, S121, S221, S222 = terms.unbind(1)
+    npairs = xij.shape[0]
+    di = th.zeros((npairs, 4, 4), dtype=xij.dtype, device=xij.device)
 
     rot = rotate_with_quaternion(xij)
     rot = rot.transpose(1, 2)
@@ -382,67 +365,9 @@ def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     c0 = rot[:, :, 0]
     di[:, 1:, 0] = S211.unsqueeze(1) * c0
     di[:, 0, 1:] = -S121.unsqueeze(1) * c0
-    M = th.stack([-S221, S222, S222], dim=1)  # → (N,3)
-    B = rot * M.unsqueeze(1)  # → (N,3,3)
+    M = th.stack([-S221, S222, S222], dim=1)  # (N, 3)
+    B = rot * M.unsqueeze(1)  # (N, 3, 3)
     di[:, 1:, 1:] = th.bmm(B, rot.transpose(1, 2))
-
-    # #jcallg2 = (jcall>2)
-    # #di[jcallg2,1,0] = S211[jcallg2,0]*ca[jcallg2,0]*sb[jcallg2,0]
-    # #the fraction of H-H is low, may not necessary to use indexing
-    # di[...,1,0] = S211*ca*sb
-    # di[...,2,0] = S211*sa*sb
-    # di[...,3,0] = S211*cb
-    # #jcall==4, pq1=pq2=2, ii=4, second - second row
-    # #di[jcall4,0,1] = -S121[jcall4]*ca[jcall4]*sb[jcall4]
-    # di[...,0,1] = -S121*casb
-    # #di[jcall4,0,2] = -S121[jcall4]*sa[jcall4]*sb[jcall4]
-    # di[...,0,2] = -S121*sasb
-    # di[...,0,3] = -S121*cb
-    # #di[jcall4,1,1] = -S221[jcall4]*ca[jcall4]**2*sb[jcall4]**2
-    # #                 +S222[jcall4]*(ca[jcall4]**2*cb[jcall4]**2+sa[jcall4]**2)
-    # di[...,1,1] = -S221*casb**2 \
-    #                  +S222*(cacb**2+sa**2)
-    # di[...,1,2] = -S221*casb*sasb \
-    #                  +S222*(cacb*sacb-sa*ca)
-    # di[...,1,3] = -S221*casb*cb \
-    #                  -S222*cacb*sb
-    # di[...,2,1] = -S221*sasb*casb \
-    #                  +S222*(sacb*cacb-ca*sa)
-    # di[...,2,2] = -S221*sasb**2 \
-    #                  +S222*(sacb**2+ca**2)
-    # di[...,2,3] = -S221*sasb*cb \
-    #                  -S222*sacb*sb
-    # di[...,3,1] = -S221*cb*casb \
-    #                  -S222*sb*cacb
-    # di[...,3,2] = -S221*cb*sasb \
-    #                  -S222*sb*sacb
-    # di[...,3,3] = -S221*cb**2 \
-    #                  +S222*sb**2
-    del S111, S121, S211  # , sasb, sacb, casb, cacb, ca, sa
-
-    # on pairs with same atom, diagonal part
-    # di[jcall==0,:,:] = th.diag(th.ones(4,dtype=dtype)).reshape((-1,4,4))
-
-    """
-    return S111, S211, S121, S221, S222
-
-
-    """
-    """
-    #  c, c0
-    # 37, 1 3 3  1.0
-    # 20, 2 2 2  ca
-    # 35, 2 2 3  sa*sb
-    # 50, 2 2 4  sa*cb
-    # 23, 2 3 2  0.0
-    # 38, 2 3 3  cb
-    # 53, 2 3 4  -sb
-    # 26, 2 4 2  -sa
-    # 41, 2 4 3  ca*sb
-    # 56, 2 4 4  ca*cb
-    """
-    # print("CALCULATION OF DIATOMIC OVERLAP: ", time.time()-t0, " (diat_overlapD.py, diatom_overlap_matrixD)")
-
     return di
 
 
