@@ -387,3 +387,37 @@ def AIJL(Z1, Z2, N1, N2, L):
         )
 
     return AIJL
+
+
+# Smallest value of hpp = 0.5 * (g_pp - g_p2) used to solve for the quadrupole additive term. Physically hpp is
+# positive, but g_pp and g_p2 are independent fitted parameters in PM3/PM6 (PM6 F has hpp = -1.9), and the
+# additive-term equation has no sensible solution for hpp <= 0. This is the constraint MOPAC applies in calpar.F90
+# ("CONSTRAINTS ON THE POSSIBLE VALUES OF PARAMETERS": hpp = max(0.1, hpp)). g_pp and g_p2 themselves are not changed.
+HPP_MIN = 0.1
+
+
+def sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp):
+    """
+    Per-atom multipole charge separations and additive terms of the s/p two-center integrals.
+
+    Z, zetas, zetap, gss, gpp, gp2, hsp: per-atom tensors (``Z == 0`` is padding).
+    Returns ``dd, qq, rho_0, rho_1, rho_2``.
+
+    This is the single place where these are derived. The integrals (``two_elec_two_center_int``) and their
+    derivatives (``w_der``) must see identical values, so both call this function; MOPAC likewise solves for
+    them once (calpar.F90) and every consumer reads the stored result.
+    """
+    isX = Z > 2  # heavy atoms
+    qn0 = const.qn[Z]
+    hpp = (0.5 * (gpp - gp2)).clamp_min(HPP_MIN)
+
+    dd = torch.zeros_like(qn0)
+    qq = torch.zeros_like(qn0)
+    rho_1 = torch.zeros_like(qn0)
+    rho_2 = torch.zeros_like(qn0)
+    rho_0 = 0.5 * ev / gss
+    if isX.any():
+        dd[isX], qq[isX] = dd_qq(qn0[isX], zetas[isX], zetap[isX])
+        rho_1[isX] = additive_term_rho1.apply(hsp[isX], dd[isX])
+        rho_2[isX] = additive_term_rho2.apply(hpp[isX], qq[isX])
+    return dd, qq, rho_0, rho_1, rho_2

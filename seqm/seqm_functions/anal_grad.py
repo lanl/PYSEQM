@@ -1,7 +1,7 @@
 import torch
 from torch import pow
 
-from .cal_par import additive_term_rho1, additive_term_rho2, dd_qq
+from .cal_par import sp_additive_terms
 from .constants import a0, ev
 from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from .dispersion import dispersion_pair_grad
@@ -631,25 +631,7 @@ def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2,
     # Two-center repulsion integral derivatives
     HH = (ni == 1) & (nj == 1)
     XX = (ni > 1) & (nj > 1)
-    qn = const.qn
-    hpp = 0.5 * (gpp - gp2)
-    qn0 = qn[Z]
-    isH = Z == 1  # Hydrogen
-    isX = Z > 2  # Heavy atom
-    rho_0 = torch.zeros_like(qn0)
-    rho_1 = torch.zeros_like(qn0)
-    rho_2 = torch.zeros_like(qn0)
-    dd = torch.zeros_like(qn0)
-    qq = torch.zeros_like(qn0)
-    rho1 = additive_term_rho1.apply
-    rho2 = additive_term_rho2.apply
-
-    dd[isX], qq[isX] = dd_qq(qn0[isX], zetas[isX], zetap[isX])
-    rho_0[isH] = 0.5 * ev / gss[isH]
-    rho_0[isX] = 0.5 * ev / gss[isX]
-    if torch.sum(isX) > 0:
-        rho_1[isX] = rho1(hsp[isX], dd[isX])
-        rho_2[isX] = rho2(hpp[isX], qq[isX])
+    dd, qq, rho_0, rho_1, rho_2 = sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp)
 
     der_TETCILF(
         w_x,

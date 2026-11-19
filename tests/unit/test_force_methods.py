@@ -1,4 +1,5 @@
 import pytest
+import torch
 
 from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
@@ -131,3 +132,26 @@ def test_excited_force_methods_batch_same_species(
     ref = _load_reference_for_mode(ref_path, data, mode_name == "autodiff")
 
     assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("mode", [[True], [True, "numerical"]], ids=["analytical", "semi_numerical"])
+def test_pm6_sp_gradient_matches_autodiff_for_fluorine(device, mode):
+    """
+    PM6 gives F a negative hpp = (g_pp - g_p2)/2, clamped in the additive terms. The integrals and their
+    derivatives must use the same clamped value (once they did not: 0.26 eV/A error). Only F triggers this and
+    no other test molecule contains it. The geometry is generic: a bond along an axis is singular for autodiff.
+    """
+    species = torch.tensor([[9, 6, 1, 1, 1]], device=device)
+    coordinates = torch.tensor(
+        [[[0.88712, 0.34408, -0.99952], [0.0, 0.0, 0.0], [-0.20906, 0.87765, 0.61362],
+          [0.43897, -0.77877, 0.61856], [-0.92396, -0.35876, -0.44652]]],
+        dtype=torch.float64, device=device,
+    )  # fmt: skip
+
+    def force(overrides):
+        seqm_parameters = {"method": "PM6_SP", "scf_eps": 1.0e-9, "scf_converger": [1], **overrides}
+        molecule = Molecule(Constants().to(device), seqm_parameters, coordinates.clone(), species).to(device)
+        Electronic_Structure(seqm_parameters).to(device)(molecule)
+        return molecule.force.detach()
+
+    assert_allclose(force({"analytical_gradient": mode}), force({}), rtol=0.0, atol=1e-6)

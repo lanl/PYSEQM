@@ -5,7 +5,7 @@ import torch
 from seqm.utils.torch_compile import optional_compile_function
 
 from .RotationMatrixD import GenerateRotationMatrix, Rotate2Center2Electron
-from .cal_par import AIJL, POIJ, additive_term_rho1, additive_term_rho2, dd_qq
+from .cal_par import AIJL, POIJ, sp_additive_terms
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
 from .two_elec_two_center_int_local_frame_d_orbitals import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
 from .constants import ev
@@ -137,9 +137,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     tore = const.tore
     qn = const.qn
     qnd = const.qnD_int
-    hpp = 0.5 * (gpp - gp2)
     hppd = 0.5 * (gpp - gp2)
-    hpp = hpp.clamp_min(0.1)
     qn0=qn[Z]
     #Z==0 is for padding zero
     isX = Z>2   # Heavy atom
@@ -159,10 +157,9 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     ds=torch.zeros_like(qn0)
     dorbdorb=torch.zeros_like(qn0)
     ###
-    rho1 = additive_term_rho1.apply
-    rho2 = additive_term_rho2.apply
 
-    dd[isX], qq[isX] = dd_qq(qn0[isX],zetas[isX], zetap[isX])
+    # dd, qq and the rho_0..2 additive terms come from one shared definition (also used by the derivatives)
+    dd, qq, rho_0, rho_1, rho_2 = sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp)
 
 ###Correct coefficients?
 ### 1/5, 4/15, 3/49, 1 or values from paper?
@@ -251,10 +248,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
 #    y = torch.sqrt((2*qn0+1)*(2*qn0+2)/20.00000) / zetap
 #    x = POIJ(2,y*math.sqrt(2),hpp[isY])
 
-    rho_0 = 0.5*ev/gss
-    
-    rho_1[isX] = rho1(hsp[isX],dd[isX])
-    rho_2[isX] = rho2(hpp[isX],qq[isX])
     if themethod == "PM6":
         rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
     ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
