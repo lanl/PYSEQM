@@ -6,9 +6,9 @@ from .om1_overlap import (
     om1_local_overlap_terms,
     om1_local_resonance_terms,
 )
-from .om1_pair_backend import omx_pair_hcore_terms
+from .om1_pair_backend import atom_gaussian_data, omx_pair_local_terms, omx_rotate_local_terms
 from .omx_basis import select_om1_basis_payload
-from .omx_utils import omx_pair_params
+from .omx_utils import blocks_to_dense, dense_to_blocks, omx_pair_params
 from .two_elec_two_center_int import rotate_with_quaternion
 
 _OMX_HCORE_CONFIG = {
@@ -18,199 +18,194 @@ _OMX_HCORE_CONFIG = {
 }
 
 
-def _build_cor_table(molecule, pair_core_semi, pi, pj):
-    nmol, molsize = molecule.species.shape
-    dtype = molecule.coordinates.dtype
-    device = molecule.coordinates.device
-
-    cor = torch.zeros((nmol, molsize * 4, molsize), dtype=dtype, device=device)
-
-    mol = molecule.pair_molid
-    atom_i = molecule.maskd[molecule.idxi] % molsize
-    atom_j = molecule.maskd[molecule.idxj] % molsize
-    row_i = atom_i * 4
-    row_j = atom_j * 4
-
-    cor[mol, row_i + 0, atom_j] = pi["U_ss"] + pair_core_semi[:, 0, 0]
-    cor[mol, row_j + 0, atom_i] = pj["U_ss"] + pair_core_semi[:, 0, 1]
-
-    heavy_i = molecule.ni > 1
-    if heavy_i.any():
-        temp_i = (
-            pi["U_pp"][heavy_i] + (pair_core_semi[heavy_i, 2, 0] + 2.0 * pair_core_semi[heavy_i, 3, 0]) / 3.0
-        )
-        cor[mol[heavy_i], row_i[heavy_i] + 1, atom_j[heavy_i]] = temp_i
-        cor[mol[heavy_i], row_i[heavy_i] + 2, atom_j[heavy_i]] = temp_i
-        cor[mol[heavy_i], row_i[heavy_i] + 3, atom_j[heavy_i]] = temp_i
-
-    heavy_j = molecule.nj > 1
-    if heavy_j.any():
-        temp_j = (
-            pj["U_pp"][heavy_j] + (pair_core_semi[heavy_j, 2, 1] + 2.0 * pair_core_semi[heavy_j, 3, 1]) / 3.0
-        )
-        cor[mol[heavy_j], row_j[heavy_j] + 1, atom_i[heavy_j]] = temp_j
-        cor[mol[heavy_j], row_j[heavy_j] + 2, atom_i[heavy_j]] = temp_j
-        cor[mol[heavy_j], row_j[heavy_j] + 3, atom_i[heavy_j]] = temp_j
-
-    return cor
-
-
-def build_omx_pair_context(molecule, method, idxi, idxj, ni, nj, xij, rij):
+def _pair_radial(molecule, idxi, idxj, ni, nj, rij):
+    """Distance-only pair ingredients: parameters, basis payloads and the local overlap/resonance terms."""
     pi, pj = omx_pair_params(molecule.parameters, idxi, idxj)
-    basis_tables = molecule.parameters.get("_omx_basis")
     basis_data = molecule.parameters.get("_omx_basis_data")
-
     basis_i = select_om1_basis_payload(basis_data, idxi)
     basis_j = select_om1_basis_payload(basis_data, idxj)
+    return {
+        "pi": pi,
+        "pj": pj,
+        "basis_i": basis_i,
+        "basis_j": basis_j,
+        "s_local": om1_local_overlap_terms(rij, basis_i, basis_j),
+        "t_local": om1_local_resonance_terms(ni, nj, rij, pi, pj),
+    }
 
+
+def pair_directions(xij):
+    """Direction-only ingredients: the rotation to the diatomic frame."""
     rot = rotate_with_quaternion(xij)
     rot_t = rot.transpose(1, 2)
-    direction = rot_t[:, :, 0]
+    return {"rot": rot, "rot_t": rot_t, "direction": rot_t[:, :, 0]}
 
-    s_local = om1_local_overlap_terms(rij, basis_i, basis_j)
-    t_local = om1_local_resonance_terms(ni, nj, rij, pi, pj)
-    pair = omx_pair_hcore_terms(
+
+def _pair_geometry(molecule, idxi, idxj, ni, nj, xij, rij):
+    """Geometry-dependent pair ingredients shared by the Hcore build, the gradients and the ortho cache."""
+    return {**_pair_radial(molecule, idxi, idxj, ni, nj, rij), **pair_directions(xij)}
+
+
+def _local_terms(molecule, method, idxi, idxj, ni, nj, rij, radial):
+    atoms = atom_gaussian_data(molecule.parameters.get("_omx_basis_data"))
+    return omx_pair_local_terms(
         method,
         ni,
         nj,
         rij,
-        pi,
-        pj,
+        radial["pi"],
+        radial["pj"],
         molecule.const.tore,
-        s_local,
-        t_local,
-        rot,
-        rot_t,
-        basis_tables,
-        basis_i,
-        basis_j,
+        radial["s_local"],
+        radial["t_local"],
+        molecule.parameters.get("_omx_basis"),
+        radial["basis_i"],
+        radial["basis_j"],
+        atoms,
+        idxi,
+        idxj,
     )
 
-    pair_resonance = diatom_resonance_matrix_OM1(xij, t_local, direction)
-    context = {"pair": pair, "pair_resonance": pair_resonance, "pair_overlap": None}
+
+def build_omx_radial_context(molecule, method, idxi, idxj, ni, nj, rij, with_pair=True):
+    """
+    Everything that depends on the pair distance only: the local overlap/resonance terms (``s_local``,
+    ``t_local``) and, with ``with_pair``, the local-frame two-center terms (``local``, see
+    ``omx_pair_local_terms``). Rotating these with a pair direction gives ``build_omx_pair_context``.
+    """
+    radial = _pair_radial(molecule, idxi, idxj, ni, nj, rij)
+    local = _local_terms(molecule, method, idxi, idxj, ni, nj, rij, radial) if with_pair else None
+    return {"local": local, "s_local": radial["s_local"], "t_local": radial["t_local"]}
+
+
+def build_omx_pair_context(molecule, method, idxi, idxj, ni, nj, xij, rij, with_pair=True):
+    """
+    Pair Hcore terms (``pair``), resonance and (OM2/OM3) overlap blocks of every atom pair.
+    ``with_pair=False`` skips the two-center integral terms for callers that only need overlap/resonance.
+    """
+    geo = _pair_geometry(molecule, idxi, idxj, ni, nj, xij, rij)
+
+    pair = None
+    if with_pair:
+        local = _local_terms(molecule, method, idxi, idxj, ni, nj, rij, geo)
+        pair = omx_rotate_local_terms(local, geo["rot"], geo["rot_t"])
+        pair["fko"] = local["fko"]
+        if method == "OM2":
+            pair["core_semi"] = local["core_semi"]
+
+    context = {
+        "pair": pair,
+        "pair_resonance": diatom_resonance_matrix_OM1(xij, geo["t_local"], geo["direction"]),
+        "pair_overlap": None,
+        "pi": geo["pi"],
+        "pj": geo["pj"],
+    }
     if method in {"OM2", "OM3"}:
-        context["pair_overlap"] = diatom_overlap_matrix_OM1(xij, rij, direction, basis_i, basis_j, s_local)
+        context["pair_overlap"] = diatom_overlap_matrix_OM1(
+            xij, rij, geo["direction"], geo["basis_i"], geo["basis_j"], geo["s_local"]
+        )
     return context
 
 
-def _apply_omx_orthogonalization(molecule, H_blocks, S_blocks, B_blocks, pi, pj, pair_core_semi, use_cor):
-    S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
-    B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
-    COR = None
-    gval2 = None
+def _symmetric_pair_blocks(molecule, pair_blocks):
+    """Scatter per-pair 4x4 blocks into the full [nmol * molsize^2, 4, 4] layout (upper + transposed lower)."""
+    blocks = pair_blocks.new_zeros((molecule.nmol * molecule.molsize**2, 4, 4))
+    blocks[molecule.mask] = pair_blocks
+    blocks[molecule.mask_l] = pair_blocks.transpose(-1, -2)
+    return blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
+
+
+def build_omx_ortho_cache(molecule):
+    """Overlap/resonance blocks at the current geometry (the OM2/OM3 orthogonalisation gradient needs them)."""
+    geo = _pair_geometry(
+        molecule, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij
+    )
+    resonance = diatom_resonance_matrix_OM1(molecule.xij, geo["t_local"], geo["direction"])
+    overlap = diatom_overlap_matrix_OM1(
+        molecule.xij, molecule.rij, geo["direction"], geo["basis_i"], geo["basis_j"], geo["s_local"]
+    )
+    return {
+        "S5": _symmetric_pair_blocks(molecule, overlap),
+        "B5": _symmetric_pair_blocks(molecule, resonance),
+        "pi": geo["pi"],
+        "pj": geo["pj"],
+    }
+
+
+def _build_cor_table(molecule, pair_core_semi, pi, pj):
+    """
+    OM2 orthogonalisation reference energies, shape [nmol, molsize, molsize, 4]:
+    ``cor[m, a, k, c]`` is the energy of AO ``c`` of atom ``a`` in the field of atom ``k``'s core.
+    """
+    nmol, molsize = molecule.species.shape
+    cor = pair_core_semi.new_zeros((nmol, molsize, molsize, 4))
+
+    mol = molecule.pair_molid
+    atom_i = molecule.maskd[molecule.idxi] % molsize
+    atom_j = molecule.maskd[molecule.idxj] % molsize
+
+    def orbital_energies(p, core, heavy):
+        e_s = p["U_ss"] + core[:, 0]
+        e_p = torch.where(heavy, p["U_pp"] + (core[:, 2] + 2.0 * core[:, 3]) / 3.0, torch.zeros_like(e_s))
+        return torch.stack([e_s, e_p, e_p, e_p], dim=1)
+
+    cor[mol, atom_i, atom_j] = orbital_energies(pi, pair_core_semi[:, :, 0], molecule.ni > 1)
+    cor[mol, atom_j, atom_i] = orbital_energies(pj, pair_core_semi[:, :, 1], molecule.nj > 1)
+    return cor
+
+
+def omx_cor_difference(cor):
+    """``F[m, i, k, a, c] = cor[m, i, k, a] - cor[m, k, i, c]`` for the OM2 orthogonalisation."""
+    return cor.unsqueeze(-1) - cor.transpose(1, 2).unsqueeze(-2)
+
+
+def _apply_omx_orthogonalization(molecule, H_blocks, S5, B5, pi, pj, pair_core_semi, use_cor):
+    cor = gval2 = None
     if use_cor:
         gval2 = (pi["gval2"], pj["gval2"])
-        COR = _build_cor_table(molecule, pair_core_semi, pi, pj)
-        # Save COR to use for gradients
-        molecule.om2_COR = COR
-    _add_betor_cor_dense_(H_blocks, S5, B5, molecule, (pi["gval1"], pj["gval1"]), COR, gval2)
+        cor = _build_cor_table(molecule, pair_core_semi, pi, pj)
+        # The gradient code reuses COR.
+        molecule.om2_COR = cor
+    _add_betor_cor_dense_(H_blocks, S5, B5, molecule, (pi["gval1"], pj["gval1"]), cor, gval2)
 
 
-def _shell4_to_flat44(X):
-    """
-    X: [M, N, N, 4, 4] with indices [mol, atom_i, atom_k, orb_a, orb_c]
-    returns [M, 4N, 4N] with rows (atom_i, orb_a), cols (atom_k, orb_c)
-    """
-    M, N = X.shape[:2]
-    return X.permute(0, 1, 3, 2, 4).reshape(M, 4 * N, 4 * N)
+def _plus_transpose(X):
+    return X + X.transpose(1, 2)
 
 
-def _flat44_to_blocks(T, N):
-    """
-    T: [M, 4N, 4N]
-    returns [M, N, N, 4, 4] with [mol, atom_i, atom_j, orb_a, orb_b]
-    """
-    M = T.shape[0]
-    return T.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
-
-
-def _add_betor_cor_dense_(out_blocks, S5, B5, molecule, gval1, COR, gval2):
+def _add_betor_cor_dense_(out_blocks, S5, B5, molecule, gval1, cor, gval2):
     """
     Dense GEMM implementation of full BETOR with COR.
 
-    Equivalent target form:
-
         T1 = S @ B.T + B @ S.T
 
-        D[i,k,a,c] = S[i,k,a,c] * (H[i,k,a] - C[k,i,c])
+        D[i,k,a,c] = S[i,k,a,c] * (cor[i,k,a] - cor[k,i,c])
         T2 = D @ S.T + S @ D.T
 
         H += -ft1 * T1 + ft2 * T2
 
-    S5/B5: [nmol, molsize, molsize, 4, 4]
-    COR:   same layout expected by existing code:
-           COR[:, 0::4, :] -> s correction, [M, N, N]
-           COR[:, 1::4, :] -> p correction, [M, N, N]
+    S5/B5: [nmol, molsize, molsize, 4, 4]; cor: [nmol, molsize, molsize, 4] or None (OM3).
     """
-
-    M, N = S5.shape[:2]
-    dtype = S5.dtype
-
+    N = S5.shape[1]
     mask = molecule.mask
     mol = molecule.pair_molid
     ai = (mask // N) % N
     aj = mask % N
 
-    # ---------------------------------------------------------------------
-    # BETOR3-like part:
-    # T1[i,j,a,b] = sum_kc S[i,k,a,c] B[j,k,b,c]
-    #             + sum_kc B[i,k,a,c] S[j,k,b,c]
-    # ---------------------------------------------------------------------
-    S2 = _shell4_to_flat44(S5)  # [M, 4N, 4N]
-    B2 = _shell4_to_flat44(B5)  # [M, 4N, 4N]
+    S2 = blocks_to_dense(S5)
+    B2 = blocks_to_dense(B5)
 
-    T1_flat = torch.bmm(S2, B2.transpose(1, 2))
-    T1_flat += torch.bmm(B2, S2.transpose(1, 2))
-
-    T1 = _flat44_to_blocks(T1_flat, N)
-
+    # T1[i,j,a,b] = sum_kc S[i,k,a,c] B[j,k,b,c] + B[i,k,a,c] S[j,k,b,c]; the second term is the
+    # transpose of the first, so one product suffices.
+    T1 = dense_to_blocks(_plus_transpose(torch.bmm(S2, B2.transpose(1, 2))), N)
     ft1 = 0.25 * (gval1[0] + gval1[1])
     hsrc = -ft1[:, None, None] * T1[mol, ai, aj]
 
-    if COR is None:
-        out_blocks.index_add_(0, molecule.mask, hsrc)
-        return
-
-    # ---------------------------------------------------------------------
-    # COR part:
-    #
-    # Original pair expression:
-    #   sum_kc S[i,k,a,c] S[j,k,b,c]
-    #       * (hi[i,k,a] + hj[j,k,b] - hk[k,i,j,c])
-    #
-    # This can be written as:
-    #   D @ S.T + S @ D.T
-    # where:
-    #   D[i,k,a,c] = S[i,k,a,c] * (Hrow[i,k,a] - Ccol[i,k,c])
-    # Hrow is the row-atom correction.
-    # Ccol is the k-atom correction transposed into the contraction orbital.
-    # ---------------------------------------------------------------------
-    CORs = COR[:, 0::4, :]  # [M, N, N]
-    CORp = COR[:, 1::4, :]  # [M, N, N]
-
-    heavy = (molecule.species > 1).to(dtype)  # [M, N]
-
-    Hrow = S5.new_zeros((M, N, N, 4))
-    Hrow[..., 0] = CORs
-    Hrow[..., 1:] = CORp[..., None] * heavy[:, :, None, None]
-
-    Ccol = S5.new_zeros((M, N, N, 4))
-    Ccol[..., 0] = CORs.transpose(1, 2)
-    Ccol[..., 1:] = CORp.transpose(1, 2)[..., None] * heavy[:, None, :, None]
-
-    # D: [M, N, N, 4, 4]
-    # D[m,i,k,a,c] = S[m,i,k,a,c] * (Hrow[m,i,k,a] - Ccol[m,i,k,c])
-    D = S5 * (Hrow.unsqueeze(-1) - Ccol.unsqueeze(-2))
-
-    D2 = _shell4_to_flat44(D)
-
-    T2_flat = torch.bmm(D2, S2.transpose(1, 2))
-    T2_flat += torch.bmm(S2, D2.transpose(1, 2))
-
-    T2 = _flat44_to_blocks(T2_flat, N)
-
-    ft2 = 0.0625 * (gval2[0] + gval2[1])
-    hsrc = hsrc + ft2[:, None, None] * T2[mol, ai, aj]
+    if cor is not None:
+        D2 = blocks_to_dense(S5 * omx_cor_difference(cor))
+        T2 = dense_to_blocks(_plus_transpose(torch.bmm(D2, S2.transpose(1, 2))), N)
+        ft2 = 0.0625 * (gval2[0] + gval2[1])
+        hsrc = hsrc + ft2[:, None, None] * T2[mol, ai, aj]
 
     out_blocks.index_add_(0, mask, hsrc)
 
@@ -218,19 +213,11 @@ def _add_betor_cor_dense_(out_blocks, S5, B5, molecule, gval1, COR, gval2):
 def build_omx_hcore(molecule):
     method = molecule.method
     cfg = _OMX_HCORE_CONFIG[method]
-    use_cor = cfg["use_cor"]
-    direct_resonance = cfg["direct_resonance"]
 
-    orb_dim = 4
-    device = molecule.coordinates.device
-    dtype = molecule.coordinates.dtype
-    nblocks = molecule.nmol * molecule.molsize * molecule.molsize
-    H_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
-
+    H_blocks = molecule.coordinates.new_zeros((molecule.nmol * molecule.molsize**2, 4, 4))
     context = build_omx_pair_context(
         molecule, method, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij, molecule.rij
     )
-    pi, pj = omx_pair_params(molecule.parameters, molecule.idxi, molecule.idxj)
     pair_data = context["pair"]
 
     for orb, key in enumerate(["U_ss", "U_pp", "U_pp", "U_pp"]):
@@ -239,22 +226,17 @@ def build_omx_hcore(molecule):
         )
     H_blocks.index_add_(0, molecule.maskd[molecule.idxi], pair_data["e1b"])
     H_blocks.index_add_(0, molecule.maskd[molecule.idxj], pair_data["e2a"])
+    H_blocks[molecule.mask] = context["pair_resonance"]
 
-    pair_resonance = context["pair_resonance"]
-    H_blocks[molecule.mask] = pair_resonance
-
-    if direct_resonance or molecule.molsize < 3:
-        return H_blocks, pair_data["w"], pair_data["fko"], None, None, None
-
-    pair_overlap = context["pair_overlap"]
-    S_blocks = torch.zeros_like(H_blocks)
-    B_blocks = torch.zeros_like(H_blocks)
-    S_blocks[molecule.mask] = pair_overlap
-    S_blocks[molecule.mask_l] = pair_overlap.transpose(-1, -2)
-    B_blocks[molecule.mask] = pair_resonance
-    B_blocks[molecule.mask_l] = pair_resonance.transpose(-1, -2)
-
-    _apply_omx_orthogonalization(
-        molecule, H_blocks, S_blocks, B_blocks, pi, pj, pair_data.get("core_semi"), use_cor
-    )
+    if not (cfg["direct_resonance"] or molecule.molsize < 3):
+        _apply_omx_orthogonalization(
+            molecule,
+            H_blocks,
+            _symmetric_pair_blocks(molecule, context["pair_overlap"]),
+            _symmetric_pair_blocks(molecule, context["pair_resonance"]),
+            context["pi"],
+            context["pj"],
+            pair_data.get("core_semi"),
+            cfg["use_cor"],
+        )
     return H_blocks, pair_data["w"], pair_data["fko"], None, None, None

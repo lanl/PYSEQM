@@ -1,5 +1,4 @@
 import functools
-import os
 
 import torch
 
@@ -211,27 +210,58 @@ def select_om1_basis_payload(basis_payload, idx):
     return {name: values[idx] for name, values in basis_payload.items()}
 
 
+def _boys_series(x, m):
+    """F_m(x) = exp(-x) * sum_k (2x)^k / ((2m+1)(2m+3)...(2m+2k+1)); all terms positive, converges for any x."""
+    term = torch.ones_like(x) / (2 * m + 1)
+    total = term.clone()
+    for k in range(1, 160):
+        term = term * (2.0 * x / (2 * m + 2 * k + 1))
+        total = total + term
+    return torch.exp(-x) * total
+
+
 class BoysInterpolationTable(torch.nn.Module):
-    def __init__(self, table_path="fortran_boys_table.pt"):
+    """
+    Boys functions F_0..F_4(x) for 0 <= x <= XLIM by Everett interpolation on a step-0.05 grid.
+
+    Generated at construction (about a millisecond of float64 work) from the exact functions:
+    ``A = F_m(x_n)``, ``B = A[n+1] - A[n]`` and ``C = h^2/6 F_{m+2}(x_n) - h^4/60 F_{m+4}(x_n)``, the
+    fourth-order-corrected curvature coefficient. That reproduces the accuracy of the Fortran GAMGEN
+    table (relative error about 1.6e-9 at small x, below 3e-10 above x = 10) without shipping its data.
+
+    ``xmax`` (19.9) is the Fortran switch point the s-s code still uses for its asymptotic branch;
+    ``forward`` clamps its argument to ``xlim`` (20.0), beyond which callers use the asymptotic form.
+    """
+
+    STEP = 0.05
+    XMAX = 19.9
+    XLIM = 20.0
+    M_MAX = 5
+
+    def __init__(self):
         super().__init__()
-        current_dir = os.path.dirname(__file__)
-        table_path = os.path.join(current_dir, "..", "params", "boys_integral_table.pt")
-        tab = torch.load(table_path, map_location="cpu", weights_only=True)
+        n_rows = int(round(self.XLIM / self.STEP)) + 2  # one spare row for the C[n + 1] term
+        nodes = self.STEP * torch.arange(n_rows, dtype=torch.float64)
+        F = torch.stack([_boys_series(nodes, m) for m in range(self.M_MAX + 4)], dim=1)
 
-        self.register_buffer("A", tab["A"])
-        self.register_buffer("B", tab["B"])
-        self.register_buffer("C", tab["C"])
+        A = F[:, : self.M_MAX]
+        B = torch.zeros_like(A)
+        B[:-1] = A[1:] - A[:-1]
+        C = self.STEP**2 / 6.0 * F[:, 2 : self.M_MAX + 2] - self.STEP**4 / 60.0 * F[:, 4 : self.M_MAX + 4]
 
-        self.maxfmt = int(tab["MAXFMT"])
-        self.xmax = float(tab["XMAX"])
-        self.xlim = float(tab["XLIM"])
+        self.register_buffer("A", A)
+        self.register_buffer("B", B)
+        self.register_buffer("C", C)
+
+        self.maxfmt = n_rows
+        self.xmax = self.XMAX
+        self.xlim = self.XLIM
 
     def forward(self, x, m_count=5):
         """
-        Table interpolation for X < XMAX.
-        Returns tuple F0...F_{m_count-1}.
+        Returns tuple F0...F_{m_count-1}; x is clamped to xlim (callers handle x > xlim asymptotically).
         """
-        qq = x * 20.0
+        qq = x.clamp(max=self.xlim) * (1.0 / self.STEP)
         n = torch.floor(qq).to(torch.long).clamp(0, self.maxfmt - 2)
         th = qq - n.to(x.dtype)
 

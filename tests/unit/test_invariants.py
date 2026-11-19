@@ -1,11 +1,10 @@
+import numpy as np
 import pytest
 import torch
 
 from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
-from seqm.seqm_functions.om1_core_corrections import _fmtgen_fortran
-from seqm.seqm_functions.om1_pair_backend import boys_from_table
 from seqm.seqm_functions.omx_basis import BoysInterpolationTable
 
 from ..reference_data import OMX_METHODS, assert_allclose
@@ -27,14 +26,37 @@ def _rotate(coords, R):
     return torch.einsum("...i,ij->...j", coords, R)
 
 
-def test_omx_boys_direct_region_matches_fmtgen():
-    boys_table = BoysInterpolationTable()
-    x = torch.linspace(boys_table.xmax, boys_table.xlim, 5, dtype=torch.float64)
+def test_omx_boys_table_matches_exact_boys_function():
+    """F_m(x) = int_0^1 t^(2m) exp(-x t^2) dt, by Gauss-Legendre quadrature; the table is good to ~2e-9."""
+    nodes, weights = np.polynomial.legendre.leggauss(200)
+    t, w = 0.5 * (nodes + 1.0), 0.5 * weights
+    x = np.linspace(0.0, BoysInterpolationTable.XLIM, 2001)
+    exact = np.stack([(w * t ** (2 * m) * np.exp(-np.outer(x, t**2))).sum(axis=1) for m in range(5)], axis=-1)
 
-    actual = torch.stack(boys_from_table(x, boys_table, 5), dim=-1)
-    expected = _fmtgen_fortran(x, 5)
+    table = torch.stack(BoysInterpolationTable()(torch.as_tensor(x), 5), dim=-1).numpy()
+    np.testing.assert_allclose(table, exact, rtol=1e-8)
 
-    assert_allclose(actual, expected, rtol=1e-11, atol=1e-11)
+
+@pytest.mark.parametrize("method", ["OM1", "OM2"])
+def test_distant_nonpolar_molecules_are_additive(device, methane_molecule_data, method):
+    """Two methanes 36 A apart have twice the energy of one: exercises the far-field integral and PPECP paths."""
+    species, coordinates = methane_molecule_data
+    const = Constants().to(device)
+    parameters = {"method": method, "scf_eps": 1.0e-9, "scf_converger": [1]}
+
+    def energy(species, coordinates):
+        molecule = Molecule(const, parameters, coordinates, species).to(device)
+        Electronic_Structure(parameters).to(device)(molecule)
+        return molecule.Etot.item()
+
+    shift = torch.tensor([30.0, 17.0, 11.0], dtype=coordinates.dtype, device=device)
+    dimer_species = torch.cat([species[:, :1], species[:, :1], species[:, 1:], species[:, 1:]], dim=1)
+    dimer_coordinates = torch.cat(
+        [coordinates[:, :1], coordinates[:, :1] + shift, coordinates[:, 1:], coordinates[:, 1:] + shift],
+        dim=1,
+    )
+
+    assert abs(energy(dimer_species, dimer_coordinates) - 2 * energy(species, coordinates)) < 1.0e-5
 
 
 @pytest.mark.parametrize("method", OMX_METHODS)

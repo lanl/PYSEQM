@@ -889,7 +889,7 @@ def _primitive_g1_vec(kd, acz, zfn, zetc, zetb, r, zlp, clp, ppecp):
     return g1
 
 
-def om1_ppecp_local_vectorized(ni, nj, rij, basis_tables, basis_i, basis_j):
+def om1_ppecp_local_vectorized(ni, nj, rij, basis_tables, basis_i, basis_j, prune=True):
     """
     Vectorized OM1 PPECP local block.
 
@@ -963,6 +963,24 @@ def om1_ppecp_local_vectorized(ni, nj, rij, basis_tables, basis_i, basis_j):
     exponents = torch.stack((basis_i["exponents"], basis_j["exponents"]), dim=1).reshape(-1, 3)[active]
     coeff_s = torch.stack((basis_i["coeff_s"], basis_j["coeff_s"]), dim=1).reshape(-1, 3)[active]
     coeff_p = torch.stack((basis_i["coeff_p"], basis_j["coeff_p"]), dim=1).reshape(-1, 3)[active]
+
+    # Drop columns whose integrals are identically zero. Every primitive term is switched on only while
+    # r^2 * zcb * zlp / (zcb + zlp) <= _TOL (see _fiprep_vec/_fjprep_vec), and the left side is smallest
+    # for the smallest primitive pair (zcb = 2 * min exponent) and the smallest of the three ECP exponents.
+    # The margin keeps the test strictly conservative against rounding in the original expressions.
+    zcb_min = (2.0 * exponents.amin(dim=1)).unsqueeze(1)
+    dum_min = r_a * r_a * (zcb_min * zlp_a / (zcb_min + zlp_a)).amin(dim=1)
+    keep = (
+        (dum_min <= _TOL * (1.0 + 1e-6) if prune else torch.ones_like(dum_min, dtype=torch.bool))
+        .nonzero(as_tuple=False)
+        .squeeze(1)
+    )
+    if keep.numel() == 0:
+        return corpp
+    if keep.numel() < dum_min.numel():
+        acz_a, zfn_a, r_a, zlp_a, clp_a = (v[keep] for v in (acz_a, zfn_a, r_a, zlp_a, clp_a))
+        shell_type, exponents, coeff_s, coeff_p = (v[keep] for v in (shell_type, exponents, coeff_s, coeff_p))
+        active_flat_col_idx = active_flat_col_idx[keep]
 
     # shell_type = shell_type.to(torch.long)
     # exponents = exponents.to(dtype)

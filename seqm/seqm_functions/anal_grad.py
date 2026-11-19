@@ -1,21 +1,27 @@
 import torch
 from torch import pow
 
-from .cal_par import additive_term_rho1, additive_term_rho2, dd_qq
+from .cal_par import sp_additive_terms
 from .constants import a0, ev
-from .diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
+from .diat_overlap_PM6_SP import diatom_overlap_local_terms, diatom_overlap_rotate
 from .dispersion import dispersion_pair_grad
 from .energy import pair_nuclear_energy
 from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
-from .om2_hcore import build_omx_pair_context
+from .om1_overlap import diatom_overlap_matrix_OM1, diatom_resonance_matrix_OM1
+from .om1_pair_backend import omx_rotate_local_terms
+from .om2_hcore import build_omx_ortho_cache, build_omx_radial_context, omx_cor_difference, pair_directions
+from .omx_utils import blocks_to_dense, dense_to_blocks
 from .two_elec_two_center_int import (
     _pair_rotation_matrix,
+    block_matvec,
+    block_sandwich,
     local_sp_integral_matrix,
     local_xh_integral_vector,
     pair_rotation_matrix_derivative,
+    rotate_sp_local,
     rotate_with_quaternion,
+    two_elec_two_center_local_sp,
 )
-from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 
 delta = 5e-6  # delta for finite difference calcs
 _VECTORIZED_SP_DERIVATIVES = True
@@ -26,12 +32,13 @@ def _rotate_sp_derivatives(rotXH, rot, rot_derXH, rot_der, riXH, ri, riXH_x, ri_
     dT = pair_rotation_matrix_derivative(rot, rot_der)
     W = local_sp_integral_matrix(ri)
     dW = local_sp_integral_matrix(ri_x)
-    T3, W3, Tt3 = T[:, None], W[:, None], T.transpose(1, 2)[:, None]
-    w_x = dT @ W3 @ Tt3 + T3 @ dW @ Tt3 + T3 @ W3 @ dT.transpose(-1, -2)
+    T3, W3 = T[:, None], W[:, None]
+    # d(T W T^T) = dT W T^T + T dW T^T + T W dT^T; T and dT are block diagonal in the AO-pair ranks.
+    w_x = block_sandwich(dT, W3, T3) + block_sandwich(T3, dW, T3) + block_sandwich(T3, W3, dT)
 
     T, dT = _pair_rotation_matrix(rotXH), pair_rotation_matrix_derivative(rotXH, rot_derXH)
     W, dW = local_xh_integral_vector(riXH), local_xh_integral_vector(riXH_x)
-    wXH_x = (dT @ W[:, None, :, None] + T[:, None] @ dW.unsqueeze(-1)).squeeze(-1)
+    wXH_x = block_matvec(dT, W[:, None]) + block_matvec(T[:, None], dW)
     return wXH_x, w_x
 
 
@@ -324,48 +331,6 @@ def scf_grad(
     return grad
 
 
-from .om2_hcore import (
-    diatom_overlap_matrix_OM1,
-    diatom_resonance_matrix_OM1,
-    om1_local_resonance_terms,
-    select_om1_basis_payload,
-)
-from .omx_utils import omx_pair_params
-
-
-def _build_omx_ortho_cache(molecule):
-    orb_dim = 4
-    device = molecule.coordinates.device
-    dtype = molecule.coordinates.dtype
-    nblocks = molecule.nmol * molecule.molsize * molecule.molsize
-
-    pi, pj = omx_pair_params(molecule.parameters, molecule.idxi, molecule.idxj)
-    basis_data = molecule.parameters.get("_omx_basis_data")
-
-    basis_i = select_om1_basis_payload(basis_data, molecule.idxi)
-    basis_j = select_om1_basis_payload(basis_data, molecule.idxj)
-
-    rot = rotate_with_quaternion(molecule.xij)
-    rot_t = rot.transpose(1, 2)
-    direction = rot_t[:, :, 0]
-
-    t_local = om1_local_resonance_terms(molecule.ni, molecule.nj, molecule.rij, pi, pj)
-
-    pair_resonance = diatom_resonance_matrix_OM1(molecule.xij, t_local, direction)
-    pair_overlap = diatom_overlap_matrix_OM1(molecule.xij, molecule.rij, direction, basis_i, basis_j)
-
-    S_blocks = torch.zeros((nblocks, orb_dim, orb_dim), dtype=dtype, device=device)
-    B_blocks = torch.zeros_like(S_blocks)
-    S_blocks[molecule.mask] = pair_overlap
-    S_blocks[molecule.mask_l] = pair_overlap.transpose(-1, -2)
-    B_blocks[molecule.mask] = pair_resonance
-    B_blocks[molecule.mask_l] = pair_resonance.transpose(-1, -2)
-
-    S5 = S_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
-    B5 = B_blocks.reshape(molecule.nmol, molecule.molsize, molecule.molsize, 4, 4)
-    return {"S5": S5, "B5": B5, "pi": pi, "pj": pj}
-
-
 def _density_to_ortho_blocks(P0, molecule, unrestricted=False):
     molsize = molecule.molsize
     if unrestricted:
@@ -386,7 +351,7 @@ def omx_threebody_ortho_grad(
     molecule, P0, S_x, B_x, pair_core_semi_x, ortho_cache=None, unrestricted=False, vel_eff=None
 ):
     """Return the OMx orthogonalization correction without squeezing batch axes."""
-    cache = _build_omx_ortho_cache(molecule) if ortho_cache is None else ortho_cache
+    cache = build_omx_ortho_cache(molecule) if ortho_cache is None else ortho_cache
     pi, pj = cache["pi"], cache["pj"]
     P_blocks = _density_to_ortho_blocks(P0, molecule, unrestricted=unrestricted)
     method = molecule.method
@@ -423,118 +388,59 @@ repeat_tensor = lambda x: torch.cat([x, x])
 
 
 def w_derivative_numerical(mol, Xij, w_x_new):
+    """Finite-difference derivative of the s/p two-center integrals and core attractions (fills ``w_x_new``)."""
+    if mol.method == "PM6":
+        raise NotImplementedError("Numerical two-center derivatives are only implemented for s/p methods")
     npairs = Xij.shape[0]
-    inv_2delta = 1.0 / (2.0 * delta)
-    e1b_x_new = torch.zeros(mol.rij.shape[0], 3, 4, 4, device=mol.rij.device, dtype=mol.rij.dtype)
-    e2a_x_new = torch.zeros_like(e1b_x_new)
-    ni_ = repeat_tensor(mol.ni)
-    nj_ = repeat_tensor(mol.nj)
-    Z_ = repeat_tensor(mol.Z)
-    idxi_ = repeat_tensor(mol.idxi)
-    idxj_ = repeat_tensor(mol.idxj)
-    zeta_s_ = repeat_tensor(mol.parameters["zeta_s"])
-    zeta_p_ = repeat_tensor(mol.parameters["zeta_p"])
-    g_ss_ = repeat_tensor(mol.parameters["g_ss"])
-    g_pp_ = repeat_tensor(mol.parameters["g_pp"])
-    g_p2_ = repeat_tensor(mol.parameters["g_p2"])
-    h_sp_ = repeat_tensor(mol.parameters["h_sp"])
-    rho_core_ = repeat_tensor(mol.parameters["rho_core"])
-    for coord in range(3):
-        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
+    p = mol.parameters
+    idxi2, idxj2, ni2, nj2 = (t.repeat(2) for t in (mol.idxi, mol.idxj, mol.ni, mol.nj))
 
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
-
-        # TODO: works for only s,p orbitals
-        w_, e1b_, e2a_, _, _, _, _ = TETCI(
+    def local_at(r):
+        return two_elec_two_center_local_sp(
             mol.const,
-            idxi_,
-            idxj_,
-            ni_,
-            nj_,
-            xij_,
-            rij_,
-            Z_,
-            zeta_s_,
-            zeta_p_,
-            None,
-            None,
-            None,
-            None,
-            g_ss_,
-            g_pp_,
-            g_p2_,
-            h_sp_,
-            None,
-            None,
-            rho_core_,
-            None,
-            None,
+            idxi2,
+            idxj2,
+            ni2,
+            nj2,
+            r,
+            mol.Z,
+            p["zeta_s"],
+            p["zeta_p"],
+            p["g_ss"],
+            p["g_pp"],
+            p["g_p2"],
+            p["h_sp"],
             mol.method,
         )
-        Xij[:, coord] -= delta
 
-        w_x_new[:, coord, ...] = (w_[:npairs] - w_[npairs:]) * inv_2delta
-        e1b_x_new[:, coord, ...] = (e1b_[:npairs] - e1b_[npairs:]) * inv_2delta
-        e2a_x_new[:, coord, ...] = (e2a_[:npairs] - e2a_[npairs:]) * inv_2delta
+    def rotate(local, units):
+        copies = units.shape[0] // npairs
+        return rotate_sp_local(local, mol.const.tore, mol.ni.repeat(copies), mol.nj.repeat(copies), units)
 
-    return e1b_x_new, e2a_x_new
+    derivatives = _radial_rotation_derivative(local_at, rotate, Xij)
+    w_x_new.copy_(derivatives["w"])
+    return derivatives["e1b"], derivatives["e2a"]
 
 
 def core_core_der_fd(mol, method, gam, parameters):
-    dtype = mol.rij.dtype
-    device = mol.rij.device
-    ni = mol.ni
-    nj = mol.nj
-    idxi = mol.idxi
-    idxj = mol.idxj
-    xij = mol.xij
-    rij = mol.rij
-    Xij = xij * rij.unsqueeze(1) * a0
-    npairs = Xij.shape[0]
-
-    pair_grad = torch.zeros((npairs, 3), dtype=dtype, device=device)
-    ni_ = repeat_tensor(ni)
-    nj_ = repeat_tensor(nj)
-    idxi_ = repeat_tensor(idxi)
-    idxj_ = repeat_tensor(idxj)
-    gss = mol.parameters["g_ss"]
-    rho_0 = 0.5 * ev / gss
+    """
+    Core-core repulsion derivative by finite differences. The energy depends on the pair distance only, so
+    only the radial term of ``_radial_rotation_derivative`` is nonzero (``gam`` is held fixed).
+    """
+    idxi_ = repeat_tensor(mol.idxi)
+    idxj_ = repeat_tensor(mol.idxj)
+    rho_0 = 0.5 * ev / mol.parameters["g_ss"]
     rho0xi = rho_0[idxi_]
     rho0xj = rho_0[idxj_]
     rho_core = mol.parameters["rho_core"]
     A = rho_core[idxi_] != 0.000
     B = rho_core[idxj_] != 0.000
-
     rho0xi[A] = rho_core[idxi_][A]
     rho0xj[B] = rho_core[idxj_][B]
-    alp = repeat_tensor(mol.alp)
-    chi = repeat_tensor(mol.chi)
-    gam_ = repeat_tensor(gam)
-    inv_2delta = 1.0 / (2.0 * delta)
+    ni_, nj_, alp, chi, gam_ = (repeat_tensor(t) for t in (mol.ni, mol.nj, mol.alp, mol.chi, gam))
 
-    for coord in range(3):
-        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-
-        diff_save = pair_nuclear_energy(
+    def local_at(r):
+        energy = pair_nuclear_energy(
             None,
             mol.const,
             mol.nmol,
@@ -542,7 +448,7 @@ def core_core_der_fd(mol, method, gam, parameters):
             nj_,
             idxi_,
             idxj_,
-            rij_,
+            r,
             rho0xi,
             rho0xj,
             alp,
@@ -551,10 +457,10 @@ def core_core_der_fd(mol, method, gam, parameters):
             method=method,
             parameters=parameters,
         )
-        Xij[:, coord] -= delta
-        pair_grad[:, coord] = (diff_save[:npairs] - diff_save[npairs:]) * inv_2delta
+        return {"energy": energy}
 
-    return pair_grad
+    Xij = mol.xij * mol.rij.unsqueeze(1) * a0
+    return _radial_rotation_derivative(local_at, lambda local, units: local, Xij)["energy"]
 
 
 def core_core_der(mol, gam, w_x, method, parameters):
@@ -631,25 +537,7 @@ def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2,
     # Two-center repulsion integral derivatives
     HH = (ni == 1) & (nj == 1)
     XX = (ni > 1) & (nj > 1)
-    qn = const.qn
-    hpp = 0.5 * (gpp - gp2)
-    qn0 = qn[Z]
-    isH = Z == 1  # Hydrogen
-    isX = Z > 2  # Heavy atom
-    rho_0 = torch.zeros_like(qn0)
-    rho_1 = torch.zeros_like(qn0)
-    rho_2 = torch.zeros_like(qn0)
-    dd = torch.zeros_like(qn0)
-    qq = torch.zeros_like(qn0)
-    rho1 = additive_term_rho1.apply
-    rho2 = additive_term_rho2.apply
-
-    dd[isX], qq[isX] = dd_qq(qn0[isX], zetas[isX], zetap[isX])
-    rho_0[isH] = 0.5 * ev / gss[isH]
-    rho_0[isX] = 0.5 * ev / gss[isX]
-    if torch.sum(isX) > 0:
-        rho_1[isX] = rho1(hsp[isX], dd[isX])
-        rho_2[isX] = rho2(hpp[isX], qq[isX])
+    dd, qq, rho_0, rho_1, rho_2 = sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp)
 
     der_TETCILF(
         w_x,
@@ -708,76 +596,19 @@ from .constants import overlap_cutoff
 
 
 def overlap_der_finiteDiff(overlap_KAB_x, idxi, idxj, rij, Xij, beta, ni, nj, zeta, qn_int):
-    # overlap_pairs = rij <= overlap_cutoff
-    # di_plus = torch.zeros(Xij.shape[0], 4, 4, dtype=Xij.dtype, device=Xij.device)
-    # di_minus = torch.clone(di_plus)
-    # for coord in range(3):
-    #     # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-    #     Xij[:, coord] -= delta
-    #     rij_ = torch.norm(Xij, dim=1)
-    #     xij_ = Xij / rij_.unsqueeze(1)
-    #     rij_ = rij_ / a0
-    #     di_plus[overlap_pairs] = diatom_overlap_matrix(
-    #         ni[overlap_pairs],
-    #         nj[overlap_pairs],
-    #         xij_[overlap_pairs],
-    #         rij_[overlap_pairs],
-    #         zeta[idxi][overlap_pairs],
-    #         zeta[idxj][overlap_pairs],
-    #         qn_int,
-    #     )
-    #     Xij[:, coord] += 2.0 * delta
-    #     rij_ = torch.norm(Xij, dim=1)
-    #     xij_ = Xij / rij_.unsqueeze(1)
-    #     rij_ = rij_ / a0
-    #
-    #     di_minus[overlap_pairs] = diatom_overlap_matrix(
-    #         ni[overlap_pairs],
-    #         nj[overlap_pairs],
-    #         xij_[overlap_pairs],
-    #         rij_[overlap_pairs],
-    #         zeta[idxi][overlap_pairs],
-    #         zeta[idxj][overlap_pairs],
-    #         qn_int,
-    #     )
-    #     Xij[:, coord] -= delta
-    #     overlap_KAB_x[:, coord, :, :] = (di_plus - di_minus) / (2.0 * delta)
-    overlap_pairs = repeat_tensor(rij) <= overlap_cutoff
-    di_ = torch.zeros(Xij.shape[0] * 2, 4, 4, dtype=Xij.dtype, device=Xij.device)
-    inv_2delta = 1.0 / (2.0 * delta)
-    npairs = Xij.shape[0]
-    ni_ = repeat_tensor(ni)
-    nj_ = repeat_tensor(nj)
-    qn_int_ = repeat_tensor(qn_int)
-    zeta_ = repeat_tensor(zeta)
-    idxi_ = repeat_tensor(idxi)
-    idxj_ = repeat_tensor(idxj)
-    for coord in range(3):
-        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
+    """Finite-difference derivative of the beta-weighted overlap blocks (only pairs within the overlap cutoff)."""
+    pairs = (rij <= overlap_cutoff).nonzero(as_tuple=False).squeeze(1)
+    if pairs.numel() > 0:
+        ni_p, nj_p = ni[pairs].repeat(2), nj[pairs].repeat(2)
+        zeta_i, zeta_j = zeta[idxi[pairs]].repeat(2, 1), zeta[idxj[pairs]].repeat(2, 1)
 
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
+        def local_at(r):
+            return {"terms": diatom_overlap_local_terms(ni_p, nj_p, r, zeta_i, zeta_j, qn_int)}
 
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
+        def rotate(local, units):
+            return {"overlap": diatom_overlap_rotate(local["terms"], units)}
 
-        di_[overlap_pairs] = diatom_overlap_matrix_PM6_SP(
-            ni_[overlap_pairs],
-            nj_[overlap_pairs],
-            xij_[overlap_pairs],
-            rij_[overlap_pairs],
-            zeta_[idxi_][overlap_pairs],
-            zeta_[idxj_][overlap_pairs],
-            qn_int_,
-        )
-        Xij[:, coord] -= delta
-        overlap_KAB_x[:, coord, :, :] = (di_[:npairs] - di_[npairs:]) * inv_2delta
+        overlap_KAB_x[pairs] = _radial_rotation_derivative(local_at, rotate, Xij[pairs])["overlap"]
 
     overlap_KAB_x[..., 0, 0] *= (beta[idxi, 0] + beta[idxj, 0]).unsqueeze(1)
     overlap_KAB_x[..., 0, 1:] *= (beta[idxi, 0:1] + beta[idxj, 1:2]).unsqueeze(1)
@@ -1684,106 +1515,136 @@ def der_TETCILF(
     w_x_final[XX, ...] = w_x.reshape(ri.shape[0], 3, 10, 10)
 
 
+def _radial_rotation_derivative(local_at, rotate, Xij):
+    """
+    Derivative with respect to the position of atom i of quantities ``q = rotate(L(r), direction)``, where
+    ``L`` is a dict of local-frame tensors that depend on the pair distance only and ``rotate`` is linear in
+    ``L`` and cheap. Moving atom i changes both the distance and the direction, so
+
+        dq/dx_c = [q(dir+, L) - q(dir-, L)] / 2 delta  -  (dr/dX_c) * q(dir, dL/dr)
+
+    The expensive ``L`` is evaluated only at ``r +- eps`` (once, shared by the three components); the
+    displaced geometries only enter through ``rotate``. This equals a finite difference of the fully rebuilt
+    quantity at displaced geometries to O(delta^2).
+
+    Parameters
+    ----------
+    local_at(r) : callable
+        ``r`` (bohr), shape (m,) -> dict of local tensors. The pair axis of the result is either all m pairs
+        or a subset chosen by pair class (the same subset for every half of a [plus; minus] batch).
+    rotate(local, units) : callable
+        ``units`` are pair unit vectors (m, 3); returns a dict of tensors with a leading pair axis of size m.
+        Entries that do not depend on the direction may simply be returned as they are.
+    Xij : (npairs, 3) displacement of atom j from atom i, in Angstrom.
+
+    Returns a dict of tensors shaped (npairs, 3, ...).
+    """
+    npairs = Xij.shape[0]
+    norm = torch.norm(Xij, dim=1)
+    unit = Xij / norm.unsqueeze(1)
+    dr_dX = Xij / (norm * a0).unsqueeze(1)  # d r / d X_c, with r in bohr and X in Angstrom
+    eps = delta / a0
+
+    local = local_at(torch.cat([norm / a0 + eps, norm / a0 - eps]))
+    mid, slope = {}, {}
+    for key, value in local.items():
+        half = value.shape[0] // 2
+        mid[key] = 0.5 * (value[:half] + value[half:])
+        slope[key] = (value[:half] - value[half:]) / (2.0 * eps)
+    mid_twice = {key: torch.cat([value, value]) for key, value in mid.items()}
+
+    slope_rotated = rotate(slope, unit)
+
+    results = {}
+    for c in range(3):
+        step = torch.zeros_like(Xij)
+        step[:, c] = delta
+        # Xij = Xj - Xi, so moving atom i by +delta means subtracting delta from Xij.
+        displaced = torch.cat([Xij - step, Xij + step])
+        rotated = rotate(mid_twice, displaced / torch.norm(displaced, dim=1, keepdim=True))
+        g = dr_dX[:, c]
+        for key, value in rotated.items():
+            radial = g.view(-1, *([1] * (value.dim() - 1))) * slope_rotated[key]
+            results.setdefault(key, [None] * 3)[c] = _central_diff(value, npairs) - radial
+    return {key: torch.stack(values, dim=1) for key, values in results.items()}
+
+
+def _omx_pair_derivatives(molecule, Xij, ni, nj, idxi, idxj, method, with_pair=True, with_overlap=False):
+    """
+    Central-difference derivatives of the OMx pair terms with respect to the position of atom i.
+
+    Returns a dict of tensors shaped (npairs, 3, ...): ``B`` (resonance blocks) and, with ``with_pair``,
+    ``w``, ``e1b``, ``e2a``, ``fko``, ``core_semi``; with ``with_overlap`` also ``S`` (overlap blocks).
+    See ``_radial_rotation_derivative``.
+    """
+
+    def local_at(r):
+        radial = build_omx_radial_context(
+            molecule,
+            method,
+            idxi.repeat(2),
+            idxj.repeat(2),
+            ni.repeat(2),
+            nj.repeat(2),
+            r,
+            with_pair=with_pair,
+        )
+        local = {"s_local": radial["s_local"], "t_local": radial["t_local"]}
+        if with_pair:
+            local.update(radial["local"])
+        return local
+
+    def rotate(local, units):
+        directions = pair_directions(units)
+        out = {"B": diatom_resonance_matrix_OM1(units, local["t_local"], directions["direction"])}
+        if with_overlap:
+            out["S"] = diatom_overlap_matrix_OM1(
+                units, None, directions["direction"], None, None, local["s_local"]
+            )
+        if with_pair:
+            out.update(omx_rotate_local_terms(local, directions["rot"], directions["rot_t"]))
+            out["fko"] = local["fko"]  # radial only
+            out["core_semi"] = local["core_semi"]
+        return out
+
+    return _radial_rotation_derivative(local_at, rotate, Xij)
+
+
+def _central_diff(t, npairs):
+    """Central difference of a [plus; minus] batched tensor."""
+    return (t[:npairs] - t[npairs:]) * (1.0 / (2.0 * delta))
+
+
 def _build_omx_ortho_fd_cache(molecule, Xij, ni, nj, idxi, idxj, method, dtype, device):
     if method not in {"OM2", "OM3"}:
         return None
 
-    npairs = Xij.shape[0]
-    ni_ = repeat_tensor(ni)
-    nj_ = repeat_tensor(nj)
-    idxi_ = repeat_tensor(idxi)
-    idxj_ = repeat_tensor(idxj)
-    one_over_twodelta = 1.0 / (2.0 * delta)
-    S_x = torch.zeros((npairs, 3, 4, 4), dtype=dtype, device=device)
-    B_x = torch.zeros_like(S_x)
-    pair_core_semi_x = torch.zeros(npairs, 3, 4, 2, device=device, dtype=dtype) if method == "OM2" else None
-    ortho_cache = _build_omx_ortho_cache(molecule)
-
-    for coord in range(3):
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
-        ctx = build_omx_pair_context(
-            molecule, method=method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
-        )
-        Xij[:, coord] -= delta
-
-        B_x[:, coord] = (ctx["pair_resonance"][:npairs] - ctx["pair_resonance"][npairs:]) * one_over_twodelta
-        S_x[:, coord] = (ctx["pair_overlap"][:npairs] - ctx["pair_overlap"][npairs:]) * one_over_twodelta
-        if pair_core_semi_x is not None:
-            pair_core_semi_x[:, coord] = (
-                ctx["pair"]["core_semi"][:npairs] - ctx["pair"]["core_semi"][npairs:]
-            ) * one_over_twodelta
-
-    return {"S_x": S_x, "B_x": B_x, "pair_core_semi_x": pair_core_semi_x, **ortho_cache}
+    # Only OM2 needs the two-center terms (core_semi); OM3 needs just overlap and resonance.
+    d = _omx_pair_derivatives(
+        molecule, Xij, ni, nj, idxi, idxj, method, with_pair=method == "OM2", with_overlap=True
+    )
+    return {
+        "S_x": d["S"],
+        "B_x": d["B"],
+        "pair_core_semi_x": d["core_semi"] if method == "OM2" else None,
+        **build_omx_ortho_cache(molecule),
+    }
 
 
 def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=None, return_ortho_cache=False):
-    npairs = Xij.shape[0]
-    ni_ = repeat_tensor(ni)
-    nj_ = repeat_tensor(nj)
-    idxi_ = repeat_tensor(idxi)
-    idxj_ = repeat_tensor(idxj)
-    e1b_x = torch.zeros((npairs, 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
-    e2a_x = torch.zeros((npairs, 3, 4, 4), dtype=w_x.dtype, device=w_x.device)
-    fko_x = torch.zeros((npairs, 3), dtype=w_x.dtype, device=w_x.device)
-    one_over_twodelta = 1.0 / (2.0 * delta)
     need_ortho_terms = method in {"OM2", "OM3"} and (torch.is_tensor(P0) or return_ortho_cache)
     need_threebody_grad = method in {"OM2", "OM3"} and torch.is_tensor(P0)
-    B_x = overlap_KAB_x
-    ortho_cache = _build_omx_ortho_cache(molecule) if need_ortho_terms else None
-    S_x = torch.zeros_like(B_x) if need_ortho_terms else None
-    pair_core_semi_x = (
-        torch.zeros(npairs, 3, 4, 2, device=w_x.device, dtype=w_x.dtype)
-        if method == "OM2" and need_ortho_terms
-        else None
+    ortho_cache = build_omx_ortho_cache(molecule) if need_ortho_terms else None
+
+    d = _omx_pair_derivatives(
+        molecule, Xij, ni, nj, idxi, idxj, method, with_pair=True, with_overlap=need_ortho_terms
     )
-
-    for coord in range(3):
-        # since Xij = Xj-Xi, when I want to do Xi+delta, I have to subtract delta from from Xij
-        Xij[:, coord] -= delta
-        rij_plus = torch.norm(Xij, dim=1)
-        xij_plus = Xij / rij_plus.unsqueeze(1)
-        rij_plus = rij_plus / a0
-
-        Xij[:, coord] += 2.0 * delta
-        rij_minus = torch.norm(Xij, dim=1)
-        xij_minus = Xij / rij_minus.unsqueeze(1)
-        rij_minus = rij_minus / a0
-
-        rij_ = torch.cat([rij_plus, rij_minus])
-        xij_ = torch.cat([xij_plus, xij_minus])
-
-        ctx = build_omx_pair_context(
-            molecule, method=method, idxi=idxi_, idxj=idxj_, ni=ni_, nj=nj_, xij=xij_, rij=rij_
-        )
-        pair = ctx["pair"]
-        B_ = ctx["pair_resonance"]
-
-        Xij[:, coord] -= delta
-
-        B_x[:, coord, :, :] = (B_[:npairs] - B_[npairs:]) * one_over_twodelta
-
-        w_x[:, coord, :, :] = (pair["w"][:npairs] - pair["w"][npairs:]) * one_over_twodelta
-        e1b_x[:, coord, :, :] = (pair["e1b"][:npairs] - pair["e1b"][npairs:]) * one_over_twodelta
-        e2a_x[:, coord, :, :] = (pair["e2a"][:npairs] - pair["e2a"][npairs:]) * one_over_twodelta
-        fko_x[:, coord] = (pair["fko"][:npairs] - pair["fko"][npairs:]) * one_over_twodelta
-        if need_ortho_terms:
-            S_ = ctx["pair_overlap"]
-            S_x[:, coord] = (S_[:npairs] - S_[npairs:]) * one_over_twodelta
-            if pair_core_semi_x is not None:
-                pair_core_semi_x[:, coord] = (
-                    pair["core_semi"][:npairs] - pair["core_semi"][npairs:]
-                ) * one_over_twodelta
+    B_x = overlap_KAB_x
+    B_x.copy_(d["B"])
+    w_x.copy_(d["w"])
+    e1b_x, e2a_x, fko_x = d["e1b"], d["e2a"], d["fko"]
+    S_x = d.get("S")
+    pair_core_semi_x = d["core_semi"] if method == "OM2" and need_ortho_terms else None
 
     omx_orthogonalization_grad = None
     if need_threebody_grad:
@@ -1801,19 +1662,6 @@ def omx_fd(molecule, overlap_KAB_x, w_x, Xij, ni, nj, idxi, idxj, method, P0=Non
     return e1b_x, e2a_x, fko_x, omx_orthogonalization_grad, ortho_cache
 
 
-def _flat(X):
-    M, N = X.shape[:2]
-    return X.permute(0, 1, 3, 2, 4).reshape(M, 4 * N, 4 * N)
-
-
-def _unflat(X, N):
-    if X.dim() == 3:
-        M = X.shape[0]
-        return X.reshape(M, N, 4, N, 4).permute(0, 1, 3, 2, 4)
-    M, K = X.shape[:2]
-    return X.reshape(M, K, N, 4, N, 4).permute(0, 1, 2, 4, 3, 5)
-
-
 def _dense_from_pairs(M, N, mol, i, j, blocks):
     if blocks.dim() == 3:
         W = blocks.new_zeros((M, 4 * N, 4 * N))
@@ -1823,7 +1671,7 @@ def _dense_from_pairs(M, N, mol, i, j, blocks):
     K = blocks.shape[1]
     W = blocks.new_zeros((M, K, N, N, 4, 4))
     W[mol, :, i, j] = blocks
-    return W.permute(0, 1, 2, 4, 3, 5).reshape(M, K, 4 * N, 4 * N)
+    return blocks_to_dense(W)
 
 
 def betor_grad_dense(
@@ -1843,8 +1691,8 @@ def betor_grad_dense(
     K = P_blocks.shape[1]
     W = 2.0 * P_blocks[mask]
 
-    S2 = _flat(S5)
-    B2 = _flat(B5)
+    S2 = blocks_to_dense(S5)
+    B2 = blocks_to_dense(B5)
 
     ft1 = 0.25 * (gval1[0] + gval1[1])
     G1 = -ft1[:, None, None, None] * W
@@ -1862,24 +1710,22 @@ def betor_grad_dense(
         W2 = _dense_from_pairs(M, N, mol, a, b, G2)
         W2 = W2 + W2.transpose(-1, -2)
 
-        COR4 = COR.reshape(M, N, 4, N).permute(0, 1, 3, 2)  # [M,N,N,4]
-        F = COR4.unsqueeze(-1) - COR4.transpose(1, 2).unsqueeze(-2)
+        F = omx_cor_difference(COR)
 
-        D = S5 * F
-        D2 = _flat(D)
+        D2 = blocks_to_dense(S5 * F)
 
         adjD2 = torch.matmul(W2, S2[:, None])
         adjS2 = adjS2 + torch.matmul(W2, D2[:, None])
 
-        adjD = _unflat(adjD2, N)
-        adjS = _unflat(adjS2, N) + adjD * F[:, None]
-        adjB = _unflat(adjB2, N)
+        adjD = dense_to_blocks(adjD2, N)
+        adjS = dense_to_blocks(adjS2, N) + adjD * F[:, None]
+        adjB = dense_to_blocks(adjB2, N)
 
         adjF = adjD * S5[:, None]
         adjCOR = adjF.sum(-1) - adjF.sum(-2).transpose(-3, -2)
     else:
-        adjS = _unflat(adjS2, N)
-        adjB = _unflat(adjB2, N)
+        adjS = dense_to_blocks(adjS2, N)
+        adjB = dense_to_blocks(adjB2, N)
         adjCOR = None
 
     S_x_t = -S_x.transpose(-1, -2)

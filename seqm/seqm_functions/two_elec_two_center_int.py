@@ -5,7 +5,7 @@ import torch
 from seqm.utils.torch_compile import optional_compile_function
 
 from .RotationMatrixD import GenerateRotationMatrix, Rotate2Center2Electron
-from .cal_par import AIJL, POIJ, additive_term_rho1, additive_term_rho2, dd_qq
+from .cal_par import AIJL, POIJ, sp_additive_terms
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
 from .two_elec_two_center_int_local_frame_d_orbitals import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
 from .constants import ev
@@ -137,9 +137,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     tore = const.tore
     qn = const.qn
     qnd = const.qnD_int
-    hpp = 0.5 * (gpp - gp2)
     hppd = 0.5 * (gpp - gp2)
-    hpp = hpp.clamp_min(0.1)
     qn0=qn[Z]
     #Z==0 is for padding zero
     isX = Z>2   # Heavy atom
@@ -159,10 +157,9 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     ds=torch.zeros_like(qn0)
     dorbdorb=torch.zeros_like(qn0)
     ###
-    rho1 = additive_term_rho1.apply
-    rho2 = additive_term_rho2.apply
 
-    dd[isX], qq[isX] = dd_qq(qn0[isX],zetas[isX], zetap[isX])
+    # dd, qq and the rho_0..2 additive terms come from one shared definition (also used by the derivatives)
+    dd, qq, rho_0, rho_1, rho_2 = sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp)
 
 ###Correct coefficients?
 ### 1/5, 4/15, 3/49, 1 or values from paper?
@@ -251,10 +248,6 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
 #    y = torch.sqrt((2*qn0+1)*(2*qn0+2)/20.00000) / zetap
 #    x = POIJ(2,y*math.sqrt(2),hpp[isY])
 
-    rho_0 = 0.5*ev/gss
-    
-    rho_1[isX] = rho1(hsp[isX],dd[isX])
-    rho_2[isX] = rho2(hpp[isX],qq[isX])
     if themethod == "PM6":
         rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
     ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
@@ -287,6 +280,35 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     rho0bTMP[B] =rho_core[idxj][B]
     
     return w, e1b, e2a,rho0aTMP,rho0bTMP, riXH, ri
+
+def two_elec_two_center_local_sp(const, idxi, idxj, ni, nj, rij, Z, zetas, zetap, gss, gpp, gp2, hsp, themethod):
+    """
+    Local-frame s/p two-center integrals of every pair, which depend on the pair distance only:
+    ``wHH`` (H-H), ``riXH`` (heavy-H) and ``ri`` (heavy-heavy) as returned by the local-frame routine. This is
+    the s/p part of ``two_elec_two_center_int``; ``rotate_sp_local`` turns them into molecular-frame integrals.
+    """
+    dd, qq, rho_0, rho_1, rho_2 = sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp)
+
+    wHH, riXH, ri, _, _, _ = TETCILF(
+        ni, nj, rij, const.tore,
+        dd[idxi], dd[idxj], qq[idxi], qq[idxj], rho_0[idxi], rho_0[idxj],
+        rho_1[idxi], rho_1[idxj], rho_2[idxi], rho_2[idxj], themethod,
+    )
+    return {"wHH": wHH, "riXH": riXH, "ri": ri}
+
+
+def rotate_sp_local(local, tore, ni, nj, xij):
+    """Rotate ``two_elec_two_center_local_sp`` integrals to the molecular frame: ``w`` (10x10), ``e1b``, ``e2a``."""
+    e1b, e2a, wXH, w = w_withquaternion(None, tore, ni, nj, xij, local["riXH"], local["ri"], local["wHH"])
+    HH = (ni == 1) & (nj == 1)
+    XH = (ni > 1) & (nj == 1)
+    XX = (ni > 1) & (nj > 1)
+    wc = torch.zeros(ni.shape[0], 10, 10, dtype=w.dtype, device=w.device)
+    wc[HH, 0, 0] = local["wHH"]
+    wc[XH, :, 0] = wXH
+    wc[XX] = w.reshape((-1, 10, 10))
+    return {"w": wc, "e1b": e1b, "e2a": e2a}
+
 
 #rotate: rotate the two electron two center integrals from local frame to molecule frame
 def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
@@ -784,15 +806,58 @@ def local_xh_integral_vector(riXH):
     return local
 
 
+# The 10 unique AO products (ab) of one atom, in the order of _SP_PAIR_FIRST/_SECOND, regrouped by tensor rank:
+# [ss] [px s, py s, pz s] [px px, py px, py py, pz px, pz py, pz pz]. A rotation preserves the rank, so the
+# 10x10 rotation of the two-center integrals is block diagonal (1 + 3 + 6). Batched matrix products of that
+# size are ~30x cheaper per matrix on CPU below 8x8 than at 10x10, so the blocks are multiplied separately.
+_RANK_ORDER = torch.tensor([0, 1, 3, 6, 2, 4, 5, 7, 8, 9], dtype=torch.long)
+_RANK_INVERSE = torch.argsort(_RANK_ORDER)
+_RANK_BLOCKS = (slice(0, 1), slice(1, 4), slice(4, 10))
+
+
+def block_sandwich(A, W, B):
+    """
+    ``A @ W @ B^T`` over the last two dimensions (10x10), for ``A`` and ``B`` that are block diagonal in the
+    (ss | ps | pp) ranks of the standard AO-pair order, such as the pair rotation matrices and their
+    derivatives. Leading dimensions broadcast.
+    """
+    perm = _RANK_ORDER.to(W.device)
+    inverse = _RANK_INVERSE.to(W.device)
+
+    def diagonal_blocks(M):
+        Mg = M[..., perm[:, None], perm[None, :]]
+        return [Mg[..., a, a].contiguous() for a in _RANK_BLOCKS]
+
+    Ab = diagonal_blocks(A)
+    Bb = Ab if B is A else diagonal_blocks(B)
+    Wg = W[..., perm[:, None], perm[None, :]]
+
+    rows = []
+    for a, Aa in zip(_RANK_BLOCKS, Ab):
+        row = [(Aa @ Wg[..., a, b]) @ Bj.transpose(-1, -2) for b, Bj in zip(_RANK_BLOCKS, Bb)]
+        rows.append(torch.cat(row, dim=-1))
+    return torch.cat(rows, dim=-2)[..., inverse[:, None], inverse[None, :]]
+
+
+def block_matvec(A, v):
+    """``A @ v`` over the last dimensions for a block-diagonal 10x10 ``A`` and a vector ``v`` of length 10."""
+    perm = _RANK_ORDER.to(v.device)
+    inverse = _RANK_INVERSE.to(v.device)
+    Ag = A[..., perm[:, None], perm[None, :]]
+    vg = v[..., perm]
+    out = [(Ag[..., a, a] @ vg[..., a].unsqueeze(-1)).squeeze(-1) for a in _RANK_BLOCKS]
+    return torch.cat(out, dim=-1)[..., inverse]
+
+
 def _rotate_sp_integrals_kernel(xij_xh, xij_xx, riXH, ri):
     local = local_sp_integral_matrix(ri)
     local_xh = local_xh_integral_vector(riXH)
 
     transform = _pair_rotation_matrix(rotate_with_quaternion(-xij_xx))
-    w = transform @ local @ transform.transpose(1, 2)
+    w = block_sandwich(transform, local, transform)
 
     transform_xh = _pair_rotation_matrix(rotate_with_quaternion(-xij_xh))
-    wXH = (transform_xh @ local_xh.unsqueeze(-1)).squeeze(-1)
+    wXH = block_matvec(transform_xh, local_xh)
     return wXH, w.reshape(-1, 100)
 
 
@@ -803,124 +868,56 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     x-axis (1,0,0)
     '''
     n, device, dtype = v.shape[0], v.device, v.dtype
-    # Reference x-axis
-    k = torch.zeros_like(v)
-    k[:,0] = 1.0
+    vx, vy, vz = v[..., 0], v[..., 1], v[..., 2]
 
-    # Compute the quaternion components
-    # u = torch.cross(v, k, dim=-1)              # axis = v × k
-    u = torch.zeros_like(v)
-    u[:,1] = v[:,2]
-    u[:,2] = -v[:,1]
-    w_ = 1.0 + v[..., 0]                         # scalar part
+    # 1 + v_x, written without cancellation for v_x < 0
+    tr2 = vy * vy + vz * vz
+    neg = vx < 0
+    w = torch.where(neg, tr2 / (1.0 - vx), 1.0 + vx)
 
-    # Raw quaternion (u_x, u_y, u_z, w_)
-    q_raw = torch.cat((u, w_.unsqueeze(-1)), dim=-1)
+    # v = -k: the quaternion is zero; a 180 degree flip about z gives A = 2, B = C = 0
+    at_antipode = w == 0
+    w_safe = torch.where(at_antipode, torch.ones_like(w), w)
+    A = torch.where(at_antipode, torch.full_like(w, 2.0), vy * vy / w_safe)
+    B = vz * vz / w_safe
+    C = vy * vz / w_safe
 
-    # Handle the antipodal case (v ≈ -k) by picking a 180° flip about z-axis
-    if w_.dtype==torch.float32:
-            eps = 5.0e-4
-    elif w_.dtype==torch.float64:
-            eps = 1.0e-7
-    else:
-        raise RuntimeError("Set dtype to float64 or float32")
-    mask = torch.abs(w_) < eps
-    # base_q = v.new_tensor([0.0, 0.0, 1.0, 0.0])
-    # q_raw = torch.where(mask.unsqueeze(-1), base_q, q_raw)
-    q_raw[mask] = torch.tensor([0.0, 0.0, 1.0, 0.0],device=device,dtype=dtype)#.unsqueeze(0)
-
-    # Normalize quaternion
-    N = torch.norm(q_raw, dim=-1, keepdim=True)
-    q = q_raw / N 
-
-    # Unpack quaternion components
-    qx, qy, qz, qw = q.unbind(-1)
-
-    # Build the 3×3 rotation matrix, ignore qx since it is always zero
     rot = torch.empty((n, 3, 3), device=device, dtype=dtype)
-    rot[..., 0, 0] = 1 - 2 * (qy*qy + qz*qz)
-    rot[..., 0, 1] = -2 * (qz*qw)
-    rot[..., 0, 2] = 2 * (qy*qw)
-    rot[..., 1, 0] = 2 * (qz*qw)
-    rot[..., 1, 1] = 1 - 2 * (qz*qz)
-    rot[..., 1, 2] = 2 * (qy*qz)
-    rot[..., 2, 0] = -2 * (qy*qw)
-    rot[..., 2, 1] = 2 * (qy*qz)
-    rot[..., 2, 2] = 1 - 2 * (qy*qy)
-
-    # print(f"rot mat orthogonality: {torch.sum(rot@rot.transpose(1,2))}, with 3*natoms is {rot.shape[0]*3}")
+    rot[..., 0, 0] = vx
+    rot[..., 0, 1] = vy
+    rot[..., 0, 2] = vz
+    rot[..., 1, 0] = -vy
+    rot[..., 1, 1] = 1 - A
+    rot[..., 1, 2] = -C
+    rot[..., 2, 0] = -vz
+    rot[..., 2, 1] = -C
+    rot[..., 2, 2] = 1 - B
 
     if not calculate_gradient:
         return rot
 
-    # q_raw is (u_x,u_y,u_z,w) = (0,v_z,-v_y,1+v_x)
-    # ∂q_raw/∂v  is constant except zeroed on mask:
-    #   ∂u_x/∂v = 0,  ∂u_y/∂v = [0,0,1],  ∂u_z/∂v = [0,-1,0],  ∂w/∂v = [1,0,0]
-    dq_raw_dv = torch.zeros((n, 4, 3), device=device, dtype=dtype)
-    dq_raw_dv[:, 1, 2] = 1.0   # ∂u_y/∂v_z
-    dq_raw_dv[:, 2, 1] = -1.0  # ∂u_z/∂v_y
-    dq_raw_dv[:, 3, 0] = 1.0   # ∂w/∂v_x
-    # zero out masked rows
-    dq_raw_dv = dq_raw_dv * (~mask).unsqueeze(-1).unsqueeze(-1)
+    # ∂w/∂v
+    dw = torch.zeros((n, 3), device=device, dtype=dtype)
+    dw[:, 0] = torch.where(neg, tr2 / (1.0 - vx) ** 2, torch.ones_like(vx))
+    dw[:, 1] = torch.where(neg, 2 * vy / (1.0 - vx), torch.zeros_like(vx))
+    dw[:, 2] = torch.where(neg, 2 * vz / (1.0 - vx), torch.zeros_like(vx))
 
-    # dN/dv_j = (1/N) ∑_i q_raw_i * ∂q_raw_i/∂v_j
-    dN_dv = (q_raw.unsqueeze(-1) * dq_raw_dv).sum(dim=1, keepdim=False) / N
+    # ∂A/∂v, ∂B/∂v, ∂C/∂v
+    eye = torch.eye(3, device=device, dtype=dtype)
+    dA = (2 * vy[:, None] * eye[1] - A[:, None] * dw) / w_safe[:, None]
+    dB = (2 * vz[:, None] * eye[2] - B[:, None] * dw) / w_safe[:, None]
+    dC = (vz[:, None] * eye[1] + vy[:, None] * eye[2] - C[:, None] * dw) / w_safe[:, None]
 
-    # dq/dv from quotient rule: ∂(q_raw_i/N)/∂v_j
-    dq_dv = (dq_raw_dv * N.unsqueeze(-1) - 
-             q_raw.unsqueeze(-1) * dN_dv.unsqueeze(1)) / (N.unsqueeze(-1)**2)
-
-    dr_dq = torch.zeros((n, 3, 3, 4), device=device, dtype=dtype)
-
-    # R[0,0] = 1 – 2(y²+z²)
-    dr_dq[:, 0, 0, 1] = -4 * qy
-    dr_dq[:, 0, 0, 2] = -4 * qz
-
-    # R[0,1] = 2(xy – z w)
-    dr_dq[:, 0, 1, 0] =  2 * qy
-    # dr_dq[:, 0, 1, 1] =  2 * qx
-    dr_dq[:, 0, 1, 2] = -2 * qw
-    dr_dq[:, 0, 1, 3] = -2 * qz
-
-    # R[0,2] = 2(xz + y w)
-    dr_dq[:, 0, 2, 0] = 2 * qz
-    dr_dq[:, 0, 2, 1] = 2 * qw
-    # dr_dq[:, 0, 2, 2] = 2 * qx
-    dr_dq[:, 0, 2, 3] = 2 * qy
-
-    # R[1,0] = 2(xy + z w)
-    dr_dq[:, 1, 0, 0] = 2 * qy
-    # dr_dq[:, 1, 0, 1] = 2 * qx
-    dr_dq[:, 1, 0, 2] = 2 * qw
-    dr_dq[:, 1, 0, 3] = 2 * qz
-
-    # R[1,1] = 1 – 2(x²+z²)
-    # dr_dq[:, 1, 1, 0] = -4 * qx
-    dr_dq[:, 1, 1, 2] = -4 * qz
-
-    # R[1,2] = 2(yz – x w)
-    dr_dq[:, 1, 2, 0] = -2 * qw
-    dr_dq[:, 1, 2, 1] = 2 * qz
-    dr_dq[:, 1, 2, 2] = 2 * qy
-    # dr_dq[:, 1, 2, 3] = -2 * qx
-
-    # R[2,0] = 2(xz – y w)
-    dr_dq[:, 2, 0, 0] = 2 * qz
-    dr_dq[:, 2, 0, 1] = -2 * qw
-    # dr_dq[:, 2, 0, 2] = 2 * qx
-    dr_dq[:, 2, 0, 3] = -2 * qy
-
-    # R[2,1] = 2(yz + x w)
-    dr_dq[:, 2, 1, 0] = 2 * qw
-    dr_dq[:, 2, 1, 1] = 2 * qz
-    dr_dq[:, 2, 1, 2] = 2 * qy
-    # dr_dq[:, 2, 1, 3] = 2 * qx
-
-    # R[2,2] = 1 – 2(x²+y²)
-    # dr_dq[:, 2, 2, 0] = -4 * qx
-    dr_dq[:, 2, 2, 1] = -4 * qy
-
-    # --- 5) chain‐rule: ∂R/∂v = ∂R/∂q ⋅ ∂q/∂v  → shape (n,3,3,3) ---
-    dRdv = torch.einsum('nijd,ndk->nkij', dr_dq, dq_dv)
+    # dRdv[n, b, i, j] = ∂rot[n, i, j] / ∂v[n, b]
+    dRdv = torch.zeros((n, 3, 3, 3), device=device, dtype=dtype)
+    dRdv[:, :, 0, 0] = eye[0]
+    dRdv[:, :, 0, 1] = eye[1]
+    dRdv[:, :, 0, 2] = eye[2]
+    dRdv[:, :, 1, 0] = -eye[1].expand(n, 3)
+    dRdv[:, :, 1, 1] = -dA
+    dRdv[:, :, 1, 2] = -dC
+    dRdv[:, :, 2, 0] = -eye[2].expand(n, 3)
+    dRdv[:, :, 2, 1] = -dC
+    dRdv[:, :, 2, 2] = -dB
 
     return rot, dRdv
