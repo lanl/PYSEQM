@@ -103,6 +103,10 @@ K_ind_4 = torch.tensor([
     [3,4,5,8],
     [6,7,8,9]
 ], dtype=torch.long)
+# Exchange gather for the s,p two-center block: K[i,j] = sum_{n,s} w[ind[i,n], ind[j,s]] * P[n,s].
+# Rows of the (16, 16) index grids enumerate (i, j), columns enumerate (n, s).
+K_ROW_4 = K_ind_4[:, None, :, None].expand(4, 4, 4, 4).reshape(16, 16)
+K_COL_4 = K_ind_4[None, :, None, :].expand(4, 4, 4, 4).reshape(16, 16)
 EMAT_SCALE_4 = torch.tensor([
     [1.0, 2.0, 2.0, 2.0],
     [0.0, 1.0, 2.0, 2.0],
@@ -301,11 +305,11 @@ def _two_center_sp(F, P, w, maskd, mask, idxi, idxj):
     weight_tc = _cached_tensor(WEIGHT_10, P.device, P.dtype)
     i0, i1 = tril_idx
 
-    PA = (P[maskd[idxi]][:, i1, i0] * weight_tc).unsqueeze(-1)
-    PB = (P[maskd[idxj]][:, i1, i0] * weight_tc).unsqueeze(-2)
-
-    J_A = (PA * w).sum(dim=1)
-    J_B = (PB * w).sum(dim=2)
+    # Coulomb: J_A[n] = sum_m PA[m] w[m, n] and J_B[m] = sum_n w[m, n] PB[n], as batched mat-vec products.
+    PA = P[maskd[idxi]][:, i1, i0] * weight_tc
+    PB = P[maskd[idxj]][:, i1, i0] * weight_tc
+    J_A = torch.bmm(PA.unsqueeze(1), w).squeeze(1)
+    J_B = torch.bmm(w, PB.unsqueeze(2)).squeeze(2)
 
     B = w.shape[0]
     sumA = torch.zeros(B, nbf, nbf, device=P.device, dtype=P.dtype)
@@ -316,18 +320,11 @@ def _two_center_sp(F, P, w, maskd, mask, idxi, idxj):
     F.index_add_(0, maskd[idxi], sumB)
     F.index_add_(0, maskd[idxj], sumA)
 
-    Pp = -0.5 * P[mask]
-    Ksum = torch.zeros_like(sumA)
-    ind = _cached_index(K_ind_4, P.device)
-
-    p_idx = ind.view(-1)
-    w1 = w[:, p_idx, :].view(B, nbf, nbf, -1)
-    for j in range(nbf):
-        w2 = w1[..., ind[j]]
-        k_block = (w2 * Pp.unsqueeze(1)).sum(dim=(2, 3))
-        Ksum[:, :, j] = k_block
-
-    F.index_add_(0, mask, Ksum)
+    # Exchange: one gather of w into (pair, (i, j), (n, s)) order, then one mat-vec with -P/2.
+    row = _cached_index(K_ROW_4, P.device)
+    col = _cached_index(K_COL_4, P.device)
+    Pp = (-0.5 * P[mask]).reshape(B, nbf * nbf, 1)
+    F.index_add_(0, mask, torch.bmm(w[:, row, col], Pp).view(B, nbf, nbf))
     return F
 
 
