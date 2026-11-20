@@ -873,7 +873,8 @@ def rotate_with_quaternion(v,calculate_gradient=False):
     # 1 + v_x, written without cancellation for v_x < 0
     tr2 = vy * vy + vz * vz
     neg = vx < 0
-    w = torch.where(neg, tr2 / (1.0 - vx), 1.0 + vx)
+    one_minus_vx = torch.where(neg, 1.0 - vx, torch.ones_like(vx))  # finite at v = +x for the unselected branch
+    w = torch.where(neg, tr2 / one_minus_vx, 1.0 + vx)
 
     # v = -k: the quaternion is zero; a 180 degree flip about z gives A = 2, B = C = 0
     at_antipode = w == 0
@@ -898,9 +899,9 @@ def rotate_with_quaternion(v,calculate_gradient=False):
 
     # ∂w/∂v
     dw = torch.zeros((n, 3), device=device, dtype=dtype)
-    dw[:, 0] = torch.where(neg, tr2 / (1.0 - vx) ** 2, torch.ones_like(vx))
-    dw[:, 1] = torch.where(neg, 2 * vy / (1.0 - vx), torch.zeros_like(vx))
-    dw[:, 2] = torch.where(neg, 2 * vz / (1.0 - vx), torch.zeros_like(vx))
+    dw[:, 0] = torch.where(neg, tr2 / one_minus_vx ** 2, torch.ones_like(vx))
+    dw[:, 1] = torch.where(neg, 2 * vy / one_minus_vx, torch.zeros_like(vx))
+    dw[:, 2] = torch.where(neg, 2 * vz / one_minus_vx, torch.zeros_like(vx))
 
     # ∂A/∂v, ∂B/∂v, ∂C/∂v
     eye = torch.eye(3, device=device, dtype=dtype)
