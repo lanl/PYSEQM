@@ -32,6 +32,11 @@ dependencies = [
   "scipy>=1.7",
 ]
 
+[project.urls]
+Documentation = "https://lanl.github.io/PYSEQM/"
+Source = "https://github.com/lanl/PYSEQM"
+Issues = "https://github.com/lanl/PYSEQM/issues"
+
 [project.optional-dependencies]
 geomopt = ["geometric"]
 hipnn = ["hippynn"]
