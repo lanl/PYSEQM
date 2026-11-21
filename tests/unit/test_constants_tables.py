@@ -45,11 +45,11 @@ def test_atomic_num_is_z(const):
         (55, "Cs", 1.0, 0, 132.91),
         (56, "Ba", 2.0, 0, 137.33),
         (57, "La", 3.0, 5, 138.906),
-        (71, "Lu", 3.0, 0, 174.967),
+        (71, "Lu", 3.0, 5, 174.967),  # Lu has a d shell in PM6
         (72, "Hf", 4.0, 5, 178.49),  # reported: Hf values sat at index 58
         (74, "W", 6.0, 5, 183.84),
         (79, "Au", 11.0, 5, 196.97),
-        (80, "Hg", 2.0, 5, 200.59),
+        (80, "Hg", 2.0, 0, 200.59),  # Zn, Cd, Hg are sp-only in PM6
         (82, "Pb", 4.0, 0, 207.2),
     ],
 )
@@ -95,3 +95,21 @@ def test_warns_for_unparameterized_elements():
     root_dir = os.path.join(os.path.dirname(seqm.__file__), "params") + "/"
     with pytest.warns(UserWarning, match=r"no parameters for atomic numbers \[58\]"):
         params(method="PM6", elements=[1, 6, 58], root_dir=root_dir)
+
+
+def test_qnD_is_nonzero_exactly_for_the_d_shell_elements(const):
+    # qnD (the d shell's principal quantum number) and has_d_shell (used for the 9-orbital basis and the d-orbital
+    # integrals) are two views of the same set; it also has to be the set with a d exponent in the PM6 parameters
+    from seqm.seqm_functions.constants import D_SHELL_ELEMENTS, has_d_shell
+
+    assert [z for z in range(87) if int(const.qnD_int[z]) > 0] == list(D_SHELL_ELEMENTS)
+    assert has_d_shell(torch.arange(87)).nonzero().flatten().tolist() == list(D_SHELL_ELEMENTS)
+
+    import csv
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "seqm" / "params" / "parameters_PM6_MOPAC.csv"
+    rows = list(csv.reader(open(path, newline="")))
+    zd = [h.strip() for h in rows[0]].index("zeta_d")
+    with_d = [int(r[0]) for r in rows[1:] if float(r[zd]) > 0 and int(r[0]) < 87]
+    assert with_d == list(D_SHELL_ELEMENTS)

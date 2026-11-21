@@ -23,6 +23,23 @@ set cutoff = 20.0 Angstrom and 20/0.529167 = 37.8
 overlap_cutoff = 40.0
 
 
+# Elements that have a d shell in PM6 (non-zero zeta_d in MOPAC's PM6 parameters): Al-Cl, Sc-Cu, As, Br, Y-Ag, Sb, I,
+# La and Lu-Au. Zn, Cd, Hg, Se and Te are sp only. Must agree with qnD (the principal quantum number of the d shell,
+# non-zero exactly for these elements) in Constants below.
+D_SHELL_ELEMENTS = (*range(13, 18), *range(21, 30), 33, 35, *range(39, 48), 51, 53, 57, *range(71, 80))
+_D_SHELL_LOOKUP = {}
+
+
+def has_d_shell(Z):
+    """Boolean mask of the atoms in Z (integer tensor of atomic numbers, 0 = padding) that have a d shell."""
+    table = _D_SHELL_LOOKUP.get(Z.device)
+    if table is None:
+        table = torch.zeros(128, dtype=torch.bool, device=Z.device)
+        table[list(D_SHELL_ELEMENTS)] = True
+        _D_SHELL_LOOKUP[Z.device] = table
+    return table[Z]
+
+
 class Constants(torch.nn.Module):
     """
     Constants used in seqm
@@ -97,13 +114,19 @@ class Constants(torch.nn.Module):
                0.0,                                                                          0.0,
                0.0,0.0,                                                  0.0,0.0,0.0,0.0,0.0,0.0,
                0.0,0.0,                                                  3.0,3.0,3.0,3.0,3.0,0.0,
-               0.0,0.0,3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 0.0,0.0,4.0,4.0,4.0,0.0,
-               0.0,0.0,4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 0.0,0.0,5.0,5.0,5.0,0.0,
-               0.0,0.0,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,0.0,0.0,0.0,0.0,0.0,0.0])
+               0.0,0.0,3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 0.0, 0.0,0.0,4.0,0.0,4.0,0.0,
+               0.0,0.0,4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 0.0, 0.0,0.0,5.0,0.0,5.0,0.0,
+               0.0,0.0,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
 
         #
         qn_int = qn.type(torch.int64)
         qnD_int = qnd.type(torch.int64)
+        # principal quantum numbers of the s and p shell used by the overlap integrals (MOPAC npq(:,1), npq(:,2)).
+        # They equal qn except for the noble gases: Ne, Ar, Kr, Xe have an s shell one above the period, He a p shell.
+        qnS_int = qn_int.clone()
+        qnS_int[[10, 18, 36, 54]] += 1
+        qnP_int = torch.where(qn_int >= 2, qn_int, torch.zeros_like(qn_int))
+        qnP_int[2] = 2
         # number of s electrons for each element
 
         iso=torch.as_tensor([0.0,
@@ -201,6 +224,8 @@ class Constants(torch.nn.Module):
         self.qn = torch.nn.Parameter(qn, requires_grad=False)
         self.qn_int = torch.nn.Parameter(qn_int, requires_grad=False)
         self.qnD_int = torch.nn.Parameter(qnD_int, requires_grad=False)
+        self.qnS_int = torch.nn.Parameter(qnS_int, requires_grad=False)
+        self.qnP_int = torch.nn.Parameter(qnP_int, requires_grad=False)
         self.ussc = torch.nn.Parameter(ussc, requires_grad=False)
         self.uppc = torch.nn.Parameter(uppc, requires_grad=False)
         self.gssc = torch.nn.Parameter(gssc, requires_grad=False)

@@ -1,9 +1,16 @@
 import torch
 
 from .constants import a0, ev
+from .two_elec_two_center_int import GetSlaterCondonParameter
+
+# MOPAC v_par6(1), v_par6(2): scalar and exponent of the C-C triple-bond term in the PM6 core-core repulsion
+PM6_CC_SCALE = 9.278465
+PM6_CC_EXPONENT = 5.983752
 
 
-def elec_energy_isolated_atom(const, Z, uss, upp, gss, gpp, gsp, gp2, hsp):
+def elec_energy_isolated_atom(
+    const, Z, uss, upp, gss, gpp, gsp, gp2, hsp, udd=None, zsn=None, zdn=None, f0sd=None, g2sd=None
+):
     """
     electrionc energy for a single atom
     #eisol in block.f or in calpar.f
@@ -18,7 +25,88 @@ def elec_energy_isolated_atom(const, Z, uss, upp, gss, gpp, gsp, gp2, hsp):
         + gp2 * const.gp2c[Z]
         + hsp * const.hspc[Z]
     )
+    if udd is not None:  # PM6 with d orbitals
+        Eiso = Eiso + d_shell_isolated_atom_energy(const, Z, udd, zsn, zdn, f0sd, g2sd)
     return Eiso
+
+
+# One-center terms of the free atom for partly filled d shells: coefficients of the Slater-Condon integrals
+# (R016 = F0SD, R066 = F0DD, R244 = G2SD, R266 = F2DD, R466 = F4DD) in MOPAC's eiscor (integrals/mndod.F90).
+_EISCOR = {
+    21: (2, 0, 1, 0, 0),
+    22: (4, 1, 2, 8, 1),
+    23: (6, 3, 3, 15, 8),
+    24: (5, 10, 5, 35, 35),
+    25: (10, 10, 5, 35, 35),
+    26: (12, 15, 6, 35, 35),
+    27: (14, 21, 7, 43, 36),
+    28: (16, 28, 8, 50, 43),
+    29: (10, 45, 5, 70, 70),
+    39: (2, 0, 1, 0, 0),
+    40: (4, 1, 2, 8, 1),
+    41: (4, 6, 4, 21, 21),
+    42: (5, 10, 5, 35, 35),
+    43: (10, 10, 5, 35, 35),
+    44: (7, 21, 5, 43, 36),
+    45: (8, 28, 5, 50, 43),
+    46: (0, 45, 0, 70, 70),
+    47: (10, 45, 5, 70, 70),
+    57: (2, 0, 1, 0, 0),
+    71: (2, 0, 1, 0, 0),
+    72: (4, 1, 2, 8, 1),
+    73: (6, 3, 3, 15, 8),
+    74: (5, 10, 5, 35, 35),
+    75: (10, 10, 5, 35, 35),
+    76: (12, 15, 6, 35, 35),
+    77: (14, 21, 7, 43, 36),
+    78: (9, 36, 5, 56, 56),
+    79: (10, 45, 5, 70, 70),
+}
+_EISCOR_CACHE = {}
+
+
+def _eiscor(z, ns, nd, zsn, zdn, f0sd, g2sd):
+    """MOPAC eiscor for one element, in eV. ns, nd: principal quantum numbers of the s and d shells."""
+    key = (z, ns, nd, zsn, zdn, f0sd, g2sd)
+    if key not in _EISCOR_CACHE:
+        if zdn <= 0.0 or zsn <= 0.0:
+            _EISCOR_CACHE[key] = 0.0
+        else:
+            sc = GetSlaterCondonParameter
+            r016 = f0sd if f0sd > 0.001 else sc(0, ns, zsn, ns, zsn, nd, zdn, nd, zdn)
+            r244 = g2sd if g2sd > 0.001 else sc(2, ns, zsn, nd, zdn, ns, zsn, nd, zdn)
+            r066 = sc(0, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
+            r266 = sc(2, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
+            r466 = sc(4, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
+            a016, a066, a244, a266, a466 = _EISCOR[z]
+            _EISCOR_CACHE[key] = (
+                a016 * r016 + a066 * r066 - a244 * r244 / 5 - a266 * r266 / 49 - a466 * r466 / 49
+            )
+    return _EISCOR_CACHE[key]
+
+
+def d_shell_isolated_atom_energy(const, Z, udd, zsn, zdn, f0sd, g2sd):
+    """
+    d-shell part of the electronic energy of the free atom (eisol in MOPAC): udd*iod plus, for elements with a
+    partly filled d shell, the one-center integral terms of eiscor. Z: (natoms,); the other arguments are
+    per-atom parameters (zsn, zdn: the s and d exponents used for the one-center integrals, i.e.
+    s_orb_exp_tail and d_orb_exp_tail). The integral terms are constants (not differentiated).
+    """
+    iod = (const.tore - const.ussc - const.uppc)[Z]  # d electrons of the free atom
+    E = udd * iod
+    sel = [i for i, z in enumerate(Z.tolist()) if z in _EISCOR]
+    if sel:
+        idx = torch.as_tensor(sel, device=Z.device)
+        vals = [
+            _eiscor(z, int(const.qn_int[z]), int(const.qnD_int[z]) or int(const.qn_int[z]) - 1, a, b, c, d)
+            for z, a, b, c, d in zip(
+                Z[idx].tolist(), zsn[idx].tolist(), zdn[idx].tolist(), f0sd[idx].tolist(), g2sd[idx].tolist()
+            )
+        ]
+        corr = torch.zeros_like(E)
+        corr[idx] = torch.as_tensor(vals, dtype=E.dtype, device=E.device)
+        E = E + corr
+    return E
 
 
 def elec_energy(P, F, Hcore, doTriu=True):
@@ -103,7 +191,6 @@ def pair_nuclear_energy(
     return nuclear interaction energy for each molecule, (nmol, )
     """
     rija = rij * a0
-    atomic_num = const.atomic_num
     tore = const.tore
 
     if method in {"OM1", "OM2", "OM3"}:
@@ -135,42 +222,43 @@ def pair_nuclear_energy(
 
         EnucAB = t1 * (1.0 + t2 + t3) + t4 * (t5 + t6)
     elif method in {"PM6", "PM6_SP", "PM6_SP_STAR"}:
+        # Follows MOPAC's ccrep (integrals/ccrep.F90). K, L, M: Gaussian terms, shape (natoms, 4)
         _, K, L, M = parameters
-        # K, L , M shape (natoms,2 or 4)
-
-        # Gaussian corrections
-        t4 = tore[ni] * tore[nj] / rija
-        t5 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija.reshape((-1, 1)) - M[idxi]) ** 2), dim=1)
-        t6 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija.reshape((-1, 1)) - M[idxj]) ** 2), dim=1)
+        dtype = rija.dtype
+        chi_ij = chi[ni, nj]
+        # a pair has bond parameters if its xfac is defined; otherwise MOPAC uses a generic core-core term
+        has_bond = chi_ij.abs() > 1e-5
+        abond = torch.where(alp[ni, nj] < 1e-6, torch.full_like(rija, 1.2), alp[ni, nj])
 
         XH = ((ni == 6) | (ni == 7) | (ni == 8)) & (nj == 1)
         XCC = (ni == 6) & (nj == 6)
         XSiO = (ni == 14) & (nj == 8)
-        ten_to_minus8 = 1.0e-8
-        unpolcore = ten_to_minus8 * torch.pow(
-            (torch.pow(atomic_num[ni], 1 / 3) + torch.pow(atomic_num[nj], 1 / 3)) / rija, 12
-        )
+        scale = 1.0 + 2.0 * chi_ij * torch.exp(-abond * (rija + 0.0003 * torch.pow(rija, 6)))
+        scale = torch.where(XH, 1.0 + 2.0 * chi_ij * torch.exp(-abond * rija**2), scale)  # C-H, N-H, O-H
+        scale = torch.where(
+            XCC, scale + PM6_CC_SCALE * torch.exp(-PM6_CC_EXPONENT * rija), scale
+        )  # C-C triple bond
+        scale = torch.where(
+            XSiO, scale - 0.0007 * torch.exp(-((rija - 2.9) ** 2)), scale
+        )  # weak long-range Si-O
+        lanthanide = ((ni > 56) & (ni < 72)) | ((nj > 56) & (nj < 72))
+        generic = 1.0 + 10.0 * torch.exp(-torch.where(lanthanide, 3.0, 2.18) * rija)
+        scale = torch.where(has_bond, scale, generic)
+        EnucAB = tore[ni] * tore[nj] * ev / torch.sqrt(rij * rij + (rho0xi + rho0xj) ** 2) * scale
 
-        expo2 = unpolcore + tore[ni] * tore[nj] * ev / torch.sqrt(rij * rij + (rho0xi + rho0xj) ** 2) * (
-            1.0 + 2.0 * chi[ni, nj] * torch.exp(-alp[ni, nj] * (rija + 0.0003 * torch.pow(rija, 6)))
-        )
+        # Gaussian corrections: pairs with bond parameters use only the first Gaussian of each atom; pairs without
+        # use all four, and MOPAC counts the first one twice
+        w_bond = torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=dtype, device=rija.device)
+        w_generic = torch.tensor([2.0, 1.0, 1.0, 1.0], dtype=dtype, device=rija.device)
+        W = torch.where(has_bond.unsqueeze(1), w_bond, w_generic)
+        t4 = tore[ni] * tore[nj] / rija
+        t5 = torch.sum(W * K[idxi] * torch.exp(-L[idxi] * (rija.reshape((-1, 1)) - M[idxi]) ** 2), dim=1)
+        t6 = torch.sum(W * K[idxj] * torch.exp(-L[idxj] * (rija.reshape((-1, 1)) - M[idxj]) ** 2), dim=1)
+        EnucAB = EnucAB + t4 * (t5 + t6)
 
-        # EXCEPTIONS FOR C-H,O-H,N-H
-        expo2[XH] = unpolcore[XH] + tore[ni][XH] * tore[nj][XH] * (
-            1.0 + 2.0 * chi[ni, nj][XH] * torch.exp(-alp[ni, nj][XH] * (torch.pow(rija[XH], 2)))
-        ) * ev / torch.sqrt(rij[XH] * rij[XH] + (rho0xi[XH] + rho0xj[XH]) ** 2)
-
-        # EXCEPTIONS FOR C-C
-        expo2[XCC] = expo2[XCC] + tore[ni][XCC] * tore[nj][XCC] * (
-            9.28 * torch.exp(-rija[XCC] * 5.98)
-        ) * ev / torch.sqrt(rij[XCC] * rij[XCC] + (rho0xi[XCC] + rho0xj[XCC]) ** 2)
-
-        # EXCEPTIONS FOR Si-O
-        expo2[XSiO] = expo2[XSiO] - tore[ni][XSiO] * tore[nj][XSiO] * (
-            0.0007 * torch.exp(-torch.pow(rij[XSiO] - 2.9, 2))
-        ) * ev / torch.sqrt(rij[XSiO] * rij[XSiO] + (rho0xi[XSiO] + rho0xj[XSiO]) ** 2)
-
-        EnucAB = expo2 + t4 * (t5 + t6)
+        # unpolarizable core - unpolarizable core repulsion (a short-range wall; MOPAC uses 0.3333 for the cube root)
+        ax = rija / (ni.to(dtype) ** 0.3333 + nj.to(dtype) ** 0.3333)
+        EnucAB = EnucAB + torch.where(ax < 3.0, (1.0e-8 / ax**12).clamp(max=1.0e5), torch.zeros_like(ax))
     else:
         raise ValueError("Supported Method: MNDO, AM1, PM3, PM6, PM6_SP, PM6_SP_STAR, OM1, OM2, OM3")
     return EnucAB

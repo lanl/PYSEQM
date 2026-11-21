@@ -7,7 +7,7 @@ import torch
 from .dynamics.active_state import active_state_tensor
 from .dynamics.nac_utils import resolve_nac_config
 from .seqm_functions.anal_grad import scf_analytic_grad, scf_grad
-from .seqm_functions.constants import ev
+from .seqm_functions.constants import ev, has_d_shell
 from .seqm_functions.dipole import calc_ground_dipole
 from .seqm_functions.dispersion import dispersion_energy, dispersion_kind
 from .seqm_functions.energy import (
@@ -357,8 +357,10 @@ class Parser(torch.nn.Module):
                         (molecule.species <= 12)
                         | ((molecule.species >= 18) & (molecule.species <= 20))
                         | ((molecule.species >= 30) & (molecule.species <= 32))
+                        | (molecule.species == 34)  # Se: sp only in PM6
                         | ((molecule.species >= 36) & (molecule.species <= 38))
                         | ((molecule.species >= 48) & (molecule.species <= 50))
+                        | (molecule.species == 52)  # Te: sp only in PM6
                         | ((molecule.species >= 54) & (molecule.species <= 56))
                         | ((molecule.species >= 80) & (molecule.species <= 83))
                     )
@@ -369,17 +371,8 @@ class Parser(torch.nn.Module):
             nHeavy = torch.sum(molecule.species > 1, dim=1)
 
         nSuperHeavy = torch.sum(
-            (
-                ((molecule.species > 12) & (molecule.species < 18))
-                | ((molecule.species > 20) & (molecule.species < 30))
-                | ((molecule.species > 32) & (molecule.species < 36))
-                | ((molecule.species > 38) & (molecule.species < 48))
-                | ((molecule.species > 50) & (molecule.species < 54))
-                | ((molecule.species > 70) & (molecule.species < 80))
-                | (molecule.species == 57)
-            ),
-            dim=1,
-        )
+            has_d_shell(molecule.species), dim=1
+        )  # atoms with d orbitals (9 basis functions)
 
         nHydro = torch.sum(molecule.species == 1, dim=1)
         tore = molecule.const.tore
@@ -1453,6 +1446,11 @@ class Energy(torch.nn.Module):
                 gsp=molecule.parameters["g_sp"],
                 gp2=molecule.parameters["g_p2"],
                 hsp=molecule.parameters["h_sp"],
+                udd=molecule.parameters.get("U_dd"),
+                zsn=molecule.parameters.get("s_orb_exp_tail"),
+                zdn=molecule.parameters.get("d_orb_exp_tail"),
+                f0sd=molecule.parameters.get("F0SD"),
+                g2sd=molecule.parameters.get("G2SD"),
             )
             Etot += Eexcited
             Etot += dispersion_energy(molecule, P)

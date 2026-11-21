@@ -8,7 +8,7 @@ from .RotationMatrixD import GenerateRotationMatrix, Rotate2Center2Electron
 from .cal_par import AIJL, POIJ, sp_additive_terms
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
 from .two_elec_two_center_int_local_frame_d_orbitals import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
-from .constants import ev
+from .constants import ev, has_d_shell
 
 
 _PM6_D_PARAM_CACHE = {}
@@ -177,7 +177,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     dp3 = torch.zeros_like(qn0)
     mask_a = ((Z > 20) & (Z < 30)) | ((Z > 38) & (Z < 48)) | ((Z > 70) & (Z < 80)) | (Z == 57)
     if themethod == "PM6":
-        mask_b = ((Z > 12) & (Z < 18)) | ((Z > 32) & (Z < 36)) | ((Z > 50) & (Z < 54))
+        mask_b = has_d_shell(Z) & ~mask_a  # main-group elements with d orbitals
     else:
         mask_b = torch.zeros_like(mask_a)
     active = mask_a | mask_b
@@ -349,11 +349,11 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     # +++++
     #***************************************************************************
     #xij = xij0/torch.norm(xij,dim=1,keepdim=True)
-    YH = (((ni > 12) & (ni <18)) | ((ni > 20) & (ni <30)) | ((ni > 32) & (ni <36)) | ((ni > 38) & (ni <48)) | ((ni > 50) & (ni <54)) | ((ni > 70) & (ni <80)) | (ni ==57))  & (nj==1)
-    YX = (((ni > 12) & (ni <18)) | ((ni > 20) & (ni <30)) | ((ni > 32) & (ni <36)) | ((ni > 38) & (ni <48)) | ((ni > 50) & (ni <54)) | ((ni > 70) & (ni <80)) | (ni ==57)) & \
+    YH = has_d_shell(ni)  & (nj==1)
+    YX = has_d_shell(ni) & \
          ((nj <= 12) | ((nj >= 18) & (nj <=20)) | ((nj >= 30) & (nj <= 32)) | ((nj >= 36) & (nj <= 38)) | ((nj >= 48) & (nj <= 50)) | ((nj >= 54) & (nj <= 56)) | ((nj >= 80) & (nj <= 83))) & (nj !=1)
-    YY = (((ni > 12) & (ni <18)) | ((ni > 20) & (ni <30)) | ((ni > 32) & (ni <36)) | ((ni > 38) & (ni <48)) | ((ni > 50) & (ni <54)) | ((ni > 70) & (ni <80)) | (ni ==57)) &\
-         (((nj > 12) & (nj <18)) | ((nj > 20) & (nj <30)) | ((nj > 32) & (nj <36)) | ((nj > 38) & (nj <48)) | ((nj > 50) & (nj <54)) | ((nj > 70) & (nj <80)) | (nj ==57))
+    YY = has_d_shell(ni) &\
+         has_d_shell(nj)
 
     #enuc is not computed at this moment
 #    if(themethod == "PM6"):

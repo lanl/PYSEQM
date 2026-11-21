@@ -70,7 +70,12 @@ def hcore(molecule, doTETCI=True):
     orb_dim = 9 if is_pm6 else 4
     if is_pm6:
         overlap_fn = diatom_overlap_matrixD
-        overlap_args = (molecule.const.qn_int, molecule.const.qnD_int)
+        overlap_args = (
+            molecule.const.qn_int,
+            molecule.const.qnD_int,
+            molecule.const.qnS_int,
+            molecule.const.qnP_int,
+        )
     else:
         overlap_fn = diatom_overlap_matrix_PM6_SP
         overlap_args = (molecule.const.qn_int,)
@@ -332,7 +337,7 @@ def _overlap_kernel_data(molecule):
     if is_pm6:
         return (
             diatom_overlap_matrixD,
-            (molecule.const.qn_int, molecule.const.qnD_int),
+            (molecule.const.qn_int, molecule.const.qnD_int, molecule.const.qnS_int, molecule.const.qnP_int),
             orb_dim,
             is_pm6,
             is_omx,

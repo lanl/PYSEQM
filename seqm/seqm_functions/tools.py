@@ -89,7 +89,7 @@ def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas,
                                    rij[overlap_pairs],
                                    zeta[idxi][overlap_pairs],
                                    zeta[idxj][overlap_pairs],
-                                   qn_int, qnD_int)
+                                   qn_int, qnD_int, const.qnS_int, const.qnP_int)
     elif themethod == 'PM6_SP':
         di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)
         di[overlap_pairs] = diatom_overlap_matrix_PM6_SP(ni[overlap_pairs],

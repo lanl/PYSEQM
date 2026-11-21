@@ -245,7 +245,9 @@ def _rotation_matrices(frame):
 # ---------------------------------------------------------------------------
 # public entry point
 # ---------------------------------------------------------------------------
-def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int):
+
+
+def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int, qnS_int=None, qnP_int=None):
     """
     Overlap matrix between the s, p, d valence orbitals of every atom pair.
 
@@ -255,6 +257,9 @@ def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int):
     zeta_a/b   : Slater exponents (s, p, d) of atom i / j, shape (npairs, 3)
     qn_int     : principal quantum number of the s and p shell, indexed by atomic number
     qnD_int    : principal quantum number of the d shell (0: no d shell), indexed by atomic number
+    qnS_int, qnP_int : optional principal quantum numbers of the s and p shell (0: no p shell), indexed by
+                 atomic number, for elements where they differ from qn_int (the noble gases in MOPAC's npq).
+                 Default: s = qn_int, p = qn_int (absent for qn_int < 2).
 
     Returns S[pair, mu_i, nu_j] with shape (npairs, 9, 9) in the molecular frame.
     Orbitals that an element does not have (p on H, d on s/p elements) give zero rows/columns.
@@ -264,15 +269,19 @@ def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int):
     if npairs == 0:
         return th.zeros((0, 9, 9), dtype=dtype, device=device)
 
-    qa, qb = qn_int[ni], qn_int[nj]
+    if qnS_int is None:
+        qnS_int = qn_int
+    if qnP_int is None:
+        qnP_int = th.where(qn_int >= 2, qn_int, th.zeros_like(qn_int))
+    sa, pa = qnS_int[ni], qnP_int[ni]
+    sb, pb = qnS_int[nj], qnP_int[nj]
     da, db = qnD_int[ni], qnD_int[nj]
-    if int(max(qa.max(), qb.max(), da.max(), db.max())) > _NMAX:
+    if int(max(sa.max(), sb.max(), pa.max(), pb.max(), da.max(), db.max())) > _NMAX:
         raise ValueError("overlap integrals are implemented for principal quantum numbers up to 6")
 
-    zero = th.zeros_like(qa)
     # principal quantum number of the s, p, d shell of each atom (0 = shell absent)
-    shell_a = th.stack([qa, th.where(qa >= 2, qa, zero), da], dim=1)
-    shell_b = th.stack([qb, th.where(qb >= 2, qb, zero), db], dim=1)
+    shell_a = th.stack([sa, pa, da], dim=1)
+    shell_b = th.stack([sb, pb, db], dim=1)
     # shells absent from an element get a dummy exponent; their coefficients are zero
     za = th.where(shell_a > 0, zeta_a[:, :3], th.ones_like(zeta_a[:, :3]))
     zb = th.where(shell_b > 0, zeta_b[:, :3], th.ones_like(zeta_b[:, :3]))

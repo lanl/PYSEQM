@@ -460,6 +460,11 @@ class EnergyXL(torch.nn.Module):
                 gsp=molecule.parameters["g_sp"],
                 gp2=molecule.parameters["g_p2"],
                 hsp=molecule.parameters["h_sp"],
+                udd=molecule.parameters.get("U_dd"),
+                zsn=molecule.parameters.get("s_orb_exp_tail"),
+                zdn=molecule.parameters.get("d_orb_exp_tail"),
+                f0sd=molecule.parameters.get("F0SD"),
+                g2sd=molecule.parameters.get("G2SD"),
             )
             Hf, Eiso_sum = heat_formation(
                 molecule.const, molecule.nmol, molecule.atom_molid, molecule.Z, Etot, Eiso, flag=self.Hf_flag
