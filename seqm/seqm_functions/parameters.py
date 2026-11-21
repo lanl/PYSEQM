@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 
 
@@ -39,15 +41,25 @@ def params(
     p = torch.zeros((m + 1, n))
     requested_elements = {int(x) for x in elements if int(x) > 0}
     found_elements = set()
+    unparameterized = []
     with open(fn) as f:
         header = f.readline().strip().replace(" ", "").split(",")
         idx = [header.index(item) for item in parameters]
+        zeta_s = header.index("zeta_s" if "zeta_s" in header else "zeta")
         for line in f:
             t = line.strip().replace(" ", "").split(",")
             element_id = int(t[0])
             if element_id in requested_elements:
                 found_elements.add(element_id)
                 p[element_id, :] = torch.tensor([float(t[x]) for x in idx])
+                if float(t[zeta_s]) < 0.1:  # same test as MOPAC (run_param.F90: zs(i) < 0.1)
+                    unparameterized.append(element_id)
+    if unparameterized:
+        warnings.warn(
+            f"{method} has no parameters for atomic numbers {sorted(unparameterized)}; "
+            "results for molecules containing them are not meaningful.",
+            stacklevel=2,
+        )
     if method in {"OM1", "OM2", "OM3"}:
         missing = sorted(requested_elements - found_elements)
         if missing:
