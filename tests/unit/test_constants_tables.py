@@ -93,5 +93,5 @@ def test_warns_for_unparameterized_elements():
     from seqm.seqm_functions.parameters import params
 
     root_dir = os.path.join(os.path.dirname(seqm.__file__), "params") + "/"
-    with pytest.warns(UserWarning, match=r"no parameters for atomic numbers \[72\]"):
-        params(method="PM6", elements=[1, 6, 72], root_dir=root_dir)
+    with pytest.warns(UserWarning, match=r"no parameters for atomic numbers \[58\]"):
+        params(method="PM6", elements=[1, 6, 58], root_dir=root_dir)
