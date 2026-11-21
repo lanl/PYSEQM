@@ -749,6 +749,12 @@ def w_withquaternion(mol, tore, ni, nj, xij, riXH, ri, wHH):
     e1b[HH, 0, 0] = e2a[HH, 0, 0] = -tore[1] * wHH
     e2a[XH, 0, 0] = -tore[ni[XH]] * wXH[:, 0]
 
+    # MOPAC (spcore in mndod.F90) only evaluates the p-type core attraction for atoms with Z >= 3: the p orbitals of
+    # He are not attracted by the other nucleus, only its s orbital is.
+    for e, he in ((e1b, ni == 2), (e2a, nj == 2)):
+        e[he, 1:, :] = 0.0
+        e[he, :, 1:] = 0.0
+
     return e1b, e2a, wXH, w
 
 

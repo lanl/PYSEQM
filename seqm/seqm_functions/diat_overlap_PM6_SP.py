@@ -17,7 +17,9 @@ def enable_overlap_compile(mode=None, **options):
     compile_options.setdefault("dynamic", True)  # the number of pairs changes between calls
     if mode is not None:
         compile_options["mode"] = mode
-    _set_dispatch = optional_compile_function(_SET_kernel, compile_options=compile_options, label="overlap.SET")
+    _set_dispatch = optional_compile_function(
+        _SET_kernel, compile_options=compile_options, label="overlap.SET"
+    )
 
 
 def diatom_overlap_matrix_PM6_SP(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
@@ -78,6 +80,12 @@ def diatom_overlap_local_terms(ni, nj, rij, zeta_a, zeta_b, qn_int):
     # only first and second row are included here
     # one-element slice to keep dim
     # jcall shape (npairs, )
+
+    if ((ni == 2) | (nj == 2)).any():
+        raise ValueError(
+            "PM6_SP has no 2p overlap for He (its s and p shells have different principal quantum numbers); "
+            "use method='PM6'"
+        )
 
     jcall = th.zeros_like(ni)
     qni = qn_int[ni]

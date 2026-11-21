@@ -407,7 +407,7 @@ def sp_additive_terms(const, Z, zetas, zetap, gss, gpp, gp2, hsp):
     derivatives (``w_der``) must see identical values, so both call this function; MOPAC likewise solves for
     them once (calpar.F90) and every consumer reads the stored result.
     """
-    isX = Z > 2  # heavy atoms
+    isX = Z > 1  # atoms with a p shell, He included (MOPAC calpar computes dd and qq for it)
     qn0 = const.qn[Z]
     hpp = (0.5 * (gpp - gp2)).clamp_min(HPP_MIN)
 

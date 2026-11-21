@@ -2,7 +2,7 @@
 
 MOPAC gives the noble gases s and p shells with different principal quantum numbers (npq in parameters_C.F90): s is one
 above the period for Ne, Ar, Kr, Xe. The overlap integrals have to follow, or Kr2 and Xe2 are off by about 0.1 eV.
-He is not covered: He pairs still differ from MOPAC by up to 0.15 eV.
+(He has its own tests: test_pm6_helium.py.)
 """
 
 import numpy as np
