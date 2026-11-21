@@ -27,7 +27,7 @@ def cis_transition_density_ao(molecule, n_states: int | None = None) -> torch.Te
     hold a single restricted MNDO-type SP calculation with CIS amplitudes.
     """
 
-    if molecule.method not in {"MNDO", "AM1", "PM3"}:
+    if molecule.method not in {"MNDO", "AM1", "RM1", "PM3"}:
         raise NotImplementedError("STO cube export currently supports MNDO-type SP methods only.")
     if int(molecule.nmol) != 1:
         raise ValueError("Cube export accepts exactly one molecule at a time.")

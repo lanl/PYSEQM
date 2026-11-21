@@ -89,15 +89,15 @@ def PWCCT(
     root_dir="./params/MOPAC/",
 ):
     """
-    loads the diatomic core-core paramters for PM6
-    returns them in q
+    loads the diatomic core-core parameters (MOPAC's alpb and xfac)
+    returns them as (alpb, xfac) matrices indexed by atomic numbers
     """
     # will directly use atomic number as array index just as in the params method
     m = max(elements)
     q = torch.zeros((m + 1, m + 1))
     p = torch.zeros((m + 1, m + 1))
 
-    if method in {"PM6", "PM6_SP"}:
+    if method in {"PM6", "PM6_SP", "AM1", "PM3", "MNDO"}:  # the other methods have no pair parameters
         fo = root_dir + "PWCCT_" + method + "_MOPAC.csv"
         requested_elements = set(elements)
         with open(fo) as f:

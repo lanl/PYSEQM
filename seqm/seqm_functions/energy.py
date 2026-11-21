@@ -167,6 +167,59 @@ def elec_energy_xl(D, P, F, Hcore):
     return Eelec
 
 
+# AM1 B-H, B-C and B-halogen pairs: MOPAC's ccrep drops boron's own Gaussians and uses two others instead,
+# (K, L, M) for each partner (the halogens are F, Cl, Br and I)
+_AM1_B_GAUSSIANS = {
+    (1,): ((0.412253, 10.0, 0.832586), (-0.149917, 6.0, 1.186220)),
+    (6,): ((0.261751, 8.0, 1.063995), (0.050275, 5.0, 1.936492)),
+    (9, 17, 35, 53): ((0.359244, 9.0, 0.819351), (0.074729, 9.0, 1.574414)),
+}
+
+
+@lru_cache(maxsize=None)
+def _am1_boron_table(dtype, device):
+    """(K, L, M) of the two special Gaussians by partner atomic number, shape (108, 2, 3); K = 0 for other partners"""
+    table = torch.zeros((108, 2, 3), dtype=dtype, device=device)
+    table[..., 1] = 1.0
+    for partners, gaussians in _AM1_B_GAUSSIANS.items():
+        table[list(partners)] = torch.tensor(gaussians, dtype=dtype, device=device)
+    return table
+
+
+def pair_bond_parameters(alp, chi, ni, nj):
+    """MOPAC's pair parameters (alpb, xfac) of the core-core term of MNDO/AM1/PM3, and which pairs have them."""
+    xfac = chi[ni, nj]
+    alpb = torch.where(alp[ni, nj] < 1e-6, torch.full_like(xfac, 1.2), alp[ni, nj])
+    return xfac.abs() > 1e-5, alpb, xfac
+
+
+def gaussian_core_core(method, rija, ni, nj, idxi, idxj, K, L, M, xfac, derivative=False):
+    """
+    Sum over the Gaussians of both atoms of K*exp(-L*(r-M)^2) for each pair, shape (npairs,); with derivative=True
+    shape (2, npairs), the second row being the sum of K*L*(r-M)*exp(-L*(r-M)^2).
+    As in MOPAC's ccrep, pairs with xfac > 1e-4 have no Gaussians, and for AM1/RM1 boron bonded to H, C or a halogen
+    uses two special Gaussians instead of its own.
+    """
+
+    def terms(K, L, M, r):
+        d = r[:, None] - M
+        g = K * torch.exp(-L * d * d)
+        return torch.stack((g.sum(dim=1), (g * L * d).sum(dim=1))) if derivative else g.sum(dim=1)
+
+    wi = wj = xfac <= 1e-4
+    if method in {"AM1", "RM1"}:
+        table = _am1_boron_table(K.dtype, K.device)
+        boron_i = (ni == 5) & (table[nj, 0, 0] != 0)
+        boron_j = (nj == 5) & (table[ni, 0, 0] != 0)
+        wi, wj = wi & ~boron_i, wj & ~boron_j
+    total = wi * terms(K[idxi], L[idxi], M[idxi], rija) + wj * terms(K[idxj], L[idxj], M[idxj], rija)
+    if method in {"AM1", "RM1"}:
+        pairs = (boron_i | boron_j).nonzero().squeeze(1)
+        special = table[torch.where(boron_i, nj, ni)[pairs]]
+        total.index_add_(-1, pairs, terms(special[..., 0], special[..., 1], special[..., 2], rija[pairs]))
+    return total
+
+
 def pair_nuclear_energy(
     Z, const, nmol, ni, nj, idxi, idxj, rij, rho0xi, rho0xj, alp, chi, gam, method="AM1", parameters=None
 ):
@@ -198,11 +251,13 @@ def pair_nuclear_energy(
     tmp = torch.exp(-alpha[idxi] * rija)
     t2 = torch.where(XH, tmp * rija, tmp)
     t3 = torch.exp(-alpha[idxj] * rija)
+    if method in {"MNDO", "PM3", "AM1", "RM1"}:
+        # pairs with parameters (alpb, xfac) in MOPAC have their own scaling of the core-core term
+        has_bond, alpb, xfac = pair_bond_parameters(alp, chi, ni, nj)
+        scale = torch.where(has_bond, 1.0 + 2.0 * xfac * torch.exp(-alpb * rija), 1.0 + t2 + t3)
     if method == "MNDO":
-        # in mopac, rij is in unit of angstrom
-        # EnucAB = torch.abs(t1*(1.0+t2+t3))
-        EnucAB = t1 * (1.0 + t2 + t3)
-    elif method in {"PM3", "AM1"}:
+        EnucAB = t1 * scale
+    elif method in {"PM3", "AM1", "RM1"}:
         # two gaussian terms for PM3
         # 3~4 terms for AM1
         _, K, L, M = parameters
@@ -210,10 +265,7 @@ def pair_nuclear_energy(
 
         # Gaussian corrections
         t4 = tore[ni] * tore[nj] / rija
-        t5 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija.reshape((-1, 1)) - M[idxi]) ** 2), dim=1)
-        t6 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija.reshape((-1, 1)) - M[idxj]) ** 2), dim=1)
-
-        EnucAB = t1 * (1.0 + t2 + t3) + t4 * (t5 + t6)
+        EnucAB = t1 * scale + t4 * gaussian_core_core(method, rija, ni, nj, idxi, idxj, K, L, M, xfac)
     elif method in {"PM6", "PM6_SP", "PM6_SP_STAR"}:
         # follows MOPAC's ccrep (integrals/ccrep.F90)
         _, K, L, M = parameters

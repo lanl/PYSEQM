@@ -185,6 +185,32 @@ parameterlist = {
         "h_sp",
         "alpha",
     ],
+    "RM1": [  # same functional form and parameters as AM1
+        "U_ss",
+        "U_pp",
+        "zeta_s",
+        "zeta_p",
+        "beta_s",
+        "beta_p",
+        "g_ss",
+        "g_sp",
+        "g_pp",
+        "g_p2",
+        "h_sp",
+        "alpha",
+        "Gaussian1_K",
+        "Gaussian2_K",
+        "Gaussian3_K",
+        "Gaussian4_K",
+        "Gaussian1_L",
+        "Gaussian2_L",
+        "Gaussian3_L",
+        "Gaussian4_L",
+        "Gaussian1_M",
+        "Gaussian2_M",
+        "Gaussian3_M",
+        "Gaussian4_M",
+    ],
     "PM3": [
         "U_ss",
         "U_pp",
@@ -865,7 +891,7 @@ class Energy(torch.nn.Module):
             return None
         if self.method == "MNDO":
             return (alpha,)
-        if self.method in ("AM1", "PM6", "PM6_SP", "PM6_SP_STAR"):
+        if self.method in ("AM1", "RM1", "PM6", "PM6_SP", "PM6_SP_STAR"):
             K = torch.stack([params[f"Gaussian{i}_K"] for i in range(1, 5)], dim=1)
             L = torch.stack([params[f"Gaussian{i}_L"] for i in range(1, 5)], dim=1)
             M = torch.stack([params[f"Gaussian{i}_M"] for i in range(1, 5)], dim=1)

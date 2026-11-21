@@ -371,7 +371,7 @@ class EnergyXL(torch.nn.Module):
             gam = rho0xi
         elif self.method == "MNDO":
             parnuc = (alpha,)
-        elif self.method in {"AM1", "PM6", "PM6_SP"}:
+        elif self.method in {"AM1", "RM1", "PM6", "PM6_SP"}:
             K = torch.stack([molecule.parameters[f"Gaussian{i}_K"] for i in range(1, 5)], dim=1)
             L = torch.stack([molecule.parameters[f"Gaussian{i}_L"] for i in range(1, 5)], dim=1)
             M = torch.stack([molecule.parameters[f"Gaussian{i}_M"] for i in range(1, 5)], dim=1)

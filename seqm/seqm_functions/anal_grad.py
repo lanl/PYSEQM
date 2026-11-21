@@ -5,7 +5,7 @@ from .cal_par import sp_additive_terms
 from .constants import a0, ev
 from .diat_overlap_PM6_SP import diatom_overlap_local_terms, diatom_overlap_rotate
 from .dispersion import dispersion_pair_grad
-from .energy import pair_nuclear_energy
+from .energy import gaussian_core_core, pair_bond_parameters, pair_nuclear_energy
 from .fock import EMAT_SCALE_4, UPPER_IDX0_4, UPPER_IDX1_4, WEIGHT_10, K_ind_4, _cached_index, _cached_tensor
 from .om1_overlap import diatom_overlap_matrix_OM1, diatom_resonance_matrix_OM1
 from .om1_pair_backend import omx_rotate_local_terms
@@ -77,8 +77,10 @@ def scf_analytic_grad(
     Dewar, Michael JS, and Yukio Yamaguchi. "Analytical first derivatives of the energy in MNDO." Computers & Chemistry 2.1 (1978): 25-29.
     https://doi.org/10.1016/0097-8485(78)80005-9
     """
-    if molecule.has_d or method not in {"PM3", "AM1", "MNDO", "PM6", "PM6_SP"}:
-        raise Exception("Analytical gradients implented only for MNDO, AM1, PM3 and PM6 without d orbitals")
+    if molecule.has_d or method not in {"PM3", "AM1", "RM1", "MNDO", "PM6", "PM6_SP"}:
+        raise Exception(
+            "Analytical gradients implented only for MNDO, AM1, RM1, PM3 and PM6 without d orbitals"
+        )
 
     # torch.set_printoptions(precision=6)
     # torch.set_printoptions(linewidth=110)
@@ -491,7 +493,13 @@ def core_core_der(mol, gam, w_x, method, parameters):
     prefactor = alpha[idxi]
     prefactor[XH] = prefactor[XH] * rija[XH] - 1.0
     t3 = alpha[idxj] * t3
-    coreTerm = ZAZB * gam / rija * (prefactor * tmp + t3)
+    minus_dg = prefactor * tmp + t3
+    # pairs with MOPAC pair parameters (alpb, xfac) use g = 1 + 2*xfac*exp(-alpb*RAB) instead
+    has_bond, alpb, xfac = pair_bond_parameters(mol.alp, mol.chi, ni, nj)
+    bond_term = 2.0 * xfac * torch.exp(-alpb * rija)
+    g = torch.where(has_bond, 1.0 + bond_term, g)
+    minus_dg = torch.where(has_bond, alpb * bond_term, minus_dg)
+    coreTerm = ZAZB * gam / rija * minus_dg
     # The derivative of the core-core term is ZAZB*(SASA|SBSB)*dg/dx + ZAZB*g*d(SASA|SBSB)/dx
     # Here we calculate the first term, i.e., ZAZB*(SASA|SBSB)*dg/dx
     pair_grad = coreTerm.unsqueeze(1) * Xij
@@ -512,25 +520,16 @@ def core_core_der(mol, gam, w_x, method, parameters):
     inv_rija = rija.reciprocal()
     inv_rija3 = torch.pow(inv_rija, 3)
     t4 = ZAZB * inv_rija
-    t5 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija[:, None] - M[idxi]) ** 2), dim=1)
-    t6 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija[:, None] - M[idxj]) ** 2), dim=1)
-    pair_grad.add_((ZAZB * inv_rija3 * (t5 + t6)).unsqueeze(1) * Xij)
-    t5_der = torch.sum(
-        K[idxi] * torch.exp(-L[idxi] * (rija[:, None] - M[idxi]) ** 2) * L[idxi] * (rija[:, None] - M[idxi]),
-        dim=1,
-    )
-    t6_der = torch.sum(
-        K[idxj] * torch.exp(-L[idxj] * (rija[:, None] - M[idxj]) ** 2) * L[idxj] * (rija[:, None] - M[idxj]),
-        dim=1,
-    )
-    pair_grad.add_((2.0 * t4 * inv_rija * (t5_der + t6_der)).unsqueeze(1) * Xij)
-    if method == "PM3" or method == "AM1":
+    gauss, gauss_der = gaussian_core_core(method, rija, ni, nj, idxi, idxj, K, L, M, xfac, derivative=True)
+    pair_grad.add_((ZAZB * inv_rija3 * gauss).unsqueeze(1) * Xij)
+    pair_grad.add_((2.0 * t4 * inv_rija * gauss_der).unsqueeze(1) * Xij)
+    if method in {"PM3", "AM1", "RM1"}:
         return pair_grad
     # Put PM6 specific grad here
     # if method=='PM6':
     #       return pair_grad
     else:
-        raise ValueError("Supported Method: MNDO, AM1, PM3")
+        raise ValueError("Supported Method: MNDO, AM1, RM1, PM3")
 
 
 def w_der(const, Z, tore, ni, nj, w_x, rij, xij, Xij, idxi, idxj, gss, gpp, gp2, hsp, zetas, zetap, riXH, ri):
