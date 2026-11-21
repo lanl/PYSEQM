@@ -218,7 +218,7 @@ Some of the basic key/value pairs in the ``seqm_parameters`` dictionary are:
 **method**  (`str`)
     Specifies the semiempirical model to use.
 
-    :accepted values: ``'MNDO'``, ``'AM1'``, ``'PM3'``, ``'PM6'``, ``'OM1'``, ``'OM2'``, ``'OM3'``
+    :accepted values: ``'MNDO'``, ``'AM1'``, ``'RM1'``, ``'PM3'``, ``'PM6'``, ``'OM1'``, ``'OM2'``, ``'OM3'``
 
     OM1, OM2, and OM3 are the orthogonalization-corrected methods in PYSEQM.
     See the OMx subsection below for workflow-specific notes and limitations.

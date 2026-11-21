@@ -16,7 +16,9 @@ from seqm.io.xyz import read_xyz
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("xyz", type=Path, help="Input XYZ geometry.")
-    parser.add_argument("--method", choices=("MNDO", "AM1", "PM3"), default="AM1", help="NDDO SP method.")
+    parser.add_argument(
+        "--method", choices=("MNDO", "AM1", "RM1", "PM3"), default="AM1", help="NDDO SP method."
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("cis_transition_density_cubes"))
     parser.add_argument("--n-states", type=int, default=10, help="Number of CIS roots to calculate.")
     parser.add_argument(

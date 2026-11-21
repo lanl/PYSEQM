@@ -12,7 +12,7 @@
 ## Features
 
 **Methods**
-* Semi-empirical Hamiltonians: MNDO, AM1, PM3, PM6 (including d orbitals, and the `PM6_SP` s/p-only variant), and the orthogonalization-corrected OM1, OM2 and OM3
+* Semi-empirical Hamiltonians: MNDO, AM1, RM1, PM3, PM6 (including d orbitals, and the `PM6_SP` s/p-only variant), and the orthogonalization-corrected OM1, OM2 and OM3
 * Restricted and unrestricted (open-shell) SCF
 * D2 and D3 dispersion corrections (OM2/OM3 and others; see the user guide for availability per method)
 * Batched calculations: many molecules, including different sizes, are processed together as tensors
@@ -72,7 +72,7 @@ coordinates = torch.tensor(
 )
 
 seqm_parameters = {
-    "method": "AM1",  # MNDO, AM1, PM3, PM6, OM1, OM2, OM3
+    "method": "AM1",  # MNDO, AM1, RM1, PM3, PM6, OM1, OM2, OM3
     "scf_eps": 1e-8,
     "scf_converger": [0, 0.1],
     # "excited_states": {"n_states": 5, "method": "cis"},  # uncomment for CIS
@@ -101,7 +101,7 @@ pytest tests
 
 | Method | Notes |
 |--------|-------|
-| MNDO, AM1, PM3 | NDDO methods, s/p basis |
+| MNDO, AM1, RM1, PM3 | NDDO methods, s/p basis |
 | PM6 | Includes d orbitals, used only by atoms that have them (molecules without such atoms run on the faster s/p kernels); `PM6_SP` is the s/p-only variant |
 | OM1, OM2, OM3 | Orthogonalization-corrected methods; D2/D3 dispersion supported for OM2/OM3 |
 

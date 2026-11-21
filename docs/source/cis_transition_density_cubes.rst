@@ -4,7 +4,7 @@ CIS Transition-Density Cube Files
 =================================
 
 PYSEQM can export real-space CIS transition densities as Gaussian
-cube files for MNDO-type methods: ``MNDO``, ``AM1``, and ``PM3``. These
+cube files for MNDO-type methods: ``MNDO``, ``AM1``, ``RM1``, and ``PM3``. These
 files help visualize the spatial character of a transition from the ground
 state to an excited state.
 
@@ -24,7 +24,7 @@ first three:
        --cube-states 3 \
        --out-dir cis_transition_density
 
-Supported ``--method`` values are ``MNDO``, ``AM1``, and ``PM3``. The default
+Supported ``--method`` values are ``MNDO``, ``AM1``, ``RM1``, and ``PM3``. The default
 is ``AM1``.
 
 The output directory contains:
