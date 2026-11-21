@@ -495,10 +495,12 @@ def core_core_der(mol, gam, w_x, method, parameters):
     t3 = alpha[idxj] * t3
     minus_dg = prefactor * tmp + t3
     # pairs with MOPAC pair parameters (alpb, xfac) use g = 1 + 2*xfac*exp(-alpb*RAB) instead
-    has_bond, alpb, xfac = pair_bond_parameters(mol.alp, mol.chi, ni, nj)
-    bond_term = 2.0 * xfac * torch.exp(-alpb * rija)
-    g = torch.where(has_bond, 1.0 + bond_term, g)
-    minus_dg = torch.where(has_bond, alpb * bond_term, minus_dg)
+    xfac = None
+    if (bond := pair_bond_parameters(mol.alp, mol.chi, ni, nj)) is not None:
+        has_bond, alpb, xfac = bond
+        bond_term = 2.0 * xfac * torch.exp(-alpb * rija)
+        g = torch.where(has_bond, 1.0 + bond_term, g)
+        minus_dg = torch.where(has_bond, alpb * bond_term, minus_dg)
     coreTerm = ZAZB * gam / rija * minus_dg
     # The derivative of the core-core term is ZAZB*(SASA|SBSB)*dg/dx + ZAZB*g*d(SASA|SBSB)/dx
     # Here we calculate the first term, i.e., ZAZB*(SASA|SBSB)*dg/dx

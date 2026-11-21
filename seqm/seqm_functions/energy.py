@@ -187,13 +187,18 @@ def _am1_boron_table(dtype, device):
 
 
 def pair_bond_parameters(alp, chi, ni, nj):
-    """MOPAC's pair parameters (alpb, xfac) of the core-core term of MNDO/AM1/PM3, and which pairs have them."""
+    """
+    MOPAC's pair parameters (alpb, xfac) of the core-core term of MNDO/AM1/PM3, and which pairs have them;
+    None if no pair of the elements present has any (the usual case), so that nothing needs to be computed.
+    """
+    if not chi.any():
+        return None
     xfac = chi[ni, nj]
     alpb = torch.where(alp[ni, nj] < 1e-6, torch.full_like(xfac, 1.2), alp[ni, nj])
     return xfac.abs() > 1e-5, alpb, xfac
 
 
-def gaussian_core_core(method, rija, ni, nj, idxi, idxj, K, L, M, xfac, derivative=False):
+def gaussian_core_core(method, rija, ni, nj, idxi, idxj, K, L, M, xfac=None, derivative=False):
     """
     Sum over the Gaussians of both atoms of K*exp(-L*(r-M)^2) for each pair, shape (npairs,); with derivative=True
     shape (2, npairs), the second row being the sum of K*L*(r-M)*exp(-L*(r-M)^2).
@@ -206,14 +211,17 @@ def gaussian_core_core(method, rija, ni, nj, idxi, idxj, K, L, M, xfac, derivati
         g = K * torch.exp(-L * d * d)
         return torch.stack((g.sum(dim=1), (g * L * d).sum(dim=1))) if derivative else g.sum(dim=1)
 
-    wi = wj = xfac <= 1e-4
-    if method in {"AM1", "RM1"}:
+    total_i, total_j = terms(K[idxi], L[idxi], M[idxi], rija), terms(K[idxj], L[idxj], M[idxj], rija)
+    boron = method in {"AM1", "RM1"} and bool(((ni == 5) | (nj == 5)).any())
+    if boron:
         table = _am1_boron_table(K.dtype, K.device)
         boron_i = (ni == 5) & (table[nj, 0, 0] != 0)
         boron_j = (nj == 5) & (table[ni, 0, 0] != 0)
-        wi, wj = wi & ~boron_i, wj & ~boron_j
-    total = wi * terms(K[idxi], L[idxi], M[idxi], rija) + wj * terms(K[idxj], L[idxj], M[idxj], rija)
-    if method in {"AM1", "RM1"}:
+        total_i, total_j = total_i * ~boron_i, total_j * ~boron_j
+    total = total_i + total_j
+    if xfac is not None:
+        total = total * (xfac <= 1e-4)
+    if boron:
         pairs = (boron_i | boron_j).nonzero().squeeze(1)
         special = table[torch.where(boron_i, nj, ni)[pairs]]
         total.index_add_(-1, pairs, terms(special[..., 0], special[..., 1], special[..., 2], rija[pairs]))
@@ -253,8 +261,10 @@ def pair_nuclear_energy(
     t3 = torch.exp(-alpha[idxj] * rija)
     if method in {"MNDO", "PM3", "AM1", "RM1"}:
         # pairs with parameters (alpb, xfac) in MOPAC have their own scaling of the core-core term
-        has_bond, alpb, xfac = pair_bond_parameters(alp, chi, ni, nj)
-        scale = torch.where(has_bond, 1.0 + 2.0 * xfac * torch.exp(-alpb * rija), 1.0 + t2 + t3)
+        scale, xfac = 1.0 + t2 + t3, None
+        if (bond := pair_bond_parameters(alp, chi, ni, nj)) is not None:
+            has_bond, alpb, xfac = bond
+            scale = torch.where(has_bond, 1.0 + 2.0 * xfac * torch.exp(-alpb * rija), scale)
     if method == "MNDO":
         EnucAB = t1 * scale
     elif method in {"PM3", "AM1", "RM1"}:
