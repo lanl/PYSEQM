@@ -102,7 +102,7 @@ pytest tests
 | Method | Notes |
 |--------|-------|
 | MNDO, AM1, PM3 | NDDO methods, s/p basis |
-| PM6 | Includes d orbitals; `PM6_SP` is the s/p-only variant |
+| PM6 | Includes d orbitals, used only by atoms that have them (molecules without such atoms run on the faster s/p kernels); `PM6_SP` is the s/p-only variant |
 | OM1, OM2, OM3 | Orthogonalization-corrected methods; D2/D3 dispersion supported for OM2/OM3 |
 
 A trained model file (`model.pt`) is included in the repository root.

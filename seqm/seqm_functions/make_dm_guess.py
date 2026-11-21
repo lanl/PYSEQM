@@ -21,7 +21,7 @@ CHECK_DEGENERACY = False
 
 
 def _initial_density_guess(molecule, tore, nmol):
-    orb_dim = 9 if molecule.method == "PM6" else 4
+    orb_dim = 9 if molecule.has_d else 4
     P0 = torch.zeros(
         molecule.nmol * molecule.molsize * molecule.molsize,
         orb_dim,
@@ -62,7 +62,7 @@ def make_dm_guess(
         learned_parameters = learned_parameters(molecule.species, molecule.coordinates)
     parameters, _, _ = packpar(molecule.Z, learned_params=learned_parameters)
 
-    if molecule.method == "PM6":
+    if molecule.has_d:
         zetas = parameters["zeta_s"]
         zetap = parameters["zeta_p"]
         zetad = parameters["zeta_d"]
@@ -103,9 +103,9 @@ def make_dm_guess(
         if assignDM:
             molecule.dm = P
 
-    if molecule.method == "PM6":
+    if molecule.has_d:
         if molecule.nocc.dim() == 2:  # open shell
-            raise RuntimeError("Openshell PM6 not tested")
+            raise RuntimeError("Open-shell with d orbitals not tested")
         else:
             W = calc_integral(
                 zs,
@@ -143,7 +143,7 @@ def make_dm_guess(
                 gsp,
                 gp2,
                 hsp,
-                molecule.method,
+                molecule.has_d,
                 zetas,
                 zetap,
                 zetad,

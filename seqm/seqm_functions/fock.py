@@ -2,15 +2,17 @@ import torch
 
 from seqm.utils.torch_compile import optional_compile_function
 
+from .constants import has_d_shell
+
 # ——— Constants —————————————————————————————————————————————————————————
 # fmt: off
 # Basis function counts
 DEFAULT_NBF = 4  # s,p basis
-PM6_NBF = 9  # s,p,d basis
+D_NBF = 9  # s,p,d basis
 
 # Precompute lower-triangle indices for packing (including diagonal)
 TRIL_IDX_4 = torch.tril_indices(DEFAULT_NBF, DEFAULT_NBF, offset=0)
-TRIL_IDX_9 = torch.tril_indices(PM6_NBF, PM6_NBF, offset=0)
+TRIL_IDX_9 = torch.tril_indices(D_NBF, D_NBF, offset=0)
 UPPER_IDX0_4 = torch.tensor([0, 0, 1, 0, 1, 2, 0, 1, 2, 3], dtype=torch.long)
 UPPER_IDX1_4 = torch.tensor([0, 1, 1, 2, 2, 2, 3, 3, 3, 3], dtype=torch.long)
 # Weight tensor to scale the lower-triangle elements by 2
@@ -28,9 +30,9 @@ WEIGHT_45 = torch.tensor([1.0,
                           2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0,
                           2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0,
                           2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0])
-# Mapping for PM6 one-center two-electron integral (W) -> local F contributions.
+# Mapping for the one-center d-orbital two-electron integrals (W) -> local F contributions.
 # Each tuple is (FLocal_column, [W_idxs], [Pnew_idxs])
-PM6_FLOCAL_MAP = [
+D_FLOCAL_MAP = [
     (0, [0, 1, 2, 3, 4], [14, 20, 27, 35, 44]),
     (1, [5, 6, 7, 8], [11, 18, 22, 38]),
     (2, [9, 10, 11, 12, 13, 14, 15, 16], [10, 14, 20, 21, 25, 27, 35, 44]),
@@ -173,7 +175,7 @@ def fock(
     gsp,
     gp2,
     hsp,
-    themethod,
+    has_d,
     zetas,
     zetap,
     zetad,
@@ -182,13 +184,13 @@ def fock(
     G2SD,
 ):
     """
-    Construct the Fock matrix for either the default (4-basis) or PM6 (9-basis) method.
+    Construct the Fock matrix for an s,p (4 orbitals per atom) or s,p,d (9 orbitals per atom) basis.
     """
-    if themethod != "PM6" and _fock_sp_dispatch is not None:
+    if not has_d and _fock_sp_dispatch is not None:
         return _fock_sp_dispatch(nmol, molsize, P0, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
 
     # 1) reshape density into blocks of shape (nbf,nbf)
-    nbf = PM6_NBF if themethod == "PM6" else DEFAULT_NBF
+    nbf = D_NBF if has_d else DEFAULT_NBF
     P = P0.view(nmol, molsize, nbf, molsize, nbf).transpose(2, 3).reshape(-1, nbf, nbf)
 
     # 2) start F with Hcore part
@@ -197,12 +199,14 @@ def fock(
     # 3) one-center (intra-atomic) ERI contributions
     F = _one_center(F, P, maskd, gss, gpp, gsp, gp2, hsp)
 
-    # 4) PM6 one-center ERI contributions from d-orbitals
-    if themethod == "PM6":
-        F = _d_contrib_one_center(F, P, W, maskd)
+    # 4) one-center ERI contributions from d-orbitals
+    atom_has_d = None
+    if has_d:
+        atom_has_d = has_d_shell(Z)
+        F = _d_contrib_one_center(F, P, W, maskd[atom_has_d])
 
     # 5) two-center (coulomb J & exchange K) neighbor-atom terms
-    F = _two_center(F, P, w, maskd, mask, idxi, idxj, themethod)
+    F = _two_center(F, P, w, maskd, mask, idxi, idxj, atom_has_d)
 
     # 6) reassemble full Fock matrix
     nrs = nbf * molsize
@@ -277,22 +281,27 @@ def _one_center(F, P, maskd, gss, gpp, gsp, gp2, hsp):
 # ——— Helper: one-center with d-orbitals —————————————————————————————
 
 
-def _d_contrib_one_center(F, P, W, maskd):
+def _d_contrib_one_center(F, P, W, blocks):
     """
     Adds one-center terms from d-orbitals via the W-integrals.
+    ``blocks`` are the diagonal blocks of the atoms that have d orbitals; W vanishes everywhere else.
     """
+    if blocks.numel() == 0:
+        return F
     tril_idx = _cached_index(TRIL_IDX_9, P.device)  # lower-triangle coords
     i0, i1 = tril_idx
     tril_scale = _cached_tensor(WEIGHT_45, P.device, P.dtype)
-    Pnew = P[:, i0, i1] * tril_scale.unsqueeze(0)
+    Pnew = P[blocks][:, i0, i1] * tril_scale.unsqueeze(0)
+    W = W[blocks]
 
-    blk = P.shape[0]
-    Floc = torch.zeros(blk, 45, device=P.device, dtype=P.dtype)
+    Floc = torch.zeros(blocks.shape[0], 45, device=P.device, dtype=P.dtype)
 
-    for col, w_idxs, p_idxs in PM6_FLOCAL_MAP:
+    for col, w_idxs, p_idxs in D_FLOCAL_MAP:
         Floc[:, col] = (W[:, w_idxs] * Pnew[:, p_idxs]).sum(dim=1)
 
-    F[:, i1, i0] += Floc
+    Fb = F[blocks]
+    Fb[:, i1, i0] += Floc
+    F[blocks] = Fb
     return F
 
 
@@ -328,14 +337,26 @@ def _two_center_sp(F, P, w, maskd, mask, idxi, idxj):
     return F
 
 
-def _two_center(F, P, w, maskd, mask, idxi, idxj, themethod):
+def _two_center(F, P, w, maskd, mask, idxi, idxj, atom_has_d):
     """
-    Adds two-center (neighbor-atom) J and K contributions.
+    Adds two-center (neighbor-atom) J and K contributions. ``atom_has_d`` flags the atoms with d orbitals,
+    None for an s,p basis.
     """
-    if themethod != "PM6":
+    if atom_has_d is None:
         return _two_center_sp(F, P, w, maskd, mask, idxi, idxj)
 
-    nbf = PM6_NBF
+    # Pairs without d atoms only have the s,p block of w (stored transposed with d orbitals); use the fast s,p kernel.
+    pair_d = atom_has_d[idxi] | atom_has_d[idxj]
+    sp = (~pair_d).nonzero().squeeze(1)
+    _two_center_sp(
+        F[:, :4, :4], P[:, :4, :4], w[sp, :10, :10].transpose(1, 2), maskd, mask[sp], idxi[sp], idxj[sp]
+    )
+    dp = pair_d.nonzero().squeeze(1)
+    if dp.numel() == 0:
+        return F
+    w, mask, idxi, idxj = w[dp], mask[dp], idxi[dp], idxj[dp]
+
+    nbf = D_NBF
     tril_idx = _cached_index(TRIL_IDX_9, P.device)
     weight_tc = _cached_tensor(WEIGHT_45, P.device, P.dtype)
     i0, i1 = tril_idx

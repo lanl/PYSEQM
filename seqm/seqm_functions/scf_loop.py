@@ -9,6 +9,7 @@ from torch.autograd import grad as agrad
 from seqm.seqm_functions.canon_dm_prt import Canon_DM_PRT
 
 from .build_two_elec_one_center_int_D import calc_integral
+from .constants import has_d_shell
 from .diag import sym_eig_trunc, sym_eig_trunc1
 from .diag_d import sym_eig_trunc1d, sym_eig_truncd
 from .energy import elec_energy
@@ -55,7 +56,7 @@ FAC_MAX = 10.0
 class SCFConfiguration:
     """Graph-local SCF settings after normalizing user-facing input."""
 
-    method: str
+    has_d: bool
     converger: tuple[Any, ...]
     sp2: tuple[Any, ...]
     eps: Any
@@ -109,7 +110,7 @@ def _as_config_tuple(value, name):
     raise TypeError(f"{name} must be an integer or a non-empty sequence")
 
 
-def normalize_scf_configuration(method, sp2, scf_converger, eps, scf_backward_eps, verbose):
+def normalize_scf_configuration(has_d, sp2, scf_converger, eps, scf_backward_eps, verbose):
     """Copy user settings into the immutable configuration used by one SCF graph."""
     converger = _as_config_tuple(scf_converger, "scf_converger")
     if converger[0] not in (0, 1, 2, 3):
@@ -124,7 +125,7 @@ def normalize_scf_configuration(method, sp2, scf_converger, eps, scf_backward_ep
         raise ValueError("enabled SP2 requires sp2=[True, tolerance]")
 
     return SCFConfiguration(
-        method=method, converger=converger, sp2=sp2, eps=eps, backward_eps=scf_backward_eps, verbose=verbose
+        has_d=has_d, converger=converger, sp2=sp2, eps=eps, backward_eps=scf_backward_eps, verbose=verbose
     )
 
 
@@ -147,7 +148,7 @@ def build_fock(problem, configuration, density):
         problem.gsp,
         problem.gp2,
         problem.hsp,
-        configuration.method,
+        configuration.has_d,
         problem.zetas,
         problem.zetap,
         problem.zetad,
@@ -160,7 +161,7 @@ def build_fock(problem, configuration, density):
 def build_initial_density(molecule, M):
     """Construct the standard diagonal density-matrix guess when no guess is supplied."""
     nmol = molecule.nHeavy.shape[0]
-    num_orbitals = 9 if molecule.method == "PM6" else 4
+    num_orbitals = 9 if molecule.has_d else 4
     P0 = torch.zeros_like(M)
     tore_z = molecule.const.tore[molecule.Z].to(dtype=P0.dtype, device=P0.device)
     heavy = molecule.Z > 1
@@ -213,20 +214,20 @@ def make_scf_problem(molecule, M, w, W):
     )
 
 
-def make_density_builder(method, sp2, molsize, backward, scf_converger, openshell):
+def make_density_builder(has_d, sp2, molsize, backward, scf_converger, openshell):
     """
     Returns a function Pnew = inner(F, nSH, nH, nHyd, nOcc) that
     applies exactly the right algorithm for your chosen flags.
     """
-    if openshell and method == "PM6":
-        raise ValueError("PM6 + open‐shell is not yet supported")
+    if openshell and has_d:
+        raise ValueError("d orbitals + open‐shell is not yet supported")
 
     if openshell and sp2[0]:
         raise ValueError("SP2 + open‐shell is not yet supported")
     # 1) pick the “core” step function
     if sp2[0]:
         # SP2-based
-        if method == "PM6":
+        if has_d:
             packer = lambda F, nsh, nh, nhy: packd(F, nsh, nh, nhy)
             unpacker = lambda D, nsh, nh, nhy: unpackd(D, nsh, nh, nhy, 9 * molsize)
         else:
@@ -234,13 +235,13 @@ def make_density_builder(method, sp2, molsize, backward, scf_converger, openshel
             unpacker = lambda D, nh, nhy: unpack(D, nh, nhy, 4 * molsize)
 
         def core_step(F, nsh, nh, nhy, nOcc):
-            D = packer(F, *((nsh, nh, nhy) if method == "PM6" else (nh, nhy)))
+            D = packer(F, *((nsh, nh, nhy) if has_d else (nh, nhy)))
             D2 = SP2(D, nOcc, sp2[1])
-            return unpacker(D2, *((nsh, nh, nhy) if method == "PM6" else (nh, nhy)))
+            return unpacker(D2, *((nsh, nh, nhy) if has_d else (nh, nhy)))
 
     else:
         # diagonalization of symmetric Fock matrix
-        if method == "PM6":
+        if has_d:
             core_step = lambda F, nsh, nh, nhy, nOcc: sym_eig_truncd(F, nsh, nh, nhy, nOcc)[1]
         else:
             if scf_converger and "T_el" in scf_converger:
@@ -252,7 +253,7 @@ def make_density_builder(method, sp2, molsize, backward, scf_converger, openshel
 
     # 2) if backward, override core_step entirely
     if backward:
-        if method == "PM6":
+        if has_d:
             core_step = lambda F, nsh, nh, nhy, nOcc: sym_eig_trunc1d(F, nsh, nh, nhy, nOcc)[1]
         else:
             core_step = lambda F, nsh, nh, nhy, nOcc: sym_eig_trunc1(F, nh, nhy, nOcc)[1]
@@ -262,7 +263,7 @@ def make_density_builder(method, sp2, molsize, backward, scf_converger, openshel
 
     def inner(F, nSuperHeavy, nHeavy, nHydro, nOccMO):
         nonlocal single_counts
-        if method != "PM6" and not openshell and not backward and not sp2[0] and F.shape[0] == 1:
+        if not has_d and not openshell and not backward and not sp2[0] and F.shape[0] == 1:
             if single_counts is None:
                 single_counts = tuple(int(x[0].item()) for x in (nHeavy, nHydro, nOccMO))
             nHeavy, nHydro, nOccMO = single_counts
@@ -317,12 +318,12 @@ def measure_convergence(
     return notconverged, dm_err.max(), dm_element_err.max()
 
 
-def reshape_Hcore(M, nmol, molsize, method):
+def reshape_Hcore(M, nmol, molsize, has_d):
     """
     Map packed per-atom M (nmol * molsize * molsize, norb, norb)
     to block molecular Hcore (nmol, norb*molsize, norb*molsize).
     """
-    num_orbitals = 9 if method == "PM6" else 4
+    num_orbitals = 9 if has_d else 4
     return (
         M.reshape(nmol, molsize, molsize, num_orbitals, num_orbitals)
         .transpose(2, 3)
@@ -340,11 +341,11 @@ def scf_forward0(problem, P, configuration, backward=False, verbose=True):
     INPUT:
     M: core part of Fock matrix
     w: 2c-2e integrals (s,p)
-    W: some integrals in PM6. zero in PM3 and PM6_SP.)
+    W: one-center d integrals, zero without d orbitals.)
     """
     M = problem.M
     nHydro, nHeavy, nSuperHeavy, nOccMO = problem.nHydro, problem.nHeavy, problem.nSuperHeavy, problem.nOccMO
-    nmol, molsize, themethod = problem.nmol, problem.molsize, configuration.method
+    nmol, molsize, has_d = problem.nmol, problem.molsize, configuration.has_d
     unrestricted, eps = problem.unrestricted, configuration.eps
     alpha = configuration.converger[1]
 
@@ -355,7 +356,7 @@ def scf_forward0(problem, P, configuration, backward=False, verbose=True):
     dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     notconverged = torch.ones(nmol, dtype=torch.bool, device=M.device)
     F = build_fock(problem, configuration, P)
-    Hcore = reshape_Hcore(M, nmol, molsize, themethod)
+    Hcore = reshape_Hcore(M, nmol, molsize, has_d)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
     # Sqrt of the size of F
@@ -363,7 +364,7 @@ def scf_forward0(problem, P, configuration, backward=False, verbose=True):
     one_minus_alpha = 1.0 - alpha
 
     make_Pnew = make_density_builder(
-        themethod, configuration.sp2, molsize, backward, configuration.converger, unrestricted
+        has_d, configuration.sp2, molsize, backward, configuration.converger, unrestricted
     )
 
     for k in range(MAX_ITER + 1):
@@ -513,7 +514,7 @@ def adaptive_mix(scf_iteration, P_prev, P_cur, unrestricted, D_prev=None):
 def scf_forward1(problem, P, configuration, backward=False, verbose=True):
     M = problem.M
     nHydro, nHeavy, nSuperHeavy, nOccMO = problem.nHydro, problem.nHeavy, problem.nSuperHeavy, problem.nOccMO
-    nmol, molsize, themethod = problem.nmol, problem.molsize, configuration.method
+    nmol, molsize, has_d = problem.nmol, problem.molsize, configuration.has_d
     unrestricted, eps = problem.unrestricted, configuration.eps
     Pnew = torch.zeros_like(P)
     Pold = torch.zeros_like(P)
@@ -524,7 +525,7 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
 
     F = build_fock(problem, configuration, P)
 
-    Hcore = reshape_Hcore(M, nmol, molsize, themethod)
+    Hcore = reshape_Hcore(M, nmol, molsize, has_d)
 
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
@@ -537,7 +538,7 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
     matrix_size_sqrt = nSuperHeavy * 9 + nHeavy * 4 + nHydro * 4
 
     make_Pnew = make_density_builder(
-        themethod, configuration.sp2, molsize, backward, configuration.converger, unrestricted
+        has_d, configuration.sp2, molsize, backward, configuration.converger, unrestricted
     )
 
     for k in range(1, MAX_ITER + 1):
@@ -659,6 +660,13 @@ def scf_forward1(problem, P, configuration, backward=False, verbose=True):
 
 
 # adaptive mixing, pulay
+def _existing_orbitals(problem, nmol, molsize):
+    """Indices (into the padded 9-orbitals-per-atom basis) of orbitals present on some atom of the batch."""
+    n_orb = torch.where(has_d_shell(problem.Z), 9, torch.where(problem.Z > 1, 4, (problem.Z == 1).long()))
+    exists = torch.arange(9, device=n_orb.device) < n_orb[:, None]
+    return exists.reshape(nmol, molsize * 9).any(dim=0).nonzero().squeeze(1)
+
+
 def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     """
     adaptive mixing algorithm, see cnvg.f
@@ -667,10 +675,10 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     """
     M = problem.M
     nHydro, nHeavy, nSuperHeavy, nOccMO = problem.nHydro, problem.nHeavy, problem.nSuperHeavy, problem.nOccMO
-    nmol, molsize, themethod, eps = problem.nmol, problem.molsize, configuration.method, configuration.eps
+    nmol, molsize, has_d, eps = problem.nmol, problem.molsize, configuration.has_d, configuration.eps
     dtype = M.dtype
     device = M.device
-    num_orbitals = 9 if themethod == "PM6" else 4
+    num_orbitals = 9 if has_d else 4
     nbas = molsize * num_orbitals
     notconverged = torch.ones(nmol, dtype=torch.bool, device=M.device)
     k = 0
@@ -680,7 +688,7 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     Pold = torch.zeros_like(P)
     dm_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     dm_element_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    Hcore = reshape_Hcore(M, nmol, molsize, themethod)
+    Hcore = reshape_Hcore(M, nmol, molsize, has_d)
 
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
@@ -688,7 +696,7 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
     # Sqrt of the size of F
     matrix_size_sqrt = nSuperHeavy * 9 + nHeavy * 4 + nHydro * 4
     make_Pnew = make_density_builder(
-        themethod, configuration.sp2, molsize, backward, configuration.converger, openshell=False
+        has_d, configuration.sp2, molsize, backward, configuration.converger, openshell=False
     )
 
     Nnot = nmol
@@ -713,7 +721,12 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
 
     # We exploit symmetry by packing the upper triangle of R = F P − P F
     # into a vector of length ntri per matrix.
-    tri_i, tri_j = torch.triu_indices(nbas, nbas, device=device)
+    # With d orbitals every atom is padded to 9 orbitals; run DIIS only in the orbitals that exist
+    # (the rest of F and P are zero)
+    keep = _existing_orbitals(problem, nmol, molsize) if has_d else None
+    nk = nbas if keep is None else keep.numel()
+    restrict = (lambda X: X) if keep is None else (lambda X: X[:, keep][:, :, keep])
+    tri_i, tri_j = torch.triu_indices(nk, nk, device=device)
     ntri = tri_i.numel()
 
     # FPPF_packed: (nmol, nFock, ntri), DIIS residuals in packed form
@@ -726,7 +739,7 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
         .clone()
     )
     # store last n=nFock number of Fock matrixes
-    FOCK = torch.zeros(nmol, nFock, nbas, nbas, dtype=dtype, device=device)
+    FOCK = torch.zeros(nmol, nFock, nk, nk, dtype=dtype, device=device)
     # start prepare for pulay algorithm
     counter = -1  # slot written this iteration, shared by the batch
     cFock = 0  # slots written so far, <= nFock
@@ -771,12 +784,12 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
         nvalid.add_(1).clamp_(max=nFock)
         mix = alpha_direct * (nvalid < 2).to(dtype)  # direct mixing until two residuals are stored
         # store fock matrix
-        FOCK[notconverged, counter, :, :] = F[notconverged]
+        FOCK[notconverged, counter, :, :] = restrict(F[notconverged])
         with torch.no_grad():
-            F_nc = F[notconverged]  # (N_act, nbas, nbas)
-            P_nc = P[notconverged]
+            F_nc = restrict(F[notconverged])  # (N_act, nk, nk)
+            P_nc = restrict(P[notconverged])
 
-            C = F_nc.matmul(P_nc) - P_nc.matmul(F_nc)  # (N_act, nbas, nbas)
+            C = F_nc.matmul(P_nc) - P_nc.matmul(F_nc)  # (N_act, nk, nk)
 
             # pack upper triangle into vector
             C_packed = C[:, tri_i, tri_j]  # (N_act, ntri)
@@ -817,7 +830,12 @@ def scf_forward2(problem, P, configuration, backward=False, verbose=True):
                     coeff * valid[:, :cFock],
                 )
 
-            F[notconverged] = torch.sum(FOCK[notconverged, :cFock] * coeff[:, :, None, None], dim=1)
+            F_new = torch.sum(FOCK[notconverged, :cFock] * coeff[:, :, None, None], dim=1)
+            if keep is not None:
+                F_full = torch.zeros(F_new.shape[0], nbas, nbas, dtype=dtype, device=device)
+                F_full[:, keep[:, None], keep[None, :]] = F_new
+                F_new = F_full
+            F[notconverged] = F_new
 
         Pnew[notconverged] = make_Pnew(
             F[notconverged],
@@ -885,7 +903,7 @@ def scf_forward3(problem, P, configuration, backward=False, verbose=False):
     M, w, W_pm6 = problem.M, problem.w, problem.W
     gss, gpp, gsp, gp2, hsp = problem.gss, problem.gpp, problem.gsp, problem.gp2, problem.hsp
     nHydro, nHeavy, nOccMO = problem.nHydro, problem.nHeavy, problem.nOccMO
-    nmol, molsize, themethod, eps = problem.nmol, problem.molsize, configuration.method, configuration.eps
+    nmol, molsize, has_d, eps = problem.nmol, problem.molsize, configuration.has_d, configuration.eps
     maskd, mask, idxi, idxj = problem.maskd, problem.mask, problem.idxi, problem.idxj
     zetas, zetap, zetad, Z, F0SD, G2SD = (
         problem.zetas,
@@ -899,7 +917,7 @@ def scf_forward3(problem, P, configuration, backward=False, verbose=False):
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     dm_err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     notconverged = torch.ones(nmol, dtype=torch.bool, device=M.device)
-    Hcore = reshape_Hcore(M, nmol, molsize, themethod)
+    Hcore = reshape_Hcore(M, nmol, molsize, has_d)
 
     Temp = xl_bomd_params["T_el"]
     kB = 8.61739e-5  # eV/K, kB = 6.33366256e-6 Ry/K, kB = 3.166811429e-6 Ha/K, #kB = 3.166811429e-6 #Ha/K
@@ -909,7 +927,7 @@ def scf_forward3(problem, P, configuration, backward=False, verbose=False):
     V = torch.zeros((P.shape[0], P.shape[1], P.shape[2], Rank), dtype=P.dtype, device=P.device)
     W = torch.zeros(
         (P.shape[0], P.shape[1], P.shape[2], Rank), dtype=P.dtype, device=P.device
-    )  # here W if from XL-BOMD, not PM6 2c-2e ints
+    )  # here W if from XL-BOMD, not the d-orbital 2c-2e ints
 
     K0 = 1.0
     F = build_fock(problem, configuration, P)
@@ -974,7 +992,7 @@ def scf_forward3(problem, P, configuration, backward=False, verbose=False):
                     gsp,
                     gp2,
                     hsp,
-                    themethod,
+                    has_d,
                     zetas,
                     zetap,
                     zetad,
@@ -1077,7 +1095,7 @@ def _scf_density_map(P, problem, configuration):
     Change the density builder here for any finite-temperature SCF modes.
     """
     F = build_fock(problem, configuration, P)
-    if configuration.method == "PM6":
+    if configuration.has_d:
         out = sym_eig_trunc1d(F, problem.nSuperHeavy, problem.nHeavy, problem.nHydro, problem.nOccMO)[1]
     else:
         out = sym_eig_trunc1(F, problem.nHeavy, problem.nHydro, problem.nOccMO)[1]
@@ -1298,7 +1316,7 @@ def orbital_charges(problem, configuration, orbitals):
     # It seems that orbital charges are the per atom molecular-orbital population
     return None
 
-    if configuration.method == "PM6":
+    if configuration.has_d:
         return None
 
     nmol = problem.nmol
@@ -1349,11 +1367,11 @@ def final_orbital_analysis(problem, configuration, F, eig, scf_backward):
         return None, None, None
 
     if scf_backward >= 1:
-        eigensolver = sym_eig_trunc1d if configuration.method == "PM6" else sym_eig_trunc1
+        eigensolver = sym_eig_trunc1d if configuration.has_d else sym_eig_trunc1
     else:
-        eigensolver = sym_eig_truncd if configuration.method == "PM6" else sym_eig_trunc
+        eigensolver = sym_eig_truncd if configuration.has_d else sym_eig_trunc
 
-    if configuration.method == "PM6":
+    if configuration.has_d:
         eigenvalues, orbitals = eigensolver(
             F, problem.nSuperHeavy, problem.nHeavy, problem.nHydro, problem.nOccMO, eig_only=True
         )
@@ -1473,7 +1491,7 @@ def scf_loop(
     return : F, e, P, Hcore, w, v
     """
     configuration = normalize_scf_configuration(
-        molecule.method, sp2, scf_converger, eps, scf_backward_eps, molecule.verbose
+        molecule.has_d, sp2, scf_converger, eps, scf_backward_eps, molecule.verbose
     )
     nmol = molecule.nHeavy.shape[0]
     if molecule.const.do_timing:
@@ -1489,9 +1507,9 @@ def scf_loop(
     unrestricted = molecule.nocc.dim() == 2
     if not torch.is_tensor(P):
         P = build_initial_density(molecule, M)
-    if molecule.method == "PM6":  # PM6 does not work. ignore this part
+    if molecule.has_d:  # d orbitals do not work here. ignore this part
         if unrestricted:  # open shell
-            raise NotImplementedError("PM6 UHF not implemented yet")
+            raise NotImplementedError("UHF with d orbitals is not implemented yet")
             # W, W_exch = calc_integral_os(
             #     molecule.parameters["s_orb_exp_tail"],
             #     molecule.parameters["p_orb_exp_tail"],
@@ -1574,6 +1592,6 @@ def scf_loop(
 
     F = build_fock(problem, configuration, Pconv)
 
-    Hcore = reshape_Hcore(M, nmol, problem.molsize, configuration.method)
+    Hcore = reshape_Hcore(M, nmol, problem.molsize, configuration.has_d)
     e, charge, v = final_orbital_analysis(problem, configuration, F, eig, scf_backward)
     return F, e, Pconv, Hcore, w, charge, rho0xi, rho0xj, riXH, ri, notconverged, v

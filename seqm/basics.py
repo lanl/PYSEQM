@@ -308,6 +308,11 @@ parameterlist = {
 }
 
 
+def includes_d(method):
+    """Whether the parameter set of ``method`` has d orbitals."""
+    return "zeta_d" in parameterlist[method]
+
+
 class Parser(torch.nn.Module):
     """
     parsing inputs from coordinates and types
@@ -349,7 +354,7 @@ class Parser(torch.nn.Module):
 
         Z = molecule.species.reshape(-1)[real_atoms]
 
-        if themethod == "PM6":  # PM6 is not implemented yet
+        if includes_d(themethod):  # d atoms are counted separately from s,p heavy atoms
             nHeavy = torch.sum(
                 (
                     (molecule.species > 1)
@@ -938,8 +943,8 @@ class Energy(torch.nn.Module):
         molecule._default_parameters = not callable(learned_parameters) and not learned_params
 
         params = molecule.parameters
-        params["beta"] = build_beta_tensor(params, molecule.method)
-        if molecule.method != "PM6":
+        params["beta"] = build_beta_tensor(params, molecule.has_d)
+        if not molecule.model_has_d:
             prepare_parameters(
                 params,
                 molecule.method,
@@ -1008,6 +1013,8 @@ class Energy(torch.nn.Module):
         else:
             e_gap = None
 
+        if (self.excited_states or self.xlesmd) and molecule.has_d:
+            raise NotImplementedError("Excited states are not implemented with d orbitals")
         if (self.excited_states or self.xlesmd) and not self.uhf:
             prev_mos = getattr(molecule, "molecular_orbitals", None)
             if molecule._same_species is None:
@@ -1138,7 +1145,7 @@ class Energy(torch.nn.Module):
                 molecule.const.timing["Force"].append(t1 - t0)
 
         # Calculate ground state molecular dipole
-        if molecule.method not in ("PM6",):  # Not yet implemented for PM6 d-orbitals
+        if not molecule.has_d:  # Not yet implemented for d orbitals
             with torch.no_grad():
                 calc_ground_dipole(molecule, P)
 

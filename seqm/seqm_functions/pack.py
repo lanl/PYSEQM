@@ -65,6 +65,18 @@ def _same_counts(*counts):
     return all(count.numel() == 1 or torch.equal(count, count[:1].expand_as(count)) for count in counts)
 
 
+def _packed_to_padded_index(nHeavy, nHydro, norb):
+    """
+    Position in the padded 4-orbitals-per-atom basis of every packed orbital, shape (nmol, norb), and a mask of
+    the positions that exist. Packed order: 4 orbitals per heavy atom, then the s orbital of each hydrogen.
+    """
+    nho = (4 * nHeavy).reshape(-1, 1)
+    p = torch.arange(norb, device=nho.device)[None, :]
+    idx = torch.where(p < nho, p, nho + (p - nho) * 4)
+    valid = p < nho + nHydro.reshape(-1, 1)
+    return torch.where(valid, idx, torch.zeros_like(idx)), valid
+
+
 def pack(x, nHeavy, nHydro):
     nho = 4 * nHeavy
     if x.dim() == 2:
@@ -80,7 +92,9 @@ def pack(x, nHeavy, nHydro):
         return _pack_batch_same(x, nho[0].item(), nHydro[0].item())
 
     norb = int((nho + nHydro).max().item())
-    return torch.stack(list(map(lambda a, b, c: packone(a, b, c, norb), x, nho, nHydro)))
+    idx, valid = _packed_to_padded_index(nHeavy, nHydro, norb)
+    b = torch.arange(x.shape[0], device=x.device)[:, None, None]
+    return x[b, idx[:, :, None], idx[:, None, :]] * (valid[:, :, None] & valid[:, None, :])
 
 
 def unpack(x0, nHeavy, nHydro, size):
@@ -94,4 +108,9 @@ def unpack(x0, nHeavy, nHydro, size):
     if _same_counts(nho, nHydro):
         return _unpack_batch_same(x0, nho[0].item(), nHydro[0].item(), size)
 
-    return torch.stack(list(map(lambda a, b, c: unpackone(a, b, c, size), x0, nho, nHydro)))
+    idx, valid = _packed_to_padded_index(nHeavy, nHydro, x0.shape[-1])
+    b = torch.arange(x0.shape[0], device=x0.device)[:, None, None]
+    x = torch.zeros((x0.shape[0], size, size), dtype=x0.dtype, device=x0.device)
+    # padding positions all point at index 0 but add zero
+    mask = valid[:, :, None] & valid[:, None, :]
+    return x.index_put((b, idx[:, :, None], idx[:, None, :]), x0 * mask, accumulate=True)

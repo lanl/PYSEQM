@@ -66,21 +66,9 @@ def hcore(molecule, doTETCI=True):
     if is_omx:
         return build_omx_hcore(molecule)
 
-    is_pm6 = molecule.method == "PM6"
-    orb_dim = 9 if is_pm6 else 4
-    if is_pm6:
-        overlap_fn = diatom_overlap_matrixD
-        overlap_args = (
-            molecule.const.qn_int,
-            molecule.const.qnD_int,
-            molecule.const.qnS_int,
-            molecule.const.qnP_int,
-        )
-    else:
-        overlap_fn = diatom_overlap_matrix_PM6_SP
-        overlap_args = (molecule.const.qn_int,)
+    overlap_fn, overlap_args, orb_dim, has_d, _, _ = overlap_kernel_data(molecule)
 
-    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
+    zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=has_d)
 
     xij, rij = molecule.xij, molecule.rij
     ni, nj = molecule.ni, molecule.nj
@@ -129,6 +117,7 @@ def hcore(molecule, doTETCI=True):
             molecule.alp,
             molecule.chi,
             molecule.method,
+            has_d,
         )
     else:
         w = e1b = e2a = rho0xi = rho0xj = riXH = ri = None
@@ -139,7 +128,7 @@ def hcore(molecule, doTETCI=True):
 
     # Fill one-center once electron pure-atomic (U_ss, U_pp, …) diagonal
     U_keys = ["U_ss"] + ["U_pp"] * 3
-    if is_pm6:
+    if has_d:
         U_keys += ["U_dd"] * 5
     for orb, key in enumerate(U_keys):
         M[molecule.maskd, orb, orb] = molecule.parameters[key].to(dtype=M.dtype, device=M.device)
@@ -150,12 +139,12 @@ def hcore(molecule, doTETCI=True):
     # e1b ==> V_{,B} E1B = ELECTRON ON ATOM NI ATTRACTING NUCLEUS OF NJ.
     # e2a ==> V_{,A}
     if doTETCI:
-        if is_pm6:
-            # PM6: idxj gets e1b, idxi gets e2a
+        if has_d:
+            # with d orbitals: idxj gets e1b, idxi gets e2a
             M.index_add_(0, molecule.maskd[idxj], e1b)
             M.index_add_(0, molecule.maskd[idxi], e2a)
         else:
-            # non-PM6: idxi gets e1b, idxj gets e2a
+            # s,p only: idxi gets e1b, idxj gets e2a
             M.index_add_(0, molecule.maskd[idxi], e1b)
             M.index_add_(0, molecule.maskd[idxj], e2a)
 
@@ -163,7 +152,7 @@ def hcore(molecule, doTETCI=True):
 
     # First, build per-orbital beta from per-atom beta
     b_atom = molecule.parameters["beta"]  # shape (n_atoms, 3) or (n_atoms, 2)
-    beta_layout = [0, 1, 1, 1, 2, 2, 2, 2, 2] if is_pm6 else [0, 1, 1, 1]
+    beta_layout = [0, 1, 1, 1, 2, 2, 2, 2, 2] if has_d else [0, 1, 1, 1]
     beta_atoms = b_atom[:, beta_layout]
 
     # Then, make the two-center one-elecron matrix terms
@@ -196,10 +185,10 @@ def overlap_between_geometries(molecule, coords1, coords2):
     if coords1.shape != coords2.shape:
         raise ValueError("coords1 and coords2 must have the same shape")
 
-    overlap_fn, overlap_args, orb_dim, is_pm6, is_omx, basis_data = _overlap_kernel_data(molecule)
+    overlap_fn, overlap_args, orb_dim, has_d, is_omx, basis_data = overlap_kernel_data(molecule)
 
     # Parameters are stored only for real atoms; rebuild a padded view for indexing.
-    zeta = None if is_omx else get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
+    zeta = None if is_omx else get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=has_d)
     nmol, molsize = molecule.species.shape
     species = molecule.species
     device = coords1.device
@@ -283,7 +272,7 @@ def overlap_between_geometries(molecule, coords1, coords2):
 
 def overlap_matrix_current_geometry(molecule):
     """Build the AO overlap matrix for the molecule's current geometry."""
-    overlap_fn, overlap_args, orb_dim, is_pm6, is_omx, basis_data = _overlap_kernel_data(molecule)
+    overlap_fn, overlap_args, orb_dim, has_d, is_omx, basis_data = overlap_kernel_data(molecule)
     nmol, molsize = molecule.species.shape
     dtype = molecule.coordinates.dtype
     device = molecule.coordinates.device
@@ -299,7 +288,7 @@ def overlap_matrix_current_geometry(molecule):
         direction = rotate_with_quaternion(molecule.xij).transpose(1, 2)[:, :, 0]
         pair_blocks = overlap_fn(molecule.xij, molecule.rij, direction, pair_i, pair_j)
     else:
-        zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=is_pm6)
+        zeta = get_orbital_zeta_tensor(molecule.parameters, molecule.method, include_d=has_d)
         pair_blocks = overlap_fn(
             molecule.ni,
             molecule.nj,
@@ -313,7 +302,7 @@ def overlap_matrix_current_geometry(molecule):
     blocks[molecule.mask] = pair_blocks
     blocks[molecule.mask_l] = pair_blocks.transpose(-1, -2)
 
-    if is_pm6:
+    if has_d:
         eye = torch.eye(orb_dim, dtype=dtype, device=device)
         h_self = torch.zeros_like(eye)
         h_self[0, 0] = 1.0
@@ -329,17 +318,18 @@ def overlap_matrix_current_geometry(molecule):
     )
 
 
-def _overlap_kernel_data(molecule):
-    is_pm6 = molecule.method == "PM6"
+def overlap_kernel_data(molecule):
+    has_d = molecule.has_d
     is_omx = molecule.method in {"OM1", "OM2", "OM3"}
-    orb_dim = 9 if is_pm6 else 4
+    orb_dim = 9 if has_d else 4
 
-    if is_pm6:
+    if molecule.model_has_d:
+        # without d atoms this gives the s,p block; the s,p kernel below lacks He, the noble gases and n > 3
         return (
             diatom_overlap_matrixD,
             (molecule.const.qn_int, molecule.const.qnD_int, molecule.const.qnS_int, molecule.const.qnP_int),
             orb_dim,
-            is_pm6,
+            has_d,
             is_omx,
             None,
         )
@@ -347,8 +337,8 @@ def _overlap_kernel_data(molecule):
         basis_data = molecule.parameters.get("_omx_basis_data")
         if basis_data is None:
             raise RuntimeError("OMx basis tables have not been cached on the molecule")
-        return diatom_overlap_matrix_OM1, (), orb_dim, is_pm6, is_omx, basis_data
-    return diatom_overlap_matrix_PM6_SP, (molecule.const.qn_int,), orb_dim, is_pm6, is_omx, None
+        return diatom_overlap_matrix_OM1, (), orb_dim, has_d, is_omx, basis_data
+    return diatom_overlap_matrix_PM6_SP, (molecule.const.qn_int,), orb_dim, has_d, is_omx, None
 
 
 def _overlap_matrix_for_geometry(molecule, coords):

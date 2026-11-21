@@ -2,7 +2,6 @@ import torch
 
 from seqm.seqm_functions.anal_grad import _build_omx_ortho_fd_cache, omx_threebody_ortho_grad
 from seqm.seqm_functions.constants import a0, overlap_cutoff
-from seqm.seqm_functions.diat_overlap_PM6_SP import diatom_overlap_matrix_PM6_SP
 from seqm.seqm_functions.fock import (
     EMAT_SCALE_4,
     UPPER_IDX0_4,
@@ -12,6 +11,7 @@ from seqm.seqm_functions.fock import (
     _cached_index,
     _cached_tensor,
 )
+from seqm.seqm_functions.hcore import overlap_kernel_data
 from seqm.seqm_functions.nac import _build_pair_response_density_batch
 from seqm.seqm_functions.om2_hcore import build_omx_pair_context
 from seqm.seqm_functions.omx_utils import OMX_METHODS, get_orbital_zetas
@@ -88,6 +88,7 @@ def _directional_overlap_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minu
     zeta_s, zeta_p = get_orbital_zetas(mol.parameters, mol.method)
     zeta = torch.cat((zeta_s.unsqueeze(1), zeta_p.unsqueeze(1)), dim=1)
     beta = mol.parameters["beta"]
+    overlap_fn, overlap_args, *_ = overlap_kernel_data(mol)
 
     di_plus = torch.zeros((npairs, 4, 4), dtype=dtype, device=device)
     di_minus = torch.zeros_like(di_plus)
@@ -95,24 +96,24 @@ def _directional_overlap_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minu
     mask_plus = rij_plus <= overlap_cutoff
     mask_minus = rij_minus <= overlap_cutoff
     if mask_plus.any():
-        di_plus[mask_plus] = diatom_overlap_matrix_PM6_SP(
+        di_plus[mask_plus] = overlap_fn(
             mol.ni[mask_plus],
             mol.nj[mask_plus],
             xij_plus[mask_plus],
             rij_plus[mask_plus],
             zeta[mol.idxi][mask_plus],
             zeta[mol.idxj][mask_plus],
-            mol.const.qn_int,
+            *overlap_args,
         )
     if mask_minus.any():
-        di_minus[mask_minus] = diatom_overlap_matrix_PM6_SP(
+        di_minus[mask_minus] = overlap_fn(
             mol.ni[mask_minus],
             mol.nj[mask_minus],
             xij_minus[mask_minus],
             rij_minus[mask_minus],
             zeta[mol.idxi][mask_minus],
             zeta[mol.idxj][mask_minus],
-            mol.const.qn_int,
+            *overlap_args,
         )
 
     overlap_t = (di_plus - di_minus) / (2.0 * dtnact)
@@ -169,6 +170,7 @@ def _directional_tetci_derivative(mol, xij_plus, rij_plus, xij_minus, rij_minus,
         None,
         None,
         mol.method,
+        mol.has_d,
     )
 
     w_t = (w_[:npairs] - w_[npairs:]) / (2.0 * dtnact)
@@ -343,8 +345,6 @@ def compute_tdc_hamiltonian_fd(
     ref_amp = cache_new["cis_amp"]
     ref_energies = cache_new["energies"]
     if validate:
-        if molecule.method == "PM6":
-            raise NotImplementedError("hamiltonian_fd TD-NAC is not implemented for PM6.")
         if molecule.nocc.dim() != 1:
             raise NotImplementedError(
                 "hamiltonian_fd TD-NAC currently supports restricted closed-shell only."

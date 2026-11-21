@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 
 from seqm.basics import *  # noqa: F403
-from .basics import Pack_Parameters, Parser
+from .basics import Pack_Parameters, Parser, includes_d
 from .seqm_functions.constants import pm6_order_key
 from .seqm_functions.omx_utils import build_beta_tensor, prepare_parameters
 
@@ -92,8 +92,11 @@ class Molecule(torch.nn.Module):
 
         self.norb = self.nHydro + 4 * self.nHeavy  # number of orbitals
 
-        self.parameters["beta"] = build_beta_tensor(self.parameters, self.method)
-        if self.method != "PM6":
+        # d orbitals are used only if the model has them and some atom of the batch carries them
+        self.model_has_d = includes_d(self.method)
+        self.has_d = self.model_has_d and bool(self.nSuperHeavy.any())
+        self.parameters["beta"] = build_beta_tensor(self.parameters, self.has_d)
+        if not self.model_has_d:
             prepare_parameters(
                 self.parameters,
                 self.method,
@@ -175,9 +178,9 @@ def check_input(species, method):
     """
     Does input checking
     The species (atomic numbers of molecules) tensor should have non-increasing rows so that elements are sorted from
-    biggest to smallest. For PM6 the atoms with a d shell come first (see pm6_order_key).
+    biggest to smallest. With a d-orbital method (PM6) the atoms with a d shell come first (see pm6_order_key).
     """
-    if method == "PM6":
+    if includes_d(method):
         key = pm6_order_key(species)
         ok = key[:, :-1] <= key[:, 1:]
         order = (

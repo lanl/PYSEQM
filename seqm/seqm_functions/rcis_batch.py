@@ -1075,7 +1075,7 @@ def cis_energy_from_transition_density(mol, F, R, w, D, Hcore):
                 molecule.parameters["g_sp"],
                 molecule.parameters["g_p2"],
                 molecule.parameters["h_sp"],
-                molecule.method,
+                molecule.has_d,
                 molecule.parameters["s_orb_exp_tail"],
                 molecule.parameters["p_orb_exp_tail"],
                 molecule.parameters["d_orb_exp_tail"],

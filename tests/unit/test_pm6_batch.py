@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from seqm.ElectronicStructure import Electronic_Structure
@@ -49,3 +50,20 @@ def test_pm6_batch_from_notebook(device):
 
     assert_allclose(data["Etot"], ref["Etot"], rtol=1e-5, atol=1e-5)
     assert_allclose(data["force"], ref["force"], rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "method, species, expect_d",
+    [
+        ("PM6", [[6, 1, 1, 1, 1]], False),
+        ("PM6", [[17, 17]], True),
+        ("PM6_SP", [[6, 1, 1, 1, 1]], False),
+        ("PM6_SP", [[17, 17]], False),
+    ],
+)
+def test_d_orbitals_are_used_only_by_pm6_for_atoms_with_a_d_shell(method, species, expect_d):
+    torch.set_default_dtype(torch.float64)
+    parameters = {"method": method, "scf_eps": 1.0e-8, "scf_converger": [1]}
+    coordinates = torch.rand(1, len(species[0]), 3) * 2.0
+    molecule = Molecule(Constants(), parameters, coordinates, torch.tensor(species))
+    assert molecule.has_d == expect_d

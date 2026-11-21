@@ -105,7 +105,7 @@ class Electronic_Structure(torch.nn.Module):
             )
 
         with torch.no_grad():
-            n_orbital = 9 if molecule.method == "PM6" else 4
+            n_orbital = 9 if molecule.has_d else 4
             if molecule.dm.dim() == 4:
                 electron_charge = self.atomic_charges(molecule.dm[:, 0], n_orbital) + self.atomic_charges(
                     molecule.dm[:, 1], n_orbital

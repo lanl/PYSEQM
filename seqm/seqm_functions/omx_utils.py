@@ -25,9 +25,9 @@ def get_orbital_zetas(parameters, method):
     return parameters["zeta_s"], parameters["zeta_p"]
 
 
-def build_beta_tensor(parameters, method):
+def build_beta_tensor(parameters, has_d):
     fields = ["beta_s", "beta_p"]
-    if method == "PM6":
+    if has_d:
         fields.append("beta_d")
     return torch.stack([parameters[field] for field in fields], dim=1)
 

@@ -10,9 +10,9 @@ from seqm.seqm_functions.rcis_batch import packone_batch
 
 def _build_full_overlap(mol):
     """Build the full AO overlap matrix (both triangles + diagonal) for a Molecule."""
-    is_pm6 = mol.method == "PM6"
-    orb_dim = 9 if is_pm6 else 4
-    if is_pm6:
+    has_d = mol.has_d
+    orb_dim = 9 if has_d else 4
+    if has_d:
         overlap_fn = diatom_overlap_matrixD
         overlap_args = (mol.const.qn_int, mol.const.qnD_int)
         zeta_fields = ["zeta_s", "zeta_p", "zeta_d"]

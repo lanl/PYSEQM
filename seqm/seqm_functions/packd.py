@@ -192,6 +192,21 @@ def unpackoned(x0, nhoho, nho, nHydro, size):
     return x
 
 
+def _packed_to_padded_index(nSuperHeavy, nHeavy, nHydro, norb):
+    """
+    Position in the 9-orbitals-per-atom padded basis of every packed orbital, shape (nmol, norb), and a mask of
+    the positions that exist. Packed order: 9 orbitals per d atom, then 4 per s,p atom, then 1 per hydrogen.
+    """
+    nsh, nh, nH = (t.reshape(-1, 1) for t in (nSuperHeavy, nHeavy, nHydro))
+    p = torch.arange(norb, device=nsh.device)[None, :]
+    q = p - 9 * nsh
+    idx = torch.where(
+        p < 9 * nsh, p, torch.where(q < 4 * nh, (nsh + q // 4) * 9 + q % 4, (nsh + nh + q - 4 * nh) * 9)
+    )
+    valid = p < 9 * nsh + 4 * nh + nH
+    return torch.where(valid, idx, torch.zeros_like(idx)), valid
+
+
 def packd(x, nSuperHeavy, nHeavy, nHydro):
     nho = 4 * nHeavy
     nhoho = 9 * nSuperHeavy
@@ -202,13 +217,19 @@ def packd(x, nSuperHeavy, nHeavy, nHydro):
         x = x.flatten(start_dim=0, end_dim=1)
 
     norb = int(torch.max(nho + nHydro + nhoho).item())
-    return torch.stack(list(map(lambda a, b, c, d: packoned(a, b, c, d, norb), x, nhoho, nho, nHydro)))
+    idx, valid = _packed_to_padded_index(nSuperHeavy, nHeavy, nHydro, norb)
+    b = torch.arange(x.shape[0], device=x.device)[:, None, None]
+    return x[b, idx[:, :, None], idx[:, None, :]] * (valid[:, :, None] & valid[:, None, :])
 
 
 def unpackd(x0, nSuperHeavy, nHeavy, nHydro, size):
     if x0.dim() == 2:
         return unpackoned(x0, nSuperHeavy * 9, nHeavy * 4, nHydro, size)
 
-    nho = 4 * nHeavy
-    nhoho = 9 * nSuperHeavy
-    return torch.stack(list(map(lambda a, b, c, d: unpackoned(a, b, c, d, size), x0, nhoho, nho, nHydro)))
+    idx, valid = _packed_to_padded_index(nSuperHeavy, nHeavy, nHydro, x0.shape[-1])
+    b = torch.arange(x0.shape[0], device=x0.device)[:, None, None]
+    x = torch.zeros((x0.shape[0], size, size), dtype=x0.dtype, device=x0.device)
+    # invalid (padding) positions all point at index 0 but add zero
+    return x.index_put(
+        (b, idx[:, :, None], idx[:, None, :]), x0 * (valid[:, :, None] & valid[:, None, :]), accumulate=True
+    )

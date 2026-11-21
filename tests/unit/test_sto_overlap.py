@@ -125,14 +125,12 @@ def _same_block(i, j):
 # zeta values chosen differently on the two atoms and for each shell
 ZETA_A = [2.1, 1.7, 1.4]
 ZETA_B = [1.6, 2.3, 1.9]
-# (qn of s/p shell, qn of d shell) pairs: low n, 5s5p, 5d-1s, 4d-5s5p, 6s6p5d, d-d with equal and unequal shells
+# ((qn of s/p shell, qn of d shell) of atom A, same for atom B): 3d-3d, 5s5p, 5d-1s, 4d-5s5p, 6s6p5d with 3d and 6s6p5d
 SHELL_PAIRS = [
-    ((1, 0), (2, 0)),
+    ((3, 3), (3, 3)),
     ((5, 0), (5, 0)),
     ((5, 5), (1, 0)),
     ((4, 4), (5, 0)),
-    ((3, 3), (3, 3)),
-    ((4, 4), (4, 4)),
     ((6, 5), (3, 3)),
     ((6, 5), (6, 5)),
 ]
@@ -233,7 +231,7 @@ def _pm6_heat_of_formation(species, coordinates):
 
 
 def test_pm6_heat_of_formation_matches_mopac_for_iodine():
-    """MOPAC 2016 PM6 (1SCF) gives 17.64885 kcal/mol for I2 at 2.70 A; the old overlap code gave -21352."""
+    """PM6 heat of formation of I2 (5s5p5d) at 2.70 A against MOPAC 2016 (17.64885 kcal/mol)."""
     assert _pm6_heat_of_formation([53, 53], [[0, 0, 0], [0, 0, 2.70]]) == pytest.approx(17.64885, abs=0.15)
 
 

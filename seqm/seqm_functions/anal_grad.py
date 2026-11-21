@@ -77,8 +77,8 @@ def scf_analytic_grad(
     Dewar, Michael JS, and Yukio Yamaguchi. "Analytical first derivatives of the energy in MNDO." Computers & Chemistry 2.1 (1978): 25-29.
     https://doi.org/10.1016/0097-8485(78)80005-9
     """
-    if method not in {"PM3", "AM1", "MNDO", "PM6_SP"}:
-        raise Exception("Analytical gradients implented only for MNDO, AM1 and PM3 methods")
+    if molecule.has_d or method not in {"PM3", "AM1", "MNDO", "PM6", "PM6_SP"}:
+        raise Exception("Analytical gradients implented only for MNDO, AM1, PM3 and PM6 without d orbitals")
 
     # torch.set_printoptions(precision=6)
     # torch.set_printoptions(linewidth=110)
@@ -389,7 +389,7 @@ repeat_tensor = lambda x: torch.cat([x, x])
 
 def w_derivative_numerical(mol, Xij, w_x_new):
     """Finite-difference derivative of the s/p two-center integrals and core attractions (fills ``w_x_new``)."""
-    if mol.method == "PM6":
+    if mol.has_d:
         raise NotImplementedError("Numerical two-center derivatives are only implemented for s/p methods")
     npairs = Xij.shape[0]
     p = mol.parameters

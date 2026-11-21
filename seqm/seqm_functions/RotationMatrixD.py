@@ -1,88 +1,57 @@
+import math
+
 import numpy as np
 import torch
 
+# d-orbital quadratic forms Y = c * r^T M r, in the local order (dz2, dxz, dyz, dx2-y2, dxy) and in the
+# global order (dx2-y2, dxz, dz2, dyz, dxy)
+_SQ15_16PI = math.sqrt(15.0 / (16.0 * math.pi))
+_SQ15_4PI = math.sqrt(15.0 / (4.0 * math.pi))
+_SQ5_16PI = math.sqrt(5.0 / (16.0 * math.pi))
 
-def GenerateRotationMatrix(xij):
-    ##     ROTATION MATRIX FOR A GIVEN ATOM PAIR I-J (I.GT.J).
-    ##     R         INTERATOMIC DISTANCE, IN ATOMIC UNITS (O).
-    ##     matrix()      PRECOMBINED ELEMENTS OF THE ROTATION MATRIX (O).
 
-    ##INDX = torch.as_tensor( [ 0,6,1,3,36,21,28,15,10 ])
+def _quadratic_forms(order):
+    mats = {
+        "z2": (np.diag([-1.0, -1.0, 2.0]), _SQ5_16PI),
+        "xz": (np.array([[0, 0, 0.5], [0, 0, 0], [0.5, 0, 0]]), _SQ15_4PI),
+        "yz": (np.array([[0, 0, 0], [0, 0, 0.5], [0, 0.5, 0]]), _SQ15_4PI),
+        "x2y2": (np.diag([1.0, -1.0, 0.0]), _SQ15_16PI),
+        "xy": (np.array([[0, 0.5, 0], [0.5, 0, 0], [0, 0, 0]]), _SQ15_4PI),
+    }
+    return np.stack([mats[o][0] for o in order]), np.array([mats[o][1] for o in order])
+
+
+_M_LOCAL, _C_LOCAL = _quadratic_forms(["z2", "xz", "yz", "x2y2", "xy"])
+M_D_GLOBAL, C_D_GLOBAL = _quadratic_forms(["x2y2", "xz", "z2", "yz", "xy"])
+NORM_D_GLOBAL = np.einsum("kab,kba->k", M_D_GLOBAL, M_D_GLOBAL)
+
+
+def GenerateRotationMatrix(P):
+    """
+    Rotation of the two-center integrals from the local frame to the molecular frame, shape (npairs, 15, 45).
+
+    P (npairs, 3, 3) is the rotation matrix from ``rotate_with_quaternion(-xij)``: its rows are the bond direction
+    and two perpendicular axes, i.e. the local sigma, pi1, pi2 p orbitals. The 5x5 d-orbital rotation is derived
+    from P, so no Euler angles (and no singularity along z) are needed.
+    """
+    dtype = P.dtype
+    device = P.device
+    npairs = P.shape[0]
     INDX = [0, 1, 3, 6, 10, 15, 21, 28, 36]
-    PT5SQ3 = 0.8660254037841
-    PT5 = 0.5
 
-    dtype = xij.dtype
-    device = xij.device
-    xij = -xij
-    # xij unit vector points from i to j: xij = (xj-xi)/|xi-xj|, shape (npairs, 3)
-    # rij : distance between atom i and j in atomic units, shape (npairs,)
-    # ni, nj, atomic number of atom i and j, shape (npairs,)
-    # x = x2-x1
-    # y = y2-y1
-    # z = z2-z1
-    # zeta_a, zeta_b: zeta_s and zeta_p for atom pair a-b, shape(npairs, 2)
-    # output di: overlap matrix between AOs from atom i an j, shape (npairs, 4,4)
-    # 0,1,2,3: sigma, px, py, pz
+    # local d orbital K, as a function of the global coordinates, expanded in the global d orbitals L:
+    # Y_K(Q r) = sum_L D[K, L] Y_L(r), with Q the rows (pi1, pi2, sigma) of P
+    Q = P[:, [1, 2, 0], :]
+    m_loc = torch.as_tensor(_M_LOCAL, dtype=dtype, device=device)
+    m_glob = torch.as_tensor(M_D_GLOBAL, dtype=dtype, device=device)
+    c_loc = torch.as_tensor(_C_LOCAL, dtype=dtype, device=device)
+    c_glob = torch.as_tensor(C_D_GLOBAL, dtype=dtype, device=device)
+    norm = torch.as_tensor(NORM_D_GLOBAL, dtype=dtype, device=device)
+    t = torch.einsum("pba,kbc,pcd->pkad", Q, m_loc, Q)
+    D = torch.einsum("pkad,lad->pkl", t, m_glob) / norm * (c_loc[:, None] / c_glob[None, :])
 
-    xy = torch.norm(xij[..., :2], dim=1)
-
-    # ``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
-
-    tmp = torch.sign(xij[..., 2])
-
-    # ca = th.where(xy>=1.0e-10, xij[...,0]/xy, tmp)
-    cond_xy = xy >= 1.0e-10
-    CA = tmp.clone()
-    CA[cond_xy] = xij[cond_xy, 0] / xy[cond_xy]
-
-    CB = torch.where(xy >= 1.0e-10, xij[..., 2], tmp)  # xij is a unti vector already
-    SA = torch.zeros_like(xy)
-
-    SA[cond_xy] = xij[cond_xy, 1] / xy[cond_xy]
-    SB = torch.where(cond_xy, xy, torch.zeros_like(xy))
-
-    C2A = 2.000 * CA * CA - 1.000
-    C2B = 2.000 * CB * CB - 1.000
-    S2A = 2.000 * SA * CA
-    S2B = 2.000 * SB * CB
-
-    P = torch.zeros(xij.shape[0], 3, 3, dtype=dtype, device=device)
-    P[..., 1 - 1, 1 - 1] = CA * SB
-    P[..., 2 - 1, 1 - 1] = CA * CB
-    P[..., 3 - 1, 1 - 1] = -SA
-    P[..., 1 - 1, 2 - 1] = SA * SB
-    P[..., 2 - 1, 2 - 1] = SA * CB
-    P[..., 3 - 1, 2 - 1] = CA
-    P[..., 1 - 1, 3 - 1] = CB
-    P[..., 2 - 1, 3 - 1] = -SB
-
-    D = torch.zeros(xij.shape[0], 5, 5, dtype=dtype, device=device)
-    D[..., 1 - 1, 1 - 1] = PT5SQ3 * C2A * SB * SB
-    D[..., 2 - 1, 1 - 1] = PT5 * C2A * S2B
-    D[..., 3 - 1, 1 - 1] = -S2A * SB
-    D[..., 4 - 1, 1 - 1] = C2A * (CB * CB + PT5 * SB * SB)
-    D[..., 5 - 1, 1 - 1] = -S2A * CB
-    D[..., 1 - 1, 2 - 1] = PT5SQ3 * CA * S2B
-    D[..., 2 - 1, 2 - 1] = CA * C2B
-    D[..., 3 - 1, 2 - 1] = -SA * CB
-    D[..., 4 - 1, 2 - 1] = -PT5 * CA * S2B
-    D[..., 5 - 1, 2 - 1] = SA * SB
-    D[..., 1 - 1, 3 - 1] = CB * CB - PT5 * SB * SB
-    D[..., 2 - 1, 3 - 1] = -PT5SQ3 * S2B
-    D[..., 4 - 1, 3 - 1] = PT5SQ3 * SB * SB
-    D[..., 1 - 1, 4 - 1] = PT5SQ3 * SA * S2B
-    D[..., 2 - 1, 4 - 1] = SA * C2B
-    D[..., 3 - 1, 4 - 1] = CA * CB
-    D[..., 4 - 1, 4 - 1] = -PT5 * SA * S2B
-    D[..., 5 - 1, 4 - 1] = -CA * SB
-    D[..., 1 - 1, 5 - 1] = PT5SQ3 * S2A * SB * SB
-    D[..., 2 - 1, 5 - 1] = PT5 * S2A * S2B
-    D[..., 3 - 1, 5 - 1] = C2A * SB
-    D[..., 4 - 1, 5 - 1] = S2A * (CB * CB + PT5 * SB * SB)
-    D[..., 5 - 1, 5 - 1] = C2A * CB
     K = 0
-    matrix = torch.zeros(xij.shape[0], 15, 45, dtype=dtype, device=device)
+    matrix = torch.zeros(npairs, 15, 45, dtype=dtype, device=device)
 
     ### S-S ###
     matrix[..., 0, 0] = 1.00000

@@ -3,8 +3,7 @@ Overlap integrals between Slater-type orbitals (s, p, d) on two centers.
 
 The overlap of normalised STOs
     chi = N r^(n-1) exp(-zeta r) Y_lm(theta, phi),   N = (2 zeta)^(n+1/2) / sqrt((2n)!)
-is evaluated for *any* principal quantum numbers (n_a, n_b) and l <= 2 with one
-general expression, instead of one hand-expanded formula per (n, l) combination.
+is evaluated for any principal quantum numbers (n_a, n_b <= 6) and l <= 2 with one general expression.
 
 Local frame (z axis along the bond, atom A at the origin, atom B at +R z):
 prolate spheroidal coordinates mu = (r_a + r_b)/R, nu = (r_a - r_b)/R give
@@ -29,28 +28,15 @@ from functools import lru_cache
 import numpy as np
 import torch as th
 
+from .RotationMatrixD import C_D_GLOBAL, M_D_GLOBAL, NORM_D_GLOBAL
+
 _NMAX = 6  # largest principal quantum number supported
 _NPOLY = 2 * _NMAX + 2  # A_i, B_j are needed for i, j = 0 .. n_a + n_b + 1 <= 13
 _BETA_SERIES_MAX = 16.0  # |beta| below this: Taylor series for B_j, above: upward recursion
 _BETA_SERIES_TERMS = 100
 
 # (l_a, l_b, m) of the independent local-frame integrals
-_SPECS = (
-    (0, 0, 0),
-    (0, 1, 0),
-    (0, 2, 0),
-    (1, 0, 0),
-    (1, 1, 0),
-    (1, 1, 1),
-    (1, 2, 0),
-    (1, 2, 1),
-    (2, 0, 0),
-    (2, 1, 0),
-    (2, 1, 1),
-    (2, 2, 0),
-    (2, 2, 1),
-    (2, 2, 2),
-)
+_SPECS = tuple((la, lb, m) for la in range(3) for lb in range(3) for m in range(min(la, lb) + 1))
 
 # local-frame orbital indices (in the 9-orbital ordering) for every (l, m)
 _LOCAL_INDEX = {0: {0: (0,)}, 1: {0: (3,), 1: (1, 2)}, 2: {0: (6,), 1: (5, 7), 2: (4, 8)}}
@@ -74,14 +60,6 @@ def _pmul(a, b):
     out = np.zeros((a.shape[0] + b.shape[0] - 1, a.shape[1] + b.shape[1] - 1))
     for i, j in zip(*np.nonzero(a)):
         out[i : i + b.shape[0], j : j + b.shape[1]] += a[i, j] * b
-    return out
-
-
-def _padd(a, b, sb=1.0):
-    shape = (max(a.shape[0], b.shape[0]), max(a.shape[1], b.shape[1]))
-    out = np.zeros(shape)
-    out[: a.shape[0], : a.shape[1]] += a
-    out[: b.shape[0], : b.shape[1]] += sb * b
     return out
 
 
@@ -111,15 +89,9 @@ _VOL = _poly({(2, 0): 1.0, (0, 2): -1.0})  # mu^2 - nu^2
 
 def _angular_poly(l, m, z, r):
     """Solid harmonic r^l Y_lm / K with the rho^m (cos m phi) factor removed."""
-    if l == 0:
-        return _ONE
-    if l == 1:
-        return z if m == 0 else _ONE
-    if l == 2:
-        if m == 0:  # 3 z^2 - r^2
-            return _padd(3.0 * _pmul(z, z), _pmul(r, r), -1.0)
-        return z if m == 1 else _ONE
-    raise ValueError("only s, p and d orbitals are supported")
+    if l == 2 and m == 0:  # 3 z^2 - r^2
+        return 3.0 * _pmul(z, z) - _pmul(r, r)
+    return z if l - m == 1 else _ONE
 
 
 @lru_cache(maxsize=None)
@@ -145,23 +117,6 @@ def _series_matrix():
     return np.where((j + k) % 2 == 0, 2.0 / (j + k + 1.0), 0.0)
 
 
-# real d-orbital quadratic forms Y_k = c_k r^T M_k r, order dx2-y2, dxz, dz2, dyz, dxy
-_DM = np.zeros((5, 3, 3))
-_DM[0] = np.diag([1.0, -1.0, 0.0])
-_DM[1][0, 2] = _DM[1][2, 0] = 0.5
-_DM[2] = np.diag([-1.0, -1.0, 2.0])
-_DM[3][1, 2] = _DM[3][2, 1] = 0.5
-_DM[4][0, 1] = _DM[4][1, 0] = 0.5
-_DC = np.array(
-    [
-        math.sqrt(15.0 / (16.0 * math.pi)),
-        math.sqrt(15.0 / (4.0 * math.pi)),
-        math.sqrt(5.0 / (16.0 * math.pi)),
-        math.sqrt(15.0 / (4.0 * math.pi)),
-        math.sqrt(15.0 / (4.0 * math.pi)),
-    ]
-)
-_DNORM = np.einsum("kab,kba->k", _DM, _DM)
 _SQRT_FACT = np.array([math.sqrt(math.factorial(2 * n)) for n in range(_NMAX + 1)])
 
 
@@ -222,13 +177,18 @@ def _bond_frame(u):
     return th.stack([e1, e2, u], dim=2)
 
 
-def _rotation_matrices(frame):
-    """Block-diagonal (s, p, d) representation of the frame rotation, shape (npairs, 9, 9)."""
+def _rotation_matrices(frame, nbf):
+    """Block-diagonal (s, p, d) representation of the frame rotation, shape (npairs, nbf, nbf)."""
     dtype, device = frame.dtype, frame.device
     npairs = frame.shape[0]
-    mats = th.as_tensor(_DM, dtype=dtype, device=device)
-    coef = th.as_tensor(_DC, dtype=dtype, device=device)
-    norm = th.as_tensor(_DNORM, dtype=dtype, device=device)
+    if nbf == 4:
+        rot = th.zeros((npairs, 4, 4), dtype=dtype, device=device)
+        rot[:, 0, 0] = 1.0
+        rot[:, 1:4, 1:4] = frame
+        return rot
+    mats = th.as_tensor(M_D_GLOBAL, dtype=dtype, device=device)
+    coef = th.as_tensor(C_D_GLOBAL, dtype=dtype, device=device)
+    norm = th.as_tensor(NORM_D_GLOBAL, dtype=dtype, device=device)
 
     # R^T M_k R expanded in the (orthogonal) basis M_l
     t = th.einsum("pba,kbc,pcd->pkad", frame, mats, frame)
@@ -252,20 +212,23 @@ def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int, qn
     ni, nj     : atomic numbers of atom i and j, shape (npairs,)
     xij        : unit vector pointing from i to j, shape (npairs, 3)
     rij        : distance between i and j in bohr, shape (npairs,)
-    zeta_a/b   : Slater exponents (s, p, d) of atom i / j, shape (npairs, 3)
+    zeta_a/b   : Slater exponents (s, p, d) of atom i / j, shape (npairs, 3); with only the s and p columns
+                 the d shell is left out and S has the s,p block only, shape (npairs, 4, 4)
     qn_int     : principal quantum number of the s and p shell, indexed by atomic number
     qnD_int    : principal quantum number of the d shell (0: no d shell), indexed by atomic number
     qnS_int, qnP_int : optional principal quantum numbers of the s and p shell (0: no p shell), indexed by
                  atomic number, for elements where they differ from qn_int (the noble gases in MOPAC's npq).
                  Default: s = qn_int, p = qn_int (absent for qn_int < 2).
 
-    Returns S[pair, mu_i, nu_j] with shape (npairs, 9, 9) in the molecular frame.
+    Returns S[pair, mu_i, nu_j] in the molecular frame, shape (npairs, 9, 9) with d orbitals, else (npairs, 4, 4).
     Orbitals that an element does not have (p on H, d on s/p elements) give zero rows/columns.
     """
     dtype, device = xij.dtype, xij.device
     npairs = xij.shape[0]
+    nsh = zeta_a.shape[-1]  # number of shells: s, p (2) or s, p, d (3)
+    nbf = 9 if nsh == 3 else 4
     if npairs == 0:
-        return th.zeros((0, 9, 9), dtype=dtype, device=device)
+        return th.zeros((0, nbf, nbf), dtype=dtype, device=device)
 
     if qnS_int is None:
         qnS_int = qn_int
@@ -278,24 +241,26 @@ def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int, qn
         raise ValueError("overlap integrals are implemented for principal quantum numbers up to 6")
 
     # principal quantum number of the s, p, d shell of each atom (0 = shell absent)
-    shell_a = th.stack([sa, pa, da], dim=1)
-    shell_b = th.stack([sb, pb, db], dim=1)
+    shell_a = th.stack([sa, pa, da][:nsh], dim=1)
+    shell_b = th.stack([sb, pb, db][:nsh], dim=1)
     # shells absent from an element get a dummy exponent; their coefficients are zero
-    za = th.where(shell_a > 0, zeta_a[:, :3], th.ones_like(zeta_a[:, :3]))
-    zb = th.where(shell_b > 0, zeta_b[:, :3], th.ones_like(zeta_b[:, :3]))
+    za = th.where(shell_a > 0, zeta_a, th.ones_like(zeta_a))
+    zb = th.where(shell_b > 0, zeta_b, th.ones_like(zeta_b))
 
     r = rij.unsqueeze(-1).unsqueeze(-1)
-    alpha = 0.5 * r * (za.unsqueeze(2) + zb.unsqueeze(1))  # (npairs, 3, 3)
+    alpha = 0.5 * r * (za.unsqueeze(2) + zb.unsqueeze(1))  # (npairs, nsh, nsh)
     beta = 0.5 * r * (za.unsqueeze(2) - zb.unsqueeze(1))
-    aint = _a_integrals(alpha)  # (npairs, 3, 3, _NPOLY)
+    aint = _a_integrals(alpha)  # (npairs, nsh, nsh, _NPOLY)
     bint = _b_integrals(beta)
 
     table = th.as_tensor(_coefficient_table(), dtype=dtype, device=device)
     sqrt_fact = th.as_tensor(_SQRT_FACT, dtype=dtype, device=device)
     half_r = 0.5 * rij
 
-    s_loc = th.zeros((npairs, 9, 9), dtype=dtype, device=device)
+    s_loc = th.zeros((npairs, nbf, nbf), dtype=dtype, device=device)
     for k, (la, lb, m) in enumerate(_SPECS):
+        if max(la, lb) >= nsh:
+            continue
         na, nb = shell_a[:, la], shell_b[:, lb]
         coeff = table[k][na, nb]  # (npairs, _NPOLY, _NPOLY)
         radial = th.einsum("pi,pij,pj->p", aint[:, la, lb], coeff, bint[:, la, lb])
@@ -305,5 +270,5 @@ def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int, qn
         for ia, ib in zip(_LOCAL_INDEX[la][m], _LOCAL_INDEX[lb][m]):
             s_loc[:, ia, ib] = value
 
-    rot = _rotation_matrices(_bond_frame(xij))
+    rot = _rotation_matrices(_bond_frame(xij), nbf)
     return rot @ s_loc @ rot.transpose(1, 2)

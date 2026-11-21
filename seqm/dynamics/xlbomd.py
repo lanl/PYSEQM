@@ -119,8 +119,8 @@ class EnergyXL(torch.nn.Module):
             molecule.Z, learned_params=learned_params
         )
 
-        molecule.parameters["beta"] = build_beta_tensor(molecule.parameters, molecule.method)
-        if molecule.method != "PM6":
+        molecule.parameters["beta"] = build_beta_tensor(molecule.parameters, molecule.has_d)
+        if not molecule.model_has_d:
             prepare_parameters(
                 molecule.parameters,
                 molecule.method,
@@ -148,7 +148,7 @@ class EnergyXL(torch.nn.Module):
             .reshape(molecule.nmol, 4 * molecule.molsize, 4 * molecule.molsize)
         )
 
-        if molecule.method == "PM6":  # PM6 does not work. ignore this part
+        if molecule.has_d:  # d orbitals do not work here. ignore this part
             W = calc_integral(
                 molecule.parameters["s_orb_exp_tail"],
                 molecule.parameters["p_orb_exp_tail"],
@@ -179,7 +179,7 @@ class EnergyXL(torch.nn.Module):
             molecule.parameters["g_sp"],
             molecule.parameters["g_p2"],
             molecule.parameters["h_sp"],
-            molecule.method,
+            molecule.has_d,
             molecule.parameters["s_orb_exp_tail"],
             molecule.parameters["p_orb_exp_tail"],
             molecule.parameters["d_orb_exp_tail"],
@@ -285,7 +285,7 @@ class EnergyXL(torch.nn.Module):
                         molecule.parameters["g_sp"],
                         molecule.parameters["g_p2"],
                         molecule.parameters["h_sp"],
-                        molecule.method,
+                        molecule.has_d,
                         molecule.parameters["s_orb_exp_tail"],
                         molecule.parameters["p_orb_exp_tail"],
                         molecule.parameters["d_orb_exp_tail"],
@@ -411,7 +411,7 @@ class EnergyXL(torch.nn.Module):
         Eelec = elec_energy_xl(D, P, F, Hcore)
 
         # Calculate ground state molecular dipole
-        if molecule.method not in ("PM6",):  # Not yet implemented for PM6 d-orbitals
+        if not molecule.has_d:  # Not yet implemented for d orbitals
             with torch.no_grad():
                 calc_ground_dipole(molecule, D)
 

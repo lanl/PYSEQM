@@ -17,7 +17,9 @@ _element_dict = {
 
 def _sort_order(Z, method):
     """Permutation that orders atoms as the method requires (see check_input)."""
-    key = pm6_order_key(Z.astype(int)).numpy() if method == "PM6" else -Z
+    from seqm.basics import includes_d  # basics imports this package
+
+    key = pm6_order_key(Z.astype(int)).numpy() if method is not None and includes_d(method) else -Z
     return np.argsort(key, kind="stable")
 
 

@@ -91,7 +91,7 @@ def _pm6_d_param_from_key(key):
         aij52 = AIJL(zetap, zetad, qn0, qn0 - 1, 1)
         aij43 = AIJL(zetas, zetad, qn0, qn0 - 1, 2)
         aij63 = AIJL(zetad, zetad, qn0 - 1, qn0 - 1, 2)
-    elif category == "B" and method == "PM6":
+    elif category == "B":
         ds_add = 0.2 * GetSlaterCondonParameter(
             2, qn0, zs, qn0, zd, qn0, zs, qn0, zd
         )
@@ -119,7 +119,7 @@ def _pm6_d_param_from_key(key):
     return cached
 #two electron two center integrals
 def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, 
-                            zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod):
+                            zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod, has_d):
     """
     two electron two center integrals in molecule frame
     """
@@ -176,7 +176,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
     dd4 = torch.zeros_like(qn0)
     dp3 = torch.zeros_like(qn0)
     mask_a = ((Z > 20) & (Z < 30)) | ((Z > 38) & (Z < 48)) | ((Z > 70) & (Z < 80)) | (Z == 57)
-    if themethod == "PM6":
+    if has_d:
         mask_b = has_d_shell(Z) & ~mask_a  # main-group elements with d orbitals
     else:
         mask_b = torch.zeros_like(mask_a)
@@ -248,7 +248,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
 #    y = torch.sqrt((2*qn0+1)*(2*qn0+2)/20.00000) / zetap
 #    x = POIJ(2,y*math.sqrt(2),hpp[isY])
 
-    if themethod == "PM6":
+    if has_d:
         rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
     ##rho_2[isX] = POIJ(2,qq[isX]*math.sqrt(2),hpp[isX])
 
@@ -269,7 +269,7 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z,
                DS[idxi]*isY[idxi],DS[idxj]*isY[idxj], \
                ##rho_6[idxi],rho_6[idxj], \
                DD[idxi]*isY[idxi],DD[idxj]*isY[idxj], \
-               alpha, themethod,rho_2d[idxi],rho_2d[idxj],rho_core[idxi],rho_core[idxj])
+               alpha, themethod, has_d, rho_2d[idxi],rho_2d[idxj],rho_core[idxi],rho_core[idxj])
 
     rho0aTMP = rho_0[idxi].clone()
     rho0bTMP = rho_0[idxj].clone()
@@ -311,7 +311,7 @@ def rotate_sp_local(local, tore, ni, nj, xij):
 
 
 #rotate: rotate the two electron two center integrals from local frame to molecule frame
-def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
+def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, has_d, rho2ad,rho2bd, rho_corea, rho_coreb, cutoff=1.0e10):
     """
     rotate the two elecron two center integrals from local frame to molecule frame
     """
@@ -395,8 +395,12 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
 
     e1b, e2a, wXH, w = w_withquaternion(None,tore,ni, nj, xij, riXH, ri, wHH)
 
-    if themethod == "PM6":
-        dRotationMatrix = GenerateRotationMatrix(xij)
+    if has_d:
+        # only pairs with a d atom are rotated, so build the (15, 45) rotation matrices for those alone
+        KK = YH | YX | YY
+        dRotationMatrix = torch.zeros(xij.shape[0], 15, 45, dtype=dtype, device=device)
+        if KK.any():
+            dRotationMatrix[KK] = GenerateRotationMatrix(rotate_with_quaternion(-xij[KK]))
 
         riYH, riYX, riYY, coreYH, coreYX, coreYY = \
                 TETCILFDO(ni,nj,rij, tore, \
@@ -634,7 +638,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
         wc[XH,:10,0] = wXH
         wc[XX,:10,:10] = w.reshape((-1,10,10))
 
-        KK = YH | YX | YY
         wcRotated = wc.clone()
 
         wcRotated[~KK,...,...] = torch.transpose(wc[~KK,...,...],1,2)

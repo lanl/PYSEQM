@@ -210,12 +210,9 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
         # Analytical gradients are required for active-surface FSSH forces.
         params.setdefault("analytical_gradient", [True])
         na_cfg = dict(params.get("nonadiabatic", {}))
-        method = str(params["method"]).upper()
         tdc_method = str(na_cfg.get("tdc_method", "hamiltonian_fd")).strip().lower()
         na_cfg["compute_nac"] = tdc_method == "nac_dot_v"
         params["nonadiabatic"] = na_cfg
-        if method == "PM6" and tdc_method in ("overlap", "hamiltonian_fd"):
-            raise NotImplementedError(f"nonadiabatic.tdc_method='{tdc_method}' is not implemented for PM6.")
         super().__init__(
             damp=damp,
             seqm_parameters=params,
