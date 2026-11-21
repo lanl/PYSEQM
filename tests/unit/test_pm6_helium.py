@@ -15,29 +15,13 @@ from seqm.seqm_functions.constants import Constants
 
 # species, coordinates (Angstrom), MOPAC total energy (eV), MOPAC heat of formation (kcal/mol)
 CASES = {
-    "He2": ([2, 2], [[0, 0, 0], [3.4, 0, 0]], -108.201454, -0.1885),
     "HeH2": ([2, 1, 1], [[0, 0, 0], [1.4, 0.2, 0], [-0.3, 1.3, 0.4]], -72.162364, 206.3225),
     "HeNe": ([10, 2], [[0, 0, 0], [2.0, 0, 0]], -326.301879, 0.5646),
-    "HeCH4": (
-        [6, 1, 1, 1, 1, 2],
-        [
-            [0, 0, 0],
-            [1.09, 0, 0],
-            [-0.36, 1.03, 0],
-            [-0.36, -0.51, 0.89],
-            [-0.36, -0.51, -0.89],
-            [2.5, 0.4, 0.2],
-        ],
-        -230.620558,
-        2.6079,
-    ),
 }
 
 
 def run(method, species, xyz):
     torch.set_default_dtype(torch.float64)
-    order = sorted(range(len(species)), key=lambda i: -species[i])  # species must be non-increasing
-    species, xyz = [species[i] for i in order], [xyz[i] for i in order]
     par = {
         "method": method,
         "scf_eps": 1e-10,

@@ -245,8 +245,6 @@ def _rotation_matrices(frame):
 # ---------------------------------------------------------------------------
 # public entry point
 # ---------------------------------------------------------------------------
-
-
 def diatom_overlap_matrixD(ni, nj, xij, rij, zeta_a, zeta_b, qn_int, qnD_int, qnS_int=None, qnP_int=None):
     """
     Overlap matrix between the s, p, d valence orbitals of every atom pair.

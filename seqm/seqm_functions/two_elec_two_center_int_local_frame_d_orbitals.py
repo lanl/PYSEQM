@@ -83,8 +83,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore,
     YX = (ni>1) & (nj>1) & has_d_shell(ni) & \
          ((nj <= 12) | ((nj >= 18) & (nj <=20)) | ((nj >= 30) & (nj <= 32)) | ((nj >= 36) & (nj <= 38)) | ((nj >= 48) & (nj <= 50)) | ((nj >= 54) & (nj <= 56)) | ((nj >= 80) & (nj <= 83)))
 
-    YY = has_d_shell(ni) &\
-         has_d_shell(nj)
+    YY = has_d_shell(ni) & has_d_shell(nj)
 
     Ycore = (drho_corea[YY] > 0.000) | (drho_coreb[YY] > 0.000)
     ##rho0a = rho_corea
@@ -4026,8 +4025,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore,
         
         coreYY = torch.zeros(YY.sum(),90,dtype=dtype, device=device)
         coreYYLocal = torch.zeros(YY.sum(),90,dtype=dtype, device=device)
-        YYY = has_d_shell(ni[XX]) &\
-         has_d_shell(nj[XX])
+        YYY = has_d_shell(ni[XX]) & has_d_shell(nj[XX])
 
         ##print(r0[YY]**2,rhoSS)
         ##print(riPM6[LL,...])

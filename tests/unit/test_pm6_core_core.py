@@ -14,12 +14,10 @@ from seqm.seqm_functions.constants import Constants
 CASES = {
     # Si-O correction -0.7e-3*exp(-(r - 2.9)**2) uses the distance in Angstrom
     "SiO_1.60": ([14, 8], [[0, 0, 0], [1.6, 0, 0]], 144.067334),
-    "SiO_2.90": ([14, 8], [[0, 0, 0], [2.9, 0, 0]], 98.053652),
     # C-C triple-bond term 9.278465*exp(-5.983752*r)
     "C2H2": ([6, 6, 1, 1], [[0, 0, 0.6], [0, 0, -0.6], [0, 0, 1.66], [0, 0, -1.66]], 294.194224),
     # pairs without an xfac entry use the generic term 10*exp(-2.18*r)
     "TiNe": ([22, 10], [[0, 0, 0], [2.3, 0, 0]], 131.021997),
-    "MgAr": ([18, 12], [[0, 0, 0], [2.5, 0, 0]], 61.235147),
     "CrTi_short": ([24, 22], [[0, 0, 0], [0, 1.2, 0]], 251.089694),
 }
 

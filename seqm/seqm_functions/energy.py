@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import torch
 
 from .constants import a0, ev
@@ -62,43 +64,34 @@ _EISCOR = {
     78: (9, 36, 5, 56, 56),
     79: (10, 45, 5, 70, 70),
 }
-_EISCOR_CACHE = {}
 
 
+@lru_cache(maxsize=None)
 def _eiscor(z, ns, nd, zsn, zdn, f0sd, g2sd):
     """MOPAC eiscor for one element, in eV. ns, nd: principal quantum numbers of the s and d shells."""
-    key = (z, ns, nd, zsn, zdn, f0sd, g2sd)
-    if key not in _EISCOR_CACHE:
-        if zdn <= 0.0 or zsn <= 0.0:
-            _EISCOR_CACHE[key] = 0.0
-        else:
-            sc = GetSlaterCondonParameter
-            r016 = f0sd if f0sd > 0.001 else sc(0, ns, zsn, ns, zsn, nd, zdn, nd, zdn)
-            r244 = g2sd if g2sd > 0.001 else sc(2, ns, zsn, nd, zdn, ns, zsn, nd, zdn)
-            r066 = sc(0, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
-            r266 = sc(2, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
-            r466 = sc(4, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
-            a016, a066, a244, a266, a466 = _EISCOR[z]
-            _EISCOR_CACHE[key] = (
-                a016 * r016 + a066 * r066 - a244 * r244 / 5 - a266 * r266 / 49 - a466 * r466 / 49
-            )
-    return _EISCOR_CACHE[key]
+    sc = GetSlaterCondonParameter
+    r016 = f0sd if f0sd > 0.001 else sc(0, ns, zsn, ns, zsn, nd, zdn, nd, zdn)
+    r244 = g2sd if g2sd > 0.001 else sc(2, ns, zsn, nd, zdn, ns, zsn, nd, zdn)
+    r066 = sc(0, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
+    r266 = sc(2, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
+    r466 = sc(4, nd, zdn, nd, zdn, nd, zdn, nd, zdn)
+    a016, a066, a244, a266, a466 = _EISCOR[z]
+    return a016 * r016 + a066 * r066 - a244 * r244 / 5 - a266 * r266 / 49 - a466 * r466 / 49
 
 
 def d_shell_isolated_atom_energy(const, Z, udd, zsn, zdn, f0sd, g2sd):
     """
-    d-shell part of the electronic energy of the free atom (eisol in MOPAC): udd*iod plus, for elements with a
-    partly filled d shell, the one-center integral terms of eiscor. Z: (natoms,); the other arguments are
-    per-atom parameters (zsn, zdn: the s and d exponents used for the one-center integrals, i.e.
-    s_orb_exp_tail and d_orb_exp_tail). The integral terms are constants (not differentiated).
+    udd*iod plus the one-center integral terms (eiscor) of the free atom's d shell, as in MOPAC's eisol. The integral
+    terms are constants. zsn, zdn: the s and d exponents of the one-center integrals (s_orb_exp_tail, d_orb_exp_tail).
     """
-    iod = (const.tore - const.ussc - const.uppc)[Z]  # d electrons of the free atom
-    E = udd * iod
+    E = (
+        udd * (const.tore - const.ussc - const.uppc)[Z]
+    )  # iod, the d electrons of the free atom, is tore - ios - iop
     sel = [i for i, z in enumerate(Z.tolist()) if z in _EISCOR]
     if sel:
         idx = torch.as_tensor(sel, device=Z.device)
         vals = [
-            _eiscor(z, int(const.qn_int[z]), int(const.qnD_int[z]) or int(const.qn_int[z]) - 1, a, b, c, d)
+            _eiscor(z, int(const.qn_int[z]), int(const.qnD_int[z]), a, b, c, d)
             for z, a, b, c, d in zip(
                 Z[idx].tolist(), zsn[idx].tolist(), zdn[idx].tolist(), f0sd[idx].tolist(), g2sd[idx].tolist()
             )
@@ -222,7 +215,7 @@ def pair_nuclear_energy(
 
         EnucAB = t1 * (1.0 + t2 + t3) + t4 * (t5 + t6)
     elif method in {"PM6", "PM6_SP", "PM6_SP_STAR"}:
-        # Follows MOPAC's ccrep (integrals/ccrep.F90). K, L, M: Gaussian terms, shape (natoms, 4)
+        # follows MOPAC's ccrep (integrals/ccrep.F90)
         _, K, L, M = parameters
         dtype = rija.dtype
         chi_ij = chi[ni, nj]
@@ -235,12 +228,8 @@ def pair_nuclear_energy(
         XSiO = (ni == 14) & (nj == 8)
         scale = 1.0 + 2.0 * chi_ij * torch.exp(-abond * (rija + 0.0003 * torch.pow(rija, 6)))
         scale = torch.where(XH, 1.0 + 2.0 * chi_ij * torch.exp(-abond * rija**2), scale)  # C-H, N-H, O-H
-        scale = torch.where(
-            XCC, scale + PM6_CC_SCALE * torch.exp(-PM6_CC_EXPONENT * rija), scale
-        )  # C-C triple bond
-        scale = torch.where(
-            XSiO, scale - 0.0007 * torch.exp(-((rija - 2.9) ** 2)), scale
-        )  # weak long-range Si-O
+        scale = torch.where(XCC, scale + PM6_CC_SCALE * torch.exp(-PM6_CC_EXPONENT * rija), scale)
+        scale = torch.where(XSiO, scale - 0.0007 * torch.exp(-((rija - 2.9) ** 2)), scale)
         lanthanide = ((ni > 56) & (ni < 72)) | ((nj > 56) & (nj < 72))
         generic = 1.0 + 10.0 * torch.exp(-torch.where(lanthanide, 3.0, 2.18) * rija)
         scale = torch.where(has_bond, scale, generic)

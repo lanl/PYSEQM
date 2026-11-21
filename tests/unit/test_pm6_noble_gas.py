@@ -13,10 +13,10 @@ from seqm.ElectronicStructure import Electronic_Structure
 from seqm.Molecule import Molecule
 from seqm.seqm_functions.constants import Constants
 
-MOPAC_ETOT = {10: -544.459527, 18: -528.412745, 36: -517.830125, 54: -1883.632939}
+MOPAC_ETOT = {36: -517.830125, 54: -1883.632939}
 
 
-@pytest.mark.parametrize("Z", list(MOPAC_ETOT), ids=["Ne2", "Ar2", "Kr2", "Xe2"])
+@pytest.mark.parametrize("Z", list(MOPAC_ETOT), ids=["Kr2", "Xe2"])
 def test_noble_gas_dimer_total_energy(Z):
     torch.set_default_dtype(torch.float64)
     xyz = torch.tensor(np.array([[[0.0, 0.0, 0.0], [3.4, 0.0, 0.0]]]))

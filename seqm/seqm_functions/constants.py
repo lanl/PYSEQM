@@ -23,21 +23,14 @@ set cutoff = 20.0 Angstrom and 20/0.529167 = 37.8
 overlap_cutoff = 40.0
 
 
-# Elements that have a d shell in PM6 (non-zero zeta_d in MOPAC's PM6 parameters): Al-Cl, Sc-Cu, As, Br, Y-Ag, Sb, I,
-# La and Lu-Au. Zn, Cd, Hg, Se and Te are sp only. Must agree with qnD (the principal quantum number of the d shell,
-# non-zero exactly for these elements) in Constants below.
+# Elements with a d shell in PM6 (non-zero zeta_d in MOPAC's parameters). Zn, Cd, Hg, Se and Te are sp only.
+# qnD in Constants is non-zero for exactly these.
 D_SHELL_ELEMENTS = (*range(13, 18), *range(21, 30), 33, 35, *range(39, 48), 51, 53, 57, *range(71, 80))
-_D_SHELL_LOOKUP = {}
 
 
 def has_d_shell(Z):
-    """Boolean mask of the atoms in Z (integer tensor of atomic numbers, 0 = padding) that have a d shell."""
-    table = _D_SHELL_LOOKUP.get(Z.device)
-    if table is None:
-        table = torch.zeros(128, dtype=torch.bool, device=Z.device)
-        table[list(D_SHELL_ELEMENTS)] = True
-        _D_SHELL_LOOKUP[Z.device] = table
-    return table[Z]
+    """Mask of the atoms in Z (atomic numbers, 0 = padding) that have a d shell."""
+    return torch.isin(Z, torch.as_tensor(D_SHELL_ELEMENTS, device=Z.device))
 
 
 class Constants(torch.nn.Module):
@@ -71,9 +64,6 @@ class Constants(torch.nn.Module):
         # 1 hatree = 27.211386 eV
         # self.ev =  27.211386
         #
-        # All per-element tables are indexed by atomic number Z (index 0 is a dummy).
-        # tore, ussc, uppc, eheat follow MOPAC's tore/ios/iop/eheat (parameters_C.F90).
-        #
         # valence shell charge for each atom type
         # tore[1]=1, Hydrogen has 1.0 charge on valence shell
         self.label=['0',
@@ -84,7 +74,6 @@ class Constants(torch.nn.Module):
                'Rb','Sr','Y ', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In','Sn',' Sb','Te','I','Xe',
                'Cs','Ba','La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 'Ta', 'W ', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg', 'Tl','Pb',' Bi','Po','At','Rn']
 
-        # true atomic number, indexed by Z (used e.g. in the PM6 unpolarized-core term)
         atomic_num = torch.arange(87, dtype=torch.get_default_dtype())
 
 

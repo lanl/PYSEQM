@@ -370,9 +370,7 @@ class Parser(torch.nn.Module):
         else:
             nHeavy = torch.sum(molecule.species > 1, dim=1)
 
-        nSuperHeavy = torch.sum(
-            has_d_shell(molecule.species), dim=1
-        )  # atoms with d orbitals (9 basis functions)
+        nSuperHeavy = torch.sum(has_d_shell(molecule.species), dim=1)
 
         nHydro = torch.sum(molecule.species == 1, dim=1)
         tore = molecule.const.tore
