@@ -1294,13 +1294,7 @@ class NonadiabaticDynamicsBase(Molecular_Dynamics_Langevin):
             if nac_dt is None:
                 # print("Bad previous overlap")
                 nac_dt = compute_tdc_hamiltonian_fd(
-                    self,
-                    molecule,
-                    cache_new,
-                    learned_parameters,
-                    vel_old,
-                    acc_old,
-                    validate=True,
+                    self, molecule, cache_new, learned_parameters, vel_old, acc_old, validate=True
                 )
                 with torch.no_grad():
                     self._packed_overlap_prev = packone_batch(

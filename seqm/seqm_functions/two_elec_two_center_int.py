@@ -350,8 +350,7 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, rho0a,
     #***************************************************************************
     #xij = xij0/torch.norm(xij,dim=1,keepdim=True)
     YH = has_d_shell(ni)  & (nj==1)
-    YX = has_d_shell(ni) & \
-         ((nj <= 12) | ((nj >= 18) & (nj <=20)) | ((nj >= 30) & (nj <= 32)) | ((nj >= 36) & (nj <= 38)) | ((nj >= 48) & (nj <= 50)) | ((nj >= 54) & (nj <= 56)) | ((nj >= 80) & (nj <= 83))) & (nj !=1)
+    YX = has_d_shell(ni) & ~has_d_shell(nj) & (nj != 1)
     YY = has_d_shell(ni) & has_d_shell(nj)
 
     #enuc is not computed at this moment

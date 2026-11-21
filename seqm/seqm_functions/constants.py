@@ -33,6 +33,16 @@ def has_d_shell(Z):
     return torch.isin(Z, torch.as_tensor(D_SHELL_ELEMENTS, device=Z.device))
 
 
+def pm6_order_key(Z):
+    """
+    Ascending sort key of the atom order PM6 needs: atoms with a d shell, then the other heavy atoms, then H, each by
+    decreasing atomic number, padding (0) last. The packed Fock matrix is laid out in this order.
+    """
+    Z = torch.as_tensor(Z)
+    group = torch.where(Z == 1, 2, torch.where(has_d_shell(Z), 0, 1))
+    return torch.where(Z == 0, 3000, group * 1000 - Z)
+
+
 class Constants(torch.nn.Module):
     """
     Constants used in seqm

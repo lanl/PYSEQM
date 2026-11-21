@@ -4,6 +4,7 @@ import torch
 
 from seqm.basics import *  # noqa: F403
 from .basics import Pack_Parameters, Parser
+from .seqm_functions.constants import pm6_order_key
 from .seqm_functions.omx_utils import build_beta_tensor, prepare_parameters
 
 
@@ -31,7 +32,7 @@ class Molecule(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.const = const
 
-        check_input(species)
+        check_input(species, seqm_parameters["method"])
         self.species = species
 
         # self.coordinates = coordinates
@@ -170,13 +171,21 @@ class Molecule(torch.nn.Module):
         self.nac_dot: Optional[torch.Tensor] = None
 
 
-def check_input(species):
+def check_input(species, method):
     """
     Does input checking
-    The species (atomic numbers of molecules) tensor should have non-increasing rows so that elements are sorted from biggest to smallest
+    The species (atomic numbers of molecules) tensor should have non-increasing rows so that elements are sorted from
+    biggest to smallest. For PM6 the atoms with a d shell come first (see pm6_order_key).
     """
-
-    ok = species[:, :-1] >= species[:, 1:]  # compares each element in a row to the one to its right
+    if method == "PM6":
+        key = pm6_order_key(species)
+        ok = key[:, :-1] <= key[:, 1:]
+        order = (
+            "atoms with a d shell first, then the other heavy atoms, then H, each by decreasing atomic number"
+        )
+    else:
+        ok = species[:, :-1] >= species[:, 1:]  # compares each element in a row to the one to its right
+        order = "non-increasing"
     # now see which rows are *all* True
     row_ok = ok.all(dim=1)
 
@@ -187,5 +196,5 @@ def check_input(species):
         # pick correct plural forms
         row_word = "row" if len(bad) == 1 else "rows"
         verb = "is" if len(bad) == 1 else "are"
-        msg = f"species must be non-increasing along each row, but {row_word} {rows} {verb} not sorted."
+        msg = f"species must be ordered ({order}) along each row, but {row_word} {rows} {verb} not sorted."
         raise ValueError(msg)

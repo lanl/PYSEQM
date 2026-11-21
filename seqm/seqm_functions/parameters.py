@@ -108,4 +108,6 @@ def PWCCT(
                 if element_i in requested_elements and element_j in requested_elements:
                     q[element_i, element_j] = float(t[2])
                     p[element_i, element_j] = float(t[3])
+    # the file stores each pair once (i >= j), the atoms of a pair can come in either order
+    q, p = q + q.T - torch.diag(q.diagonal()), p + p.T - torch.diag(p.diagonal())
     return torch.nn.Parameter(q, requires_grad=False), torch.nn.Parameter(p, requires_grad=False)

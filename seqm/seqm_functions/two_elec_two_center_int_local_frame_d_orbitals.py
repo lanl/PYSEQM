@@ -80,8 +80,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore,
     XX = (ni>1) & (nj>1) 
     YH = has_d_shell(ni)  & (nj==1)
   
-    YX = (ni>1) & (nj>1) & has_d_shell(ni) & \
-         ((nj <= 12) | ((nj >= 18) & (nj <=20)) | ((nj >= 30) & (nj <= 32)) | ((nj >= 36) & (nj <= 38)) | ((nj >= 48) & (nj <= 50)) | ((nj >= 54) & (nj <= 56)) | ((nj >= 80) & (nj <= 83)))
+    YX = (ni>1) & (nj>1) & has_d_shell(ni) & ~has_d_shell(nj)
 
     YY = has_d_shell(ni) & has_d_shell(nj)
 
@@ -1413,8 +1412,7 @@ def two_elec_two_center_int_local_frame_d_orbitals(ni,nj,r0d, tore,
 
         coreYX = torch.zeros(YX.sum(),55,dtype=dtype, device=device)
         coreYXLocal = torch.zeros(YX.sum(),55,dtype=dtype, device=device)
-        YYX = (ni[XX]>1) & (nj[XX]>1) & has_d_shell(ni[XX]) & \
-         ((nj[XX] <= 12) | ((nj[XX] >= 18) & (nj[XX] <=20)) | ((nj[XX] >= 30) & (nj[XX] <= 32)) | ((nj[XX] >= 36) & (nj[XX] <= 38)) | ((nj[XX] >= 48) & (nj[XX] <= 50)) | ((nj[XX] >= 54) & (nj[XX] <= 56)) | ((nj[XX] >= 80) & (nj[XX] <= 83)))
+        YYX = (ni[XX]>1) & (nj[XX]>1) & has_d_shell(ni[XX]) & ~has_d_shell(nj[XX])
 
         ##print(r0[YX]**2,rhoSS)
 #        coreYXLocal[...,0] = tore[ni[YX]]*riPM6a[YX,1-1]

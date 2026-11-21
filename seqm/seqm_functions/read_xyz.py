@@ -2,6 +2,8 @@ import os
 
 import numpy as np
 
+from .constants import pm6_order_key
+
 # fmt: off
 _element_dict = {
             'H':  1,                                                                                                                                 'He':2,
@@ -13,7 +15,13 @@ _element_dict = {
 # fmt: on
 
 
-def read_xyz(files, sort=True):
+def _sort_order(Z, method):
+    """Permutation that orders atoms as the method requires (see check_input)."""
+    key = pm6_order_key(Z.astype(int)).numpy() if method == "PM6" else -Z
+    return np.argsort(key, kind="stable")
+
+
+def read_xyz(files, sort=True, method=None):
     """
     Read .xyz files, pad all to same atom-count, return NumPy arrays.
 
@@ -34,8 +42,10 @@ def read_xyz(files, sort=True):
             a, *xyz = L.split()
             data[i, 0] = int(a) if numeric else _element_dict[a]
             data[i, 1:4] = list(map(float, xyz))
-        if sort:  # sort such than atoms are ordered in decreasing atomic numbers
-            order = np.argsort(-data[:, 0], kind="stable")
+        if (
+            sort
+        ):  # sort such than atoms are ordered in decreasing atomic numbers (for PM6: d-shell atoms first)
+            order = _sort_order(data[:, 0], method)
             data = data[order]
         mols.append(data)
     # pad out
@@ -51,7 +61,16 @@ def read_xyz(files, sort=True):
 
 
 def read_xyz_trajectory(
-    file, start=0, stop=None, step=1, num=None, sort=True, vel_file=None, return_vel=False, indices=None
+    file,
+    start=0,
+    stop=None,
+    step=1,
+    num=None,
+    sort=True,
+    vel_file=None,
+    return_vel=False,
+    indices=None,
+    method=None,
 ):
     """
     Read concatenated XYZ frames from coords.xyz file produced by NEXMD
@@ -219,7 +238,7 @@ def read_xyz_trajectory(
                         )
 
                     if sort:
-                        order = np.argsort(-sp, kind="stable")
+                        order = _sort_order(sp, method)
                         species_fixed = sp[order]
                         co = co[order]
                     else:
